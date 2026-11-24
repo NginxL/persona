@@ -5,7 +5,7 @@
 // Needs you, a search hit), which opens the parent's page with that side shown. This module says which side the panel
 // shows and carries those links to the parent's page.
 import { useSyncExternalStore } from "react";
-import { openPanel, type Panel } from "./panel";
+import { getPanel, openPanel, type Panel } from "./panel";
 import { shownMember } from "./team";
 import type { Session } from "./types";
 
@@ -28,12 +28,12 @@ export function shownSide(sides: readonly Session[], mid: string, parent: string
 /** Shows `side` in its parent's panel (a pill picked on the strip), opening the panel if it is not. */
 export function showSide(mid: string, parent: string, side: string) {
   picked.set(parentKey(mid, parent), side);
-  openPanel({ kind: "sides", mid, sid: parent, side });
+  openPanel({ kind: "sides", mid, sid: parent, side }, sidesPanelOf(getPanel(), mid, parent) ? { replace: true } : { push: false });
 }
 
 /** Opens or closes the parent's panel from its header button or ⋯. */
 export function toggleSides(mid: string, parent: string, open: boolean) {
-  openPanel(open ? null : { kind: "sides", mid, sid: parent });
+  openPanel(open ? null : { kind: "sides", mid, sid: parent }, { push: false });
 }
 
 // ── a link to a side (App: `/s/<mid>/<side>`, its card, a notification, a search hit): its parent's page, asked to show it ──
@@ -71,6 +71,6 @@ export function doneSideAsk(mid: string, sid: string, ask: SideAsk) {
   if (asks.get(parentKey(mid, sid)) !== ask) return;
   asks.delete(parentKey(mid, sid));
   picked.set(parentKey(mid, sid), ask.side);
-  openPanel({ kind: "sides", mid, sid, side: ask.side, at: ask.at });
+  openPanel({ kind: "sides", mid, sid, side: ask.side, at: ask.at }, { push: false });
   tellAsks();
 }

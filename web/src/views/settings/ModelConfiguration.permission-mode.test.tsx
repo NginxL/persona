@@ -28,6 +28,7 @@ const PROVIDERS: ModelProvider[] = [
 
 let agents: ModelPurpose;
 let lark: ModelPurpose;
+let inbox: ModelPurpose;
 let triage: ModelPurpose;
 let writes: { path: string; body: Record<string, unknown> }[] = [];
 let host: HTMLDivElement;
@@ -58,6 +59,10 @@ function makeLark(override: ModelBinding = {}, revision = 5): ModelPurpose {
   };
 }
 
+function makeInbox(override: ModelBinding = {}, revision = 4): ModelPurpose {
+  return { ...makeLark(override, revision), id: "inbox.agent", name: "AI twin runs" };
+}
+
 function makeTriage(): ModelPurpose {
   return {
     id: "inbox.triage", name: "Sorting", group: "Sorting", kind: "api", category_id: "inbox.triage",
@@ -70,13 +75,13 @@ function makeTriage(): ModelPurpose {
 async function hub(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
   const path = String(input).split("?")[0];
   if (path === "/api/v1/model-profiles") return json({ error: "not found" }, 404);
-  if (path === "/api/v1/model-config") return json({ purposes: [agents, lark, triage], providers: PROVIDERS });
+  if (path === "/api/v1/model-config") return json({ purposes: [agents, lark, inbox, triage], providers: PROVIDERS });
   if (path.endsWith("/models")) {
     const providerId = decodeURIComponent(path.split("/").slice(-2)[0] ?? "");
     const provider = PROVIDERS.find((p) => p.id === providerId);
     return json({ agent: provider?.agent ?? "claude", models: [{ id: "default", name: "Default", default: true }] });
   }
-  const purpose = [agents, lark, triage].find((p) => path === `/api/v1/model-config/purposes/${p.id}`);
+  const purpose = [agents, lark, inbox, triage].find((p) => path === `/api/v1/model-config/purposes/${p.id}`);
   if (purpose && init?.method === "PATCH") {
     const body = JSON.parse(String(init.body)) as Record<string, unknown>;
     writes.push({ path, body });
@@ -88,8 +93,9 @@ async function hub(input: RequestInfo | URL, init?: RequestInit): Promise<Respon
       }
     }
     if (purpose.id === "lark.agent") lark = makeLark(next, purpose.revision + 1);
+    else if (purpose.id === "inbox.agent") inbox = makeInbox(next, purpose.revision + 1);
     else if (purpose.id === "agent.new") agents = makeAgents(next);
-    return json({ purpose: purpose.id === "lark.agent" ? lark : agents, providers: PROVIDERS });
+    return json({ purpose: purpose.id === "lark.agent" ? lark : purpose.id === "inbox.agent" ? inbox : agents, providers: PROVIDERS });
   }
   if (purpose) return json({ purpose, providers: PROVIDERS });
   if (path.startsWith("/api/v1/model-config/purposes/")) return json({ error: "not found" }, 404);
@@ -129,6 +135,7 @@ beforeEach(async () => {
   Object.assign(getState(), { features: [], machines: [], sessions: {}, assistant: undefined });
   agents = makeAgents();
   lark = makeLark();
+  inbox = makeInbox();
   triage = makeTriage();
   writes = [];
   vi.stubGlobal("fetch", vi.fn(hub));
@@ -169,6 +176,45 @@ describe("ModelConfiguration unified permission mode", () => {
     await act(async () => button(t("settings-modelconfiguration.follow_agents"), dialog()).click());
     await flush();
     expect(writes[1].body).toEqual({ revision: 6, provider: null, model: null, effort: null, permission_mode: null });
+  });
+
+  it("keeps the AI twin on default instead of inheriting Agents bypass, then saves and resets its own choice", async () => {
+    agents = makeAgents({ provider: "launcher.claude", permission_mode: "bypassPermissions" });
+    inbox = makeInbox();
+    await render();
+    await openPurpose("inbox.agent");
+    let select = permSelect()!;
+    expect(select.options[0].textContent).toContain(modeTitle("default"));
+    expect(select.options[0].textContent).not.toContain(modeTitle("bypassPermissions"));
+    expect([...select.options].map((o) => o.value)).toEqual(["", "default", "acceptEdits", "auto", "bypassPermissions"]);
+
+    await selectValue(select, "bypassPermissions");
+    expect(dialog().textContent).toContain(BYPASS_WARNING);
+    await act(async () => button(t("common.save"), dialog()).click());
+    await flush();
+    expect(writes[0]).toEqual({
+      path: "/api/v1/model-config/purposes/inbox.agent",
+      body: { revision: 4, provider: null, model: null, effort: null, permission_mode: "bypassPermissions" },
+    });
+
+    await openPurpose("inbox.agent");
+    await act(async () => button(t("settings-modelconfiguration.follow_agents"), dialog()).click());
+    await flush();
+    expect(writes[1].body).toEqual({ revision: 5, provider: null, model: null, effort: null, permission_mode: null });
+    await openPurpose("inbox.agent");
+    select = permSelect()!;
+    expect(select.options[0].textContent).toContain(modeTitle("default"));
+    expect(select.options[0].textContent).not.toContain(modeTitle("bypassPermissions"));
+  });
+
+  it("treats a legacy AI-twin Plan override as default and does not offer Plan again", async () => {
+    inbox = makeInbox({ permission_mode: "plan" });
+    await render();
+    await openPurpose("inbox.agent");
+    const select = permSelect()!;
+    expect(select.value).toBe("");
+    expect([...select.options].map((o) => o.value)).toEqual(["", "default", "acceptEdits", "auto", "bypassPermissions"]);
+    expect(dialog().textContent).toContain(modeTitle("default"));
   });
 
   it("filters permission modes by provider capability and hides selector on omp and direct API purposes", async () => {

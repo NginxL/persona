@@ -237,7 +237,7 @@ private fun resourceOf(key: CoreText.Key): Int = when (key) {
     CoreText.Key.EngineRex -> R.string.designsystem_core_engine_rex
     CoreText.Key.EnginePaseo -> R.string.designsystem_core_engine_paseo
     CoreText.Key.EngineCindy -> R.string.designsystem_core_engine_cindy
-    CoreText.Key.EngineT3Code -> R.string.designsystem_core_engine_t3code
+    CoreText.Key.EngineT3code -> R.string.designsystem_core_engine_t3code
     CoreText.Key.EngineNone -> R.string.designsystem_core_engine_none
     CoreText.Key.EngineNoneDetail -> R.string.designsystem_core_engine_none_detail
     CoreText.Key.EngineOffline -> R.string.designsystem_core_engine_offline

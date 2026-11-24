@@ -1,4 +1,3 @@
-#if os(iOS)
 import BeautifulUI
 import SwiftUI
 import Testing
@@ -254,4 +253,3 @@ private struct RowDrawing {
         return (count, erased, minX)
     }
 }
-#endif

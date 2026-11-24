@@ -402,7 +402,7 @@ private fun LazyListScope.catalogExtensionBody(
         item("about-homepage") {
             val uri = LocalUriHandler.current
             JGroupItem(GroupPosition.of(count - 1, count)) {
-                JRow(stringResource(R.string.settings_ext_about_homepage), leadingIcon = PhIcons.ArrowSquareOut, chevron = false, onClick = { runCatching { uri.openUri(url) } })
+                JRow(stringResource(R.string.settings_ext_about_homepage), leadingIcon = PhIcons.ArrowSquareOut, chevron = false, onClick = { val _ = runCatching { uri.openUri(url) } })
             }
         }
     }
@@ -670,7 +670,7 @@ fun ExtensionMarketsPage(extensions: ExtensionManagement?, onBack: () -> Unit) {
                 tokenFor = market
             }),
             market.homepage?.takeIf { ExtensionViewText.isHttps(it) }?.let { url ->
-                JAction(stringResource(R.string.settings_ext_open_homepage), icon = PhIcons.ArrowSquareOut, onClick = { runCatching { uri.openUri(url) } })
+                JAction(stringResource(R.string.settings_ext_open_homepage), icon = PhIcons.ArrowSquareOut, onClick = { val _ = runCatching { uri.openUri(url) } })
             },
             JAction(stringResource(R.string.settings_ext_remove_market), icon = PhIcons.Trash, destructive = true, separatorBefore = true, onClick = {
                 scope.launch { model.prepareRemoval(market.id, assistant) }
@@ -738,7 +738,7 @@ private fun TokenSheet(market: ExtensionMarket, busy: Boolean, error: String? = 
                 // The browser, not an in-app page: GitHub's form needs the user's GitHub session.
                 val uri = LocalUriHandler.current
                 SettingsCaption(stringResource(R.string.settings_ext_token_create_hint))
-                JButton(stringResource(R.string.settings_ext_token_create), { runCatching { uri.openUri(GitHubTokenUrl) } }, kind = JButtonKind.Secondary,
+                JButton(stringResource(R.string.settings_ext_token_create), { val _ = runCatching { uri.openUri(GitHubTokenUrl) } }, kind = JButtonKind.Secondary,
                     size = JButtonSize.Small, icon = PhIcons.ArrowSquareOut)
             }
             error?.let { JInlineStatus(it, tone = InlineTone.Failed) }

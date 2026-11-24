@@ -135,9 +135,14 @@ class PersonaOnlyTests(unittest.TestCase):
         shared = {item["path"] for item in targets["PersonaWatchWidgets"]["sources"] if item["path"].startswith("Shared/")}
         watch_pet = {"Shared/WatchPetSnapshot.swift", "Shared/Recording/AllDaySnapshot.swift", "Shared/Design/WatchFaceTokens.swift"}
         self.assertTrue(watch_pet.issubset(shared))
+        # The water and protein complications (#13275) are the watch face's too: visionOS has no complications.
+        watch_intake = {"Shared/WatchIntake.swift", "Shared/WatchIntakeConfiguration.swift", "Shared/WatchIntakeComplicationView.swift",
+                        "Shared/StatusPalette.swift", "Shared/Design/Palette.swift", "Shared/Design/HealthIntakePalette.swift"}
+        self.assertTrue(watch_intake.issubset(shared))
         vision_sources = {item["path"] for item in widget["sources"]}
         self.assertTrue(watch_pet.isdisjoint(vision_sources))
-        self.assertEqual(vision_sources, (shared - watch_pet) | {"PersonaVisionWidgets"})
+        self.assertTrue(watch_intake.isdisjoint(vision_sources))
+        self.assertEqual(vision_sources, (shared - watch_pet - watch_intake) | {"PersonaVisionWidgets"})
         for target in (app, widget):
             self.assertEqual(target["entitlements"]["properties"]["com.apple.security.application-groups"], ["$(PERSONA_APP_GROUP)"])
             self.assertEqual(target["info"]["properties"]["PersonaAppGroup"], "$(PERSONA_APP_GROUP)")
@@ -165,12 +170,18 @@ class PersonaOnlyTests(unittest.TestCase):
         self.assertNotIn(".systemSmall", widget_source_for_platform("watchOS"))
 
     def test_vision_widget_sync_and_invalidation_are_enabled(self):
+        # visionOS syncs and invalidates extension widgets as iOS and watchOS do. Shared/ builds for all three and
+        # Persona/ for iOS and visionOS, so this code takes no platform branch at all (#13399): none may leave visionOS out.
         sync = source("Shared/ExtensionSurfaceSync.swift")
-        self.assertEqual(sync.count("#if os(iOS) || os(watchOS) || os(visionOS)"), 4)
+        self.assertNotRegex(sync, r"#(?:if|elseif)[^\n]*\bos\(")
+        self.assertEqual(sync.count("WidgetCenter.shared.reloadTimelines(ofKind: ExtensionSystemWidget.kind)"), 2)
+        self.assertIn("ExtensionWidgetReconciliation.configurations()", sync)
         app = source("Persona/App/PersonaApp.swift")
-        self.assertRegex(app, r'#if os\(iOS\) \|\| os\(visionOS\)\s+if let widget = info\["extension_widget"\]')
+        self.assertIn('if let widget = info["extension_widget"]', app)
+        self.assertNotRegex(app, r'#if os\(iOS\)\s+if let widget = info\["extension_widget"\]')
         model = source("Persona/App/AppModel.swift")
-        self.assertRegex(model, r"#if os\(iOS\) \|\| os\(visionOS\)\s+ExtensionWidgetReconciliation.invalidate")
+        self.assertIn("ExtensionWidgetReconciliation.invalidate(", model)
+        self.assertNotRegex(model, r"#if os\(iOS\)\s+ExtensionWidgetReconciliation.invalidate")
         vision = widget_source_for_platform("visionOS")
         self.assertIn('Open Persona to sync extension capabilities.', vision)
         self.assertNotIn('Open Persona on iPhone to sync extension capabilities.', vision)
@@ -196,9 +207,11 @@ class PersonaOnlyTests(unittest.TestCase):
         for interim in ["persona.control.ask", "persona.control.agents"]:
             self.assertEqual(controls.count(f'configuration(kind: "{interim}")'), 1)
         self.assertEqual(controls.count('Self.configuration(kind: "persona.control.dictate")'), 1)
+        self.assertEqual(controls.count('Self.configuration(kind: "persona.control.call")'), 1)
         bundle = source("PersonaWidgets/PersonaWidgetsBundle.swift")
-        for widget in ["AskPersonaControl", "PersonaAgentsControl", "DictatePersonaControl", "CompatibleAssistantControl",
-                       "CompatibleAgentsControl", "FleetLiveActivity", "CompatibleFleetLiveActivity"]:
+        for widget in ["AskPersonaControl", "PersonaAgentsControl", "DictatePersonaControl", "CallPersonaControl",
+                       "CompatibleAssistantControl", "CompatibleAgentsControl", "FleetLiveActivity",
+                       "CompatibleFleetLiveActivity"]:
             self.assertEqual(len(re.findall(rf"\b{widget}\(\)", bundle)), 1)
 
     def test_duplicate_key_guards_reject_silent_overwrites(self):
@@ -413,7 +426,8 @@ class PersonaOnlyTests(unittest.TestCase):
             self.assertEqual(len(names), len(set(names)), [name for name, n in collections.Counter(names).items() if n > 1])
         self.assertIn('static let avatar = "person.crop.artframe"', icons)
         self.assertIn('static let persona = "sparkle"', icons)
-        self.assertIn("symbol: Theme.Icon.avatar", source("Persona/Views/Settings/AppearanceSettingsView.swift"))
+        # Settings' Avatar row (its catalog entry, which Settings draws), not a brand or persona symbol.
+        self.assertIn("symbol: Theme.Icon.avatar", source("Persona/Views/Settings/SettingsNavigation.swift"))
         launch = source("PersonaUITests/UITestStyle.swift")
         self.assertEqual(len(re.findall(r"\bfunc launchPersona\(", launch)), 1)
         self.assertNotRegex(launch, r"func launchPersona\([^)]*\)\s*\{\s*launchPersona\(")

@@ -441,7 +441,8 @@ func TestAttachHookEventsDoNotWaitForAResume(t *testing.T) {
 			t.Fatalf("hook %d waited %v for the transport", i, took)
 		}
 	}
-	waitFor(t, "the kept events", func() bool { return len(openSpool(SpoolPath()).load()) == 2 })
+	// The events are kept only once the window runs out: waitFor's time counts from there, not from the loss.
+	waitWithin(t, resumeWindow+5*time.Second, "the kept events", func() bool { return len(openSpool(SpoolPath()).load()) == 2 })
 	m3, n3 := net.Pipe()
 	r.extra <- n3
 	next := rpc.New("h2", m3)

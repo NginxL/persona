@@ -29,9 +29,10 @@ type QuietHours struct {
 type quietRule int
 
 const (
-	quietNone quietRule = iota // delivered as usual
-	quietSkip                  // not delivered inside the window
-	quietHush                  // delivered without sound inside the window
+	quietNone    quietRule = iota // delivered as usual
+	quietSkip                     // not delivered inside the window
+	quietHush                     // delivered without sound inside the window
+	quietHushAll                  // delivered without sound on every device, window or not (quiet attention mode)
 )
 
 var errQuietHours = errors.New(`quiet: start and end are "HH:MM", tz an IANA time zone`)

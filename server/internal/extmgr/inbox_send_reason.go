@@ -6,11 +6,12 @@ import (
 	"fmt"
 	"math"
 
+	"github.com/nwverse/persona/server/internal/cliwire"
+
 	"github.com/nwverse/persona/server/internal/assistantwire"
 	"github.com/nwverse/persona/server/internal/connector"
 	"github.com/nwverse/persona/server/internal/i18n"
-	adapter "github.com/nwverse/persona/server/internal/larkcli"
-	"github.com/nwverse/persona/server/internal/mail"
+	"github.com/nwverse/persona/server/internal/mailwire"
 	"github.com/nwverse/persona/server/internal/proto"
 	"github.com/nwverse/persona/server/internal/rpc"
 )
@@ -25,7 +26,7 @@ func inboxSendRefusal(err error) *rpc.Error {
 	code := assistantwire.CodeInboxSendFailed
 	var retryAfter float64
 	var re *rpc.Error
-	var cli *adapter.Error
+	var cli *cliwire.Error
 	switch {
 	case errors.As(err, &re) && isInboxSendCode(re.Code): // already said: kept, in this code's words
 		code, retryAfter = re.Code, retryAfterOf(re)
@@ -35,13 +36,13 @@ func inboxSendRefusal(err error) *rpc.Error {
 		code = assistantwire.CodeInboxCannotReply
 	case errors.As(err, &cli) && cli != nil:
 		switch cli.Kind {
-		case adapter.KindNotInstalled, adapter.KindUnsupportedVersion:
+		case cliwire.KindNotInstalled, cliwire.KindUnsupportedVersion:
 			code = assistantwire.CodeInboxSourceUnavailable
-		case adapter.KindNotLoggedIn, adapter.KindExpired:
+		case cliwire.KindNotLoggedIn, cliwire.KindExpired:
 			code = assistantwire.CodeInboxSourceSignedOut
-		case adapter.KindMissingPermission:
+		case cliwire.KindMissingPermission:
 			code = assistantwire.CodeInboxSendDenied
-		case adapter.KindRateLimited:
+		case cliwire.KindRateLimited:
 			code, retryAfter = assistantwire.CodeInboxSendRateLimited, cli.RetryAfter.Seconds()
 		}
 	case errors.As(err, &re) && re.Code == proto.ToolErrorRateLimited: // an extension's connector (connector.Registry's convention)
@@ -84,7 +85,7 @@ func isInboxSendCode(code string) bool { _, ok := inboxSendKeys[code]; return ok
 // inboxSendLogKind is what the log may say of a failed send's cause: lark-cli's own safe words (they never carry its
 // output), else only the error's code and type. An extension's or a mail server's message can quote what was sent.
 func inboxSendLogKind(err error) string {
-	var cli *adapter.Error
+	var cli *cliwire.Error
 	var re *rpc.Error
 	switch {
 	case err == nil:
@@ -93,8 +94,8 @@ func inboxSendLogKind(err error) string {
 		return "lark-cli " + string(cli.Kind) + ": " + cli.Error()
 	case errors.Is(err, errCannotReply), errors.Is(err, connector.ErrCannotReply):
 		return err.Error() // fixed words, no identifiers
-	case errors.Is(err, mail.ErrMaybeSent):
-		return "mail: " + mail.ErrMaybeSent.Error() // its own fixed words, not what wraps them (the server's address)
+	case errors.Is(err, mailwire.ErrMaybeSent):
+		return "mail: " + mailwire.ErrMaybeSent.Error() // its own fixed words, not what wraps them (the server's address)
 	case errors.As(err, &re):
 		return fmt.Sprintf("rpc code %q", re.Code)
 	}

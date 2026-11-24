@@ -99,12 +99,16 @@ The parts (the hub, the managers, the node on each computer, extensions) talk on
 | --- | --- |
 | `assistantwire`, `devicewire`, `extwire` | The bus between the hub and a manager: methods, events, routes the hub relays, extension scopes and manifest types the bus carries; in `assistantwire` also the To-dos view, counts and places, generated from `schema/wire/todo-view.schema.json` (`server/internal/assistantwire/todo_view_gen.go`, never edited by hand) |
 | `kbwire` | Knowledge-base entities, identity hints, updates and chat context as they cross the bus and the connector protocol |
-| `connectorwire` | Inbox things and replies, conversation batches, posts and snapshots from connectors (`docs/protocol/connector-protocol.md`) |
+| `connectorwire` | The connector SPI: `Connector`, its `Manifest` and capability interfaces, statuses, sign-in prompts, threads and recall errors; inbox things and replies, conversation batches, posts and snapshots from connectors (`docs/protocol/connector-protocol.md`, `docs/extensions/connectors.md`) |
 | `aiwire` | A model setting (`aiwire.Config`) |
 | `dialogwire` | A terminal dialog read off a screen, as the node and the apps see it |
 | `repositorywire` | A task's requested refs, repository layouts and the preparation snapshot a manager hands to a node, with the alias and ref rules both apply; `assistant/repository` aliases them |
 | `nodeproto` | The node protocol handshake: the protocol version and capability names a node announces (`docs/protocol/protocol.md` "Node handshake") |
 | `proto`, `rpc`, `relayproto` | The client API and node protocol types, the JSON-RPC framing, the push relay |
+| `githubwire` | What the extension manager and the GitHub connector module pass (manager.json's `github` section, the token source, the CI-check snapshot the assistant reads) and the `Connector` the manager drives (`docs/architecture/core-and-modules.md` "Provider seams") |
+| `imessagewire` | What the extension manager, the node and the iMessage connector module pass (manager.json's `imessage` section, the `Caller` to a Mac's node and its errors) and the `Remote` the manager drives and the node's `connector.*` handler (`docs/architecture/core-and-modules.md` "Provider seams") |
+| `mailwire` | What the extension manager and the mail module pass (accounts, messages, sends) and the `Service` the manager reaches mail through (`docs/architecture/core-and-modules.md` "Provider seams") |
+| `modapi` | The feature-module contract: a module's manifest, its registration and the `Host` it reaches the core through (`docs/architecture/core-and-modules.md`) |
 | `sdk/go/wire` (the SDK's module) | The extension protocol's types generated from its schema (an error report the bus carries, say), shared with extensions written against the SDK |
 
 The business packages alias the contract types so their callers keep the old names (`type InboxThing = connectorwire.InboxThing` in `connector`, `type Update = kbwire.Update` in `kb`).
@@ -116,8 +120,133 @@ Where the business type needs fields of its own, it stays a separate type with t
 - **Pure contracts**: every package in `testdata/contracts.txt` depends only on the standard library and other listed packages (the SDK's `sdk/go/wire` is listed by its full import path), and every package named `*wire` must be listed.
 - **Part boundaries**: the hub (`hub`, `hubedge`) depends on no manager (`assistant`, `devices`, `extmgr`, `manager`) or node package, a manager on no hub package, and the node (`node`) on neither.
   Known violations would go into `testdata/boundary_allowed.txt` (shrink-only, each line naming the step that removes it); it is empty, and a line that no longer applies fails too.
+- **Core and modules**: no core package imports a feature module (`internal/modules/<id>`), and a module imports only
+  `modapi`, the contract packages and the modules it needs (`TestCoreImportsNoModule`, `TestModulesUseOnlyTheSPI`;
+  `docs/architecture/core-and-modules.md` "Guards").
 - **Reap first**: every production `osproc.ReapInherited` call (the hub's `claimInherited`, the manager's `runManager`, `managercli.Assistant`, the node's `runNode`) comes before anything that could start a child, and the hub's `Run`, `Serve` and `RunSlot` call `claimInherited` first (`reap_test.go`).
   Only the calls its list names, each with why it starts no process, may run ahead; a new call site has to be listed.
+
+## Registering a domain's entries
+
+Nearly every feature used to add a line to one of a few central lists: the route calls in the assistant's `New`,
+`toolNames` and the cases of `runTool`, the loops `Service.Run` starts, `proto.Features`, `assistantwire.Routes`,
+`extwire.RouteScopes`, the switch in `Node.handle` and `server/internal/prompts/assistant.go`. Those lines are where most
+of the server's merge conflicts come from (#7891). A domain adds its entries from its own files instead, and every kind
+of entry goes through the same design. The central lists keep the entries they have, and take no new name (below).
+
+### One registry per Service
+
+- **The registry**: the package `kernel`, under `server/internal/assistant`, holds one registry per assistant `Service`,
+  with a slot for each kind of entry. The slots are routes (installed through `Service.handle`), bus methods, tools
+  (each placed after a named anchor tool), the hooks for a settled turn and a new connection, snapshot parts, and loops.
+  `Kernel.Bus` is where any domain adds a new bus method, not only the Inbox. Not on `main` yet: the package comes with
+  step S1 of `docs/plans/plan-inbox-vertical-slice.md`.
+- **Two ways in, one registry**:
+  - A module in a subpackage calls `Register(k)` from `New`, where its central line was. `saved` comes first: today
+    `New` calls `saved.Register(saved.Host{…})`, and S1 registers it through the kernel instead, keeping `saved.Host`
+    as saved's own adapter.
+  - A domain inside package `assistant` calls a package-level function from an `init()` in its own file:
+    `registerRoutes(name, (*Service).xRoutes)`, `registerTools(after, …)` or `registerLoop(name, (*Service).xLoop)`.
+    `New` adds them to the same registry before the modules register.
+- **One of each**: there is one route table and one list of loops, and tool placement is computed once, at the end of
+  `New`. Route order means nothing (`TestRoutesAreTheWireOnes` sorts, and `http.ServeMux` ignores it). The tools keep
+  the order `server/internal/hub/testdata/prompts/mcp_tools/assistant.index.golden` pins.
+- **When each part lands**:
+  1. the kernel, with `saved` (S1);
+  2. the Inbox's routes, bus methods, hooks and snapshot part (S4);
+  3. `registerRoutes` and `registerLoop` (#7891);
+  4. `registerTools`, with or just before the Inbox's tools (S5).
+
+  Until a slot exists, its entries go where they went before. The 63 route calls already in `New`, and the tools and
+  loops already listed, stay where they are.
+
+How each registration is checked, and when the registry closes, is written with the kernel (S1).
+
+### Lists that stay package variables
+
+A wire list that is a plain variable in a contract package takes a domain's entries from an `init()` in that domain's
+file. The append comes after the literal, which stays first and unchanged:
+
+- **`assistantwire.Routes`**: `func init() { Routes = append(Routes, …) }` in `assistantwire/<domain>.go`. Seven files do
+  this today, among them `agents.go`, `board.go` and `urgent_call.go`. Package `assistant` reads the list after they
+  have run (`server/internal/assistant/hub.go`), and `TestRoutesAreTheWireOnes` keeps it equal to what the assistant
+  serves.
+- **`proto.Features`**: `func init() { Features = append(Features, FeatureX) }` in `proto/features_<domain>.go`, beside
+  the flag's constant. Go runs the init()s after the literal is set, file by file in name order, so the hello and
+  `/health` list the literal's flags, then each domain file's. `server/internal/proto/features_test.go` holds the
+  package to that one form of append, and `scripts/test/test_doc_wire.py` reads the appends too.
+- **`extwire.RouteScopes`**: `addRouteScopes(…)` from an `init()` in `extwire/<domain>_scopes.go`, which panics on a key
+  that is already there, on a key that is no route pattern and on an empty scope, so a bad entry stops every program
+  that imports `extwire` at start-up. `extwire/inbox_scopes.go` does this for the Inbox's routes (step S6 of the Inbox
+  plan), and archguard's `TestCentralListsGainNoInboxEntry` keeps them there.
+  `server/internal/hub/testdata/route_scopes.txt` stays one sorted golden, the permission list a reviewer reads.
+
+The hub's bus handlers already work this way: `handleBus("notify.request", (*Hub).busNotifyRequest)` runs from an
+`init()` beside the handler, and a method registered twice panics (`server/internal/hub/bus.go`). A domain's feature
+flags and methods are documented in its domain's protocol doc: `docs/protocol/protocol.md`, or a doc split from it
+(`scripts/test/test_doc_wire.py` finds a flag in either).
+
+### The node's method table
+
+The node has a table of the same shape, its own because the node may not import the manager's packages
+(`server/internal/node/node_methods.go`).
+
+- **Registering**: a method that is not bound to a session registers from an `init()` in its domain's own file,
+  `func init() { nodeRPC(proto.MethodMachinePorts, (*Node).machinePorts) }`. `nodeRPC` decodes each call's params into
+  the handler's own type once: fields the type does not have are ignored, empty params leave it zero, and params that
+  do not decode are answered `bad <method> params`. A handler that takes `json.RawMessage` is handed the params
+  themselves, because `secret.run` and `model.run` clear them after reading.
+- **Where it is consulted**: in `Node.handleMethod`, after the delivery aliases and before the shared parameter
+  struct, where `sessions.history` was first handed to its domain's handler (`server/internal/node/sessions_history.go`).
+- **Validated on entry**: each `nodeRPC` call is checked where it is made, and an invalid one panics when the node
+  starts, at the `init()` that made it. The table refuses an empty name, a nil handler, a name registered twice, a
+  name under a prefix `handleMethod` hands to a dispatcher of its own (`assistant.segment.`, `git.backend.`,
+  `node.update.`, `task.workspace.`, `plugin.node.`), a delivery alias (`session.source_send`,
+  `session.owner_interrupt`, `codex.owner_answer`) and a session-bound name. No flag closes the table after start-up:
+  nothing registers later, and a call only reads it.
+- **What stays in the switch**: methods bound to a session (`session.*`, `terminal.*`, `assistant.send`,
+  `assistant.answer_again`, `assistant.permissions.reset`, `codex.answer`). The shared decode, alias resolution, the
+  Codex thread mapping and the identity-conflict refusal run before them, and a table entry would skip all of them.
+- **No new label**: `handleMethod` takes no new label for a method the table may hold (the `node_handle_method` row
+  under "Frozen central lists"). The labels it has stay, and move into the table only while no open PR edits their
+  lines.
+
+### Prompts
+
+A new prompt's types and `Render` function go in a file of their own, `prompts/assistant_<topic>.go`, as
+`assistant_answer_again.go` has them. Templates and goldens do not change (`docs/assistant/prompts.md`). The topics
+already in `prompts/assistant.go` move out one file at a time, and only while no open PR edits them.
+
+### Frozen central lists
+
+A central list with a seam takes no new name. `server/internal/archguard/central_lists_test.go` checks this.
+
+- **The names**: each frozen list has a row in `centralLists`, and its names are in
+  `server/internal/archguard/testdata/central_lists/<id>.txt`. The file holds the names the list had when its freeze
+  landed, then the names the PRs open that day were adding, each with its PRs.
+- **The check**: a new name fails. The message gives the file and line, where the entry goes instead, and this section.
+  A listed name that has left the list is a notice, and its line can go. Editing an existing entry is fine, because the
+  freeze is on names, not lines. These files hold names, never counts (they are not count ratchets,
+  `docs/operations/testing.md` "Count ratchets").
+- **Frozen today**:
+  - the labels of `Node.handleMethod` for the methods the node's method table may hold, by their source text
+    (`"node.info"`, `proto.MethodMachineToolchain`), and the prefixes it routes on as `prefix "plugin.node."`;
+  - the `assistantwire.Routes` literal, by each entry's source text (`"GET /api/v1/todos"`, `"GET " + StarredImportPath`);
+  - the top-level declarations of `prompts/assistant.go`, a method as `Type.Method`;
+  - the `proto.Features` literal, by each entry's source text (`"locale"`, `FeatureTodoSendState`);
+  - the keys of the `extwire.RouteScopes` literal in `extwire/scopes.go`, by their source text (`"GET /api/v1/kb/{kind}"`).
+
+  Each later seam's PR adds its own list's row. That PR shows a planted entry failing and a registered one passing.
+- **Pending names**: `python3 scripts/test/name_freezes.py pending` lists the names that open PRs add, read from their
+  heads. A draft whose head commit is more than 14 days old does not count. The script asks the archguard test for the
+  names (`-central-list-names`), so they are in the form the freeze compares.
+- **Writing the list**: on the day a row lands, `pending --write` rewrites the list's file, after `origin/main` is merged
+  in. Once the list is on `main`, `--write` only prunes it: it keeps the listed names `main` still has, a pending one
+  whose PR merged among them, and drops the names that have left and the pending ones whose PRs closed. It adds no
+  name: one that `main` has and the list lacks is reported as an error, and the freeze keeps failing on it. So it is
+  not how a later PR gets a name on a list.
+- **The mock hub too**: `scripts/mock/mock_hub_switches.py` uses the same module for the mock hub's switch freeze
+  (`docs/operations/testing.md` "Mock hub domains").
 
 ## Key flows
 

@@ -25,6 +25,7 @@ const failedText = /读不到运行记录：.*run history unavailable/;
 
 let runsReply: () => Response | Promise<Response>;
 let tasksReply: () => Response;
+let taskUpdate: ((init?: RequestInit) => Response) | undefined;
 let providers: unknown[];
 let catalogReplies: Record<string, () => Response | Promise<Response>>;
 // the hub is unreachable: every request, a change or a read, answers 502
@@ -44,6 +45,7 @@ beforeEach(() => {
   down = false;
   runsReply = failure;
   tasksReply = () => json({ tasks: [task] });
+  taskUpdate = undefined;
   providers = [];
   catalogReplies = {};
   forgetProviderNames();
@@ -60,6 +62,7 @@ beforeEach(() => {
     }
     if (path === "/api/v1/assistant") return Promise.resolve(json({ conversations: [] }));
     if (path === "/api/v1/assistant/tasks") return Promise.resolve(tasksReply());
+    if (path === `/api/v1/assistant/tasks/${task.id}` && taskUpdate) return Promise.resolve(taskUpdate(init));
     if (path === "/api/v1/assistant/runs") return Promise.resolve(runsReply());
     if (path === "/api/v1/model-config") return Promise.resolve(json({ providers }));
     const machine = /^\/api\/v1\/machines\/([^/]+)\/launchers/.exec(path)?.[1];
@@ -98,6 +101,19 @@ describe("routine run history loading", () => {
     const marks = [...history().querySelectorAll('[role="img"]')];
     expect(marks.some((mark) => mark.classList.contains("bg-green-tint") && mark.classList.contains("text-green"))).toBe(true);
     expect(marks.some((mark) => mark.classList.contains("bg-field") && mark.classList.contains("text-red"))).toBe(true);
+  });
+
+  it("shows actual legacy task execution fallback beside successful timing, not eligibility alone", async () => {
+    const fallbackRun = { ...run, compatibility_fallback: "legacy_task_execution", session_id: "fallback-chat" };
+    const ordinaryRun = { ...run, id: "ordinary-run", title: "Ordinary summary", session_id: "ordinary-chat" };
+    runsReply = () => json({ runs: [fallbackRun, ordinaryRun] });
+    await render();
+
+    const line = (title: string) => [...history().querySelectorAll<HTMLElement>("button")].find((el) => el.textContent?.includes(title))!;
+    expect(line(fallbackRun.title).textContent).toContain("准时");
+    expect(line(fallbackRun.title).textContent).toContain("使用旧版任务执行方式");
+    expect(line(ordinaryRun.title).textContent).toContain("准时");
+    expect(line(ordinaryRun.title).textContent).not.toContain("使用旧版任务执行方式");
   });
 
   it("shows a failed request's reason and retry while keeping the tasks visible", async () => {
@@ -181,6 +197,49 @@ describe("routine run history loading", () => {
     expect(history().textContent).not.toMatch(failedText);
     expect(retry()).toBeUndefined();
   });
+});
+
+it.each([
+  { repeat: "interval" as const, title: "", body: "", label: "定时任务" },
+  { repeat: "cron" as const, title: "", body: "", label: "定时任务" },
+  { repeat: "once" as const, title: "", body: "", label: "定时跟进" },
+  { repeat: "interval" as const, title: "Explicit title", body: "Review notes", label: "Explicit title" },
+  { repeat: "cron" as const, title: "", body: "Review notes", label: "Review notes" },
+])("shows $label for the $repeat task with a selected reference", async ({ repeat, title, body, label }) => {
+  const selected = '<persona-context kind="skill" ref="review">Review</persona-context>';
+  tasksReply = () => json({ tasks: [{
+    ...task, repeat, title, prompt: `${selected}\n\n${body}`, prompt_selections: true,
+    at: "2099-01-01T09:00:00Z", every_minutes: 30, cron: "@hourly",
+  }] });
+  runsReply = () => json({ runs: [] });
+
+  await render();
+
+  expect(rowOf(label)?.textContent).toContain(label);
+});
+
+it("pauses a routine without changing its saved selections or execution settings", async () => {
+  const prompt = '<persona-context kind="skill" ref="review">Review</persona-context>\n\nReview notes';
+  const selected: Task = { ...task, prompt, prompt_selections: true, execution_machine_id: "box", cwd: "/work" };
+  tasksReply = () => json({ tasks: [selected] });
+  runsReply = () => json({ runs: [] });
+  let update: RequestInit | undefined;
+  taskUpdate = (init) => {
+    update = init;
+    return json({ task: { ...selected, enabled: false } });
+  };
+
+  await render();
+  const toggle = host.querySelector<HTMLButtonElement>('[role="switch"]')!;
+  await act(async () => toggle.click());
+  await flush();
+
+  expect(update?.method).toBe("PUT");
+  expect(JSON.parse(String(update?.body))).toEqual({
+    title: task.title, structured_prompt: prompt, repeat: "daily", cron: "", session_id: "",
+    time: task.time, weekdays: [], enabled: false, every_minutes: 0, permission_mode: "",
+  });
+  expect(toggle.getAttribute("aria-checked")).toBe("false");
 });
 
 describe("a change the hub refuses while the list cannot be read again", () => {

@@ -1,4 +1,3 @@
-#if os(iOS) || os(watchOS) || os(visionOS)
 import AppIntents
 import SwiftUI
 import WidgetKit
@@ -187,4 +186,3 @@ nonisolated enum ExtensionWidgetReconciliation {
         WidgetCenter.shared.reloadTimelines(ofKind: ExtensionSystemWidget.kind)
     }
 }
-#endif

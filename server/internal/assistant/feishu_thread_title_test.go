@@ -6,25 +6,29 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/nwverse/persona/server/internal/botcard"
 	"github.com/nwverse/persona/server/internal/db"
-	"github.com/nwverse/persona/server/internal/feishubot"
 	"github.com/nwverse/persona/server/internal/i18n"
 )
 
 func TestTopicOpeningUsesReadableTitle(t *testing.T) {
 	const link = "https://docs.example.com/wiki/garden-notes-2026"
-	post := func(body string) feishubot.MessageEvent {
+	post := func(body string) botcard.MessageEvent {
 		ev := rootEvent("om_first", "")
 		ev.Message.MessageType, ev.Message.Content = "post", body
 		return ev
 	}
-	withBot := func(ev feishubot.MessageEvent) feishubot.MessageEvent {
-		ev.Message.Mentions = []feishubot.Mention{{Key: "@_user_1", Name: "Garden Bot"}}
+	withBot := func(ev botcard.MessageEvent) botcard.MessageEvent {
+		ev.Message.Mentions = []botcard.Mention{{Key: "@_user_1", Name: "Garden Bot"}}
+		return ev
+	}
+	withBotOpenID := func(ev botcard.MessageEvent) botcard.MessageEvent {
+		ev.Message.Mentions = []botcard.Mention{{Key: "@_user_1", Name: "Garden Bot", ID: botcard.UserID{OpenID: "ou_bot"}}}
 		return ev
 	}
 	cases := []struct {
 		name, locale string
-		event        feishubot.MessageEvent
+		event        botcard.MessageEvent
 		title, notes string
 	}{
 		{"ordinary words", "en", rootEvent("om_first", "Review the seed order today"), "Review the seed order today", "Review the seed order today"},
@@ -36,6 +40,15 @@ func TestTopicOpeningUsesReadableTitle(t *testing.T) {
 		{"opening mention touching a named rich link", "en",
 			withBot(post(`{"content":[[{"tag":"at","user_id":"@_user_1"},{"tag":"text","text":"："},{"tag":"a","href":"` + link + `","text":"Garden [Q3] (draft)"}]]}`)),
 			"Garden [Q3] (draft)", "@Garden Bot：[Garden [Q3] (draft)](" + link + ")"},
+		{"opening mention directly touching a named rich link", "en",
+			withBot(post(`{"content":[[{"tag":"at","user_id":"@_user_1"},{"tag":"a","href":"` + link + `","text":"Garden [Q3] (draft)"}]]}`)),
+			"Garden [Q3] (draft)", "@Garden Bot[Garden [Q3] (draft)](" + link + ")"},
+		{"opening open-id mention touching punctuation and a named rich link", "en",
+			withBotOpenID(post(`{"content":[[{"tag":"at","user_id":"ou_bot","user_name":"Garden Bot"},{"tag":"text","text":"："},{"tag":"a","href":"` + link + `","text":"Garden [Q3] (draft)"}]]}`)),
+			"Garden [Q3] (draft)", "@Garden Bot：[Garden [Q3] (draft)](" + link + ")"},
+		{"opening mention with space before punctuation and a named rich link", "en",
+			withBot(post(`{"content":[[{"tag":"at","user_id":"@_user_1"},{"tag":"text","text":" ："},{"tag":"a","href":"` + link + `","text":"Garden [Q3] (draft)"}]]}`)),
+			"Garden [Q3] (draft)", "：[Garden [Q3] (draft)](" + link + ")"},
 		{"punctuation after a shared URL and mention", "zh-Hans", withBot(rootEvent("om_first", link+"，@_user_1：核对春季花种")), "核对春季花种", link + "，@Garden Bot：核对春季花种"},
 		{"generic words alone", "en", rootEvent("om_first", "Have a look!"), "New to-do", "Have a look!"},
 		{"similar words with a subject", "en", rootEvent("om_first", "Have a look at the seed order"), "Have a look at the seed order", "Have a look at the seed order"},

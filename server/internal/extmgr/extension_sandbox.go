@@ -61,7 +61,7 @@ type extensionSandboxes struct {
 
 // SandboxView is an installed extension's sandbox as the apps and the admin UI show it.
 type SandboxView struct {
-	// Enabled: it runs in a sandbox (or would, when the machine has none: Active false, Why says why).
+	// Enabled: isolation is required. When unavailable, startup is refused (Active false, Why says why).
 	Enabled bool `json:"enabled"`
 	// Default is what it would be without the owner's choice; Chosen whether there is one.
 	Default bool   `json:"default"`
@@ -157,13 +157,9 @@ func (ps *extensions) sandboxOf(ctx context.Context, p *extension.Extension) san
 		st.Active = sup.Available()
 		if !st.Active {
 			l := ps.h.contextLang(ctx)
-			why, detail := i18n.ExtensionFailureText(l, sup.Why, "extension-status.sandbox_unavailable")
+			_, detail := i18n.ExtensionFailureText(l, sup.Why, "extension-status.sandbox_unavailable")
 			st.Detail = detail
-			if detail == "" {
-				st.Why = i18n.T(l, "hub-extension_sandbox.unavailable", i18n.Args{"why": why})
-			} else {
-				st.Why = why
-			}
+			st.Why = i18n.T(l, "hub-extension_sandbox.start_blocked", i18n.Args{"why": i18n.ExtensionStatusText(l, sup.Why)})
 		}
 	}
 	if px := ps.sandboxes.proxyIfStarted(); px != nil {
@@ -345,7 +341,7 @@ func (ps *extensions) setSandbox(ctx context.Context, p *extension.Extension, on
 
 // confine puts the sandbox and the egress proxy around s, the way p's program runs: in a sandbox, its HTTP socket
 // moves to its run directory, the hub's API is HubHost through the proxy, and the program runs inside; with a sandbox
-// on but none on this machine, it is at least pointed at the proxy.
+// on but unavailable on this machine, startup is refused before any program or proxy is started.
 func (ps *extensions) confine(ctx context.Context, p *extension.Extension, hp *hubExtension, s *host.Spec) error {
 	if p.Manifest.Runtime.IsDeno() {
 		return ps.confineSource(ctx, p, s)
@@ -353,6 +349,9 @@ func (ps *extensions) confine(ctx context.Context, p *extension.Extension, hp *h
 	st := ps.sandboxOf(ctx, p)
 	if !st.applies || !st.Enabled {
 		return nil
+	}
+	if !st.Active {
+		return errors.New(st.Why)
 	}
 	px, err := ps.egress()
 	if err != nil {
@@ -365,17 +364,7 @@ func (ps *extensions) confine(ctx context.Context, p *extension.Extension, hp *h
 		return egress.Rule{Hosts: slices.Clone(g.Network), Hub: g.FullHub() || len(g.Hub) > 0, Targets: ps.settingsTargets(id),
 			Owner: ps.ownerTargets(p.Record.StorageKey())}
 	}
-	if !st.Active {
-		start := s.StartEnv
-		s.StartEnv = func() []string {
-			var env []string
-			if start != nil {
-				env = start()
-			}
-			return append(env, sandbox.ProxyEnv(px.Register(id, ruleNow()))...)
-		}
-		return nil
-	}
+
 	run := filepath.Join(ps.root, "run", p.Record.StorageKey())
 	// An agent runtime (permissions.agent_runtimes) reaches this machine's node through a socket of its own that leads
 	// to the node's runtime.sock and nowhere else (#5413): the node's is in the home directory, which the sandbox hides.
@@ -405,6 +394,9 @@ func (ps *extensions) confine(ctx context.Context, p *extension.Extension, hp *h
 	}
 	hubURL := "http://" + egress.HubHost
 	s.Env = identity.Environment(s.Env, "PERSONA_HUB_URL="+hubURL)
+	// A permitted loopback address in its settings is LocalHost in the sandbox (`127.0.0.1` there is the sandbox
+	// itself, #13540).
+	s.Env = setEnv(s.Env, "PERSONA_PLUGIN_CONFIG", string(extension.SandboxConfig(p.Manifest, ps.reg.Config(p), ruleNow())))
 	if start := s.StartEnv; start != nil {
 		s.StartEnv = func() []string { return identity.Environment(start(), "PERSONA_HUB_URL="+hubURL) }
 	}
@@ -414,6 +406,7 @@ func (ps *extensions) confine(ctx context.Context, p *extension.Extension, hp *h
 			if params.Hub.URL != "" {
 				params.Hub.URL = hubURL
 			}
+			params.Config = extension.SandboxConfig(p.Manifest, params.Config, ruleNow())
 			return params, err
 		}
 	}

@@ -35,7 +35,10 @@ fun Session.keepingDetails(old: Session?): Session {
         compaction = compaction ?: old.compaction,
         asks = asks ?: old.asks,
         pendingSwitch = pendingSwitch ?: old.pendingSwitch,
-        // A summary omits this detail; a complete row with an empty list clears it by returning above.
+        // Summary rows omit the coded start details. Keep the pair only while the failure they explain is unchanged;
+        // a row carrying a new code must never inherit the previous code's arguments.
+        startErrorCode = startErrorCode ?: old.startErrorCode.takeIf { startError == old.startError },
+        startErrorArgs = if (startErrorCode != null) startErrorArgs else old.startErrorArgs.takeIf { startError == old.startError },
         undelivered = undelivered ?: old.undelivered,
     )
 }

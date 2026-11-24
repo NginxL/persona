@@ -32,6 +32,33 @@ import PersonaWire
         #expect(bare.models[0].name == "model-a" && bare.models[0].defaultEffort == "medium" && bare.locked == "fixed")
     }
 
+    @Test func foldedAliasesSelectTheirRowWithoutRewritingTheSavedPick() throws {
+        let folded = try list(#"{"agent":"claude","models":[{"id":"default","name":"Default","default":true,"resolved":"claude-opus-5-5"},{"id":"claude-opus-5-5","name":"Opus 5.5","aliases":["opus","fable","sonnet","haiku"],"efforts":["low","high"]},{"id":"kiro/claude-opus-5-5","name":"Opus 5.5 (kiro)"}]}"#)
+        #expect(folded.models[1].aliases == ["opus", "fable", "sonnet", "haiku"])
+        var c = LauncherModelChoice(list: folded, picked: "sonnet", configured: "opus")
+        #expect(c.selected?.id == "claude-opus-5-5")
+        #expect(c.unlisted == nil && c.typed == nil, "a folded alias is listed, not a typed model")
+        #expect(c.sent == "sonnet", "restoring a pick does not silently rewrite it")
+        #expect(c.title == "Opus 5.5" && c.efforts == ["low", "high"])
+        c.picked = ""
+        #expect(c.efforts == ["low", "high"], "a configured alias inherits the folded row's efforts")
+        #expect(c.customModelID("fable") == nil && c.customProblem("opus") == nil)
+        #expect(c.matching("haiku").map(\.id) == ["claude-opus-5-5"])
+        c.picked = "claude-opus-5-5"
+        #expect(c.sent == "claude-opus-5-5", "a deliberate row pick uses the canonical ID")
+
+        // Exact row IDs win over another row's alias, however synthetic the collision.
+        let collision = LauncherModels(agent: "claude", models: [
+            AgentModel(id: "claude-opus-5-5", name: "Folded", aliases: ["sonnet"]),
+            AgentModel(id: "sonnet", name: "Exact"),
+        ], locked: nil, machine: nil)
+        #expect(LauncherModelChoice(list: collision, picked: "sonnet").selected?.name == "Exact")
+
+        let oldHub = try list(#"{"agent":"claude","models":[{"id":"opus","name":"Opus"}]}"#)
+        #expect(oldHub.models[0].aliases == nil)
+        #expect(LauncherModelChoice(list: oldHub, picked: "opus").selected?.id == "opus")
+    }
+
     @Test func theDefaultSendsNoModel() throws {
         var c = LauncherModelChoice(list: try claude)
         #expect(c.canPick && c.sent == nil && c.title == "默认" && c.detail == "claude-opus-5-5")

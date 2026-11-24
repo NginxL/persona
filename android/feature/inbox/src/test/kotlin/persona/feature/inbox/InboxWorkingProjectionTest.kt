@@ -9,6 +9,7 @@ import persona.core.contracts.CoreText
 import persona.core.domain.inbox.InboxItem
 import persona.core.domain.inbox.InboxListSettings
 import persona.core.domain.inbox.buildInboxList
+import persona.core.inbox.*
 
 /** The item-based successor to the old conversation-view In progress regressions (#6650). */
 class InboxWorkingProjectionTest {

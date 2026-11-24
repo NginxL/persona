@@ -478,6 +478,12 @@ fun PersonaModelPill(
     onConfigure: (() -> Unit)? = null,
     /** An effort on an older hub, which keeps it on the session (`POST …/modes`); null: not offered. */
     onEffort: ((String) -> Unit)? = null,
+    /** A one-off request from this page's model-route remedy to open this same picker. */
+    openRequested: Boolean = false,
+    onOpenHandled: () -> Unit = {},
+    /** A one-off request to follow the default, using the same optimistic clear as the panel's strip. */
+    clearRequested: Boolean = false,
+    onClearHandled: () -> Unit = {},
 ) {
     val res = LocalResources.current
     val features = LocalHubFeatures.current
@@ -488,6 +494,9 @@ fun PersonaModelPill(
     var config by remember(management) { mutableStateOf<persona.core.contracts.api.AssistantConfig?>(null) }
     var drawn by remember(session?.key) { mutableStateOf<DrawnPick?>(null) }
     LaunchedEffect(open) { onOverlay(open) }
+    LaunchedEffect(openRequested) {
+        if (openRequested) { open = true; onOpenHandled() }
+    }
     DisposableEffect(Unit) { onDispose { onOverlay(false) } }
     LaunchedEffect(management) {
         try { config = management?.config() } catch (cancelled: CancellationException) { throw cancelled } catch (_: Exception) { }
@@ -521,8 +530,10 @@ fun PersonaModelPill(
         config = config?.launcher, pagePick = pagePick)
     // Only the main conversation has a per-conversation model pick (#6911): a leader, the background supervisor or
     // another assistant conversation draws no pill and follows the default or what it started with. The new-chat page
-    // (session null) keeps its starter pick, which goes with the main conversation's start.
-    if (session != null && !chat.isMain) return
+    // (session null) keeps its starter pick, which goes with the main conversation's start. A model-route remedy may
+    // still open this chat's existing panel; once it closes (and after its clear request is handled), the non-main chat
+    // goes back to drawing no pill.
+    if (session != null && !chat.isMain && !open && !clearRequested) return
     val catalog = lists.assistantCatalog(machineId, main = isMain)
     val info = (catalog as? JLoadable.Loaded)?.value
     val setup = PersonaModelPanel.setup(chat, info)
@@ -536,10 +547,6 @@ fun PersonaModelPill(
     val (content, spoken) = pillContent(view, null, false, res)
     JModelPill(content, spoken, if (management != null) ({ open = true }) else null, modifier.testTag("model-pill"), width = width, open = open,
         enabled = enabled)
-    if (!open) return
-    val running = session?.agent?.isNotBlank() == true
-    val panel = PersonaModelPanel.panel(setup, info, { lists.list(machineId, it) }, typed = PersonaModelPanel.TYPED_MODELS in features,
-        engine = session?.let(AgentModelPanel::engine) ?: "claude", running = running)
     fun keep(pick: ModelPick?, after: () -> Unit = {}) {
         val s = session
         if (s == null || !kept) { onPagePick(pick); after(); return }
@@ -553,6 +560,13 @@ fun PersonaModelPill(
             catch (error: Exception) { drawn = before; onNotice(operationFeedback(error).text.resolve(res)) }
         }
     }
+    LaunchedEffect(clearRequested) {
+        if (clearRequested) { keep(null); onClearHandled() }
+    }
+    if (!open) return
+    val running = session?.agent?.isNotBlank() == true
+    val panel = PersonaModelPanel.panel(setup, info, { lists.list(machineId, it) }, typed = PersonaModelPanel.TYPED_MODELS in features,
+        engine = session?.let(AgentModelPanel::engine) ?: "claude", running = running)
     val named = listOfNotNull(info?.launchers?.firstOrNull { it.name == setup.provider }?.title ?: setup.provider,
         panel.providers.firstOrNull { it.id == setup.provider }?.models?.firstOrNull { it.id == panel.state.current?.model }?.name ?: view.setup.model)
         .joinToString(" · ")

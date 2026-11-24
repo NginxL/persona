@@ -14,9 +14,9 @@ import (
 	"time"
 
 	"github.com/nwverse/persona/server/internal/assistantwire"
+	"github.com/nwverse/persona/server/internal/botcard"
 	"github.com/nwverse/persona/server/internal/channel"
 	"github.com/nwverse/persona/server/internal/compat"
-	"github.com/nwverse/persona/server/internal/feishubot"
 	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/proto"
 )
@@ -102,6 +102,7 @@ type fakeOpenAPI struct {
 	readCode          map[string]int   // message id -> business code GET /messages/:id answers instead of its items
 	readFail          map[string]int   // message id -> how many more GETs answer HTTP 500 (the client reads again)
 	botInfoFail       bool             // GET /bot/v3/info answers a business error
+	beforeBotInfo     func(app string) // optional response barrier, called outside mu with the asking app (token t-<app>)
 	pins              []map[string]any // what GET /pins answers (its items)
 }
 
@@ -119,12 +120,20 @@ func newFakeOpenAPI(t *testing.T) *fakeOpenAPI {
 		f.calls = append(f.calls, r.Method+" "+r.URL.Path+" "+string(body))
 		f.n++
 		n := f.n
+		beforeBotInfo := f.beforeBotInfo
 		f.mu.Unlock()
 		p := r.URL.Path
+		if p == "/open-apis/bot/v3/info" && beforeBotInfo != nil {
+			beforeBotInfo(strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer t-"))
+		}
 		reply := func(v any) { _ = json.NewEncoder(w).Encode(v) }
 		switch {
 		case p == "/open-apis/auth/v3/tenant_access_token/internal":
-			reply(map[string]any{"code": 0, "tenant_access_token": "t-1", "expire": 7200})
+			var app struct {
+				ID string `json:"app_id"`
+			}
+			_ = json.Unmarshal(body, &app)
+			reply(map[string]any{"code": 0, "tenant_access_token": "t-" + app.ID, "expire": 7200})
 		case p == "/open-apis/bot/v3/info" && f.failsBotInfo():
 			reply(map[string]any{"code": 99991, "msg": "bot info is down"})
 		case p == "/open-apis/bot/v3/info":
@@ -257,6 +266,7 @@ func (f *fakeOpenAPI) total() int {
 // A Persona node on the machine running these tests probes the fake's port (GET /, node/ports.go): only the bot's
 // calls to the open platform are recorded, so a probe never shows up as one of them.
 func TestFakeOpenAPIRecordsOnlyTheBotsCalls(t *testing.T) {
+	needsLarkModule(t)
 	f := newFakeOpenAPI(t)
 	req, _ := http.NewRequest("GET", f.srv.URL+"/", nil)
 	req.Header.Set("User-Agent", compat.PortProbeAgent)
@@ -301,6 +311,7 @@ type botWorld struct {
 // assistant in its process.
 func newBotWorld(t *testing.T) *botWorld {
 	t.Helper()
+	needsLarkModule(t) // the world is the Feishu bot's, with its fake open platform
 	h := newTestManager(t)
 	st := newBotStore()
 	h.store = st
@@ -406,6 +417,7 @@ func (w *botWorld) pair(t *testing.T) {
 
 // Pairing makes the sender of the code the owner; nobody else is answered, and the code works once.
 func TestBotPairsWithTheCodeAndAnswersOnlyItsOwner(t *testing.T) {
+	needsLarkModule(t)
 	w := newBotWorld(t)
 	_, _ = w.h.botEvent(w.ctx, botMessageEvent("om_early", "ou_me", "text", textContent("你好"), nil))
 	w.api.find(t, "/messages", "还没配对")
@@ -435,6 +447,7 @@ func TestBotPairsWithTheCodeAndAnswersOnlyItsOwner(t *testing.T) {
 
 // Paired while the assistant is not here: the manager says hello itself.
 func TestBotPairedNoteWithoutTheAssistant(t *testing.T) {
+	needsLarkModule(t)
 	w := newBotWorld(t)
 	w.h.opts.AssistantEvent = nil // no assistant in this process to tell
 	_, out := w.do(t, "POST", "/api/v1/bots/feishu/pair", "")
@@ -446,6 +459,7 @@ func TestBotPairedNoteWithoutTheAssistant(t *testing.T) {
 // The owner's message goes to the assistant once (a redelivered event is not handed again), as Feishu sent it; the
 // answer comes back through the transport: the reaction, the card replying to the message, the reaction's end.
 func TestBotMessageGoesToTheAssistantAndTheAnswerComesBack(t *testing.T) {
+	needsLarkModule(t)
 	w := newBotWorld(t)
 	w.pair(t)
 	ev := botMessageEvent("om_q1", "ou_me", "text", textContent("今天有什么会？"), nil)
@@ -483,6 +497,7 @@ func TestBotMessageGoesToTheAssistantAndTheAnswerComesBack(t *testing.T) {
 // answers the card with it (interactions.resolve) once, as the user's own answer; another card's action, none, or
 // one used already is refused.
 func TestBotCardPressGoesToTheAssistantWithTheOwnersAction(t *testing.T) {
+	needsLarkModule(t)
 	w := newBotWorld(t)
 	w.pair(t)
 	w.a.on(assistantwire.MethodFeishuAction, func(json.RawMessage) (any, error) {
@@ -540,6 +555,7 @@ func TestBotCardPressGoesToTheAssistantWithTheOwnersAction(t *testing.T) {
 
 // The switches (Agents off by default) are the manager's to keep and say: feishu.status has them for the assistant.
 func TestBotFeatureSwitches(t *testing.T) {
+	needsLarkModule(t)
 	w := newBotWorld(t)
 	w.pair(t)
 	feats := func() map[string]any {
@@ -563,6 +579,7 @@ func TestBotFeatureSwitches(t *testing.T) {
 }
 
 func TestTurnAnswerIsTheLastWords(t *testing.T) {
+	needsLarkModule(t)
 	items := []proto.Item{
 		{Role: "user", Kind: proto.KindText, Text: "问"},
 		{Role: "assistant", Kind: proto.KindText, Text: "先看看"},
@@ -586,6 +603,7 @@ func TestTurnAnswerIsTheLastWords(t *testing.T) {
 
 // Wrong codes end the pairing after a few tries; a new code pairs.
 func TestBotPairingGivesUpOnGuesses(t *testing.T) {
+	needsLarkModule(t)
 	w := newBotWorld(t)
 	if code, _ := w.do(t, "POST", "/api/v1/bots/feishu/pair", ""); code != 200 {
 		t.Fatal(code)
@@ -621,6 +639,7 @@ func (w *botWorld) away(on bool) {
 // While the assistant can't take them the bot still takes the owner's messages: each is answered that the assistant
 // can't be reached; a press on a card says so too. Back, it takes messages again.
 func TestBotSaysTheAssistantIsAwayAndRecovers(t *testing.T) {
+	needsLarkModule(t)
 	w := newBotWorld(t)
 	w.pair(t)
 	shortInboundWait(t)
@@ -660,6 +679,7 @@ func shortInboundWait(t *testing.T) {
 // A message that comes while the assistant is away for a moment (an assistant restart) waits for it and is handed as
 // usual: nothing the bot took is dropped, and nobody is told the assistant is away.
 func TestBotMessageWaitsForTheAssistant(t *testing.T) {
+	needsLarkModule(t)
 	w := newBotWorld(t)
 	w.pair(t)
 	w.away(true)
@@ -679,6 +699,7 @@ func TestBotMessageWaitsForTheAssistant(t *testing.T) {
 // another card's, or one used already is refused, so the assistant can't approve anything by itself (the assistant
 // takes it, interactions.owner_action, before it answers the card in its queue).
 func TestChannelAnswersNeedTheOwnersAction(t *testing.T) {
+	needsLarkModule(t)
 	h := newTestManager(t)
 	h.store = newBotStore()
 	resolve := func(action string) error {
@@ -705,6 +726,7 @@ func TestChannelAnswersNeedTheOwnersAction(t *testing.T) {
 
 // The bot writes in the user's language: the pairing hint to someone not paired yet, the owner-only line.
 func TestBotRepliesInTheUsersLanguage(t *testing.T) {
+	needsLarkModule(t)
 	w := newBotWorld(t)
 	w.h.opts.Lang = func() i18n.Lang { return i18n.Ja } // the hub's hello says the user's language
 	_, _ = w.h.botEvent(w.ctx, botMessageEvent("om_early", "ou_me", "text", textContent("こんにちは"), nil))
@@ -717,6 +739,7 @@ func TestBotRepliesInTheUsersLanguage(t *testing.T) {
 // The owner's messages are handed to the assistant in the order they came, one after another: one the assistant is
 // slow to take does not let the next one overtake it.
 func TestBotMessagesGoToTheAssistantInOrder(t *testing.T) {
+	needsLarkModule(t)
 	w := newBotWorld(t)
 	w.pair(t)
 	slow := make(chan struct{})
@@ -744,6 +767,7 @@ func TestBotMessagesGoToTheAssistantInOrder(t *testing.T) {
 
 // The owner's recall in the bot's private chat is passed to the assistant; one in another chat, or by an admin, is not.
 func TestBotRecallTellsTheAssistant(t *testing.T) {
+	needsLarkModule(t)
 	w := newBotWorld(t)
 	w.pair(t)
 	recall := func(chat, kind string) {
@@ -763,9 +787,10 @@ func TestBotRecallTellsTheAssistant(t *testing.T) {
 // feishu.post and feishu.text with in_thread put a reply in the parent's thread; without it the request is what it
 // was (no reply_in_thread at all), and a chat_id naming the owner's own chat changes nothing.
 func TestChannelFeishuInThread(t *testing.T) {
+	needsLarkModule(t)
 	w := newBotWorld(t)
 	w.pair(t)
-	card := feishubot.NewCard("t", "green", "a").Markdown("thread card").JSON()
+	card := botcard.NewCard("t", "green", "a").Markdown("thread card").JSON()
 	for _, id := range []string{"om_t1", "om_t2", "om_t3", "om_t4"} { // the owner's messages in the private chat
 		w.api.inChat(id, "oc_p2p")
 	}
@@ -790,9 +815,10 @@ func TestChannelFeishuInThread(t *testing.T) {
 
 // Only the owner's private chat is a chat the assistant may name; any other is refused before anything is sent.
 func TestChannelFeishuRefusesOtherChats(t *testing.T) {
+	needsLarkModule(t)
 	w := newBotWorld(t)
 	w.pair(t)
-	card := feishubot.NewCard("t", "green", "a").Markdown("refused card").JSON()
+	card := botcard.NewCard("t", "green", "a").Markdown("refused card").JSON()
 	before := w.api.count("/open-apis/im/v1/messages")
 	for method, params := range map[string]map[string]any{
 		assistantwire.FeishuPost: {"card": card, "chat_id": "oc_test"},
@@ -810,6 +836,7 @@ func TestChannelFeishuRefusesOtherChats(t *testing.T) {
 }
 
 func TestBotChatAllowed(t *testing.T) {
+	needsLarkModule(t)
 	owner := FeishuBotSettings{Owner: &BotOwner{OpenID: "ou_owner", ChatID: "oc_p2p"}}
 	for _, c := range []struct {
 		name string
@@ -838,11 +865,12 @@ func TestBotChatAllowed(t *testing.T) {
 // A reply whose parent was withdrawn is sent into the chat the call carried (not a fixed one), as a plain message:
 // the thread flag does not follow it into the chat send.
 func TestBotReplyDetoursIntoTheCallsChat(t *testing.T) {
+	needsLarkModule(t)
 	w := newBotWorld(t)
 	w.pair(t)
 	w.api.rejectReply = 230011
 	api, _ := w.h.botAPI()
-	if _, rerouted, err := w.h.replyOrSend(context.Background(), api, "oc_test", "om_gone", feishubot.TypeText, feishubot.TextContent("detour text"), "k1", true); err != nil || !rerouted {
+	if _, rerouted, err := w.h.replyOrSend(context.Background(), api, "oc_test", "om_gone", botcard.TypeText, botcard.TextContent("detour text"), "k1", true); err != nil || !rerouted {
 		t.Fatalf("replyOrSend: rerouted %v, err %v", rerouted, err)
 	}
 	w.api.find(t, "/messages/om_gone/reply", "detour text", `"reply_in_thread":true`) // the threaded reply was tried first

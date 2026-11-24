@@ -293,9 +293,7 @@ private struct FolderPickerList: View {
         .listStyle(.plain)
         .themedPage()
         .navigationTitle(title)
-        #if !os(macOS)
         .navigationBarTitleDisplayMode(.inline)
-        #endif
         .accessibilityIdentifier("files.move.list")
         .task(id: "\(path)\u{0}\(reload)") {
             guard let api = model.api(group) else { return }

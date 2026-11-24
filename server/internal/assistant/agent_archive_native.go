@@ -151,23 +151,27 @@ func (svc *Service) nativeArchiveKick(key string) {
 // nativeArchiveRun brings the tool to the latest wish for key: again while the wish changes under a call.
 func (svc *Service) nativeArchiveRun(key string, done chan struct{}) {
 	b := &svc.agentNative
-	defer func() {
+	for {
+		for range 4 {
+			ctx, cancel := context.WithTimeout(context.Background(), nativeArchiveCallTimeout)
+			again := svc.nativeArchiveOnce(ctx, key)
+			cancel()
+			if !again {
+				break
+			}
+		}
+		// A wish that came in as this worker was ending is made by this worker, decided under the same lock that
+		// ends it: ended first and started again after, a request in between found a fresh wish with no worker to
+		// wait for (nativeArchiveAwaited) and answered "pending" at once.
 		b.mu.Lock()
+		if rec := b.records[key]; rec.State == nativeArchivePending && rec.At.IsZero() {
+			b.mu.Unlock()
+			continue
+		}
 		delete(b.running, key)
-		rec := b.records[key]
 		b.mu.Unlock()
 		close(done)
-		if rec.State == nativeArchivePending && rec.At.IsZero() {
-			svc.nativeArchiveKick(key) // a wish that came in as this worker was ending
-		}
-	}()
-	for range 4 {
-		ctx, cancel := context.WithTimeout(context.Background(), nativeArchiveCallTimeout)
-		again := svc.nativeArchiveOnce(ctx, key)
-		cancel()
-		if !again {
-			return
-		}
+		return
 	}
 }
 

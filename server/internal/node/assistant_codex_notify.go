@@ -115,6 +115,7 @@ func (c *codexConn) notification(method string, params json.RawMessage) {
 		c.mu.Unlock()
 		n.notifyCodex()
 	case "turn/started":
+		n.ttft.armIfUnarmed(p.id, time.Now(), ev.Turn.ID)
 		c.mu.Lock()
 		c.turnID = ev.Turn.ID
 		c.loop = codexCompactionLoop{}
@@ -157,6 +158,9 @@ func (c *codexConn) notification(method string, params json.RawMessage) {
 			n.emitDelta(p.id, "")
 		}
 	case "item/agentMessage/delta":
+		if ev.Delta != "" {
+			n.ttft.firstToken(p.id, time.Now(), ev.TurnID)
+		}
 		p.mu.Lock()
 		p.partial.WriteString(ev.Delta)
 		text := n.partialGrewLocked(p)
@@ -164,6 +168,10 @@ func (c *codexConn) notification(method string, params json.RawMessage) {
 		p.mu.Unlock()
 		if text != "" {
 			n.emitDelta(p.id, text)
+		}
+	case "item/reasoning/textDelta", "item/reasoning/summaryTextDelta":
+		if ev.Delta != "" {
+			n.ttft.firstToken(p.id, time.Now(), ev.TurnID)
 		}
 	case "thread/tokenUsage/updated":
 		c.noteRequest(ev.TokenUsage.Last.InputTokens, ev.TokenUsage.ModelContextWindow, c.turnModel())
@@ -183,6 +191,7 @@ func (c *codexConn) notification(method string, params json.RawMessage) {
 			n.refresh(p.id, f)
 		}
 	case "turn/completed":
+		n.ttft.clearPending(p.id)
 		c.mu.Lock()
 		if c.turnID == ev.Turn.ID {
 			c.turnID = ""

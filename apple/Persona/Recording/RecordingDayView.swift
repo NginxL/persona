@@ -1,4 +1,3 @@
-#if os(iOS) || os(visionOS)
 import SwiftUI
 import UIKit
 
@@ -984,5 +983,4 @@ private struct RecordingDayTodayRow: View {
         if next != pending { pending = next }
     }
 }
-#endif
 #endif

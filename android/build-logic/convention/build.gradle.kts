@@ -14,3 +14,8 @@ dependencies {
     implementation(libs.hilt.gradlePlugin)
     implementation(libs.ksp.gradlePlugin)
 }
+
+// ModuleGuard's own tests (scripts/ci/android.sh runs them with ./gradlew -p build-logic :convention:test).
+dependencies {
+    testImplementation(libs.junit)
+}

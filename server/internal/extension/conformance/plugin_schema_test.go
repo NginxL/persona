@@ -26,6 +26,7 @@ import (
 	"github.com/nwverse/persona/server/internal/extension"
 	"github.com/nwverse/persona/server/internal/extmgr/storage"
 	"github.com/nwverse/persona/server/internal/kbwire"
+	"github.com/nwverse/persona/server/internal/proto"
 )
 
 const schemaDir = "../../../../schema/extension"
@@ -126,6 +127,9 @@ var goTypes = map[string]any{
 	"AssistantConversationsResult": assistantwire.AssistantConversationsResult{},
 	"AssistantMessagesParams":      assistantwire.AssistantMessagesParams{},
 	"AssistantMessagesResult":      assistantwire.AssistantMessagesResult{},
+	"AssistantEntriesParams":       proto.AssistantEntriesParams{},
+	"AssistantEntriesResult":       proto.AssistantEntriesResult{},
+	"AssistantEntriesChangedEvent": proto.AssistantEntriesChanged{},
 	"AssistantMemoryParams":        assistantwire.AssistantMemoryParams{},
 	"AssistantMemoryResult":        assistantwire.AssistantMemoryResult{},
 	"AssistantDataStatusParams":    assistantwire.AssistantDataStatusParams{},
@@ -161,6 +165,18 @@ var goTypes = map[string]any{
 	"RepoDescribeResult": wire.RepoDescribeResult{},
 	"RepoPRStatusParams": wire.RepoPRStatusParams{},
 	"RepoPRStatusResult": wire.RepoPRStatusResult{},
+
+	"MachinesPairLinkParams": wire.MachinesPairLinkParams{},
+	"MachinesPairLinkResult": wire.MachinesPairLinkResult{},
+	"MachinesStatusParams":   wire.MachinesStatusParams{},
+	"MachinesStatusResult":   wire.MachinesStatusResult{},
+
+	// The manager decodes an extension's browser calls into the generated wire types and answers with them
+	// (extmgr/extension_browser.go).
+	"BrowserMachinesParams": wire.BrowserMachinesParams{},
+	"BrowserMachinesResult": wire.BrowserMachinesResult{},
+	"BrowserRunParams":      wire.BrowserRunParams{},
+	"BrowserRunResult":      wire.BrowserRunResult{},
 
 	// Storage params are the actual manager-engine decoder types. Dynamic result
 	// objects are validated against these wire DTOs before committing/acknowledging.
@@ -227,7 +243,7 @@ var transcriptionCalls = []string{assistantwire.MethodTranscriptionStart, assist
 // assistant.memory.read (assistant.schema.json), and what it reads back of an extension's data contributions
 // (assistant_data.schema.json).
 var assistantCalls = []string{assistantwire.MethodAssistantConversations, assistantwire.MethodAssistantMessages,
-	assistantwire.MethodAssistantMemory, assistantwire.MethodAssistantDataStatus}
+	assistantwire.MethodAssistantMemory, assistantwire.MethodAssistantDataStatus, assistantwire.MethodAssistantEntriesList, "event." + assistantwire.EventAssistantEntriesChanged}
 
 // The to-do events the hub tells the extensions granted todos.read (todos.schema.json).
 var todoCalls = []string{"event." + assistantwire.EventTodoChanged, "event." + assistantwire.EventTodoDecision}
@@ -474,6 +490,18 @@ func (s schemas) compare(t *testing.T, at string, node map[string]any, g reflect
 		seen[key] = true
 		s.compare(t, at+"→"+name, target, g, seen)
 		return
+	}
+	if choices, ok := node["oneOf"].([]any); ok && len(choices) == 2 {
+		a, _ := choices[0].(map[string]any)
+		b, _ := choices[1].(map[string]any)
+		if a["type"] == "null" {
+			s.compare(t, at, b, g, seen)
+			return
+		}
+		if b["type"] == "null" {
+			s.compare(t, at, a, g, seen)
+			return
+		}
 	}
 	kind := func(want ...reflect.Kind) {
 		t.Helper()

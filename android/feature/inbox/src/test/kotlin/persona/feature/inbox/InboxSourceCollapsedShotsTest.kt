@@ -46,6 +46,7 @@ import persona.core.domain.inbox.InboxItem
 import persona.core.navigation.AppTab
 import persona.core.navigation.Navigator
 import java.io.File
+import persona.core.inbox.*
 
 /**
  * Collapsed non-event chat and mail details in every style, light and dark, at default and 200% text. The source page

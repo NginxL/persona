@@ -80,8 +80,6 @@ struct RootView: View {
         return false
         #elseif os(iOS)
         return (heldWidthClass ?? widthClass) == .compact || flipped
-        #else
-        return false
         #endif
     }
 
@@ -140,8 +138,6 @@ struct RootView: View {
                 if usesSidebar { SidebarRoot().background { ToastWindowHook() }.modifier(BuiltTreeRoot()) }
                 else if usesShell { ShellView().modifier(BuiltTreeRoot()) }
                 else { RootTabs().background { ToastWindowHook() }.modifier(BuiltTreeRoot()) }
-                #else
-                RootTabs()
                 #endif
             } else {
                 WelcomeView()
@@ -160,6 +156,9 @@ struct RootView: View {
             // Which inbox sources a plugin draws (placement inbox_item): known before an item is opened.
             await InboxItemSlots.shared.reload(for: hub)
         }
+        // The assistant's domain spaces, for the sidebar's Spaces section (#13500): read on every hello, cleared for
+        // another hub.
+        .task(id: "\(model.hub?.group ?? "")|\(model.hubHellos)") { await SpaceStore.shared.load(hub: model.hub?.group) }
         .extensionThemes()
         .extensionSystemPresentation()
         // A new style, Theme Color or persona rebuilds the whole tree (tokens are static); the open tab and chat are remembered.
@@ -214,9 +213,7 @@ struct RootView: View {
         .screenProbe("tree", swaps)
         .confirmationDialogLabelProbe()
         // LookBlink drives UIWindowScene overrides, so it only exists on iOS and visionOS.
-        #if os(iOS) || os(visionOS)
         .task { await LookBlink.run() }
-        #endif
         #endif
         .tint(Theme.accent)
         .fontDesign(model.style.fontDesign)
@@ -233,7 +230,6 @@ struct RootView: View {
         // sheets too: drawn here, the tabs' Saved to Photos was under the image viewer and the share card (#1492). Where
         // there is no such window they are drawn here: a pairing link that failed on the welcome page said nothing (#4273).
         .overlay(alignment: .top) { if overlayToasts { ToastOverlay().padding(.top, toastClearance) } }
-        #if os(iOS) || os(visionOS)
         // Settings › Appearance › Light & Dark on this scene's window (and any other open one) as it first shows.
         .onAppear {
             model.colorScheme.apply()
@@ -250,7 +246,6 @@ struct RootView: View {
         #endif
         // The Theme Color on the windows too, for what UIKit draws in the window's tint (Settings' row icons, `WindowTint`).
         .onChange(of: model.look, initial: true) { WindowTint.apply() }
-        #endif
         #if DEBUG || PERF_SIGNPOST
         .task { MainThreadWatchdog.shared.start() }
         #endif
@@ -258,7 +253,7 @@ struct RootView: View {
         .overlay(alignment: .bottomTrailing) { PerfCountProbe() }
         // UI tests see the small window (VNC in picture in picture, #1343), which is the system's.
         .overlay(alignment: .topLeading) {
-            if model.vncPiP != nil {
+            if model.liveScreen?.smallWindow != nil {
                 Color.clear.frame(width: Theme.Size.hairline, height: Theme.Size.hairline)
                     .accessibilityElement().accessibilityLabel("VNC 小窗开着").accessibilityIdentifier("vnc-pip-on") // i18n-ignore
             }
@@ -272,7 +267,7 @@ struct RootView: View {
         .htmlCardSample()
         .voiceOrbSample()
         .closeoutSample()
-        .healthTrendsSample()
+        .modifier(ModuleDebugSamples())
         #endif
         .alert("Claude Wants to Act on Your iPhone", isPresented: Binding(
             get: { model.pendingConfirmation != nil },
@@ -289,11 +284,9 @@ struct RootView: View {
         // Add Computer / Confirm Computer from anywhere (the readiness card's add_computer / confirm_computer, the Agents list).
         .addComputerPresentation()
         .loadsChannels() // the names under a message that came in from a channel (「来自 微信」)
-        #if os(iOS) || os(visionOS)
         .onChange(of: LarkHomePreference.shared.shows) { _, enabled in
             if !enabled, model.selectedTab == .feishu { model.selectedTab = .assistant }
         }
-        #endif
     }
 }
 
@@ -321,9 +314,7 @@ struct RootView: View {
             AssistantRootTab()
             AgentsRootTab()
             #endif
-            #if os(iOS) || os(visionOS)
             if LarkHomePreference.shared.shows { FeishuRootTab() }
-            #endif
             #if !os(iOS)
             InboxRootTab()
             SettingsRootTab()
@@ -630,7 +621,6 @@ nonisolated struct ConnectionShown: Encodable, Equatable {
 }
 #endif
 
-#if os(iOS) || os(visionOS)
 @MainActor private struct FeishuRootTab: TabContent {
     var body: some TabContent<AppTab> {
         Tab(String(localized: "Messages [Quote Views 4da199]"), systemImage: Theme.Icon.feishuChats, value: AppTab.feishu) {
@@ -643,7 +633,6 @@ nonisolated struct ConnectionShown: Encodable, Equatable {
         }
     }
 }
-#endif
 
 #if DEBUG
 /// `probe.tree`: how many times `-swapTreeAt` flipped the width class (`count`), and how many times the tree went between

@@ -8,8 +8,14 @@ nonisolated struct ModelBinding: Codable, Hashable, Sendable {
     var effort: String?
     /// The main conversation's runtime (`cli` | `agentsdk`, #2455); only Main Chat has it (`ModelPurpose.runtimes`).
     var runtime: String? = nil
+    /// A launcher's saved permission override; nil follows the purpose's ordinary inheritance, except the Inbox's safe default.
+    var permissionMode: String? = nil
 
-    var isEmpty: Bool { provider == nil && model == nil && effort == nil && runtime == nil }
+    var isEmpty: Bool { provider == nil && model == nil && effort == nil && runtime == nil && permissionMode == nil }
+    enum CodingKeys: String, CodingKey {
+        case provider, model, effort, runtime
+        case permissionMode = "permission_mode"
+    }
 }
 
 nonisolated struct ModelUse: Codable, Hashable, Sendable {
@@ -61,7 +67,7 @@ nonisolated struct ModelPurpose: Codable, Hashable, Identifiable, Sendable {
 
     /// Explicit capabilities allow a child to own a binding without pretending to be a category.
     var hasWritableFields: Bool {
-        fields?.contains(where: { ["provider", "model", "effort", "runtime"].contains($0) }) == true
+        fields?.contains(where: { ["provider", "model", "effort", "runtime", "permission_mode"].contains($0) }) == true
     }
 }
 
@@ -149,10 +155,14 @@ nonisolated struct ModelProvider: Codable, Hashable, Identifiable, Sendable {
     var hidden: Bool?
     var hasKey: Bool?
     var models: [ModelAvailableModel]?
+    /// The runtime behind a launcher provider, and its explicit non-standard permission-mode list when it has one.
+    var agent: String? = nil
+    var permissionModes: [String]? = nil
 
     enum CodingKeys: String, CodingKey {
-        case id, name, kind, api, model, machines, hidden, models
+        case id, name, kind, api, model, machines, hidden, models, agent
         case hasKey = "has_key"
+        case permissionModes = "permission_modes"
     }
 }
 
@@ -173,7 +183,9 @@ nonisolated struct ModelConfigurationPatch: Encodable, Sendable {
     var fields: [String]
 
     var candidates: ModelCandidateSelection? = nil
-    enum CodingKeys: String, CodingKey { case revision, provider, model, effort, runtime, candidates }
+    enum CodingKeys: String, CodingKey { case revision, provider, model, effort, runtime, candidates
+        case permissionMode = "permission_mode"
+    }
 
     func encode(to encoder: any Encoder) throws {
         var c = encoder.container(keyedBy: CodingKeys.self)
@@ -184,7 +196,8 @@ nonisolated struct ModelConfigurationPatch: Encodable, Sendable {
         }
         for (field, value, key) in [("provider", binding.provider, CodingKeys.provider),
                                     ("model", binding.model, CodingKeys.model), ("effort", binding.effort, CodingKeys.effort),
-                                    ("runtime", binding.runtime, CodingKeys.runtime)] where fields.contains(field) {
+                                    ("runtime", binding.runtime, CodingKeys.runtime),
+                                    ("permission_mode", binding.permissionMode, CodingKeys.permissionMode)] where fields.contains(field) {
             if let value { try c.encode(value, forKey: key) } else { try c.encodeNil(forKey: key) }
         }
     }

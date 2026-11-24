@@ -12,6 +12,7 @@ import (
 	"github.com/nwverse/persona/server/internal/prompts"
 	"github.com/nwverse/persona/server/internal/proto"
 	"github.com/nwverse/persona/server/internal/screen"
+	"github.com/nwverse/persona/server/internal/transcript"
 )
 
 // Question cards for a Claude session outside Persona's terminals (docs/integrations/claude-integration.md "Question
@@ -49,17 +50,136 @@ func (n *Node) outsideAskCards() []proto.Interaction {
 	return out
 }
 
-// outsideAskCard is the card of the question claude c waits on, ok false when its transcript's latest call is not an
-// AskUserQuestion still open (a permission prompt, a plan, a dialog of its own) or the call cannot be one card.
+// outsideAskCacheEntry caches a private read-only transcript.File and its last derived pending AskUserQuestion for one
+// file identity (os.SameFile + size + mtime). Because the File is never stored in n.files and never acquires
+// n.pushLock, repeated waiting polls avoid disk I/O without blocking on slow-link subscriber pushes, while any append,
+// in-place rewrite, or atomic same-size/same-mtime replacement re-reads immediately.
+type outsideAskCacheEntry struct {
+	path  string
+	stat  os.FileInfo
+	size  int64
+	mtime time.Time
+	file  *transcript.File
+	item  *proto.Item
+}
+
+// pendingOutsideAsk returns the current turn's unanswered AskUserQuestion call that outside claude c is waiting on, or
+// nil when c is not waiting or its current turn's latest tool call is not an open AskUserQuestion. It reads through a
+// private branch-aware transcript.File — never acquiring subscriber push locks or triggering watch pushes — so card
+// creation, Capabilities.Approve, AttentionReason, and priority-now replies share one source of truth across rewound
+// branches, trailing text, metaMinInterval, quickTail, and >8 MiB metadata tails.
+func (n *Node) pendingOutsideAsk(c claudeProc) *proto.Item {
+	if c.Status != "waiting" {
+		return nil
+	}
+	id := c.SessionID
+	p := n.transcriptPath(id)
+	if p == "" {
+		return nil
+	}
+	st, err := os.Stat(p)
+	if err != nil {
+		return nil
+	}
+	var f *transcript.File
+	n.cx.mu.Lock()
+	if e, ok := n.cx.outsideAskCache[id]; ok && e.path == p && e.stat != nil && os.SameFile(e.stat, st) {
+		if e.size == st.Size() && e.mtime.Equal(st.ModTime()) {
+			item := copyItemPtr(e.item)
+			n.cx.mu.Unlock()
+			return item
+		}
+		f = e.file // same underlying file grew or was edited: refresh incrementally
+	}
+	n.cx.mu.Unlock()
+
+	if f == nil {
+		f = transcript.NewFile(p)
+	}
+	item, err := readPendingOutsideAskFile(f)
+	if err != nil {
+		// Transient open/read failure: never cache a false negative.
+		return nil
+	}
+	n.cx.mu.Lock()
+	if n.cx.outsideAskCache == nil {
+		n.cx.outsideAskCache = map[string]outsideAskCacheEntry{}
+	} else if len(n.cx.outsideAskCache) >= 64 {
+		clear(n.cx.outsideAskCache)
+	}
+	n.cx.outsideAskCache[id] = outsideAskCacheEntry{
+		path: p, stat: st, size: st.Size(), mtime: st.ModTime(), file: f, item: copyItemPtr(item),
+	}
+	n.cx.mu.Unlock()
+	return item
+}
+
+func copyItemPtr(it *proto.Item) *proto.Item {
+	if it == nil {
+		return nil
+	}
+	cp := *it
+	return &cp
+}
+
+// isOutsideTurnPrompt reports whether it starts a new user turn (clearing any earlier turn's unanswered
+// AskUserQuestion). Tool results, tool-returned screenshots (which carry ToolUseID != ""), and queued user messages
+// belong to the current turn and do not clear it; genuine user text/image prompts and wakes do.
+func isOutsideTurnPrompt(it proto.Item) bool {
+	if it.Wake {
+		return true
+	}
+	return it.Role == "user" && it.Kind != proto.KindToolResult && it.ToolUseID == "" && !it.Queued
+}
+
+// readPendingOutsideAskFile refreshes f read-only (no pushLock, no subscriber push) and walks back through branch-aware
+// PageTurns until it finds the current turn's boundary or latest tool call, returning that call when it is an open
+// AskUserQuestion that has neither a tool_result nor a subsequent active-branch turn close.
+func readPendingOutsideAskFile(f *transcript.File) (*proto.Item, error) {
+	if _, _, err := f.RefreshExportSpan(); err != nil {
+		return nil, err
+	}
+	answered := map[string]bool{}
+	beforeSeq := 0
+	for {
+		items, hasMore, _ := f.PageTurns(beforeSeq, 2, 2000)
+		var last *proto.Item
+		sawBoundary := false
+		for i := range items {
+			it := items[i]
+			switch {
+			case it.Kind == proto.KindToolResult && it.ToolUseID != "":
+				answered[it.ToolUseID] = true
+			case isOutsideTurnPrompt(it):
+				last = nil
+				sawBoundary = true
+			case it.Role == "assistant" && it.Kind == proto.KindToolUse:
+				cp := it
+				last = &cp
+				sawBoundary = true
+			}
+		}
+		if sawBoundary || !hasMore || len(items) == 0 {
+			if last == nil || last.ToolName != askTool || last.ToolUseID == "" || answered[last.ToolUseID] || f.TurnClosedAfter(last.Seq) {
+				return nil, nil
+			}
+			return last, nil
+		}
+		nextBefore := items[0].Seq
+		if nextBefore <= 1 || (beforeSeq > 0 && nextBefore >= beforeSeq) {
+			return nil, nil
+		}
+		beforeSeq = nextBefore
+	}
+}
+
+// outsideAskCard is the card of the question claude c waits on, ok false when its current turn's latest call is not an
+// AskUserQuestion still open (a permission prompt, a plan, a dialog of its own), when an active AskUserQuestion hook
+// or plugin permission request already covers the same tool call, or when the call cannot be one card.
 func (n *Node) outsideAskCard(c claudeProc) (proto.Interaction, bool) {
 	id := c.SessionID
-	f, err := n.file(id)
-	if err != nil || n.refresh(id, f) != nil {
-		return proto.Interaction{}, false
-	}
-	items, _, _ := f.PageTurns(0, 2, 2000)
-	call := pendingAsk(items)
-	if call == nil {
+	call := n.pendingOutsideAsk(c)
+	if call == nil || n.activeAsks.coversAsk(id, call.ToolUseID) || n.ccPlugins.coversAsk(id, call.ToolUseID) {
 		return proto.Interaction{}, false
 	}
 	var ix proto.Interaction
@@ -97,25 +217,6 @@ func (n *Node) outsideAskCard(c claudeProc) (proto.Interaction, bool) {
 		ix.SessionTitle = filepath.Base(ix.Cwd)
 	}
 	return ix, true
-}
-
-// pendingAsk is the transcript's latest tool call when it is an AskUserQuestion with no result yet, else nil.
-func pendingAsk(items []proto.Item) *proto.Item {
-	answered := map[string]bool{}
-	var last *proto.Item
-	for i := range items {
-		it := &items[i]
-		switch {
-		case it.Kind == proto.KindToolResult && it.ToolUseID != "":
-			answered[it.ToolUseID] = true
-		case it.Role == "assistant" && it.Kind == proto.KindToolUse:
-			last = it
-		}
-	}
-	if last == nil || last.ToolName != askTool || last.ToolUseID == "" || answered[last.ToolUseID] {
-		return nil
-	}
-	return last
 }
 
 // outsideAnswer sends the phone's answer to a card of outsideAskCards through the session's inbox. A card handed back

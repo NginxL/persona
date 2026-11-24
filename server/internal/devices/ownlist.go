@@ -45,7 +45,7 @@ func (d *Devices) startOwnList(ctx context.Context) {
 		d.mu.Unlock()
 		return
 	}
-	d.cfg = devicewire.Config{Machines: list, TailcatDERPMapURL: from.TailcatDERPMapURL}
+	d.cfg = devicewire.Config{Machines: list, TailcatDERPMapURL: from.TailcatDERPMapURL, PrivateNetwork: from.PrivateNetwork}
 	d.early = true
 	d.mu.Unlock()
 	d.logf("own list of machines: the hub has not answered: %d from %s", len(list), d.opts.ConfigFile)
@@ -95,7 +95,7 @@ func (d *Devices) keepOwnListLocked() {
 			"'s is kept, not written over, for when it hands it over to this manager again")
 		return
 	}
-	from := managerconf.MachinesFromHub{TailcatDERPMapURL: cfg.TailcatDERPMapURL, HubID: cfg.HubID, Mesh: cfg.Mesh != nil,
+	from := managerconf.MachinesFromHub{TailcatDERPMapURL: cfg.TailcatDERPMapURL, PrivateNetwork: cfg.PrivateNetwork, HubID: cfg.HubID, Mesh: cfg.Mesh != nil,
 		Own: cfg.MachinesOwn}
 	if cfg.MachinesOwn { // taking the hand-over over as its own: another hub's own list is kept aside first
 		if path, err := managerconf.SetAsideOtherHubs(d.opts.ConfigFile, cfg.HubID); err != nil {

@@ -3,6 +3,11 @@
 The recommended direction (synthesis §2, frames §3.1). Files: `v1/screens.js` (frames), `v1/screens.css` (styles scoped
 to `[data-variant="V1"]`).
 
+**Superseded for the list:** the frames `iphone/list` and its states (the section bar, Review Plan ›, the floating New
+To-Do pill, bare times) predate the owner's 2026-11-21 redraw of the list page, its rows and their container:
+`docs/design/DECISIONS.md` "11-21 The To-dos list" and DESIGN_SYSTEM 3.4 "To-dos list" are the design now. The other
+frames stand.
+
 ## The idea
 
 - **A to-do is one page, the paper.** Top to bottom: tick and title, the state word with the hub's sentence, Since you
@@ -87,7 +92,7 @@ never in screenshots.
   "Sent now to …"). Two shared components still draw older forms, so V1 draws them from the data itself: the relay
   line's Send Now state and the Fleet Live Activity, which counts sessions (at most two, buttons on the first
   actionable one only). The place summary's lines are ordered by the data's section order.
-- **The section bar** has the Inbox's chips with the landing choice first (the owner's decision of 2026-11-18): All ·
+- **The section bar** (superseded on 2026-11-21 by the Filter at the list's foot, above) has the Inbox's chips with the landing choice first (the owner's decision of 2026-11-18): All ·
   Needs you (3) · In progress 5 · To do 2, the grouping symbol inside the capsule's trailing end (Group By: Phase ·
   Project · Due Date, `iphone/list~group`); the list's ⋯ keeps Sort and Show. Done shows only while it has rows, so the
   mock offers no Done chip (and no Done filter frame). To-dos lands on All at the strip's start, so Needs you with its

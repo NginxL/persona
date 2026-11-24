@@ -4,6 +4,7 @@ import { buildMachineTree, paneRoute, type HerdrMachine, type HerdrSpace } from 
 import type { Panel } from "./panel";
 import type { Route, SessionView } from "./router";
 import { otherView } from "./session-view";
+import { splitSubagentLink } from "./subagent-link";
 import { isPaneAddress } from "./terminals";
 import type { Machine, Session } from "./types";
 
@@ -13,9 +14,14 @@ export interface PaneRef {
   sid: string;
 }
 
-/** A panel that belongs to a conversation (files / Git) is only meant for that one; the others (a link, a task…) go anywhere. */
+/** A panel that belongs to a conversation (files / Git / subagent) is only meant for that one; the others (a link, a task…) go anywhere. */
 function fits(panel: Panel, pane: PaneRef | undefined): boolean {
   if (panel.kind === "files" || panel.kind === "git") return Boolean(pane && panel.mid === pane.mid && panel.sid === pane.sid);
+  if (panel.kind === "subagent") {
+    const pMid = panel.parentMid ?? panel.mid;
+    const pSid = panel.parentSid ?? splitSubagentLink(panel.sid)?.parent;
+    return Boolean(pane && pane.mid === pMid && pane.sid === pSid);
+  }
   return true;
 }
 

@@ -5,7 +5,7 @@
 // chat holds are kept here too (`useChildRow`), where its cards and its children's request cards find them: a summary is
 // never put among the store's complete rows.
 import { useEffect, useLayoutEffect, useMemo, useRef, useSyncExternalStore } from "react";
-import { foldedChildren, rowKey, SESSIONS_HIERARCHY_FEATURE } from "./child-sessions";
+import { foldedChildren, rowKey, SESSIONS_CROSS_MACHINE_HIERARCHY_FEATURE, SESSIONS_HIERARCHY_FEATURE } from "./child-sessions";
 import { runtimeIdentity, runtimeOrder, runtimeRemoval, runtimeSessions } from "./runtime-list";
 import { heldSeen } from "./seen-outbox";
 import { SESSIONS_LIST_FEATURE, SessionList, type ListSnapshot } from "./session-list";
@@ -82,6 +82,16 @@ export function heldSides(mid: string, sid: string): Session[] | undefined {
   return sidesByParent.get(rowKey(mid, sid));
 }
 
+/** The side rows of a listed row (`heldSides` by its own key), for what counts many rows at once (heldCounts). */
+export const heldSidesOf = (s: Pick<Session, "machine_id" | "session_id">): Session[] | undefined => heldSides(s.machine_id, s.session_id);
+
+/** Moves on whenever the rows the open chats hold change: what reads `heldSides` outside a row's hook (a count) reads
+ *  again with it. */
+export function useHeldVersion(): number {
+  const read = () => heldVersion;
+  return useSyncExternalStore(subscribeHeld, read, read);
+}
+
 /** `heldSides`, kept up to date; undefined while `enabled` is off (a row with no sides reads nothing). */
 export function useHeldSides(mid: string, sid: string, enabled = true): Session[] | undefined {
   const read = () => (enabled ? heldSides(mid, sid) : undefined);
@@ -100,10 +110,11 @@ export function sameRows(prev: Session[] | undefined, next: Session[]): Session[
 export function useChildSessions(mid: string, sid: string, hasChildren: boolean, enabled = true, within?: string): ChildSessions {
   const paged = useStore((s) => s.features.includes(SESSIONS_LIST_FEATURE));
   const hierarchy = useStore((s) => s.features.includes(SESSIONS_HIERARCHY_FEATURE));
+  const crossMachine = useStore((s) => s.features.includes(SESSIONS_CROSS_MACHINE_HIERARCHY_FEATURE));
   const storeLoaded = useStore((s) => s.loaded);
-  // a hub that pushes every row: the children among the machine's rows, read there so that a push for another of its
-  // sessions leaves the chat alone (useStore keeps the array while it holds the same rows)
-  const pushed = useStore((s) => (enabled && !paged ? foldedChildren(s.sessions[mid] ?? NONE, mid, sid) : NONE));
+  // a hub that pushes every row: search all machines so cross-machine A2A subagents fold in too (useStore's shallow
+  // compare keeps the array identity across pushes for unrelated sessions)
+  const pushed = useStore((s) => (enabled && !paged ? foldedChildren(Object.values(s.sessions).flat(), mid, sid) : NONE));
   // a paging hub: one bounded list of this session's children, as list summaries (what a card shows is in one)
   const list = useMemo(
     () => (enabled && paged && hierarchy && hasChildren ? new SessionList<Session>("/sessions", runtimeIdentity, runtimeOrder, undefined, runtimeRemoval, { summary: true, pageCounts: () => runtimeSessions.usesPageCounts() }) : null),
@@ -113,14 +124,17 @@ export function useChildSessions(mid: string, sid: string, hasChildren: boolean,
   const parent = within || sid;
   useEffect(() => {
     if (!list) return;
-    void list.setFilters({ machine_id: mid, parent_session_id: parent }).catch(() => {});
+    const filters = crossMachine
+      ? { parent_machine_id: mid, parent_session_id: parent }
+      : { machine_id: mid, parent_session_id: parent };
+    void list.setFilters(filters).catch(() => {});
     // the hub's hint for any change of the list: a read of what changed since (`since`), only for these rows
     const off = onHubEvent("sessions_list", () => list.invalidate());
     return () => {
       off();
       list.reset();
     };
-  }, [list, mid, parent]);
+  }, [list, mid, parent, crossMachine]);
   // a session with more children than a page: the rest too (there are seldom more than a few)
   useEffect(() => {
     if (list && page.loaded && page.hasMore && !page.loading && !page.error) void list.more().catch(() => {});

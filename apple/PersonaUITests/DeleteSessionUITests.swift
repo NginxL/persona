@@ -90,6 +90,8 @@ final class DeleteSessionUITests: XCTestCase {
         XCTAssertTrue(row.waitForExistence(timeout: 10), "no row:\n\(app.debugDescription)")
         row.press(forDuration: 1.0)
         let delete = app.buttons["删除对话…"]
+        // The menu's last item, or More's while Close Agent… is the last (#13396).
+        if !delete.waitForExistence(timeout: 3) { app.openAgentMenuMore() }
         XCTAssertTrue(delete.waitForExistence(timeout: 5), "no 删除对话…:\n\(app.debugDescription)")
         shot("row-menu")
         delete.tap()
@@ -101,6 +103,9 @@ final class DeleteSessionUITests: XCTestCase {
         let working = app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "排查 /orders 接口变慢")).firstMatch
         XCTAssertTrue(working.waitForExistence(timeout: 10), "no row:\n\(app.debugDescription)")
         working.press(forDuration: 1.0)
+        XCTAssertTrue(app.buttons["置顶"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.buttons["删除对话…"].exists)
+        app.openAgentMenuMore()
         XCTAssertTrue(app.buttons["拷贝目录"].waitForExistence(timeout: 5))
         XCTAssertFalse(app.buttons["删除对话…"].exists)
     }

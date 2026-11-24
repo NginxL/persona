@@ -82,9 +82,11 @@ async function retryFixture(overrides: Partial<AgentLaunch> = {}, lostReply = fa
   await flush();
   return { item, fetcher, starts: () => fetcher.mock.calls.filter(([url]) => url.endsWith("/sessions")) };
 }
-const retry = async () => {
+const retry = async (fixture: Awaited<ReturnType<typeof retryFixture>>, count = 1) => {
   const button = [...host.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent?.trim() === t("startingagent.retry"))!;
   act(() => button.click());
+  // Delivery is loaded on intent; wait for that module and its request instead of assuming a fixed microtask count.
+  await act(async () => vi.waitFor(() => expect(fixture.starts()).toHaveLength(count)));
   await flush();
 };
 
@@ -92,7 +94,7 @@ it.each(["launcher", "empty text"])("retires captured TRAE CLI startup when edit
   const fixture = await retryFixture();
   if (edit === "launcher") typeRetry(host.querySelector("input")!, "claude");
   else typeRetry(host.querySelector("textarea")!, " ");
-  await retry();
+  await retry(fixture);
   expect(fixture.starts()).toHaveLength(1);
   const body = JSON.parse(fixture.starts()[0][1]!.body as string);
   expect(body).toMatchObject({ async: true, host: "herdr" });
@@ -103,7 +105,7 @@ it.each(["launcher", "empty text"])("retires captured TRAE CLI startup when edit
 
 it("retries the same valid TRAE CLI snapshot inline without an ordinary first message", async () => {
   const fixture = await retryFixture();
-  await retry();
+  await retry(fixture);
   expect(fixture.starts()).toHaveLength(1);
   const body = JSON.parse(fixture.starts()[0][1]!.body as string);
   expect(body).toMatchObject({ launcher: "work", agent_type: "traex", host: "herdr", prompt: "Original task" });
@@ -113,7 +115,7 @@ it("retries the same valid TRAE CLI snapshot inline without an ordinary first me
 
 it("preserves Codex's optional empty inline retry", async () => {
   const fixture = await retryFixture({ agentType: "codex", text: "" });
-  await retry();
+  await retry(fixture);
   const body = JSON.parse(fixture.starts()[0][1]!.body as string);
   expect(body).toMatchObject({ agent_type: "codex" });
   expect(body).not.toHaveProperty("async");
@@ -124,7 +126,7 @@ it("keeps a repeat-only TRAE CLI target locked", async () => {
   const fixture = await retryFixture({ repeatOnly: true });
   expect(host.querySelector("input")).toBeNull();
   expect(host.querySelector("textarea")).toBeNull();
-  await retry();
+  await retry(fixture);
   const body = JSON.parse(fixture.starts()[0][1]!.body as string);
   expect(body).toMatchObject({ launcher: "work", agent_type: "traex", prompt: "Original task" });
 });
@@ -133,7 +135,7 @@ it("keeps an uncertain target without dispatch when confirmation is declined", a
   vi.stubGlobal("confirm", vi.fn(() => false));
   const fixture = await retryFixture({ uncertain: true });
   expect(host.querySelector("input")).toBeNull();
-  await retry();
+  await retry(fixture, 0);
   expect(fixture.starts()).toHaveLength(0);
   expect(getState().launches[fixture.item.id].agentType).toBe("traex");
 });
@@ -141,7 +143,7 @@ it("keeps an uncertain target without dispatch when confirmation is declined", a
 it("replays an inline TRAE CLI attempt with the same operation and payload after a gap", async () => {
   vi.useFakeTimers();
   const fixture = await retryFixture({ startPromptOpId: "00000000-1111-4000-8000-000000000002" }, true);
-  await retry();
+  await retry(fixture);
   await act(async () => vi.advanceTimersByTimeAsync(500));
   const starts = fixture.starts();
   expect(starts).toHaveLength(2);

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/nwverse/persona/server/internal/apierr"
@@ -104,11 +105,24 @@ func (s *Service) channelRoutes() {
 	handle("POST /api/v1/channels/{id}/test", full(func(w http.ResponseWriter, r *http.Request, v channel.View) {
 		ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 		defer cancel()
-		if err := s.testChannel(ctx, v); err != nil {
+		res, err := s.testChannel(ctx, v)
+		if err != nil {
+			var nc notConnectedError
+			if errors.As(err, &nc) {
+				apierr.WriteCode(w, http.StatusConflict, "not_connected", errors.New(nc.Error()))
+				return
+			}
+			if msg, ok := cannotSendMessage(err); ok {
+				if msg == "" {
+					msg = i18n.T(s.botLang(r.Context()), "assistant-channels.cannot_send", i18n.Args{"name": v.Name})
+				}
+				apierr.WriteCode(w, http.StatusConflict, channel.CodeCannotSend, errors.New(msg))
+				return
+			}
 			apierr.Write(w, http.StatusBadGateway, err)
 			return
 		}
-		apierr.WriteJSON(w, map[string]any{"ok": true})
+		apierr.WriteJSON(w, res)
 	}))
 }
 
@@ -163,13 +177,79 @@ func (s *Service) updateChannel(ctx context.Context, v channel.View, enabled *bo
 	return nil
 }
 
-// testChannel sends the owner (only them) a line, to see the channel reaches them.
-func (s *Service) testChannel(ctx context.Context, v channel.View) error {
-	if v.State != channel.StateConnected {
-		return errors.New(i18n.T(s.botLang(ctx), "assistant-channels.not_connected", i18n.Args{"name": v.Name}))
+type channelTestResult struct {
+	OK        bool   `json:"ok"`
+	ReplyOnly bool   `json:"reply_only,omitempty"`
+	Note      string `json:"note,omitempty"`
+}
+
+type cannotSendError struct {
+	msg string
+}
+
+func (e cannotSendError) Error() string {
+	if e.msg != "" {
+		return e.msg
+	}
+	return errCannotSend.Error()
+}
+
+func (e cannotSendError) Unwrap() error { return errCannotSend }
+
+type notConnectedError struct {
+	msg string
+}
+
+func (e notConnectedError) Error() string { return e.msg }
+
+func cannotSendMessage(err error) (string, bool) {
+	var cs cannotSendError
+	if errors.As(err, &cs) {
+		return sanitizeCannotSendReason(cs.msg), true
+	}
+	if errors.Is(err, errCannotSend) || errors.Is(err, channel.ErrCannotSend) {
+		return sanitizeCannotSendReason(err.Error()), true
+	}
+	var re *rpc.Error
+	if errors.As(err, &re) && (re.Code == CodeCannotSend || re.Code == channel.CodeCannotSend) {
+		return sanitizeCannotSendReason(re.Message), true
+	}
+	return "", false
+}
+
+func sanitizeCannotSendReason(msg string) string {
+	msg = strings.TrimSpace(msg)
+	if msg == "" || msg == errCannotSend.Error() || msg == channel.ErrCannotSend.Error() {
+		return ""
+	}
+	return msg
+}
+
+// testChannel sends the owner (only them) a line, to see the channel reaches them; for reply-only channels, it verifies
+// connectivity/readiness without invoking proactive channel.send.
+func (s *Service) testChannel(ctx context.Context, v channel.View) (channelTestResult, error) {
+	l := s.botLang(ctx)
+	if !v.Enabled || v.State != channel.StateConnected {
+		if v.State == channel.StateError && strings.TrimSpace(v.Error) != "" {
+			return channelTestResult{}, notConnectedError{msg: strings.TrimSpace(v.Error)}
+		}
+		return channelTestResult{}, notConnectedError{msg: i18n.T(l, "assistant-channels.not_connected", i18n.Args{"name": v.Name})}
+	}
+	if v.Capabilities.ReplyOnly {
+		return channelTestResult{
+			OK:        true,
+			ReplyOnly: true,
+			Note:      i18n.T(l, "assistant-channels.reply_only_test_ok", i18n.Args{"name": v.Name}),
+		}, nil
 	}
 	if v.ID == channel.Feishu {
-		return s.appCall(ctx, AppFeishu, FeishuTest, map[string]any{}, nil)
+		if err := s.appCall(ctx, AppFeishu, FeishuTest, map[string]any{}, nil); err != nil {
+			return channelTestResult{}, err
+		}
+		return channelTestResult{OK: true}, nil
 	}
-	return s.channelTell(ctx, v.ID, "", i18n.T(s.botLang(ctx), "assistant-channels.test_message"), channel.OutNote)
+	if err := s.channelTell(ctx, v.ID, "", i18n.T(l, "assistant-channels.test_message"), channel.OutNote); err != nil {
+		return channelTestResult{}, err
+	}
+	return channelTestResult{OK: true}, nil
 }

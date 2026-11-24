@@ -341,7 +341,7 @@ func TestComputerToolsCallTheNode(t *testing.T) {
 		t.Fatal("neither script nor steps")
 	}
 
-	// Asking first, when the user set it: unanswered (or declined), nothing runs.
+	// Asking first, when the user set it: unanswered, nothing runs, and the model is not told the user declined it.
 	if err := h.extensions.reg.SetConfig(ctx, cuaExtensionID, json.RawMessage(`{"machines": ["mac"], "confirm": true, "app_approval": false}`), "test"); err != nil {
 		t.Fatal(err)
 	}
@@ -351,7 +351,7 @@ func TestComputerToolsCallTheNode(t *testing.T) {
 	defer cancel()
 	res = h.callComputerTool(short, "c", "computer_run", json.RawMessage(`{"machine": "mac", "script": "const a = await cua.getApp(\"Calculator\"); return 1"}`))
 	_, after := seen()
-	if !res.IsError || !strings.Contains(res.Content[0].Text, "declined") {
+	if !res.IsError || strings.Contains(res.Content[0].Text, "declined") || !strings.Contains(res.Content[0].Text, "did NOT decline") {
 		t.Fatalf("not confirmed: %+v", res)
 	}
 	for _, c := range after[len(before):] { // only the look at its apps and windows (#4336)

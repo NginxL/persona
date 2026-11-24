@@ -91,10 +91,11 @@ func (s *Service) pushStreak(t Task, count int, last ScheduleRun) bool {
 	}
 	l := s.lang(ctx)
 	name := t.labelIn(l)
-	if t.Space == SpaceHealth { // the lock screen does not name a health task (health.go)
-		name, _ = healthNotice(l)
-	}
 	why := clip(oneLine(last.Error), 300)
+	// the lock screen does not name a task whose push says something sensitive (usage.go, scene 4)
+	if s.exitPolicy(ctx, name+"\n"+why, last.SessionID, t.Space).Redact {
+		name, _ = s.redactedNotice(ctx, l, t.Space)
+	}
 	if why == "" {
 		why = i18n.T(l, "assistant-schedule.streak_unknown")
 	}
@@ -106,6 +107,6 @@ func (s *Service) pushStreak(t Task, count int, last ScheduleRun) bool {
 			n.Subtitle = m.Name
 		}
 	}
-	s.push(ctx, n)
+	s.push(withCard(ctx, cardScheduleStreak), n)
 	return true
 }

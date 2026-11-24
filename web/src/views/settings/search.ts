@@ -1,6 +1,8 @@
 import { t } from "../../i18n";
 import { LOCAL_SHORTCUTS, SHORTCUTS } from "../../lib/shortcuts";
-import { TAB_INFO, TABS, type Tab } from "./nav";
+import { enabledSettingsTabs, registeredModules } from "../../core/module-host";
+import { MODULES_LABS_ID } from "../../core/module-labs";
+import { tabInfo, TABS, type Tab } from "./nav";
 
 // ── search ──────────────────────────────────────────────
 
@@ -40,8 +42,10 @@ export const SEARCH_INDEX: SearchGroup[] = [
   { tab: "general", group: t("ui-look.font"), hint: words(t("ui-look.font_sans"), t("ui-look.font_mono")), anchor: "font" },
   { tab: "general", group: t("language.label"), anchor: "language" },
   { tab: "general", group: t("settings.reply_motion"), anchor: "reply-motion" },
+  { tab: "general", group: t("settings.starred_messages"), anchor: "starred-messages" },
   { tab: "general", group: t("ui-look.recent_chats"), anchor: "recent-chats" },
   { tab: "general", group: t("ui-look.sidebar_icons"), hint: words(t("ui-look.sidebar_icons_monochrome"), t("ui-look.sidebar_icons_colored")), anchor: "sidebar-icons" },
+  { tab: "general", group: t("ui-look.sidebar_usage"), anchor: "sidebar-usage" },
   { tab: "general", group: t("settings.start_page"), anchor: "start-page" },
   { tab: "general", group: t("settings.start_page_open_on"), hint: t("settings.start_page_main"), anchor: "open-on" },
   { tab: "general", group: t("settings.sidebar_pages"), anchor: "sidebar-pages" },
@@ -78,11 +82,11 @@ export const SEARCH_INDEX: SearchGroup[] = [
     hint: words(
       t("settings-assistantsettings.auto_naming"), t("settings-assistantsettings.auto_naming_max"), t("settings-assistantsettings.auto_naming_periodic"),
       t("settings-assistantsettings.auto_naming_interval"), t("settings-assistantsettings.main_supervises"), t("settings-assistantsettings.delivery_gate"), t("settings-assistantsettings.agent_tasks"), t("settings-assistantsettings.close_ended_terminals"),
-      t("settings-assistantsettings.inbox_signals"), t("settings-assistantsettings.idle_close"), t("settings-assistantsettings.archive_closed"),
+      t("settings-assistantsettings.inbox_signals"), t("settings-assistantsettings.inbox_todo_forward"), t("settings-assistantsettings.idle_close"), t("settings-assistantsettings.archive_closed"),
     ),
     anchor: "agents",
   },
-  { tab: "persona", group: t("settings-assistantsettings.default_permissions"), anchor: "default-permissions" },
+  { tab: "persona", group: t("settings-assistantsettings.default_permissions"), hint: words(t("settings-directionnotes.title"), t("settings-directionnotes.permissions")), anchor: "default-permissions" },
   { tab: "persona", group: t("settings-assistantsettings.readonly_mode"), anchor: "readonly-mode" },
   {
     tab: "persona",
@@ -174,6 +178,8 @@ export const SEARCH_INDEX: SearchGroup[] = [
   { tab: "hub", group: t("settings-hubsettings.auto_update"), hint: t("settings-hubsettings.computer_auto"), anchor: "hub-auto-update" },
   { tab: "hub", group: t("settings-hubsettings.dev_backup"), hint: words(t("settings-hubsettings.backup_folder"), t("settings-hubsettings.backup_retain")), anchor: "hub-dev-backup" },
   { tab: "agents", group: t("settings.show_botmux"), hint: t("settings.show_botmux_hint"), anchor: "botmux-display" },
+  { tab: "agents", group: t("settings.sort_by_activity"), hint: t("settings.sort_by_activity_hint"), anchor: "agents-sort-by-activity" },
+  { tab: "agents", group: t("settings.show_agents_filter"), hint: t("settings.show_agents_filter_hint"), anchor: "agents-show-filter" },
   { tab: "agents", group: t("settings.use_herdr_tab_name"), hint: t("settings.use_herdr_tab_name_hint"), anchor: "herdr-tab-session-name" },
   { tab: "hub", group: t("workspace-board.setting_label"), anchor: "workflow-board" },
   { tab: "hub", group: t("settings-hubsettings.mirrors"), hint: words(t("settings-hubsettings.registry_mirror"), t("settings-hubsettings.catalog_mirror")), anchor: "mirrors" },
@@ -182,6 +188,12 @@ export const SEARCH_INDEX: SearchGroup[] = [
   { tab: "devices", group: t("settings.revoke"), anchor: "devices" },
   { tab: "devices", group: t("settings-connectdevice.add"), anchor: "devices" },
 ];
+
+/** Labs › Features: one entry per module's switch, from the module list (core/module-labs.ts draws each as a row of
+ *  the configuration form, `configuration-<document>-<field>`). */
+function moduleSwitchEntries(): SearchGroup[] {
+  return registeredModules().map((d) => ({ tab: "labs", group: path(t("settings-labs.area_features"), d.title()), hint: d.description(), anchor: `configuration-${MODULES_LABS_ID}-${d.id}` }));
+}
 
 // What is typed and what is matched, compared without case or spaces: "timezone" finds "Time zone", "apikey" "API Key".
 const fold = (s: string) => s.toLocaleLowerCase().replace(/\s+/g, "");
@@ -192,7 +204,7 @@ export function searchSettings(query: string): { tabs: Tab[]; groups: SearchGrou
   if (!q) return { tabs: [], groups: [] };
   const has = (...texts: (string | undefined)[]) => texts.some((s) => s && fold(s).includes(q));
   return {
-    tabs: TABS.filter((t) => has(TAB_INFO[t].label, TAB_INFO[t].hint)),
-    groups: SEARCH_INDEX.filter((g) => has(g.group, g.hint)),
+    tabs: [...TABS, ...enabledSettingsTabs().map((m) => m.key)].filter((k) => has(tabInfo(k).label, tabInfo(k).hint)),
+    groups: [...SEARCH_INDEX, ...moduleSwitchEntries()].filter((g) => has(g.group, g.hint)),
   };
 }

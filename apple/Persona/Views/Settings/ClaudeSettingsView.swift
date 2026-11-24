@@ -76,14 +76,9 @@ struct ClaudeSettingsView: View {
             if let error {
                 Section { Text(error).foregroundStyle(Theme.danger).font(Theme.Font.caption) }
             }
-            #if os(macOS)
-            // An empty group draws as a blank gap in a Mac form (while loading, or a machine with nothing to set).
-            if !settings.isEmpty { Section { ForEach(settings) { s in row(s) } } }
-            #else
             Section {
                 ForEach(settings) { s in row(s) }
             }
-            #endif
             if agent == .claude, let live = liveReplies, live.ref == ref, !live.unsupported {
                 LiveRepliesSection(model: live, others: applyAll ? onlineMachines.filter { $0.ref != ref }.map(\.ref) : [])
             }
@@ -136,9 +131,6 @@ struct ClaudeSettingsView: View {
                           text: Binding(get: { strings[s.key] ?? value?.string ?? "" }, set: { strings[s.key] = $0 }))
                     .onSubmit { Task { await set(s.key, .string(strings[s.key] ?? "")) } }
                     .submitLabel(.done)
-                    #if os(macOS)
-                    .labelsHidden() // a Mac form shows a field's title as its label; here it is the prompt (#1221)
-                    #endif
             }
         }
         .padding(.vertical, Theme.Space.xxs)

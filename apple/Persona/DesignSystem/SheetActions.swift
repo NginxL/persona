@@ -113,21 +113,10 @@ extension View {
         foregroundStyle(Color.primary)
     }
 
-    /// The way out of a page that only shows things (#9653): `SheetClose`'s ✕ at the top leading corner on the iPhone
-    /// and iPad, Done in a Mac sheet's bottom row. Nothing when `detailPresentation` pushed the page into a column
-    /// (`detailPushed`): there its ‹ goes back.
+    /// The way out of a page that only shows things (#9653): `SheetClose`'s ✕ at the top leading corner. Nothing when
+    /// `detailPresentation` pushed the page into a column (`detailPushed`): there its ‹ goes back.
     func sheetDone(_ done: @escaping () -> Void) -> some View {
         modifier(SheetDone(done: done))
-    }
-
-    /// Done for a sheet that only shows things, in a Mac sheet's bottom row (Esc too). Nothing on iOS: there the page
-    /// keeps its own Close or the swipe down.
-    func macSheetDone(_ done: @escaping () -> Void) -> some View {
-        #if os(macOS)
-        toolbar { ToolbarItem(placement: .cancellationAction) { Button(action: done) { Text("Done [Extension System Presentation c0b3fb]").lineLimit(1) } } }
-        #else
-        self
-        #endif
     }
 }
 
@@ -136,11 +125,7 @@ private struct SheetDone: ViewModifier {
     @Environment(\.detailPushed) private var pushed
 
     func body(content: Content) -> some View {
-        #if os(macOS)
-        content.macSheetDone(done)
-        #else
         if pushed { content } else { content.pageToolbar { SheetClose(action: done) }.environment(\.shownAsSheet, true) }
-        #endif
     }
 }
 
@@ -165,9 +150,6 @@ private struct SheetCancel: ViewModifier {
         content
             .pageToolbar {
                 SheetClose(id: id) {
-                    #if os(macOS)
-                    if unsaved { asking = true; return }
-                    #endif
                     cancel()
                 }
             }
@@ -178,13 +160,5 @@ private struct SheetCancel: ViewModifier {
             } message: {
                 Text("If you close it, the changes you made won't be saved.")
             }
-            #if DEBUG && os(macOS)
-            // `-showDiscardConfirm YES`: the question up as the sheet opens, for screenshots.
-            .task {
-                guard UserDefaults.standard.bool(forKey: "showDiscardConfirm") else { return }
-                try? await Task.sleep(for: .seconds(1))
-                asking = true
-            }
-            #endif
     }
 }

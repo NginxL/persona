@@ -7,7 +7,9 @@ import persona.core.contracts.Todo
 
 enum class HoldStep { Pr, Merged, Off }
 
-enum class HoldUnblock { User, Agent, Other }
+/** Who can unhold it. [Supervisor] (#13191): an owner hold an Agent reported on a supervised task that its supervisor has not
+ *  read yet; it is not the owner's until the supervisor opens a decision. Only [User] is the owner's. */
+enum class HoldUnblock { User, Agent, Other, Supervisor }
 
 data class TodoHold(val step: HoldStep, val gate: String?, val unblock: HoldUnblock?)
 
@@ -26,6 +28,7 @@ val Todo.hold: TodoHold?
             "user" -> HoldUnblock.User
             "agent" -> HoldUnblock.Agent
             "other" -> HoldUnblock.Other
+            "supervisor" -> HoldUnblock.Supervisor
             else -> null
         }
         return TodoHold(step, d.gate?.trim()?.takeIf(String::isNotEmpty), unblock)

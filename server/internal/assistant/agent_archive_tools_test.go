@@ -110,6 +110,7 @@ func TestAgentArchiveToolRefusesBusy(t *testing.T) {
 // agent_archive with close asks on the phone every time: declined, nothing changes; allowed, it is archived and closed.
 func TestAgentArchiveCloseToolConfirms(t *testing.T) {
 	ft, row := closeTestService(t, nil)
+	ft.f.hello.Assistant.AutoApproveReversibleSettings = true
 	args := map[string]any{"machine": "mac", "session_id": row.SessionID, "close": true}
 	shown := make(chan proto.Interaction, 1)
 	go answerArchiveCard(t, ft.s, false, shown)

@@ -26,6 +26,7 @@ const (
 	TWSessionDropped, TWNoInterim, TWBehind = "session_dropped", "no_interim", "behind"
 	TENoUpstream, TEUpstreamForbidden       = "no_upstream", "upstream_forbidden"
 	TEUpstreamUnavailable, TEUpstreamFailed = "upstream_unavailable", "upstream_failed"
+	TEUpstreamBusy                          = "upstream_busy" // busy or rate-limited: too many sessions, quota used up (#13446)
 	TEBadFrame                              = "bad_frame"
 	TSetupLiveUpstream                      = "live_upstream" // /info.setup: no GPT-Live (live dialect) upstream
 )

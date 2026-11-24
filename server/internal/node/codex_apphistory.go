@@ -339,7 +339,7 @@ func writeCodexAppHistory(ctx context.Context, db string, t codexAppThread, path
 	if grow {
 		res = codexHistoryWrite{turn: mark.Turn, turnID: mark.TurnID, status: mark.Status}
 	}
-	sqlite, err := exec.LookPath("sqlite3")
+	sqlite, err := codexSQLiteProgram()
 	if err != nil {
 		return res, err
 	}
@@ -356,10 +356,12 @@ func writeCodexAppHistory(ctx context.Context, db string, t codexAppThread, path
 	if err != nil {
 		return res, err
 	}
-	defer file.Close()
-	if !grow {
-		defer os.Remove(file.Name()) // renamed away once complete
-	}
+	defer func() {
+		file.Close()
+		if !grow {
+			os.Remove(file.Name()) // close first: Windows cannot remove the open temporary file
+		}
+	}()
 	w := bufio.NewWriterSize(file, 256<<10)
 	line := func(at time.Time, typ string, payload any) {
 		b, _ := json.Marshal(map[string]any{"timestamp": at.UTC().Format(time.RFC3339Nano), "type": typ, "payload": payload})
@@ -388,6 +390,7 @@ func writeCodexAppHistory(ctx context.Context, db string, t codexAppThread, path
 		`LEFT JOIN thread_items i ON i.thread_id = t.thread_id AND i.turn_id = t.turn_id AND t.history_ordinal > %d `+
 		`WHERE t.history_ordinal >= %d ORDER BY t.history_ordinal, i.rollout_ordinal`, from, from)
 	cmd := exec.CommandContext(ctx, sqlite, "-readonly", "-bail", "-noheader", "-list", "-separator", "\x1f", "-cmd", ".timeout 2000", codexDBTarget(db), q)
+	hideCodexSQLiteWindow(cmd)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	stdout, err := cmd.StdoutPipe()

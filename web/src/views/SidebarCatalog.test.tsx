@@ -124,10 +124,13 @@ describe("By repo catalog integration", () => {
     sessions = [agent("codex", "native", { space_kind: "herdr", workspace_id: "native", cwd: "/code/app", repo_root: "/code/app", worktree: "/code/app" }),
       ...["agy-one", "agy-two", "omp"].map((id) => agent(id, "/code/app", { space_kind: "agy", source_kind: "runtime", cwd: "/code/app", repo_root: "/code/app", worktree: "/code/app" }))];
     await render();
-    expect(host.querySelectorAll("[data-workspace-key]")).toHaveLength(1);
-    const row = title("app").closest("[data-workspace-key]")!;
+    // The lone workspace is named after its folder, the repository's, so its Agents are listed under the repository's
+    // heading without a row of their own (#13454).
+    expect(host.querySelectorAll("[data-workspace-key]")).toHaveLength(0);
+    const section = host.querySelector(`a[href="/s/${machine.id}/codex"]`)!.closest("[data-sidebar-group]")!;
+    expect(section.querySelector("[data-sidebar-group-heading]")!.textContent).toContain("app");
     for (const session of sessions) {
-      expect(row.querySelectorAll(`a[href="/s/${machine.id}/${session.session_id}"]`)).toHaveLength(1);
+      expect(section.querySelectorAll(`a[href="/s/${machine.id}/${session.session_id}"]`)).toHaveLength(1);
       expect(host.querySelectorAll(`a[href="/s/${machine.id}/${session.session_id}"]`)).toHaveLength(1);
     }
   });

@@ -117,7 +117,7 @@ func lastBackgroundInput(items []proto.Item) (int, bool) {
 			return i, false
 		}
 		switch source.Kind {
-		case proto.SourceSupervision, proto.SourcePatrol, proto.SourceScheduledTask, proto.SourceConversation:
+		case proto.SourceSupervision, proto.SourcePatrol, proto.SourceScheduledTask, proto.SourceConversation, proto.SourceNotice:
 			return i, true
 		case proto.SourceFollowup:
 			// A scheduled follow-up has its own title. A wake or usage-limit continuation can be the owner's turn.

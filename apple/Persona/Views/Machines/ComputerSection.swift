@@ -27,6 +27,10 @@ struct ComputerSection: View {
     @State private var apps: [ComputerApp] = []
 
     private var shown: MachineComputer { fresh ?? computer }
+    /// The Mac's live screen, when the screen-share module is active (`LiveScreen`); without it the page offers no VNC.
+    private var screen: (any LiveScreen)? { model.liveScreen }
+    /// VNC can be offered: the module is active and the Mac's Screen Sharing answers.
+    private func vnc(_ c: MachineComputer) -> Bool { c.screenSharing && screen != nil }
 
     /// Asked again every few seconds: a job runs, or macOS's dialogs wait on the Mac after a grant.
     private var watching: Bool {
@@ -66,14 +70,14 @@ struct ComputerSection: View {
                 await refresh()
             }
         }
-        .task(id: model.screenOpen == nil) { // the drawer may have saved the sign-in, or unlocked the Mac
-            screenKept = ScreenCredentials.load(ref) != nil
-            oneTap = ScreenUnlock.isOn(ref)
-            if model.screenOpen == nil, online, shown.enabled { await refresh() }
+        .task(id: screen?.isOpen != true) { // the drawer may have saved the sign-in, or unlocked the Mac
+            screenKept = screen?.keepsSignIn(ref) ?? false
+            oneTap = screen?.oneTapUnlock(ref) ?? false
+            if screen?.isOpen != true, online, shown.enabled { await refresh() }
         }
         .accessibleConfirmationDialog("Turn On \(Self.oneTapTitle)?", isPresented: $askOneTap, titleVisibility: .visible, hasCancel: true) {
             Button(String(localized: "action.turnOn", defaultValue: "Turn On")) {
-                ScreenUnlock.set(true, for: ref)
+                screen?.setOneTapUnlock(true, for: ref)
                 oneTap = true
             }
             Button("Cancel", role: .cancel) {}
@@ -119,7 +123,9 @@ struct ComputerSection: View {
             // screen shows the lock screen, where the password is typed (docs/extensions/computer-use.md「Locking, preventing sleep and per-App approval」).
             VStack(alignment: .leading, spacing: Theme.Space.s) {
                 line(String(localized: "This Mac is locked. Unlock it to control it."), ok: false)
-                if !c.screenSharing {
+                if screen == nil {
+                    // Without the live screen the line above says it all.
+                } else if !c.screenSharing {
                     Text("Unlock it on that Mac. With its Screen Sharing on, you can also unlock it remotely here over VNC.")
                         .font(Theme.Font.label).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                 } else if oneTap {
@@ -136,28 +142,28 @@ struct ComputerSection: View {
                 } else {
                     Text("Tap Unlock to open its screen, switch to Take Over, and type that Mac's login password on the lock screen.")
                         .font(Theme.Font.label).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-                    Button { model.openScreen(ref) } label: {
+                    Button { screen?.open(ref, unlock: false) } label: {
                         Label("Unlock", systemImage: Theme.Icon.screen).font(Theme.Font.labelStrong).lineLimit(1)
                     }
                     .themedButton(prominent: true)
                     .accessibilityIdentifier("computer-unlock")
                 }
-                if c.screenSharing, screenKept { unlockRow(locked: true) }
+                if vnc(c), screenKept { unlockRow(locked: true) }
             }
         } else if c.daemon, !c.missingPermissions.isEmpty {
             grantGuide(c, asking: false)
         } else if c.ready {
             VStack(alignment: .leading, spacing: Theme.Space.s) {
                 line(String(localized: "Ready to control") + (c.version.map { " · \(c.backend == "lcu" ? "LCU" : "Cua Driver") \($0)" } ?? ""), ok: true)
-                if c.screenSharing {
+                if let screen, c.screenSharing {
                     HStack(spacing: Theme.Space.s) {
                         look(prominent: false)
-                        if screenKept { ScreenForgetButton(ref: ref, kept: $screenKept) }
+                        if screenKept { screen.forgetButton(ref, kept: $screenKept) }
                     }
-                } else {
+                } else if screen != nil {
                     Self.noScreenSharing
                 }
-                if c.screenSharing, screenKept { unlockRow(locked: false) }
+                if vnc(c), screenKept { unlockRow(locked: false) }
                 noLockRow(c)
                 // Only where the user installed ffmpeg with libx264 (or while it is on, so it can be turned off).
                 if c.screenVideo?.x264 != nil || c.screenX264 { x264Row(c) }
@@ -201,8 +207,8 @@ struct ComputerSection: View {
                 .accessibilityValue(step.done ? String(localized: "Done [Task Sheets f28461]") : String(localized: "To do"))
             }
             HStack(spacing: Theme.Space.s) {
-                if !asking { action(String(localized: "Grant Access"), "grant", prominent: !c.screenSharing, identifier: "computer-grant") }
-                if c.screenSharing { look(prominent: true) }
+                if !asking { action(String(localized: "Grant Access"), "grant", prominent: !vnc(c), identifier: "computer-grant") }
+                if vnc(c) { look(prominent: true) }
                 Button { Task { await recheck() } } label: {
                     if checking { ProgressView().controlSize(.small) } else { Text("Check Again [Browser Section 953cf0]").font(Theme.Font.labelStrong).lineLimit(1) }
                 }
@@ -210,7 +216,7 @@ struct ComputerSection: View {
                 .disabled(checking)
                 .accessibilityIdentifier("computer-recheck")
             }
-            if !c.screenSharing { Self.noScreenSharing }
+            if !c.screenSharing, screen != nil { Self.noScreenSharing }
         }
     }
 
@@ -237,7 +243,7 @@ struct ComputerSection: View {
     /// VNC: the Mac's live screen, where macOS's dialogs can be answered from the phone too.
     private func look(prominent: Bool) -> some View {
         Button {
-            model.openVNC(ref)
+            screen?.openVNC(ref, from: nil)
         } label: {
             Label("VNC", systemImage: Theme.Icon.screen).font(Theme.Font.labelStrong).lineLimit(1)
         }
@@ -262,18 +268,10 @@ struct ComputerSection: View {
         if let a = try? await api.computerApps(machine: ref.id) { apps = a }
     }
 
-    #if os(macOS)
-    static let oneTapTitle = String(localized: "One-Tap Unlock from This Mac")
-    #else
     static let oneTapTitle = String(localized: "One-Tap Unlock from This iPhone")
-    #endif
 
-    /// deviceOwnerAuthentication is Touch ID (or the password) on macOS, Face ID (or the password) on iOS.
-    #if os(macOS)
-    static let oneTapAuthName = String(localized: "Touch ID")
-    #else
+    /// deviceOwnerAuthentication's name on the iPhone: Face ID (or the password).
     static let oneTapAuthName = String(localized: "Face ID")
-    #endif
 
     /// One-Tap Unlock on this device (it needs the sign-in kept), and Lock while it is on (#1507 a-2).
     private func unlockRow(locked: Bool) -> some View {
@@ -282,7 +280,7 @@ struct ComputerSection: View {
                 if on {
                     askOneTap = true
                 } else {
-                    ScreenUnlock.set(false, for: ref)
+                    screen?.setOneTapUnlock(false, for: ref)
                     oneTap = false
                 }
             })) {
@@ -381,8 +379,8 @@ struct ComputerSection: View {
     /// Face ID (or the passcode), then the live screen signs in and types the kept password on the lock screen.
     private func unlockNow() async {
         let name = model.machine(ref)?.name ?? ref.id
-        guard await ScreenUnlock.authenticate(name) else { return }
-        model.openScreen(ref, unlock: true)
+        guard let screen, await screen.authenticate(name) else { return }
+        screen.open(ref, unlock: true)
     }
 
     /// The apps always allowed here (#1507): each can be taken back, and is asked about again the next time.

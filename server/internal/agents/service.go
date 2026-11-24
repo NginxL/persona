@@ -3,6 +3,7 @@ package agents
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -378,6 +379,11 @@ type SendResult struct {
 	Upstream  json.RawMessage `json:"upstream,omitempty"`
 }
 
+// sendPreparer reserves a source's durable idempotency record before a new outbox row can mask a conflict.
+type sendPreparer interface {
+	prepareSend(ctx context.Context, clientID, text string) error
+}
+
 var uuidRe = lazyre.New(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
 
 func NewClientID() string {
@@ -389,6 +395,9 @@ func NewClientID() string {
 
 // TextLen counts like JavaScript's String.length (UTF-16 units), which is what the Lark gateway's 20000 limit measures.
 func TextLen(s string) int { return len(utf16.Encode([]rune(s))) }
+
+// textSHA256 fingerprints the exact client payload without storing another copy of it in the outbox.
+func textSHA256(s string) string { return fmt.Sprintf("%x", sha256.Sum256([]byte(s))) }
 
 func preview(s string) string {
 	r := []rune(s)
@@ -422,6 +431,9 @@ func (s *Service) Send(ctx context.Context, id, clientID, text, origin string) (
 	if seen && prev.SessionID != id {
 		return nil, fail(http.StatusConflict, "agents: clientId %s was used for another session", clientID)
 	}
+	if seen && prev.TextSHA256 != "" && prev.TextSHA256 != textSHA256(text) {
+		return nil, fail(http.StatusConflict, "agents: clientId %s was used for a different payload", clientID)
+	}
 	if seen && (prev.Status == OutSent || prev.Status == OutDeleted) {
 		return &SendResult{Entry: prev, Duplicate: true}, nil
 	}
@@ -432,10 +444,18 @@ func (s *Service) Send(ctx context.Context, id, clientID, text, origin string) (
 	if !sess.CanSend {
 		return nil, fail(http.StatusConflict, "agents: session %s cannot send now (canSend=false)", id)
 	}
+	if p, ok := src.(sendPreparer); ok {
+		if err := p.prepareSend(ctx, clientID, text); err != nil {
+			return nil, err
+		}
+	}
 	now := time.Now().UTC()
 	e := prev
 	if !seen {
 		e = OutboxEntry{ClientID: clientID, SessionID: id, Preview: preview(text), Length: TextLen(text), Origin: origin, CreatedAt: now}
+	}
+	if e.TextSHA256 == "" {
+		e.TextSHA256 = textSHA256(text)
 	}
 	e.Status, e.Error, e.UpdatedAt = OutSending, "", now
 	e.Attempts++

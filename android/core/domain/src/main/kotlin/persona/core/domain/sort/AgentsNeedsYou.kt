@@ -47,7 +47,7 @@ fun needsYouRows(cards: List<Interaction>, waiting: List<Session>): List<NeedsYo
         }
     }
     waiting.forEach { session ->
-        val home = session.foldedUnder?.takeIf(String::isNotBlank)?.let { SessionKey(session.machineId, it) } ?: session.key
+        val home = session.foldedUnderKey ?: session.key
         if (home !in at) {
             at[home] = rows.size
             rows += NeedsYouRow(home, emptyList(), parseTime(session.stateSince ?: session.updatedAt))

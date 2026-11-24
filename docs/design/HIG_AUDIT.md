@@ -601,7 +601,7 @@ Each block lists: Severity, Platform, Location, Violates, Problem, Evidence, Fix
 
 #### HIG-064 iPad has no menu-bar commands and little pointer support
 - **Severity**: P2. **Platform**: iPadOS.
-- **Location**: the retired native Mac app command set, `apple/Persona/DesignSystem/ShellComposerBar.swift:213`, `apple/Persona/DesignSystem/Styling.swift:45`, `apple/Persona/DesignSystem/MacHover.swift:33`, `apple/Persona/Views/Session/Terminal/TerminalInput.swift:262`.
+- **Location**: the retired native Mac app command set, `apple/Persona/DesignSystem/ShellComposerBar.swift:213`, `apple/Persona/DesignSystem/Styling.swift:45`, `apple/Persona/Views/Session/Terminal/TerminalInput.swift:262` (the Mac's hover modifiers went in #13399).
 - **Violates**: [Design principles][dp] ("Consider a variety of input methods"); the keyboard and pointing pages were not in the digest, so this is a recommendation.
 - **Problem**: the Mac app has full commands; the iOS target has none, so the iPad shortcut overlay lacks New Chat, Search, Settings or tab switching. Hover effects are visionOS only; system buttons and glass `.interactive()` still respond, so the gap is custom tappable rows.
 - **Evidence**: `.hoverEffect(isEnabled: interactive)` inside a visionOS block only.

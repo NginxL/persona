@@ -178,9 +178,11 @@ class HubNetworkingTest {
     @Test fun aHandshakeCutShortIsRetriedNotACertificateChange() = runBlocking {
         val certificate = HeldCertificate.Builder().commonName("example.com").build()
         ServerSocket(0, 50, InetAddress.getLoopbackAddress()).use { proxy ->
-            thread(isDaemon = true) {
-                while (!proxy.isClosed) runCatching {
-                    proxy.accept().use { socket -> socket.getInputStream().read(ByteArray(512)) } // the ClientHello, then gone
+            val _ = thread(isDaemon = true) {
+                while (!proxy.isClosed) {
+                    val _ = runCatching {
+                        proxy.accept().use { socket -> socket.getInputStream().read(ByteArray(512)) } // the ClientHello, then gone
+                    }
                 }
             }
             val endpoint = Endpoint("https://${InetAddress.getLoopbackAddress().hostAddress}:${proxy.localPort}/", "lan")

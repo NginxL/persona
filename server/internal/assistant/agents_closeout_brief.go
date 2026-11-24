@@ -18,7 +18,7 @@ import (
 
 // closeoutForm returns the format the destination can read. A missing capability keeps the XML contract.
 func (s *Service) closeoutForm(machine, language string) string {
-	if nodes, ok := s.devs.(nodeAnnouncer); ok && nodes.NodeAnnounced(machine, nodeproto.MarkdownCloseout) {
+	if nodes, ok := s.physicalDevices().(nodeAnnouncer); ok && nodes.NodeAnnounced(machine, nodeproto.MarkdownCloseout) {
 		return closeout.MarkdownExample(language)
 	}
 	return closeout.Example

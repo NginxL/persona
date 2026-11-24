@@ -12,6 +12,11 @@ include:
   - path: watch-and-share.yml
   - path: lean-dev-build.yml
     enable: ${PERSONA_LEAN_DEV_BUILD}
+  # Feature modules in directories of their own (modules.yml), then the switch that leaves them all out
+  # (modules-core-only.yml, PERSONA_CORE_ONLY=YES). Before every include that adds sources of its own (siri-calls.yml).
+  - path: modules.yml
+  - path: modules-core-only.yml
+    enable: ${PERSONA_CORE_ONLY}
   - path: carplay-voice-entitlements.yml
     enable: ${PERSONA_CARPLAY_VOICE}
   - path: health-background-delivery-entitlements.yml
@@ -33,7 +38,6 @@ options:
   deploymentTarget:
     iOS: "18.6"
     watchOS: "10.0"
-    macOS: "26.0"
     visionOS: "26.0"
   # The String Catalogs' source language: the Chinese text is the key (docs/apple/ios.md「Interface language」). The Info.plists say
   # CFBundleDevelopmentRegion en, so a language the app does not have falls back to English (docs/protocol/i18n.md).
@@ -69,6 +73,10 @@ packages:
   # it with `#if canImport`.
   PersonaInputKit:
     path: Packages/PersonaInputKit
+  # The module contract and registry (#13432, docs/apple/ios.md「Modules」): the iOS and Vision apps, which compile the
+  # module list (Persona/App/Modules.swift). Nothing in Shared/ imports it, so the watch, widgets and extensions never link it.
+  PersonaModuleAPI:
+    path: Packages/PersonaModuleAPI
   # The composer's glow while a reply is generating (Settings › Appearance › Glow While Replying, `ComposerGlow`): the iOS
   # app only. Vision compiles the same sources and skips it with `#if os(iOS) && canImport`.
   MarqueeGlow:
@@ -123,6 +131,7 @@ targets:
       - package: MarqueeGlow
       - package: PersonaScreenKit
       - package: PersonaInputKit
+      - package: PersonaModuleAPI
     # app-entitlements.yml or a later opt-in include selects the file. XcodeGen writes these properties there and derives
     # CODE_SIGN_ENTITLEMENTS from the same path.
     entitlements:
@@ -180,6 +189,16 @@ targets:
           git -C "$SRCROOT/.." diff --quiet HEAD -- 2>/dev/null || sha="$sha+"
           plist="$TARGET_BUILD_DIR/$INFOPLIST_PATH"
           /usr/libexec/PlistBuddy -c "Set :PersonaCommit $sha" "$plist" 2>/dev/null || /usr/libexec/PlistBuddy -c "Add :PersonaCommit string $sha" "$plist"
+      # What a Debug build was built from (commit, branch, dirty, time, machine, Xcode, Swift) for Settings › About
+      # (#12926, BuildInfo.swift). Debug only; it skips itself unless the code was linked again, the Info.plist was
+      # written again or HEAD moved, so an unchanged build still writes and signs nothing (#10713). Never fails a build.
+      - name: Stamp the debug build info
+        basedOnDependencyAnalysis: false
+        inputFiles: ["$(TARGET_BUILD_DIR)/$(INFOPLIST_PATH)"]
+        script: |
+          [ "$CONFIGURATION" = Debug ] || exit 0
+          "$SRCROOT/../scripts/app/stamp_debug_build_info.sh" "$TARGET_BUILD_DIR/$INFOPLIST_PATH" \
+            "$TARGET_BUILD_DIR/$EXECUTABLE_PATH" "$DERIVED_FILE_DIR/debug-build-info.stamp" "$SRCROOT/.." || true
     info:
       path: Persona/Resources/Info.plist
       properties:
@@ -249,9 +268,11 @@ targets:
         NSCalendarsWriteOnlyAccessUsageDescription: "Persona adds events to your calendar when you ask Claude to, for example to save a meeting it scheduled for you."
         NSRemindersFullAccessUsageDescription: "Persona lets Claude read and create reminders when you ask, for example to add “review the PR” to your Today list."
         NSLocationWhenInUseUsageDescription: "Persona shares your current location with Claude only when you ask, for example to find what time it is where you are or which office you are in."
-        NSHealthShareUsageDescription: "Persona lets Claude read health summaries when you ask, for example how many steps you walked this week or how long you slept last night. With rolling recording on, Persona also checks heart rate, HRV, steps, workouts and the moods you log, on your iPhone only, to keep the minutes around them."
-        # Asked when Claude saves a health sample (phone_health_write_sample); App Store processing also wants it with the HealthKit entitlement.
-        NSHealthUpdateUsageDescription: "Persona saves health data only after you approve it on your iPhone, one entry at a time, for example a weight or last night's sleep you told Claude about."
+        # Always, asked only after the owner taps Allow (#13200, docs/apple/phone-tools.md "Location when Persona isn't open").
+        NSLocationAlwaysAndWhenInUseUsageDescription: "Persona reads your location only when the assistant needs it to answer you, for example when you ask “How far am I from home?” while Persona isn't open. When you move a long way, iOS may wake Persona in the background, but it doesn't record where you go."
+        NSHealthShareUsageDescription: "Persona lets Claude read health summaries when you ask, for example how many steps you walked this week or how long you slept last night. With rolling recording on, Persona also checks heart rate, HRV, steps, workouts and the moods you log, on your iPhone only, to keep the minutes around them. The Health home and widgets show Activity rings, steps and sleep."
+        # Confirmed AI samples and opt-in water/protein sync; required with the HealthKit entitlement.
+        NSHealthUpdateUsageDescription: "Persona saves individual health samples after you confirm them on your iPhone. When you turn on sync, Persona also automatically writes your water and protein records to Apple Health on this iPhone."
         NSPhotoLibraryUsageDescription: "Persona shows your recent photos under the + button so you can attach them to a message, and lets Claude look at recent photos when you ask, for example to read a screenshot you took."
         NSPhotoLibraryAddUsageDescription: "Persona saves images Claude produces to your library when you ask, for example a chart it generated."
         NSMicrophoneUsageDescription: "Persona records audio when you start a recording or dictate a message, for example a meeting or a spoken note. Recordings are transcribed on your iPhone and only the text is saved to the knowledge base on your hub; the audio stays on your iPhone, except while Talk is on in a meeting: what is said then goes to the voice service. A meeting you choose to transcribe on the hub sends its audio, Talk included, through your hub to the speech service it is set up with, and the hub deletes it once the meeting's minutes are written. In a voice conversation or a call to Persona you start — on the phone, in CarPlay or with Siri — your voice is streamed through your hub to the realtime speech service it is set up with, only while it lasts. On an urgent call you answer, Persona listens on your iPhone and only the text of what you say goes to your hub."
@@ -280,6 +301,7 @@ targets:
       - package: BeautifulUI
       - package: PersonaSSH
       - package: PersonaKit
+      - package: PersonaModuleAPI
     entitlements:
       path: Vision/Resources/PersonaVision.entitlements
       properties:
@@ -381,6 +403,7 @@ targets:
       # Persona's Home Screen widgets (docs/apple/home-widgets.md): the snapshot the app writes, the views, their tokens.
       - path: Shared/HomeWidgets
       - path: Shared/Design/HomeWidgetTokens.swift
+      - path: Shared/Design/HealthIntakePalette.swift
       # The app's String Catalog and interface language (docs/apple/ios.md「Interface language」).
       - path: Shared/Localization
     entitlements:
@@ -644,6 +667,12 @@ targets:
       # The All-Day Recording complication: the state the watch app wrote into the watch App Group.
       - path: Shared/Recording/AllDaySnapshot.swift
       - path: Shared/Design/WatchFaceTokens.swift
+      - path: Shared/WatchIntake.swift
+      - path: Shared/WatchIntakeConfiguration.swift
+      - path: Shared/WatchIntakeComplicationView.swift
+      - path: Shared/StatusPalette.swift
+      - path: Shared/Design/Palette.swift
+      - path: Shared/Design/HealthIntakePalette.swift
       - path: Shared/Localization
     entitlements:
       path: PersonaWatchWidgets/PersonaWatchWidgets.entitlements
@@ -682,6 +711,7 @@ targets:
       - path: ../android/refract/about/AboutVersionRow.swift
     dependencies:
       - package: PersonaWire
+      - package: PersonaModuleAPI
       - target: Persona
       # The test bundle directly imports LiveCommunicationKit too; keep its symbols weak on a Mac.
       - sdk: LiveCommunicationKit.framework

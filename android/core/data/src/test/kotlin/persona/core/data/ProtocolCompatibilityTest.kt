@@ -2,7 +2,7 @@ package persona.core.data
 
 import org.junit.Assert.assertEquals
 import org.junit.Test
-import persona.feature.inbox.ReplyTarget
+import persona.core.inbox.ReplyTarget
 
 /** Golden UUIDs from the reply-receipt algorithm at baseline 39a706a338. */
 class ProtocolCompatibilityTest {

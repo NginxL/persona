@@ -13,6 +13,7 @@ import (
 
 // Capture the JSON returned to the node, including deferred-loading metadata.
 func TestGoldenMCPDiscoveryLanguages(t *testing.T) {
+	needsLarkLayer(t)
 	ft := newFleetTest(t)
 	ft.f.hello.Assistant.MachineID = "mac"
 	ctx := i18n.With(context.Background(), i18n.En) // request locale must not replace the owner's
@@ -103,6 +104,7 @@ func TestGoldenMCPRestrictedLanguages(t *testing.T) {
 				case "work":
 					ft.d.machines["mac"].trust = "work"
 				case "meeting":
+					needsRecordingModule(t) // a meeting guest's tools are the recording module's: none without it
 					if err := ft.s.guestSetRoom(context.Background(), "mac", "ordinary", "sample-recording"); err != nil {
 						t.Fatal(err)
 					}

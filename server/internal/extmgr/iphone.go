@@ -597,9 +597,9 @@ func (h *Manager) callIPhoneTool(ctx context.Context, sessionID, name string, ar
 			break
 		}
 		card, input := iphoneCard(h.userLang(), d.Name, res.Approval)
-		if !h.approve(ctx, by, name, card, input) {
-			h.logf("[%s] %s declined on the phone (%s, step %d %s)", m.cfg.ID, name, what, res.Approval.Step, res.Approval.Action)
-			return proto.TextResult("The user declined this on the phone. Do not retry it unless they ask.", true)
+		if ok, outcome := h.approveOutcome(ctx, by, name, card, input); !ok {
+			h.logf("[%s] %s %s (%s, step %d %s)", m.cfg.ID, name, refusalWord(outcome), what, res.Approval.Step, res.Approval.Action)
+			return notApproved(outcome)
 		}
 		// Resumed with the approval alone: the node holds the pending do. A phone busy with another call keeps the
 		// approval pending: the same id is tried again, without asking the owner again.

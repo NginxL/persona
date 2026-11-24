@@ -1,0 +1,23 @@
+{
+  "name": "resource_renew",
+  "description": "续期本会话排队中或持有的租约。排队时使用 token 0，授予后使用 fencing token；收到 fenced 时停止门禁客户端。",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "resource": {
+        "type": "string"
+      },
+      "lease_id": {
+        "type": "string"
+      },
+      "token": {
+        "type": "integer"
+      }
+    },
+    "required": [
+      "resource",
+      "lease_id",
+      "token"
+    ]
+  }
+}

@@ -123,7 +123,7 @@ func RenderTodoLessons(d TodoLessons) string { return render("todo/lessons", d) 
 
 // TodoLessonsInput is the story of an accepted task (todo/lessons_input): the owner's request, goal and criteria, the
 // scope changes, every review (rework rounds with the criteria not met), the owner's answers, how each criterion ended,
-// the estimate against the time it took, the Agent's last reply, and the lessons its project already has.
+// the estimate against the time it took, the Agent's last reply, and the project's live and recently deleted lessons.
 type TodoLessonsInput struct {
 	Language                     string
 	Title, Request, Goal         string
@@ -134,7 +134,7 @@ type TodoLessonsInput struct {
 	Result                       []TodoLessonsCriterion
 	ExpectMinutes, ActualMinutes int
 	Reply                        string
-	Known                        []TodoLessonsKnown
+	Known, Deleted               []TodoLessonsKnown
 }
 
 // TodoLessonsChange is one scope change of the task's brief: what changed and why.

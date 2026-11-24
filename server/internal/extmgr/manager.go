@@ -32,6 +32,7 @@ import (
 	"github.com/nwverse/persona/server/internal/connector"
 	"github.com/nwverse/persona/server/internal/extwire"
 	"github.com/nwverse/persona/server/internal/i18n"
+	"github.com/nwverse/persona/server/internal/prompts"
 	"github.com/nwverse/persona/server/internal/proto"
 	"github.com/nwverse/persona/server/internal/remoteimage"
 	"github.com/nwverse/persona/server/internal/secretkey"
@@ -117,6 +118,8 @@ type Manager struct {
 	inboxReads sourceReads
 	// errReports: the error reports' pipeline (error_reports.go).
 	errReports errorReports
+	// browserBackends: pluggable BrowserBackend registry for extension browser.machines / browser.run (#12866).
+	browserBackends browserRegistry
 	// iphoneTurns: one iphone_do at a time per iPhone, across conversations (iphone.go, iphoneTurn).
 	iphoneTurns sync.Map
 	// serving: the requests the hub relayed to the extensions being served now, a WebSocket (a voice call, an
@@ -135,6 +138,8 @@ type Manager struct {
 
 	mail               Mail
 	connectors         *connector.Registry
+	larkCLIRefreshMu   sync.Mutex
+	larkCLIRecovery    larkCLIRecovery
 	imessageSettingsMu imessageContextLock
 	imessageArchive    imessageArchiveFence
 	imessageAIPending  atomic.Bool
@@ -321,13 +326,36 @@ func (h *Manager) broadcast(message any) {
 	}
 }
 
-// approve asks the user on the phone to allow a sensitive call (the hub's card).
-func (h *Manager) approve(ctx context.Context, by asker, tool, summary string, input json.RawMessage) bool {
+// approveOutcome asks the user on the phone to allow a sensitive call (the hub's card), and says how the card ended
+// (proto.Resolution.Outcome): a refusal is the user's own decline only when it is proto.OutcomeDeclined; otherwise
+// nobody answered it (notApproved).
+func (h *Manager) approveOutcome(ctx context.Context, by asker, tool, summary string, input json.RawMessage) (bool, string) {
 	r, _ := h.approveCard(ctx, by, tool, summary, input)
-	return r.Allow != nil && *r.Allow
+	return r.Allow != nil && *r.Allow, r.Outcome()
 }
 
-// approveCard is approve for a caller that keeps a record of the answer: it gives the answer itself and the id of the
+// declinedText is what a call the user declined on the phone answers.
+const declinedText = "The user declined this on the phone. Do not retry it unless they ask."
+
+// notApproved is what a call whose card did not let it go answers (outcome: how the card ended): the user's decline
+// only when they declined it themselves on a device; otherwise nobody answered it (it expired, was withdrawn or
+// cleared, someone else answered it), and the model is told the user did not decline it.
+func notApproved(outcome string) proto.ToolResult {
+	if outcome == proto.OutcomeDeclined {
+		return proto.TextResult(declinedText, true)
+	}
+	return proto.TextResult(prompts.RenderOutboundUnanswered(prompts.OutboundUnanswered{Outcome: outcome, Nothing: "nothing was done"}), true)
+}
+
+// refusalWord is how the log says a card ended that did not let a call go: "declined" only for the user's own decline.
+func refusalWord(outcome string) string {
+	if outcome == proto.OutcomeDeclined {
+		return "declined on the phone"
+	}
+	return "not answered on the phone (" + outcome + ")"
+}
+
+// approveCard is approveOutcome for a caller that keeps a record of the answer: it gives the answer itself and the id of the
 // card that asked.
 func (h *Manager) approveCard(ctx context.Context, by asker, tool, summary string, input json.RawMessage) (proto.Resolution, string) {
 	ix := proto.Interaction{

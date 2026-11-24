@@ -33,6 +33,18 @@ test('stripJsonc and readConfiguredModel handle comments, trailing commas, and U
     writeFileSync(join(dir, 'opencode.jsonc'), raw)
     assert.equal(readConfiguredModel({ configDir: dir }), 'opencode-go/claude-sonnet-4-6')
     assert.equal(readConfiguredModel({ configDir: join(dir, 'missing') }), '')
+
+    const withCommaBracesInStrings = `{
+      "pattern": "\\",}",
+      "items": "[a, b,]",
+      "model": "opencode-go/claude-sonnet-4-6", // trailing comma before comment
+    }`
+    const parsedStrings = JSON.parse(stripJsonc(withCommaBracesInStrings))
+    assert.equal(parsedStrings.pattern, '",}')
+    assert.equal(parsedStrings.items, '[a, b,]')
+    assert.equal(parsedStrings.model, 'opencode-go/claude-sonnet-4-6')
+    writeFileSync(join(dir, 'opencode.jsonc'), withCommaBracesInStrings)
+    assert.equal(readConfiguredModel({ configDir: dir }), 'opencode-go/claude-sonnet-4-6')
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }
@@ -127,6 +139,11 @@ test('resolveModel handles provider/model, nested slashes, provider:model, bare 
     modelID: 'claude-sonnet-4-6',
   })
   assert.deepEqual(resolveModel('openrouter/anthropic/claude-3.7-sonnet', catalog), {
+    id: 'openrouter/anthropic/claude-3.7-sonnet',
+    providerID: 'openrouter',
+    modelID: 'anthropic/claude-3.7-sonnet',
+  })
+  assert.deepEqual(resolveModel('openrouter:anthropic/claude-3.7-sonnet', catalog), {
     id: 'openrouter/anthropic/claude-3.7-sonnet',
     providerID: 'openrouter',
     modelID: 'anthropic/claude-3.7-sonnet',

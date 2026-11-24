@@ -69,13 +69,15 @@ export function openOverlay(onClose: () => void): () => void {
     const depth = overlayDepth(history.state) + 1;
     history.pushState({ ...overlayState(history.state, id), [AT]: location.href, [DEPTH]: depth }, "", location.href);
   }
+  const depth = overlayDepth(history.state);
   // where it opened: a replace that moves the page under it (an old link turned into its new one, a delete going
   // home) keeps the marker, so Back still closes it; closing it from the page then must not go back from the new page
   const at = location.href;
   let popped = false;
   const onPop = () => {
-    // the entry under ours came back: ours is gone, the overlay goes with it
-    if (!isOverlayEntry(history.state, id)) {
+    // Only close when history has popped below this overlay's depth, so stacked overlays (e.g. a dialog over a menu
+    // over a side panel) pop strictly one level at a time instead of triggering lower listeners early.
+    if (!isOverlayEntry(history.state, id) && overlayDepth(history.state) < depth) {
       popped = true;
       removeEventListener("popstate", onPop);
       onClose();
@@ -137,9 +139,10 @@ export async function settleOverlayEntry(ms = BACK_MS): Promise<void> {
 }
 
 /** While `open` (and `enabled`, e.g. only on a narrow screen), Back closes it through `onClose`. A navigation away while
- *  it is open leaves its entry under the new page; closing then does not go back (that would undo the navigation). */
-export function useCloseOnBack(open: boolean, onClose: () => void, enabled = true): void {
+ *  it is open leaves its entry under the new page; closing then does not go back (that would undo the navigation).
+ *  Bump `step` when Back popped an inner level while the overlay stays open so another Back entry is armed. */
+export function useCloseOnBack(open: boolean, onClose: () => void, enabled = true, step = 0): void {
   const close = useRef(onClose);
   close.current = onClose;
-  useEffect(() => (open && enabled ? openOverlay(() => close.current()) : undefined), [open, enabled]);
+  useEffect(() => (open && enabled ? openOverlay(() => close.current()) : undefined), [open, enabled, step]);
 }

@@ -3,9 +3,11 @@ package node
 import (
 	"context"
 	"net"
+	"strings"
 	"time"
 
 	"github.com/tailscale/go-winio"
+	"golang.org/x/sys/windows"
 )
 
 // peerAuthRequired: a Windows inbox drops a connection whose first line is not a good auth line (Claude Code's
@@ -15,6 +17,33 @@ const peerAuthRequired = true
 // peerPathUsable: on Windows an inbox is a named pipe (\\.\pipe\LOCAL\cc-msg-<hex>); a unix socket path from another
 // platform's claude (a shared config directory) is not dialed.
 func peerPathUsable(socket string) bool { return peerPipeRe.MatchString(socket) }
+
+// Listing the named pipe does not open a connection or consume an inbox instance (os.Stat uses CreateFile).
+func peerInboxExists(socket string) bool {
+	if !peerPathUsable(socket) {
+		return false
+	}
+	p, err := windows.UTF16PtrFromString(`\\.\pipe\*`)
+	if err != nil {
+		return false
+	}
+	var data windows.Win32finddata
+	h, err := windows.FindFirstFile(p, &data)
+	if err != nil {
+		return false
+	}
+	defer windows.FindClose(h)
+	// Names below LOCAL are still entries of the pipe namespace, not directories to search within.
+	want := strings.TrimPrefix(socket, `\\.\pipe\`)
+	for {
+		if strings.EqualFold(windows.UTF16ToString(data.FileName[:]), want) {
+			return true
+		}
+		if windows.FindNextFile(h, &data) != nil {
+			return false
+		}
+	}
+}
 
 // dialPeer connects to the inbox's named pipe.
 func dialPeer(ctx context.Context, socket string) (net.Conn, error) {

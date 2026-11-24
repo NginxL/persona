@@ -12,7 +12,7 @@ import (
 
 const (
 	recoveryFirstError = "API Error: 529 Overloaded"
-	recoveryNewError   = "API Error: 503 no eligible upstream"
+	recoveryNewError   = "API Error: 503 Service Unavailable"
 )
 
 // retryDecisionFixture reaches the real exhausted-retry decision after one automatic continuation. The work tick uses

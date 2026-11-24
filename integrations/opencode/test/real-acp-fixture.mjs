@@ -5,6 +5,11 @@ import { join } from 'node:path'
 export async function fakeModel(t) {
   const requests = []
   const server = createServer(async (req, res) => {
+    // Local Agent port discovery sends GET / to new listeners; only model API calls belong in requests.
+    if (req.url !== '/v1/chat/completions') {
+      res.writeHead(404).end()
+      return
+    }
     try {
       assert.equal(req.url, '/v1/chat/completions')
       let text = ''

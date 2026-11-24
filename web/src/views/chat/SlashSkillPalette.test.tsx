@@ -7,7 +7,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { MentionSkill } from "../../lib/skill-mentions";
 
 const skill = { id: "review", name: "/review", description: "Review the change", source: "project" } as unknown as MentionSkill;
-vi.mock("./useSkillCatalog", () => ({ useSkillCatalog: () => ({ catalog: { skills: [skill] }, status: undefined }) }));
+const useSkillCatalog = vi.fn((_source?: unknown, _machine?: unknown, _cwd?: unknown, _memory?: unknown, enabled = true) =>
+  enabled ? { catalog: { skills: [skill] }, status: undefined } : {});
+vi.mock("./useSkillCatalog", () => ({ useSkillCatalog: (...args: unknown[]) => useSkillCatalog(...args) }));
 const { SlashSkillPalette } = await import("./SlashSkillPalette");
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -17,6 +19,7 @@ let root: Root;
 let now = 1_000;
 beforeEach(() => {
   now = 1_000;
+  useSkillCatalog.mockClear();
   vi.spyOn(performance, "now").mockImplementation(() => now);
   Element.prototype.scrollIntoView ??= () => {};
   host = document.createElement("div");
@@ -105,6 +108,25 @@ describe("SlashSkillPalette's keys", () => {
     field.dispatchEvent(e);
     expect(e.defaultPrevented).toBe(true);
     expect(onPick).toHaveBeenCalledTimes(1);
+    composer.remove();
+  });
+
+  it("keeps bare / command-only without fetching skills and shows matching skills on a non-empty keyword", () => {
+    const within = createRef<HTMLDivElement>();
+    const composer = document.createElement("div");
+    document.body.append(composer);
+    (within as { current: HTMLDivElement | null }).current = composer;
+    const command = { word: "/compact", desc: "Compact context", text: "/compact" };
+    const source = { files: () => [], skills: { manager: "assistant", environment: "test" } };
+    act(() => root.render(<SlashSkillPalette rows={[command]} active={0} onHover={vi.fn()} onPick={vi.fn()} onClose={vi.fn()} query="" source={source} within={within} />));
+    expect(useSkillCatalog).toHaveBeenLastCalledWith(source.skills, undefined, undefined, undefined, false);
+    expect([...host.querySelectorAll("[role=option]")].map((o) => o.textContent)).toEqual(["compact"]);
+    expect(host.querySelectorAll("[data-picker-group]")).toHaveLength(0);
+
+    act(() => root.render(<SlashSkillPalette rows={[command]} active={0} onHover={vi.fn()} onPick={vi.fn()} onClose={vi.fn()} query="rev" source={source} within={within} />));
+    expect(useSkillCatalog).toHaveBeenLastCalledWith(source.skills, undefined, undefined, undefined, true);
+    expect([...host.querySelectorAll("[role=option]")].map((o) => o.textContent)).toEqual(["compact", expect.stringContaining("Review the change")]);
+    expect([...host.querySelectorAll("[data-picker-group]")].map((g) => g.textContent)).toHaveLength(2);
     composer.remove();
   });
 });

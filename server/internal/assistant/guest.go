@@ -97,7 +97,7 @@ func (s *Service) guestSet(ctx context.Context, machine, id string, tools []stri
 // guestSetRoom notes that conversation id on machine is recording's room (before the node starts it: its first MCP
 // calls come before the start answers).
 func (s *Service) guestSetRoom(ctx context.Context, machine, id, recording string) error {
-	return s.guestPut(ctx, id, &guestConv{MachineID: machine, Tools: meetingRoomToolNames(), Kind: guestKindMeeting, Recording: recording})
+	return s.guestPut(ctx, id, &guestConv{MachineID: machine, Tools: s.meetingRoomToolNames(), Kind: guestKindMeeting, Recording: recording})
 }
 
 // guestDrop forgets guest id (a room deleted).

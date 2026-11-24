@@ -1,0 +1,8 @@
+{
+  "$schema": "../../../../schema/module.schema.json",
+  "id": "phone-extra",
+  "api": 1,
+  "origin": "builtin",
+  "title": "iPhone control",
+  "feature": "module.phone-extra"
+}

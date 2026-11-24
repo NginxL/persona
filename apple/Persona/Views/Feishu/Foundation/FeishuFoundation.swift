@@ -73,15 +73,6 @@ private struct FeishuLinkHandling: ViewModifier {
     @State private var hubSheet: HubLinkSheet?
 
     func body(content: Content) -> some View {
-        #if os(macOS)
-        content.environment(\.openURL, OpenURLAction { url in
-            if let open, case .route(let route) = FeishuLinks.target(url, lark: model.larkFeatures, manager: manager) {
-                open(route)
-                return .handled
-            }
-            return LinkPolicy.system(url) // NSWorkspace would run any scheme it names
-        })
-        #else
         content
             .environment(\.openURL, OpenURLAction { url in
                 // A page of Persona's own (a link to a paired hub's page, an app link) opens in the app (#9926).
@@ -113,7 +104,6 @@ private struct FeishuLinkHandling: ViewModifier {
                 if let assistant { LinkSheet(target: t, key: assistant) }
             }
             .hubLinkSheet($hubSheet)
-        #endif
     }
 
     private var assistant: SessionKey? { model.assistantMain ?? model.assistantCurrent }

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/nwverse/persona/server/internal/i18n"
+	"github.com/nwverse/persona/server/internal/modapi"
 	"github.com/nwverse/persona/server/internal/prompts"
 	"github.com/nwverse/persona/server/internal/proto"
 )
@@ -16,6 +17,7 @@ import (
 // The fixed direction rows come from the same ledgers as supervision. A task that was dispatched and later stopped is
 // named; one that was never dispatched is only counted. All ids and secrets here are placeholders on a fake hub.
 func TestBriefDirectionsListStoppedWork(t *testing.T) {
+	needsBriefingModule(t)
 	ctx := context.Background()
 	now := time.Now().UTC()
 	e := newTodoEventEnv(t, nil)
@@ -249,6 +251,7 @@ func TestBriefDirectionsListStoppedWork(t *testing.T) {
 // The owner reads parked-until values in the hub's configured zone, directions by conversation name rather than raw ID,
 // and every ordinary task row with the same to-do URL in both the rich card and its complete plain-text substitute.
 func TestBriefDirectionsUseHubZoneNamesAndTaskLinks(t *testing.T) {
+	needsBriefingModule(t)
 	ctx := context.Background()
 	now := time.Date(2030, 1, 2, 20, 0, 0, 0, time.UTC)
 	until := time.Date(2030, 1, 3, 1, 30, 0, 0, time.UTC)
@@ -298,18 +301,19 @@ func TestBriefDirectionsUseHubZoneNamesAndTaskLinks(t *testing.T) {
 
 func TestBriefTaskWaitUsesLatestAgentActivity(t *testing.T) {
 	s := newStorelessService(t, newFakeHub().withMachine())
+	waits := defaultTestWaits(t, s)
 	now := time.Now().UTC()
 	agents := []proto.Session{
 		{SessionID: "old", State: proto.StateWorking, UpdatedAt: now.Add(-3 * time.Hour), Activity: "old stopped tool"},
 		{SessionID: "current", State: proto.StateIdle, UpdatedAt: now.Add(-30 * time.Minute), Activity: "recent answer"},
 	}
 	if w, stopped := s.briefTaskWait(context.Background(), Todo{ID: "todo-live", Title: "Still active"}, agents, nil, nil,
-		now, defaultBriefingWaits(), nil, nil, nil); stopped {
+		now, waits, nil, nil, nil); stopped {
 		t.Fatalf("an old agent hid the newer agent's activity: %+v", w)
 	}
 	agents[1].UpdatedAt = now.Add(-2 * time.Hour)
 	w, stopped := s.briefTaskWait(context.Background(), Todo{ID: "todo-stopped", Title: "Both stopped"}, agents, nil, nil,
-		now, defaultBriefingWaits(), nil, nil, nil)
+		now, waits, nil, nil, nil)
 	if !stopped || w.Kind != "stalled" || !w.Since.Equal(agents[1].UpdatedAt) || w.Reason != "recent answer" {
 		t.Fatalf("the latest stopped session did not supply the wait row: %+v, stopped %v", w, stopped)
 	}
@@ -319,6 +323,7 @@ func TestBriefTaskWaitUsesLatestAgentActivity(t *testing.T) {
 // neither identity nor question text. This calls the collector directly so withTask cannot repair a bad fixture first.
 func TestBriefTaskCardWaitIdentityAndPrivacy(t *testing.T) {
 	s := newStorelessService(t, newFakeHub().withMachine())
+	waits := defaultTestWaits(t, s)
 	now := time.Now().UTC()
 	todo := Todo{ID: "todo-real", Title: "The real task title"}
 	for _, tc := range []struct {
@@ -336,7 +341,7 @@ func TestBriefTaskCardWaitIdentityAndPrivacy(t *testing.T) {
 			if tc.kind == "permission" {
 				ix.Kind = proto.IxPermission
 			}
-			w, stopped := s.briefTaskWait(context.Background(), todo, nil, []proto.Interaction{ix}, nil, now, defaultBriefingWaits(), nil, nil, nil)
+			w, stopped := s.briefTaskWait(context.Background(), todo, nil, []proto.Interaction{ix}, nil, now, waits, nil, nil, nil)
 			if !stopped || w.Kind != tc.kind || w.InteractionID != ix.ID {
 				t.Fatalf("wait = %+v, stopped %v", w, stopped)
 			}
@@ -354,6 +359,7 @@ func TestBriefTaskCardWaitIdentityAndPrivacy(t *testing.T) {
 // max_rows bounds only the non-owner tail, in main as well as every leader. Every owner-wait row remains, even when
 // owner rows alone exceed the configured limit; the folded rows become one direction-level "N more" count.
 func TestFoldBriefDirectionKeepsEveryOwnerWait(t *testing.T) {
+	waits := defaultTestWaits(t, newStorelessService(t, newFakeHub().withMachine()))
 	now := time.Now().UTC()
 	for _, ownerDirection := range []bool{false, true} {
 		t.Run(fmt.Sprintf("owner_direction_%v", ownerDirection), func(t *testing.T) {
@@ -364,12 +370,12 @@ func TestFoldBriefDirectionKeepsEveryOwnerWait(t *testing.T) {
 			for i := 0; i < 17; i++ {
 				d.Waits = append(d.Waits, prompts.BriefWait{TodoID: fmt.Sprintf("other-%02d", i), Kind: "stalled", Since: now.Add(time.Duration(i) * time.Minute)})
 			}
-			foldBriefDirection(&d, defaultBriefingWaits().MaxRows)
+			foldBriefDirection(&d, waits)
 			if len(d.Waits) != 35 || d.More != 2 {
 				t.Fatalf("kept %d rows, more %d; want 35 and 2", len(d.Waits), d.More)
 			}
 			for i := 0; i < 20; i++ {
-				if !briefOwnerWait(d.Waits[i].Kind) {
+				if d.Waits[i].Kind != "needs_user" {
 					t.Fatalf("owner row %d was folded or sorted behind another wait: %+v", i, d.Waits[i])
 				}
 			}
@@ -377,14 +383,30 @@ func TestFoldBriefDirectionKeepsEveryOwnerWait(t *testing.T) {
 	}
 }
 
+// briefingWaitsJSON is the briefing module's setting as persona_settings shows it (internal/modules/briefing Waits).
+type briefingWaitsJSON struct {
+	StalledMinutes int `json:"stalled_minutes"`
+	SilentMinutes  int `json:"silent_minutes"`
+	OrphanMinutes  int `json:"orphan_minutes"`
+	CardMinutes    int `json:"card_minutes"`
+	MaxRows        int `json:"max_rows"`
+}
+
+// defaultTestWaits are the briefing module's wait rules with nothing set.
+func defaultTestWaits(t *testing.T, s *Service) modapi.WaitRules {
+	t.Helper()
+	needsBriefingModule(t)
+	w, ok := s.briefingWaits(Settings{})
+	if !ok {
+		t.Fatal("the briefing module is not loaded")
+	}
+	return w
+}
+
 func TestBriefingWaitsSettingUsesSupervisionDefaultsAndApprovalChange(t *testing.T) {
+	needsBriefingModule(t)
 	ctx := context.Background()
 	s := newTestService(t, newFakeHub().withMachine())
-	defaults := defaultBriefingWaits()
-	if defaults.StalledMinutes != int(superviseStallMin/time.Minute) || defaults.SilentMinutes != int(superviseSilentMin/time.Minute) ||
-		defaults.OrphanMinutes != int(orphanOfflineAfter/time.Minute) || defaults.CardMinutes != int(superviseNeedsAfter/time.Minute) || defaults.MaxRows != 15 {
-		t.Fatalf("defaults no longer come from supervision: %+v", defaults)
-	}
 	var registered *ownSetting
 	for i := range s.ownSettings() {
 		o := s.ownSettings()[i]
@@ -396,29 +418,43 @@ func TestBriefingWaitsSettingUsesSupervisionDefaultsAndApprovalChange(t *testing
 	if registered == nil || settingTitles["assistant.briefing_waits"] != "title_briefing_waits" {
 		t.Fatal("assistant.briefing_waits is not registered in persona_settings")
 	}
+	inForce := func() briefingWaitsJSON {
+		t.Helper()
+		got, err := registered.get(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var decoded briefingWaitsJSON
+		if err := json.Unmarshal([]byte(got), &decoded); err != nil {
+			t.Fatalf("get = %s: %v", got, err)
+		}
+		return decoded
+	}
+	defaults := inForce()
+	if defaults.StalledMinutes != int(superviseStallMin/time.Minute) || defaults.SilentMinutes != int(superviseSilentMin/time.Minute) ||
+		defaults.OrphanMinutes != int(orphanOfflineAfter/time.Minute) || defaults.CardMinutes != int(superviseNeedsAfter/time.Minute) || defaults.MaxRows != 15 {
+		t.Fatalf("defaults no longer come from supervision: %+v", defaults)
+	}
+	w := defaultTestWaits(t, s)
+	if w.StalledAfter(0) != superviseStallMin || w.SilentAfter(0) != superviseSilentMin || w.OrphanAfter() != orphanOfflineAfter ||
+		w.CardAfter() != superviseNeedsAfter || w.StalledAfter(40) != stallAfter(40) || w.SilentAfter(100) != silentAfter(100) {
+		t.Fatalf("the default wait rules differ from supervision's floors")
+	}
 	for _, source := range []string{"superviseStallMin", "superviseSilentMin", "orphanOfflineAfter", "superviseNeedsAfter"} {
 		if !strings.Contains(registered.About, source) {
 			t.Errorf("setting documentation does not name %s: %s", source, registered.About)
 		}
 	}
-	got, err := registered.get(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var decoded BriefingWaits
-	if err := json.Unmarshal([]byte(got), &decoded); err != nil || decoded != defaults {
-		t.Fatalf("get = %s (%v), want %+v", got, err, defaults)
-	}
 	for _, bad := range []string{`{}`, `{"stalled_minutes":20,"silent_minutes":120,"orphan_minutes":10,"card_minutes":3,"max_rows":0}`,
 		`{"stalled_minutes":0,"silent_minutes":120,"orphan_minutes":10,"card_minutes":3,"max_rows":15}`,
 		`{"stalled_minutes":20,"silent_minutes":120,"orphan_minutes":10,"card_minutes":3,"max_rows":101}`, `"15"`} {
-		if _, err := s.setBriefingWaits(ctx, json.RawMessage(bad)); err == nil {
+		if _, err := registered.set(ctx, json.RawMessage(bad)); err == nil {
 			t.Errorf("accepted invalid value %s", bad)
 		}
 	}
-	custom := BriefingWaits{StalledMinutes: 25, SilentMinutes: 150, OrphanMinutes: 12, CardMinutes: 4, MaxRows: 7}
+	custom := briefingWaitsJSON{StalledMinutes: 25, SilentMinutes: 150, OrphanMinutes: 12, CardMinutes: 4, MaxRows: 7}
 	raw, _ := json.Marshal(custom)
-	change, err := s.setBriefingWaits(ctx, raw)
+	change, err := registered.set(ctx, raw)
 	if err != nil || change == nil || change.apply == nil || change.cardText == nil {
 		t.Fatalf("set did not prepare an approval-backed change: %+v, %v", change, err)
 	}
@@ -428,21 +464,24 @@ func TestBriefingWaitsSettingUsesSupervisionDefaultsAndApprovalChange(t *testing
 	if _, err := change.apply(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if got := briefingWaitsOf(s.settings(ctx)); got != custom {
+	if got := inForce(); got != custom {
 		t.Fatalf("applied = %+v, want %+v", got, custom)
 	}
-	if again, err := s.setBriefingWaits(ctx, raw); err != nil || again.apply != nil {
+	if string(s.settings(ctx).BriefingWaits) != string(raw) {
+		t.Fatalf("stored %s, want %s", s.settings(ctx).BriefingWaits, raw)
+	}
+	if again, err := registered.set(ctx, raw); err != nil || again.apply != nil {
 		t.Fatalf("unchanged value prepared another approval: %+v, %v", again, err)
 	}
-	reset, err := s.setBriefingWaits(ctx, json.RawMessage(`null`))
+	reset, err := registered.set(ctx, json.RawMessage(`null`))
 	if err != nil || reset.apply == nil {
 		t.Fatalf("null did not prepare a defaults reset: %+v, %v", reset, err)
 	}
 	if _, err := reset.apply(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if got := briefingWaitsOf(s.settings(ctx)); got != defaults || s.settings(ctx).BriefingWaits != nil {
-		t.Fatalf("null reset = %+v, saved pointer %+v", got, s.settings(ctx).BriefingWaits)
+	if got := inForce(); got != defaults || s.settings(ctx).BriefingWaits != nil {
+		t.Fatalf("null reset = %+v, saved %s", got, s.settings(ctx).BriefingWaits)
 	}
 }
 

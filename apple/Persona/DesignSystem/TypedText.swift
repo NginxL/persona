@@ -1,6 +1,5 @@
 import SwiftUI
 
-#if os(iOS) || os(visionOS)
 import UIKit
 
 /// What the user typed, as the field shows it, for a send (#2203). With the WeChat keyboard (a third-party keyboard)
@@ -31,4 +30,3 @@ enum TypedText {
     /// `composingFocused` for a given view (tests).
     @MainActor static func composing(_ view: UITextInput?) -> Bool { view?.markedTextRange != nil }
 }
-#endif

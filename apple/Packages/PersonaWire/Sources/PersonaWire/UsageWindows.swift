@@ -12,13 +12,18 @@ public nonisolated struct UsageWindow: Decodable, Hashable, Sendable {
     public var resetsAt: Date?
     /// An allowance a provider keeps for one model next to the plan's own (#2595); nil for the plan's window.
     public var model: String?
+    /// The protection line of this window (0...100, #13173): once use reaches it the account is no longer given work.
+    /// Per account and per window; nil when the hub does not say (an older hub).
+    public var protectPercent: Double?
 
     public enum CodingKeys: String, CodingKey {
         case label, model
         case windowMinutes = "window_minutes", usedPercent = "used_percent", resetsAt = "resets_at"
+        case protectPercent = "protect_percent"
     }
 
-    public init(label: String, windowMinutes: Int, usedPercent: Double, resetsAt: Date?, model: String? = nil) {
+    public init(label: String, windowMinutes: Int, usedPercent: Double, resetsAt: Date?, model: String? = nil, protectPercent: Double? = nil) {
+        self.protectPercent = protectPercent
         self.label = label
         self.windowMinutes = windowMinutes
         self.usedPercent = usedPercent
@@ -34,6 +39,7 @@ public nonisolated struct UsageWindow: Decodable, Hashable, Sendable {
         resetsAt = (try? c.decodeIfPresent(String.self, forKey: .resetsAt)).flatMap { $0.flatMap(JSON.parseDate) }
         let m = try c.decodeIfPresent(String.self, forKey: .model)?.trimmingCharacters(in: .whitespaces)
         model = m?.isEmpty == false ? m : nil
+        protectPercent = (try? c.decodeIfPresent(Double.self, forKey: .protectPercent)).flatMap { $0 }.flatMap { (0...100).contains($0) ? $0 : nil }
     }
 
     /// Unique within an account (the same length may come twice: the plan's and one model's).

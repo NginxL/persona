@@ -62,6 +62,24 @@ func TestMessageSourcesRelayQueueRestart(t *testing.T) {
 	assertSentSource(t, f, &proto.MessageSource{Kind: proto.SourceSupervision})
 }
 
+func TestMessageSourcesInternalRelayNotices(t *testing.T) {
+	f := newFakeHub().withMachine()
+	f.known["receiver"] = true
+	s := newTestService(t, f)
+	for _, tool := range []string{prFollowupTool, taskEndTool, relayRefusedTool, spawnNoticeTool, chatReplyTool} {
+		t.Run(tool, func(t *testing.T) {
+			msg := relayMsg{From: "origin", FromTitle: "Example", Tool: tool, Text: "An update from Persona", At: time.Now().UTC()}
+			if err := s.deliverRelay(t.Context(), "server", "receiver", msg); err != nil {
+				t.Fatal(err)
+			}
+			assertSentSource(t, f, &proto.MessageSource{Kind: proto.SourceNotice, Title: "Persona"})
+			if text, _ := f.lastSend(t)["text"].(string); relayWords(text) != msg.Text {
+				t.Fatalf("marked relay changed its text: %q", text)
+			}
+		})
+	}
+}
+
 func TestMessageSourcesScheduledPaths(t *testing.T) {
 	for _, repeat := range []string{repeatOnce, repeatDaily, repeatInterval} {
 		t.Run(repeat, func(t *testing.T) {

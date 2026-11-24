@@ -141,7 +141,7 @@ internal class DictationSession(
         input = null
         heard = ""
         phrases = ""
-        runCatching { previous?.close() }
+        val _ = runCatching { previous?.close() }
         if (keepWords && words.isNotBlank()) keep(words)
     }
 }

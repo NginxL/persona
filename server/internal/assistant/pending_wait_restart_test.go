@@ -182,8 +182,8 @@ func testTaskReceiptRecheckRestoredAfterRestart(t *testing.T, st Store) {
 	first := newServiceOn(t, f, st)
 	startedTask(t, first, f)
 	ctx := context.Background()
-	first.taskWorking(ctx, "box", "s1")
-	f.setItems(proto.Item{ID: "answer-1", Kind: proto.KindText, Role: "assistant", Text: "Delivery verified", TS: time.Now()})
+	first.taskWorking(ctx, "box", "s1", startRow{})
+	f.setItems(turnPage("turn-1", "Delivery verified", true)...)
 	f.setSessions("box", proto.Session{MachineID: "box", SessionID: "s1", Agent: "codex", Status: proto.StatusDone,
 		State: proto.StateIdle, LastText: "Delivery verified", UpdatedAt: time.Now(), Rev: 1})
 	if got := feedKinds(first, "conv1"); strings.Contains(got, "receipt") {
@@ -216,16 +216,26 @@ func testTaskReceiptRecheckRestoredAfterRestart(t *testing.T, st Store) {
 		return strings.Count(feedKinds(second, "conv1"), "receipt") == 1
 	})
 
-	waitFor(t, "the restored completion judgment", func() bool { return onlyTodo(second).DoneAt != nil })
-	doneAt := *onlyTodo(second).DoneAt
-	// Replaying the same closed turn after restoration is synchronous and must not add a second receipt or reopen
-	// completion handling.
+	waitFor(t, "the restored completion judgment", func() bool {
+		current := onlyTodo(second)
+		return current.Check != nil && current.Check.Verdict == verdictDone && current.DoneAt == nil && current.Supervision == nil
+	})
+	// Universal supervision does not close a judged task or invent a reviewer while main is absent. Once main is
+	// configured, the same recovered turn reaches its review without another receipt (#5732).
+	setSettings(t, second, func(v *Settings) { v.Main = "conv1" })
+	second.superviseWatch(ctx, time.Now())
+	waitFor(t, "the restored completion review", func() bool {
+		current := onlyTodo(second)
+		return current.Supervision != nil && current.Supervision.Supervisor == "conv1" && current.Supervision.State == reviewPending && current.DoneAt == nil
+	})
+	// Replaying the same closed turn after restoration is synchronous and must not add a second receipt or close the task.
 	second.taskTurnEnded(ctx, "box", "s1")
 	if got := strings.Count(feedKinds(second, "conv1"), "receipt"); got != 1 {
 		t.Fatalf("same-turn replay produced %d receipts, want 1", got)
 	}
-	if current := onlyTodo(second).DoneAt; current == nil || !current.Equal(doneAt) {
-		t.Fatalf("same-turn replay changed completion: %v, want %v", current, doneAt)
+	if current := onlyTodo(second); current.DoneAt != nil || current.Check == nil || current.Check.Verdict != verdictDone ||
+		current.Supervision == nil || current.Supervision.State != reviewPending {
+		t.Fatalf("same-turn replay changed completion or review: %+v", current)
 	}
 }
 

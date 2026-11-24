@@ -1,10 +1,13 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
-import { EventEmitter } from 'node:events'
+import { EventEmitter, once } from 'node:events'
 import { DatabaseSync } from 'node:sqlite'
 import { createHash } from 'node:crypto'
 import { fileURLToPath } from 'node:url'
+import { chmodSync, mkdtempSync, realpathSync, rmSync, symlinkSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { startFakeNode, until } from '../../runtime-sdk/testing/fake-node.js'
 import { parseCompanionArgs } from '../companion.mjs'
 import { buildAcpEnv, createOpencodeCompanion } from '../lib/companion.js'
@@ -757,6 +760,40 @@ test('companion.mjs with --parent-stdin exits cleanly when parent closes stdin',
   assert.equal(exit.signal, null)
 })
 
+// #12848: Node loads the entry module by its real path while argv[1] keeps a symlink on the way (a symlinked home is
+// common on Linux, and the node starts the companion from under ~/.persona), so an entry check comparing the two as given
+// skipped main() and the companion exited 0 without a word, once a minute.
+test('companion.mjs runs main() when started through a symlinked directory', async (t) => {
+  const base = realpathSync(mkdtempSync(join(tmpdir(), 'persona-opencode-link-')))
+  const pkg = fileURLToPath(new URL('..', import.meta.url))
+  const link = join(base, 'opencode')
+  symlinkSync(pkg, link, process.platform === 'win32' ? 'junction' : 'dir')
+  const child = spawn(process.execPath, [
+    join(link, 'companion.mjs'),
+    '--socket', join(base, 'missing', 'runtime.sock'),
+    '--bin', '/nonexistent/opencode-test-bin',
+    '--instance', 'builtin-opencode-test-link',
+    '--no-update',
+    '--parent-stdin',
+  ], { stdio: ['pipe', 'pipe', 'pipe'] })
+  const exited = once(child, 'exit')
+  t.after(async () => {
+    if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL')
+    await exited
+    chmodSync(base, 0o700)
+    rmSync(base, { recursive: true, force: true })
+  })
+  let stderr = ''
+  child.stderr.setEncoding('utf8')
+  child.stderr.on('data', (chunk) => { stderr += chunk })
+
+  await until('companion started or exited', () => stderr.includes('started opencode ACP companion for Persona') || child.exitCode !== null, 5000)
+  assert.equal(child.exitCode, null, `companion exited (${child.exitCode}) instead of starting; stderr=${JSON.stringify(stderr)}`)
+  child.stdin.end()
+  const [code] = await exited
+  assert.equal(code, 0)
+})
+
 test('companion does not spawn opencode acp on startup, stops idle acp child, and reloads on next turn', async (t) => {
   const n = await startFakeNode(t)
   const db = fakeV1Db()
@@ -797,4 +834,62 @@ test('companion does not spawn opencode acp on startup, stops idle acp child, an
   assert.ok(acp.calls.some((c) => c[0] === 'ensureStarted'))
   assert.ok(acp.calls.some((c) => c[0] === 'loadSession' && c[1].sessionId === sid))
   await until('idle acp child stopped again', () => acp.pid === 0 && acp.calls.some((c) => c[0] === 'stopChild'), 2000)
+})
+
+test('live ACP tool_call notifications normalize tool_name and tool_input from rawInput and kind', async (t) => {
+  const n = await startFakeNode(t)
+  const db = fakeV1Db()
+  const acp = new FakeAcpClient()
+  acp.onPrompt = async (sessionId, _blocks, client) => {
+    client.emit('update', {
+      sessionId,
+      update: {
+        sessionUpdate: 'tool_call',
+        toolCallId: 'tc_edit',
+        kind: 'edit',
+        title: 'Edit src/app.ts',
+        rawInput: { filePath: '/w/app/src/app.ts', oldString: 'old', newString: 'new' },
+      },
+    })
+    client.emit('update', {
+      sessionId,
+      update: {
+        sessionUpdate: 'tool_call',
+        toolCallId: 'tc_search',
+        kind: 'search',
+        title: 'Search auth token',
+        rawInput: { pattern: 'auth', path: '/w/app' },
+      },
+    })
+    client.emit('update', {
+      sessionId,
+      update: {
+        sessionUpdate: 'tool_call',
+        toolCallId: 'tc_fetch',
+        kind: 'fetch',
+        title: 'Fetch https://example.com',
+        rawInput: { url: 'https://example.com', format: 'markdown' },
+      },
+    })
+    return { stopReason: 'end_turn' }
+  }
+  const companion = createTestCompanion({ socketPath: n.path, openDb: db.openDb, acp })
+  t.after(() => companion.stop())
+  await companion.start()
+  await n.ready
+
+  const started = await n.peer.call('session.start', { cwd: '/w/app', prompt: 'edit and search' })
+  const sid = started.session.session_id
+  await until('turn finished', () => !companion.live.get(sid)?.running)
+
+  const pg = await n.peer.call('session.items', { session_id: sid, limit: 20 })
+  const tools = pg.items.filter((i) => i.kind === 'tool_use')
+  assert.deepEqual(
+    tools.map((i) => [i.tool_name, i.tool_input]),
+    [
+      ['Edit', { file_path: '/w/app/src/app.ts', old_string: 'old', new_string: 'new' }],
+      ['Grep', { pattern: 'auth', path: '/w/app' }],
+      ['WebFetch', { url: 'https://example.com', format: 'markdown' }],
+    ],
+  )
 })

@@ -78,7 +78,7 @@ class ManagerPackageScopeTests(unittest.TestCase):
             if args[:3] == ['go', 'test', '-list']:
                 return 'TestA\nTestB\nTestC\nBenchmarkD\nok  \texample/server/internal/node\t0.1s\n'
             if args[:2] == ['go', 'list']:
-                return ('example/server/internal/assistant\nexample/server/internal/hub\nexample/server/internal/node\n'
+                return ('example/server/internal/assistant\nexample/server/internal/kb\nexample/server/internal/node\n'
                         'example/server/internal/node/sub\n')
             if args[:2] == ['go', 'env']:
                 return b'{"GOCACHE":"/example/cache","GOMODCACHE":"/example/mod","GOPATH":"/example/go"}'
@@ -135,7 +135,7 @@ class ManagerPackageScopeTests(unittest.TestCase):
     def test_node_and_assistant_tests_run_in_partitions_beside_the_other_packages(self):
         _, calls, _ = self.build()
         tests = [args for args, _ in calls if args[:3] == ['go', 'test', '-count=1']]
-        self.assertEqual(tests[0], ['go', 'test', '-count=1', 'example/server/internal/hub',
+        self.assertEqual(tests[0], ['go', 'test', '-count=1', 'example/server/internal/kb',
                                     'example/server/internal/node/sub'])
         self.assertEqual(tests[1:7], [['go', 'test', '-count=1', '-run', '^(TestA)$', './internal/assistant'],
                                       ['go', 'test', '-count=1', '-run', '^(TestB)$', './internal/assistant'],
@@ -161,6 +161,13 @@ class ManagerPackageScopeTests(unittest.TestCase):
         self.assertTrue(any(args[:2] == ['go', 'vet'] for args, _ in calls))
         self.assertTrue(any(args[:3] == ['go', 'test', '-count=1'] for args, _ in calls))
         self.assertTrue(any('scripts/release/check_bundle_privacy.py' in args for args, _ in calls))
+
+    def test_runtime_packages_are_generated_before_any_test(self):
+        _, calls, _ = self.build()
+        args = [args for args, _ in calls]
+        generate = args.index(['go', 'generate', './internal/runtimepkg'])
+        self.assertEqual(args.count(['go', 'generate', './internal/runtimepkg']), 1)
+        self.assertLess(generate, next(i for i, a in enumerate(args) if a[:2] == ['go', 'test']))
 
     def test_web_client_is_scanned_as_built_then_precompressed_before_go_build(self):
         out, calls, _ = self.build()

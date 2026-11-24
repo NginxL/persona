@@ -1,8 +1,13 @@
 package node
 
 import (
+	"context"
+	"os"
 	"path/filepath"
 	"testing"
+	"time"
+
+	"github.com/nwverse/persona/server/internal/proto"
 )
 
 // Literal command prefixes are expanded for classification only. A prefix may contain an interpreter and its flags,
@@ -37,6 +42,196 @@ func TestLarkLiteralCommandPrefixes(t *testing.T) {
 		{"expanded opaque program after a read", `READER="python3 -I -B /opt/example/reader.py"; lark-cli docs +fetch --doc-id example; $READER list`, 1},
 	} {
 		t.Run(tc.name, func(t *testing.T) { assertAssistantBypassClassification(t, tc.command, tc.cards) })
+	}
+}
+
+func TestLarkLiteralPrefixesAcrossIndependentReads(t *testing.T) {
+	for _, tc := range []struct {
+		name, command string
+	}{
+		{"relative assignment after directory change", `cd /tmp; READER=./reader.sh; $READER list`},
+		{"null redirect after assignment", `READER=/tmp/reader.sh; ls /tmp 2>/dev/null; $READER list`},
+		{"descriptor duplication after assignment", `READER=/tmp/reader.sh; ls /tmp 2>&1; $READER list`},
+		{"glob before assignment", `ls /tmp/*/; READER=/tmp/reader.sh; $READER list`},
+		{"scalar parameter before assignment", `ls "$HOME"; READER=/tmp/reader.sh; $READER list`},
+		{"brace expansion before assignment", `echo {one,two}; READER=/tmp/reader.sh; $READER list`},
+	} {
+		t.Run(tc.name, func(t *testing.T) { assertAssistantBypassClassification(t, tc.command, 0) })
+	}
+}
+
+func TestLarkLiteralPrefixTrackedDirectories(t *testing.T) {
+	root := t.TempDir()
+	if err := os.Mkdir(filepath.Join(root, "sub"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name, command string
+	}{
+		{"explicit current directory child", `cd ` + root + `; cd ./sub; READER=./reader.sh; $READER list`},
+		{"literal parent directory", `cd ` + filepath.Join(root, "sub") + `; cd ..; READER=./reader.sh; $READER list`},
+		{"leave and return to binding directory", `cd ` + root + `; READER=./reader.sh; cd ` + filepath.Join(root, "sub") + `; cd ` + root + `; $READER list`},
+		{"current directory no-op", `cd ` + root + `; cd .; READER=./reader.sh; $READER list`},
+	} {
+		t.Run(tc.name, func(t *testing.T) { assertAssistantBypassClassification(t, tc.command, 0) })
+	}
+}
+
+func TestLarkLiteralPrefixIndependentReadSafety(t *testing.T) {
+	gate := exampleGate("")
+	missing := filepath.Join(t.TempDir(), "missing")
+	directoryRoot := t.TempDir()
+	if err := os.Mkdir(filepath.Join(directoryRoot, "sub"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	nestedDirectory := filepath.Join(directoryRoot, "a", "b", "c")
+	if err := os.MkdirAll(nestedDirectory, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	// Reach the filesystem root without assuming how many components t.TempDir contains.
+	rootAscent, err := filepath.Rel(nestedDirectory, string(filepath.Separator))
+	if err != nil {
+		t.Fatal(err)
+	}
+	directoryFile := filepath.Join(t.TempDir(), "file")
+	if err := os.WriteFile(directoryFile, []byte("fixture"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name, command string
+		cards         int
+	}{
+		{"assignment before directory change", `READER=./reader.sh; cd /tmp; $READER list`, 1},
+		{"assignment before second directory change", `cd /tmp; READER=./reader.sh; cd /var; $READER list`, 1},
+		{"relative directory change stays unknown", `cd /tmp; cd subdirectory; READER=./reader.sh; $READER list`, 1},
+		{"unknown directory relative pipeline stays unknown", `cd /tmp; cd subdirectory; READER=./reader.sh; $READER list | cat`, 1},
+		{"existing relative directory change stays unknown", `cd ` + directoryRoot + `; cd sub; READER=./reader.sh; $READER list`, 1},
+		{"bare executable after directory change", `cd /tmp; READER=reader.sh; $READER list`, 1},
+		{"relative CLI after directory change", `cd /tmp; READER=./lark-cli; $READER docs +fetch --doc-id example`, 1},
+		{"relative gate command after directory change", `cd /tmp; REQUEST=./ex; $REQUEST GET /health`, 1},
+		{"relative gate read after directory change", `cd /tmp; REQUEST=./ex.sh; $REQUEST GET /health`, 1},
+		{"relative gate write after directory change", `cd /tmp; REQUEST=./ex.sh; $REQUEST POST /messages/example/recall`, 1},
+		{"gate write after null redirect", `REQUEST=/tmp/example/scripts/ex.sh; ls /tmp 2>/dev/null; $REQUEST POST /messages/example/recall`, 1},
+		{"gate deletion after read glob", `ls /tmp/*/; REQUEST=/tmp/example/scripts/ex.sh; $REQUEST DELETE /messages/example`, 1},
+		{"command substitution before assignment", `ls $(choose_path); READER=/tmp/reader.sh; $READER list`, 1},
+		{"process substitution before assignment", `cat <(printf example); READER=/tmp/reader.sh; $READER list`, 1},
+		{"arithmetic expansion before assignment", `ls $((1 + 1)); READER=/tmp/reader.sh; $READER list`, 1},
+		{"parameter assignment before assignment", `ls ${OTHER:=/tmp}; READER=/tmp/reader.sh; $READER list`, 1},
+		{"file output clears assignment", `READER=/tmp/reader.sh; ls /tmp > /tmp/listing; $READER list`, 1},
+		{"dynamic redirect clears assignment", `READER=/tmp/reader.sh; ls /tmp 2>$ERROR_FILE; $READER list`, 1},
+		{"environment assignment clears binding", `READER=/tmp/reader.sh; EXAMPLE=value ls /tmp; $READER list`, 1},
+		{"unsupported wrapper stops resolution", `xargs ls /tmp/*/; READER=/tmp/reader.sh; $READER list`, 1},
+		{"dynamic reassignment stays unknown", `READER=/tmp/reader.sh; ls /tmp 2>/dev/null; READER=$(choose_reader); $READER list`, 1},
+		{"named descriptor null redirect clears binding", `READER=/tmp/reader.sh; ls /tmp {READER}>/dev/null; $READER list`, 1},
+		{"named descriptor duplication clears binding", `READER=/tmp/reader.sh; ls /tmp {fd}>&1; $READER list`, 1},
+		{"ampersand output clears binding", `READER=/tmp/reader.sh; ls /tmp &>/dev/null; $READER list`, 1},
+		{"clobber output clears binding", `READER=/tmp/reader.sh; ls /tmp >|/dev/null; $READER list`, 1},
+		{"descriptor close clears binding", `READER=/tmp/reader.sh; ls /tmp >&-; $READER list`, 1},
+		{"source descriptor three clears binding", `READER=/tmp/reader.sh; ls /tmp 3>&1; $READER list`, 1},
+		{"target descriptor three clears binding", `READER=/tmp/reader.sh; ls /tmp 2>&3; $READER list`, 1},
+		{"input descriptor duplication clears binding", `READER=/tmp/reader.sh; cat <&0; $READER list`, 1},
+		{"here string clears binding", `READER=/tmp/reader.sh; cat <<< example; $READER list`, 1},
+		{"read-write redirect clears binding", `READER=/tmp/reader.sh; ls /tmp <> /dev/null; $READER list`, 1},
+		{"here document clears binding", "READER=/tmp/reader.sh; cat <<'EOF'\nexample\nEOF\n$READER list", 1},
+		{"stdout device target clears binding", `READER=/tmp/reader.sh; ls /tmp >/dev/stdout; $READER list`, 1},
+		{"zsh parameter subscript clears binding", `READER=/tmp/reader.sh; echo $HOME[READER=7]; $READER list`, 1},
+		{"zsh parameter modifier clears binding", `READER=/tmp/reader.sh; echo $HOME:F:READER=7:h; $READER list`, 1},
+		{"quoted zsh parameter modifier clears binding", `READER=/tmp/reader.sh; echo "$HOME:F:READER=7:h"; $READER list`, 1},
+		{"special parameter modifier clears binding", `READER=/tmp/reader.sh; echo $#HOME:F:READER=7:h; $READER list`, 1},
+		{"zsh tilde flag subscript clears binding", `READER=/tmp/reader.sh; echo $~HOME[READER=7]; $READER list`, 1},
+		{"zsh equals flag subscript clears binding", `READER=/tmp/reader.sh; ls $=HOME[READER=7]; $READER list`, 1},
+		{"zsh caret flag subscript clears binding", `READER=/tmp/reader.sh; cat $^HOME[READER=7]; $READER list`, 1},
+		{"zsh plus flag subscript clears binding", `READER=/tmp/reader.sh; echo $+HOME[READER=7]; $READER list`, 1},
+		{"zsh non ASCII subscript clears binding", `READER=/tmp/reader.sh; echo $é[READER=7]; $READER list`, 1},
+		{"zsh tilde modifier glob clears binding", `READER=/tmp/reader.sh; echo $~HOME:F:READER=7:h/*; $READER list`, 1},
+		{"zsh glob qualifier clears binding to CLI", `READER=/tmp/reader.sh; X='mp(e:READER=lark-c\li:)'; echo /[t]$~X; $READER im +messages-send --chat-id oc_example --text hello`, 1},
+		{"dollar at is not scalar", `echo "$@"; READER=/tmp/reader.sh; $READER list`, 1},
+		{"dollar star is not scalar", `echo $*; READER=/tmp/reader.sh; $READER list`, 1},
+		{"array parameter is not scalar", `echo ${X[1]}; READER=/tmp/reader.sh; $READER list`, 1},
+		{"length parameter is not scalar", `echo ${#X}; READER=/tmp/reader.sh; $READER list`, 1},
+		{"indirect parameter is not scalar", `echo ${!X}; READER=/tmp/reader.sh; $READER list`, 1},
+		{"extended glob stays unknown", `ls /tmp/@(one|two); READER=/tmp/reader.sh; $READER list`, 1},
+		{"sort scalar is not independent", `sort "$HOME"; READER=/tmp/reader.sh; $READER list`, 1},
+		{"find glob is not independent", `find /tmp/*; READER=/tmp/reader.sh; $READER list`, 1},
+		{"timeout wrapper stops independent read", `timeout 5 ls "$HOME"; READER=/tmp/reader.sh; $READER list`, 1},
+		{"env wrapper stops independent read", `env ls /tmp/*; READER=/tmp/reader.sh; $READER list`, 1},
+		{"uniq output operand is not independent", `uniq "$INPUT" "$OUTPUT" | cat; READER=/tmp/reader.sh; $READER list`, 1},
+		{"ps is not independent", `ps "$HOME" | cat; READER=/tmp/reader.sh; $READER list`, 1},
+		{"stat is not independent", `stat "$HOME" | cat; READER=/tmp/reader.sh; $READER list`, 1},
+		{"du is not independent", `du "$HOME" | cat; READER=/tmp/reader.sh; $READER list`, 1},
+		{"df is not independent", `df "$HOME" | cat; READER=/tmp/reader.sh; $READER list`, 1},
+		{"previous directory stays unknown", `cd /tmp; READER=./reader.sh; cd -; $READER list`, 1},
+		{"other user home stays unknown", `cd /tmp; READER=./reader.sh; cd ~other; $READER list`, 1},
+		{"directory option stays unknown", `cd /tmp; READER=./reader.sh; cd -P /tmp; $READER list`, 1},
+		{"bare cd stays unknown", `cd; READER=./reader.sh; $READER list`, 1},
+		{"missing directory stays unknown", `cd ` + missing + `; READER=./reader.sh; $READER list`, 1},
+		{"file instead of directory stays unknown", `cd ` + directoryFile + `; READER=./reader.sh; $READER list`, 1},
+		{"unanchored relative executable stays unknown", `cd /tmp; READER=sub/reader.sh; $READER list`, 1},
+		{"parent relative executable stays unknown", `cd /tmp; READER=./../reader.sh; $READER list`, 1},
+		{"system bin directory stays unknown", `cd /bin; READER=./cat; $READER list`, 1},
+		{"system usr bin directory stays unknown", `cd /usr/bin; READER=./cat; $READER list`, 1},
+		{"joined bin directory stays unknown", `cd /; READER=./bin/cat; lark-cli docs +fetch --doc-id example | $READER`, 1},
+		{"joined usr bin directory stays unknown", `cd /usr; READER=./bin/cat; lark-cli docs +fetch --doc-id example | $READER`, 1},
+		{"joined root usr bin directory stays unknown", `cd /; READER=./usr/bin/cat; lark-cli docs +fetch --doc-id example | $READER`, 1},
+		{"nested cwd system directory stays unknown", `cd ` + nestedDirectory + `; bash -c 'cd ` + rootAscent + `; READER=./usr/bin/cat; lark-cli docs +fetch --doc-id example | $READER'`, 1},
+		{"parent relative gate read stays unknown", `cd /tmp; REQUEST=../example/scripts/ex.sh; $REQUEST GET /health`, 1},
+		{"nested relative CLI stays unknown", `cd /tmp; READER=./sub/lark-cli; $READER docs +fetch --doc-id example`, 1},
+		{"pushd stays unknown", `pushd /tmp; READER=./reader.sh; $READER list`, 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) { assertAssistantBypassClassification(t, tc.command, tc.cards, gate) })
+	}
+}
+
+func TestLarkLiteralPrefixCodexShellApprovalShapes(t *testing.T) {
+	gate := exampleGate("")
+	for _, tc := range []struct {
+		name, command string
+		cards         int
+	}{
+		{"wrapped independent read", `/bin/zsh -lc 'READER=/tmp/reader.sh; ls /tmp 2>&1; $READER list'`, 0},
+		{"wrapped named descriptor", `/bin/zsh -lc 'READER=/tmp/reader.sh; ls /tmp {READER}>/dev/null; $READER list'`, 1},
+		{"wrapped zsh subscript", `/bin/zsh -lc 'READER=/tmp/reader.sh; echo $HOME[READER=7]; $READER list'`, 1},
+		{"wrapped zsh modifier", `/bin/zsh -lc 'READER=/tmp/reader.sh; ls $HOME:F:READER=7:h; $READER list'`, 1},
+		{"wrapped zsh glob qualifier clears binding to CLI", `/bin/zsh -lc 'READER=/tmp/reader.sh; X="mp(e:READER=lark-c\li:)"; ls /[t]$~X; $READER im +messages-send --chat-id oc_example --text hello'`, 1},
+		{"wrapped gate write", `/bin/zsh -lc 'REQUEST=/tmp/example/scripts/ex.sh; ls /tmp 2>&1; $REQUEST POST /messages/example/recall'`, 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) { assertAssistantBypassClassification(t, tc.command, tc.cards, gate) })
+	}
+}
+
+func TestLarkLiteralPrefixPermissionModes(t *testing.T) {
+	const read = `REQUEST=/tmp/example/scripts/ex.sh; ls "$HOME"; $REQUEST GET /health`
+	const write = `REQUEST=/tmp/example/scripts/ex.sh; ls "$HOME"; $REQUEST POST /messages/example/recall`
+	for _, tc := range []struct {
+		name, origin, mode, command, want string
+		health                            bool
+		cards                             int
+	}{
+		{name: "ordinary default keeps normal read flow", mode: proto.ModeDefault, command: read, want: ""},
+		{name: "inbox default keeps normal read flow", origin: originInbox, mode: proto.ModeDefault, command: read, want: ""},
+		{name: "health keeps normal read flow", mode: proto.ModeBypass, command: read, health: true, want: ""},
+		{name: "ordinary default write confirms", mode: proto.ModeDefault, command: write, want: "deny", cards: 1},
+		{name: "inbox write is refused", origin: originInbox, mode: proto.ModeBypass, command: write, want: "deny"},
+		{name: "health write confirms", mode: proto.ModeBypass, command: write, health: true, want: "deny", cards: 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			n := codexTestNode(t)
+			fh := withFakeHub(t, n)
+			cwd := t.TempDir()
+			n.larkCfg, n.larkCfgAt = olCfg(), time.Now().Add(time.Hour)
+			n.larkCfg.Gates = []proto.CommandGate{exampleGate("")}
+			n.procs[testThread] = &assistantProc{id: testThread, agent: "claude", origin: tc.origin, cwd: cwd, exited: make(chan struct{})}
+			n.persistModes(testThread, tc.mode, "")
+			if tc.health {
+				n.gates().markSpace(testThread)
+			}
+			fh.answer = func(proto.Interaction) proto.Resolution { no := false; return proto.Resolution{Allow: &no} }
+			decision, reason, err := n.larkCheck(context.Background(), testThread, cwd, tc.command,
+				proto.Interaction{SessionID: testThread, ExpiresAt: time.Now().Add(time.Minute)})
+			if err != nil || decision != tc.want || len(fh.interactions()) != tc.cards {
+				t.Fatalf("decision=%q reason=%q cards=%d err=%v; want %q/%d", decision, reason, len(fh.interactions()), err, tc.want, tc.cards)
+			}
+		})
 	}
 }
 

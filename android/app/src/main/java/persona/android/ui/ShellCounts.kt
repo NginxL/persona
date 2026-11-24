@@ -13,7 +13,7 @@ import persona.core.domain.sort.needsYouBadgeRows
 import persona.core.domain.sort.needsYouCards
 import persona.core.domain.sort.needsYouRows
 import persona.core.domain.sort.needsYouWaiting
-import persona.feature.inbox.InboxRecord
+import persona.core.inbox.InboxRecord
 
 /**
  * What the shell counts beside the pages (docs/assistant/managers.md "Clients"): the current assistant's alone (the tab

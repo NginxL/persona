@@ -161,6 +161,20 @@ class AgentOperationsTest {
         override suspend fun renameSpace(machineId: String, workspaceId: String, name: String) { checkFailure(); renamedWorkspace = workspaceId; onSpaceRename() }
         override suspend fun closeSession(key: SessionKey) { checkFailure() }
         val deleted = mutableListOf<SessionKey>()
+        val forked = mutableListOf<SessionKey>()
         override suspend fun deleteSession(key: SessionKey) { checkFailure(); deleted += key }
+        override suspend fun forkSession(key: SessionKey): String { checkFailure(); forked += key; return "fork-${key.sessionId}" }
+    }
+
+    @Test fun forkReturnsNewSessionIdAndClearsBusyOnCompletionAndFailure() = runTest {
+        val api = FakeOperations()
+        val operations = AgentOperationsState(api)
+        val session = Session("machine", "orig", status = "idle", canFork = true)
+        assertEquals("fork-orig", operations.fork(session))
+        assertEquals(listOf(session.key), api.forked)
+        assertFalse(operations.state.value.busy)
+        api.fail = true
+        try { operations.fork(session); fail("Expected fork failure") } catch (_: AgentOperationFailure) {}
+        assertFalse(operations.state.value.busy)
     }
 }

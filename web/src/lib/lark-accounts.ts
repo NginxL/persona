@@ -4,7 +4,6 @@
 import { t } from "../i18n";
 import { useSyncExternalStore } from "react";
 import { api, ApiError } from "./api";
-import { withManager } from "./manager-choice";
 
 /** GET /api/v1/lark/accounts: one account signed in on the hub's Lark gateway. */
 export interface LarkAccount {
@@ -26,13 +25,7 @@ export interface LarkAccountList {
   default: number;
 }
 
-/** `path` (`/lark/…`, with or without a query) naming account `ol`, and `manager` when the chat is another manager's
- * (an inbox item's stamp, docs/assistant/managers.md "Clients": the hub reads `?manager=`); unchanged for the hub's own account
- * (undefined) and the default manager, or for what it names already. */
-export function larkPath(path: string, ol?: number, manager?: string): string {
-  const named = ol === undefined || /[?&]ol_account=/.test(path) ? path : `${path}${path.includes("?") ? "&" : "?"}ol_account=${ol}`;
-  return withManager(named, manager);
-}
+export { larkPath } from "./lark-path";
 
 export const accountTitle = (a: Pick<LarkAccount, "id" | "name">) => a.name?.trim() || t("lib-lark-accounts.account_fallback", { id: a.id });
 

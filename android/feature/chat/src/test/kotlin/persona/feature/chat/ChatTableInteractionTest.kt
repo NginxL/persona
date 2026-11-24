@@ -77,7 +77,7 @@ class ChatTableInteractionTest {
         assertTrue("a sideways drag scrolls the table", range.value() > 0)
         assertEquals("the message does not swipe to quote", "", quoted)
 
-        rule.onAllNodes(horizontal)[0].performSemanticsAction(SemanticsActions.ScrollBy) { it(-100_000f, 0f) }
+        rule.onAllNodes(horizontal)[0].performSemanticsAction(SemanticsActions.ScrollBy) { val _ = it(-100_000f, 0f) }
         rule.waitForIdle()
         rule.onNodeWithTag("message").performTouchInput { swipeRight(startX = left + 2f) }
         rule.waitForIdle()
@@ -118,7 +118,7 @@ class ChatTableInteractionTest {
             }
         }
         waitForTable()
-        rule.onAllNodes(horizontal)[0].performSemanticsAction(SemanticsActions.ScrollBy) { it(120f, 0f) }
+        rule.onAllNodes(horizontal)[0].performSemanticsAction(SemanticsActions.ScrollBy) { val _ = it(120f, 0f) }
         rule.waitForIdle()
         assertEquals(120f, horizontalRange().value())
 

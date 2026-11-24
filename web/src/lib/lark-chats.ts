@@ -7,7 +7,7 @@
 import { t } from "../i18n";
 import { useSyncExternalStore } from "react";
 import { api, ApiError, enc, errorText } from "./api";
-import { larkPath } from "./lark-accounts";
+import { larkPath } from "./lark-path";
 import { itemHeaders } from "./manager-choice";
 import { sameValue } from "./stable-lines";
 

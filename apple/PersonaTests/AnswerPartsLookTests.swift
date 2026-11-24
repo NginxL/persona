@@ -1,4 +1,3 @@
-#if os(iOS)
 import MarkdownUI
 import PersonaKit
 import SwiftUI
@@ -143,4 +142,3 @@ struct AnswerPartLinesTests {
 private final class HeightBox {
     var height: CGFloat = 0
 }
-#endif

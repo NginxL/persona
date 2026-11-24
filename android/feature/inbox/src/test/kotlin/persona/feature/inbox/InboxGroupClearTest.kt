@@ -50,6 +50,7 @@ import persona.core.domain.inbox.InboxGroups
 import persona.core.domain.inbox.InboxItem
 import persona.core.navigation.AppTab
 import persona.core.navigation.Navigator
+import persona.core.inbox.*
 
 /**
  * Android acceptance for #10425 (docs/assistant/inbox.md "Group titles"). These drive InboxScreen itself: the group

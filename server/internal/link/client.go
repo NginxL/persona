@@ -3,6 +3,7 @@ package link
 import (
 	"cmp"
 	"context"
+	"crypto/sha256"
 	"errors"
 	"math/rand/v2"
 	"net"
@@ -371,7 +372,8 @@ func runActive(ctx context.Context, o Options, rep *reporter, b backoff) {
 			// change, written while the link was up, counts as a change since it was read. The stamp is taken before the
 			// read, so a change written in between still counts.
 			now := stampOf(o.Path)
-			if f, err := Read(o.Path); err != nil || (f.Token == c.Token && f.SSH.Equal(c.SSH) && f.Proxy == c.Proxy) {
+			if f, err := Read(o.Path); err != nil || (f.Token == c.Token && f.SSH.Equal(c.SSH) && f.Proxy == c.Proxy &&
+				f.ProxyAlways == c.ProxyAlways) {
 				was = now
 			}
 		}
@@ -414,7 +416,7 @@ func runActive(ctx context.Context, o Options, rep *reporter, b backoff) {
 // dialActive dials c's hub over its routes in routeOrder. A pinned hub that refused the credential, on whichever
 // route, ends the attempt: no other route can do better.
 func dialActive(ctx context.Context, c *Config, sshBin string, last string) (*link, error) {
-	p, eps, perr := proxied(c)
+	p, eps, perr := proxyRoute(c)
 	return tryRoutes(routeOrder(c, p != nil || perr != nil, last), func(kind string) (*link, error) {
 		switch kind {
 		case KindSSH:
@@ -433,9 +435,16 @@ func dialActive(ctx context.Context, c *Config, sshBin string, last string) (*li
 
 // routeOrder is the order c's routes are tried in (docs/operations/link.md "Outbound proxy"): direct candidates
 // (""), the outbound proxy when there is one, the SSH tunnel when there is one; last, the kind of the link that worked
-// last, first when it is one of these. Always use SSH, or a tunnel and no candidates, leaves the tunnel alone.
+// last, first when it is one of these. Always use SSH leaves the tunnel alone; else proxy-only mode
+// (Config.ProxyAlways) leaves the proxy alone, whatever last was; else a tunnel and no candidates leaves the tunnel.
 func routeOrder(c *Config, proxy bool, last string) []string {
-	if c.SSH != nil && (c.SSH.Always || len(c.Endpoints) == 0) {
+	if c.SSH != nil && c.SSH.Always {
+		return []string{KindSSH}
+	}
+	if c.ProxyAlways {
+		return []string{KindProxy}
+	}
+	if c.SSH != nil && len(c.Endpoints) == 0 {
 		return []string{KindSSH}
 	}
 	order := []string{""}
@@ -475,13 +484,13 @@ func tryRoutes[T any](order []string, try func(kind string) (T, error), stop fun
 // wait sleeps up to d, less if the network changed, a reconnect was asked for or link.json changed (paired again,
 // an address added) since was: the stamp (stampOf) from when the attempt read it, so a change that landed during the
 // attempt (a new credential written while the hub refused the old one) ends the wait at its first poll.
-func (o Options) wait(ctx context.Context, d time.Duration, was time.Time) {
+func (o Options) wait(ctx context.Context, d time.Duration, was fileStamp) {
 	o.waitWithProbe(ctx, d, was, nil)
 }
 
 // waitWithProbe also ends a long wait when reach reports that the hub has gone from unreachable at the start of
 // the wait to reachable. A nil reach leaves the wake conditions of wait in place.
-func (o Options) waitWithProbe(ctx context.Context, d time.Duration, was time.Time, reach func(context.Context) bool) {
+func (o Options) waitWithProbe(ctx context.Context, d time.Duration, was fileStamp, reach func(context.Context) bool) {
 	start, reason := time.Now(), "timer"
 	defer func() {
 		if o.Logf != nil {
@@ -526,10 +535,28 @@ func (o Options) waitWithProbe(ctx context.Context, d time.Duration, was time.Ti
 	}
 }
 
-// stampOf is when link.json at path was last written (zero when there is none): a different stamp means it changed.
-func stampOf(path string) time.Time {
-	if fi, err := os.Stat(path); err == nil {
-		return fi.ModTime()
+// fileStamp is link.json as of one look: when it was last written and what it held (the zero stamp when there is
+// none). A different stamp means it changed.
+type fileStamp struct {
+	mod time.Time
+	sum [sha256.Size]byte
+}
+
+// Equal: the file was not written in between, or written back the same.
+func (s fileStamp) Equal(o fileStamp) bool { return s == o }
+
+// stampOf is link.json at path as of now. The modification time alone missed a change: two writes within the file
+// system's timestamp granularity (a pairing, then a mode switch or a new credential a moment later) leave one time,
+// and a watcher that had looked between them waited on as if nothing had happened. The file is a few kilobytes,
+// read about once a second.
+func stampOf(path string) fileStamp {
+	fi, err := os.Stat(path)
+	if err != nil {
+		return fileStamp{}
 	}
-	return time.Time{}
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return fileStamp{mod: fi.ModTime()}
+	}
+	return fileStamp{mod: fi.ModTime(), sum: sha256.Sum256(b)}
 }

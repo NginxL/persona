@@ -133,7 +133,7 @@ internal class LocalMarkdownImages(
                 }
                 val decoded = withContext(Dispatchers.Default) { Base64.getMimeDecoder().decode(data) }
                 if (target != null && decoded.isNotEmpty()) {
-                    runCatching {
+                    val _ = runCatching {
                         target.writeBytes(decoded)
                         target.setLastModified(System.currentTimeMillis())
                         trimDiskCache(dir, target)

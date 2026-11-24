@@ -1,6 +1,5 @@
 import SwiftUI
 
-#if os(visionOS)
 // Design tokens and components only the visionOS shell uses (its windows and ornaments). Same rule as `Theme`:
 // pages read these, never literals.
 extension Theme.Size {
@@ -38,4 +37,3 @@ extension View {
             .onAppear { model.colorScheme.apply() }
     }
 }
-#endif

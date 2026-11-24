@@ -336,7 +336,9 @@ func TestCheckUsesEnvironmentProxy(t *testing.T) {
 		},
 	}
 	id, _ := Parse(canonical, "github")
-	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+	// A deadline for a check expected to finish, not a speed bound: a TLS handshake through the proxy in a fresh
+	// process took over a second on a loaded CI machine. The timeout scenario sets its own 100 ms below.
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 	defer cancel()
 	if scenario == "cancel" {
 		go func() {

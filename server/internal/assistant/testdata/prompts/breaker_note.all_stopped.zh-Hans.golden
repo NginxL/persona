@@ -1,0 +1,1 @@
+后台督办在 all_stopped 信号上连续 2 轮无进展（repeated_noop），已熔断暂停重试并转交主对话处理。

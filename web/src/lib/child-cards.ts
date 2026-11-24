@@ -10,8 +10,9 @@ import type { Item, Session } from "./types";
  *  the chat's jump to it). */
 const CHILD = "child:";
 
-/** Where a child's card goes: the session, and the time it is placed by. */
+/** Where a child's card goes: the session (and optional cross-machine `mid`), and the time it is placed by. */
 export interface ChildPlace {
+  mid?: string;
   sid: string;
   at: string;
 }
@@ -19,29 +20,67 @@ export interface ChildPlace {
 /** A child session's card among the steps (`withChildSessions`). */
 export const isChildSessionStep = (s: Step): boolean => s.kind === "tool" && s.use.id.startsWith(CHILD);
 
-/** The session a child card stands for. */
-export const childSessionOf = (s: Step & { kind: "tool" }): string => s.use.id.slice(CHILD.length);
+/** The call a child's card is known by: `"child:<sid>"` on the parent's machine, `"child:<mid>/<sid>"` across machines. */
+export const childCall = (sid: string, mid?: string): string =>
+  mid ? `${CHILD}${encodeURIComponent(mid)}/${sid}` : `${CHILD}${sid}`;
 
-/** The call a child's card is known by: what a link to the child brings into view. */
-export const childCall = (sid: string): string => `${CHILD}${sid}`;
+/** Parse a child call ID back into its optional cross-machine `mid` and `sid`; undefined for any other call. */
+export function childRefOfCall(call: string): { mid?: string; sid: string } | undefined {
+  if (!call.startsWith(CHILD)) return undefined;
+  const rest = call.slice(CHILD.length);
+  const slash = rest.indexOf("/");
+  if (slash > 0) {
+    const rawMid = rest.slice(0, slash);
+    const sid = rest.slice(slash + 1);
+    if (sid) {
+      try {
+        return { mid: decodeURIComponent(rawMid), sid };
+      } catch {
+        return { mid: rawMid, sid };
+      }
+    }
+  }
+  return { sid: rest };
+}
+
+/** The session a child card stands for. */
+export const childSessionOf = (s: Step & { kind: "tool" }): string => childRefOfCall(s.use.id)?.sid ?? s.use.id.slice(CHILD.length);
+
+/** The machine a child card's session runs on (`fallbackMid` when same-machine). */
+export const childMachineOf = (s: Step & { kind: "tool" }, fallbackMid: string): string => {
+  const fromId = childRefOfCall(s.use.id)?.mid;
+  if (fromId) return fromId;
+  const mid = (s.use.tool_input as { child_mid?: unknown } | undefined)?.child_mid;
+  return typeof mid === "string" && mid ? mid : fallbackMid;
+};
 
 /** The child session a call is a child's card's (`childCall`); undefined for any other call. */
-export const childOfCall = (call: string): string | undefined => (call.startsWith(CHILD) ? call.slice(CHILD.length) : undefined);
+export const childOfCall = (call: string): string | undefined => childRefOfCall(call)?.sid;
 
-/** The key a child card's open / closed state is kept under (expanded.ts): a link to the child opens it. */
-export const childCardKey = (scope: string, sid: string): string => `${scope}${CHILD}${sid}`;
+/** The key a child card's open / closed state is kept under (expanded.ts): keyed by `(mid, sid)` across machines. */
+export const childCardKey = (scope: string, sid: string, mid?: string): string => `${scope}${childCall(sid, mid)}`;
 
 /** The time each child is placed by: when it started, else when it was first seen updated. A child without its start
- *  keeps that first time (`seen`, the chat's own), so a working one does not move to the latest exchange with every push. */
-export function childPlaces(rows: readonly Session[], seen: Map<string, string>): ChildPlace[] {
+ *  keeps that first time (`seen`, keyed by `(machine_id, session_id)`), so a working one does not move to the latest
+ *  exchange with every push. Pass `parentMid` so cross-machine children (including archived-parent orphans that carry
+ *  `parent_machine_id` without `folded_under_machine_id`) always retain their own `machine_id`. */
+export function childPlaces(rows: readonly Session[], seen: Map<string, string>, parentMid?: string): ChildPlace[] {
   return rows.map((s) => {
-    if (s.started_at) return { sid: s.session_id, at: s.started_at };
-    let at = seen.get(s.session_id);
+    const remote = parentMid
+      ? s.machine_id !== parentMid
+      : Boolean(
+          (s.folded_under_machine_id && s.folded_under_machine_id !== s.machine_id) ||
+          (s.parent_machine_id && s.parent_machine_id !== s.machine_id),
+        );
+    const mid = remote ? s.machine_id : undefined;
+    const seenKey = `${s.machine_id}\u0000${s.session_id}`;
+    if (s.started_at) return { ...(mid ? { mid } : {}), sid: s.session_id, at: s.started_at };
+    let at = seen.get(seenKey);
     if (at === undefined) {
       at = s.updated_at ?? "";
-      seen.set(s.session_id, at);
+      seen.set(seenKey, at);
     }
-    return { sid: s.session_id, at };
+    return { ...(mid ? { mid } : {}), sid: s.session_id, at };
   });
 }
 
@@ -94,7 +133,17 @@ export function placeChildren(exchanges: readonly ExchangeStart[], children: rea
   const out = new Map<string, ChildPlace[]>();
   for (const e of exchanges) {
     const list = by.get(e.id);
-    if (list) out.set(e.id, list.sort((a, b) => (ms(a.at) ?? Infinity) - (ms(b.at) ?? Infinity) || (a.sid < b.sid ? -1 : a.sid > b.sid ? 1 : 0)));
+    if (list) {
+      out.set(
+        e.id,
+        list.sort(
+          (a, b) =>
+            (ms(a.at) ?? Infinity) - (ms(b.at) ?? Infinity) ||
+            (a.sid < b.sid ? -1 : a.sid > b.sid ? 1 : 0) ||
+            ((a.mid ?? "") < (b.mid ?? "") ? -1 : (a.mid ?? "") > (b.mid ?? "") ? 1 : 0),
+        ),
+      );
+    }
   }
   return out;
 }
@@ -117,8 +166,8 @@ export function withChildSessions(steps: Step[], places: readonly ChildPlace[] |
       if (t !== undefined && t <= at) i = j + 1;
     }
     const near = out[i - 1] ?? out[i];
-    const id = childCall(c.sid);
-    const use: Item = { id, seq: near ? stepSeq(near) : 0, ts: near ? stepTs(near) : c.at || undefined, role: "assistant", kind: "tool_use", tool_name: "Agent", tool_use_id: id, tool_input: {} };
+    const id = childCall(c.sid, c.mid);
+    const use: Item = { id, seq: near ? stepSeq(near) : 0, ts: near ? stepTs(near) : c.at || undefined, role: "assistant", kind: "tool_use", tool_name: "Agent", tool_use_id: id, tool_input: c.mid ? { child_mid: c.mid } : {} };
     out.splice(i, 0, { kind: "tool", id, use, images: [] });
   }
   return out;

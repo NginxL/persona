@@ -45,6 +45,7 @@ import persona.core.designsystem.LocalAppFeedback
 import persona.core.designsystem.PersonaTheme
 import persona.core.designsystem.Tokens
 import persona.core.designsystem.icons.PersonaIcons
+import persona.core.inbox.*
 
 private const val MAX_SAME_MATTER_DEPTH = 8
 

@@ -70,7 +70,6 @@ struct LarkPinnedShelf: View {
     }
 }
 
-#if os(iOS) || os(visionOS)
 /// Offset compensation belongs to the scroll view, not every frame of the page's state.
 @MainActor final class LarkConversationScroll {
     let reader = ReaderAnchor()
@@ -133,4 +132,3 @@ struct LarkPinnedShelf: View {
         }
     }
 }
-#endif

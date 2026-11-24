@@ -1720,6 +1720,101 @@ private actor SlowPut {
         #expect(Set([wifi, stopped, problem]).count == 3)
     }
 
+    /// #13385: a phone that can't transcribe the meeting never says its transcript shows; the notice says what the hub
+    /// is at, and a line of its own says why this iPhone has no lines, naming the meeting's language.
+    private static let repo = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+
+    /// #13446: the hub's `problem` code read as the kind of failure, by every case the hub's `problemOfJob` runs too
+    /// (spec/fixtures/meeting-transcription-problems).
+    @Test func theProblemKindsFollowTheSharedCases() throws {
+        struct Fixtures: Decodable {
+            struct Case: Decodable {
+                var name: String
+                var problem: String
+                var kind: String?
+            }
+            var version: Int
+            var cases: [Case]
+        }
+        let data = try Data(contentsOf: Self.repo.appending(path: "spec/fixtures/meeting-transcription-problems/cases.json"))
+        let fixtures = try JSONDecoder().decode(Fixtures.self, from: data)
+        #expect(fixtures.version == 1)
+        #expect(fixtures.cases.count >= 9)
+        for c in fixtures.cases {
+            #expect(Words.upstreamKind(c.problem)?.rawValue == c.kind, "\(c.name)")
+        }
+    }
+
+    /// #13446: the fallback notice says why the hub isn't transcribing for each kind, naming the speech service (the
+    /// built-in one as such), and what to do; the phone's own state on a line under it. Waiting for Wi-Fi and a stop
+    /// say what they said before, and so does a problem with no reason of its own.
+    @Test func theFallbackNoticeSaysWhyForEachKind() {
+        var m = MeetingTranscription.Meeting()
+        m.decided = .init(mode: .hub)
+        m.socket = .ready
+        let showing = String(localized: "Showing this iPhone's transcript.")
+        m.problem = "upstream_forbidden"
+        var notice = Words.fallbackNotice(m, service: "Example ASR", phoneCannot: nil)
+        #expect(notice.words == Words.upstream(.refused, service: "Example ASR"))
+        #expect(notice.words.contains("Example ASR"))
+        #expect(notice.phone == showing)
+        #expect(!notice.words.contains("upstream_forbidden"), "never the code itself")
+        let builtIn = String(localized: "the speech service [Meeting Transcription]")
+        #expect(Words.fallbackNotice(m, service: nil, phoneCannot: nil).words.contains(builtIn))
+        // This iPhone can't transcribe either: its reason takes the second line.
+        notice = Words.fallbackNotice(m, service: "Example ASR", phoneCannot: "No lines here.")
+        #expect(notice.words == Words.upstream(.refused, service: "Example ASR") && notice.phone == "No lines here.")
+
+        var said: Set<String> = []
+        for (code, kind) in [("upstream_forbidden", Words.UpstreamKind.refused), ("upstream_busy", .busy),
+                             ("upstream_unavailable", .unreachable), ("upstream_failed", .failed)] {
+            m.problem = code
+            let words = Words.fallbackNotice(m, service: "Example ASR", phoneCannot: nil).words
+            #expect(words == Words.upstream(kind, service: "Example ASR"), "\(code)")
+            said.insert(words)
+        }
+        #expect(said.count == 4, "a sentence of its own for each kind")
+
+        // A problem with no reason of its own: as before.
+        m.problem = "made_up_future_problem"
+        notice = Words.fallbackNotice(m, service: "Example ASR", phoneCannot: nil)
+        #expect(notice == .init(words: Words.fallback(m), phone: nil))
+        // Waiting for Wi-Fi and a stop come first, as before.
+        m.problem = "upstream_busy"
+        m.socket = .waitingForWiFi
+        #expect(Words.fallbackNotice(m, service: "Example ASR", phoneCannot: nil) == .init(words: Words.fallback(m), phone: nil))
+        m.socket = .ready
+        m.stopped = "replaced"
+        #expect(Words.fallbackNotice(m, service: "Example ASR", phoneCannot: "No lines here.")
+            == .init(words: Words.fallback(m, phoneCannot: true), phone: "No lines here."))
+    }
+
+    @Test func aPhoneThatCantTranscribeSaysWhy() {
+        var m = MeetingTranscription.Meeting()
+        m.decided = .init(mode: .hub)
+        m.problem = "upstream_failed"
+        let promise = String(localized: "The hub isn't transcribing right now. Showing this iPhone's transcript.")
+        #expect(Words.fallback(m) == promise)
+        #expect(Words.fallback(m, phoneCannot: true) == String(localized: "The hub isn't transcribing right now."))
+        m.stopped = "upstream_failed"
+        #expect(Words.fallback(m, phoneCannot: true) == String(localized: "The hub stopped transcribing this meeting."))
+        m.socket = .waitingForWiFi
+        #expect(Words.fallback(m, phoneCannot: true) == String(localized: "Waiting for Wi-Fi to send the audio to the hub."))
+
+        let english = Locale(identifier: "en")
+        #expect(Words.languageName("zh-CN", in: english) == "Chinese")
+        #expect(Words.languageName("ja-JP", in: english) == "Japanese")
+        let fellBack = Words.phoneCannot(.unsupportedLanguage, locale: "zh-CN", fellBack: true, interface: english)
+        let own = Words.phoneCannot(.unsupportedLanguage, locale: "zh-CN", fellBack: false, interface: english)
+        #expect(fellBack == String(localized: "This iPhone can't transcribe \("Chinese") on the device either, so no lines show until the hub transcribes again."))
+        #expect(own == String(localized: "This iPhone can't transcribe \("Chinese") on the device, so it shows no lines for this meeting."))
+        #expect(Words.phoneCannot(.needsNewerSystem, locale: "zh-CN", fellBack: true, interface: english)
+            == String(localized: "This iPhone needs iOS 26 or later to transcribe on the device, so no lines show until the hub transcribes again."))
+        // Without a hub to come back to, and for a model that didn't download: the error's own words, with what to do.
+        #expect(Words.phoneCannot(.needsNewerSystem, locale: "zh-CN", fellBack: false) == RecordingSpeechError.needsNewerSystem.errorDescription)
+        #expect(Words.phoneCannot(.modelUnavailable, locale: "zh-CN", fellBack: true) == RecordingSpeechError.modelUnavailable.errorDescription)
+    }
+
     /// With the Highlights card on top (phase 2b), the hub's lines are the Full Transcript's rows in place of the phone's:
     /// in the live log's order, a placeholder skipped, each row's id its position, so a line the hub sends again keeps its
     /// row; bookmarks and questions keep their places; and a highlight's minute lights the hub's lines in it.

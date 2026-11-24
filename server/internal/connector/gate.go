@@ -10,6 +10,7 @@ import (
 	"strings"
 	"unicode"
 
+	"github.com/nwverse/persona/server/internal/prompts"
 	"github.com/nwverse/persona/server/internal/proto"
 )
 
@@ -252,7 +253,14 @@ func gate(ctx context.Context, rules []Rule, c Connector, a Actions, name string
 		if act.Visible != "" {
 			summary += "\n\n谁会看到：" + act.Visible
 		}
-		if ask == nil || !ask(ctx, summary, args) {
+		askCtx, told := withAskOutcome(ctx)
+		if ask == nil || !ask(askCtx, summary, args) {
+			if outcome := *told; ask != nil && outcome != "" && outcome != proto.OutcomeDeclined {
+				// Nobody answered the card (TellAskOutcome): not the user's decline, and never told as one.
+				res := proto.ErrorResult(proto.ToolErrorUnanswered, prompts.RenderOutboundUnanswered(prompts.OutboundUnanswered{
+					Outcome: outcome, Nothing: name + " did not run"}), 0)
+				return &res, through
+			}
 			res := proto.ErrorResult(proto.ToolErrorDeclined, "The user declined "+name+".", 0)
 			return &res, through
 		}
@@ -301,4 +309,22 @@ func matchFieldsAny(want, got map[string]any) bool {
 		}
 	}
 	return true
+}
+
+type askOutcomeKey struct{}
+
+// withAskOutcome is ctx for an Ask the gate calls, with where the Ask tells how its card ended (TellAskOutcome).
+func withAskOutcome(ctx context.Context) (context.Context, *string) {
+	told := new(string)
+	return context.WithValue(ctx, askOutcomeKey{}, told), told
+}
+
+// TellAskOutcome is how an Ask that showed a card says how the card ended (proto.Resolution.Outcome), with the ctx the
+// gate called it with: a refusal whose card the user did not decline themselves (it expired, was withdrawn or cleared,
+// someone else answered it) is then no decline (proto.ToolErrorUnanswered). An Ask that tells nothing refuses as the
+// user declining, as before.
+func TellAskOutcome(ctx context.Context, outcome string) {
+	if told, ok := ctx.Value(askOutcomeKey{}).(*string); ok {
+		*told = outcome
+	}
 }

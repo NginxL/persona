@@ -11,6 +11,7 @@ import { apiOp } from "./ops";
 import { endInteraction, getSession, keepDelegated, useStore } from "./store";
 import { isSecretHandoff, isSecretRun } from "./tool-detail";
 import { isSessionReview } from "./types";
+import { supervisorHeld } from "./supervisor-held";
 import type { Interaction } from "./types";
 
 /** Sent (`already`: it had been answered, here or elsewhere), or why not, as a sentence to show. */
@@ -104,6 +105,8 @@ function sameAnswer(a: unknown, b: unknown): boolean {
  * the hub already. Once it ends (delivered, refused, or out of time) the card can be answered again.
  */
 export function answerCard(ix: Interaction, body: Resolution, from: AnswerFrom = {}): Promise<CardAnswer> {
+  // a card a task's supervisor holds is the supervisor's until it passes it up (lib/supervisor-held.ts): no page answers it
+  if (supervisorHeld(ix)) return Promise.resolve({ ok: false, error: t("chat-delegate.supervisor_held_refused") });
   if (!interactionCanAnswer(ix, getSession(ix.machine_id, ix.session_id)) && !workCardLocalResolution(ix, body) && !sessionReviewResolution(ix, body)) {
     return Promise.resolve({ ok: false, error: t("chat-interactions.approve_not_allowed") });
   }

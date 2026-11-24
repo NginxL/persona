@@ -1,4 +1,5 @@
 import Foundation
+import PersonaWire
 
 /// What the main conversation still needs (docs/assistant/onboarding.md 4.4, 5.1; docs/protocol/protocol.md「Main chat readiness」): the hub works it
 /// out (`GET /api/v1/assistant/readiness`, feature `assistant_readiness`) and every client draws the same thing from it —
@@ -37,6 +38,24 @@ nonisolated struct AssistantReadiness: Codable, Hashable, Sendable {
 
         /// Nothing to do for it: done, not needed, or not known yet (unknown / checking never block, 5.1).
         var passes: Bool { ["ok", "skipped", "unknown", "checking"].contains(state) }
+
+        /// The client action for this step. A model the conversation cannot run is fixed in its own picker, not by
+        /// adding another provider; older hubs keep sending `connect_model`, so the code decides the remedy (#10365).
+        var clientAction: String? { clientAction(action?.id) }
+        var clientAltAction: String? { clientAction(altActions?.first?.id) }
+
+        /// The same primary/quiet action order as the web. After a replacement pick, only Try a Message can clear the old failure.
+        func clientActions(promoteTry: Bool = false) -> [String] {
+            var ids = ([action?.id] + (altActions ?? []).map { Optional($0.id) }).compactMap { clientAction($0) }
+            if promoteTry { ids.sort { $0 == "test_assistant" && $1 != "test_assistant" } }
+            return ids.filter { AssistantReadiness.knows(action: $0) }
+        }
+
+        /// A model-routing failure chooses another model wherever the hub offered the old connect action, primary or alternate.
+        func clientAction(_ id: String?) -> String? {
+            if code == "model_route", id == "connect_model" { return "pick_model" }
+            return id
+        }
     }
 
     nonisolated struct Suggestion: Codable, Hashable, Sendable {
@@ -142,7 +161,7 @@ nonisolated struct AssistantReadiness: Codable, Hashable, Sendable {
 
     /// The action ids a card draws a button for (5.1); any other id is text only (5 General Rules).
     static let knownActions: Set<String> = ["add_computer", "confirm_computer", "wake_computer", "install_claude", "login_claude",
-                                            "connect_model", "edit_provider", "test_assistant", "enable_tls", "open_admin"]
+                                            "connect_model", "pick_model", "edit_provider", "test_assistant", "enable_tls", "open_admin"]
 
     static func knows(action id: String?) -> Bool { id.map(knownActions.contains) ?? false }
 }
@@ -211,7 +230,10 @@ nonisolated struct TurnErrorFix: Hashable, Sendable {
                 self.init(title: String(localized: "Model not connected: the key for \(owner) is wrong"), detail: String(localized: "The key is wrong or has expired; use one that works."), action: "edit_provider")
                 return
             case "model_route":
-                self.init(title: String(localized: "Model not connected: this model isn't available on \(owner)"), detail: String(localized: "The model name is wrong, or the model isn't available right now; try another one."), action: "connect_model")
+                self.init(title: String(localized: "Model not connected: this model isn't available on \(owner)"), detail: String(localized: "The model name is wrong, or the model isn't available right now; try another one."), action: "pick_model")
+                return
+            case "tool_search_unsupported":
+                self.init(title: String(localized: "Model not connected: this gateway can't load tools on demand"), detail: String(localized: "Try again."), action: "retry")
                 return
             default:
                 return nil
@@ -226,10 +248,32 @@ nonisolated struct TurnErrorFix: Hashable, Sendable {
         case "auth_failed":
             self.init(title: String(localized: "Model not connected: the key is wrong"), detail: String(localized: "The key is wrong or has expired; use one that works."), action: "edit_provider")
         case "model_route":
-            self.init(title: String(localized: "Model not connected: this model can't be used"), detail: String(localized: "The model name is wrong, or the model isn't available right now; try another one."), action: "connect_model")
+            self.init(title: String(localized: "Model not connected: this model can't be used"), detail: String(localized: "The model name is wrong, or the model isn't available right now; try another one."), action: "pick_model")
+        case "tool_search_unsupported":
+            self.init(title: String(localized: "Model not connected: this gateway can't load tools on demand"), detail: String(localized: "Try again."), action: "retry")
         default:
             return nil
         }
+    }
+
+    private static let toolSearchCache = TextMemo<Bool>(limit: 128)
+
+    /// The same refusal from an older hub that did not code the turn. Keep this as narrow as the web's parser: only a
+    /// 400 (or its "not representable" edge wording) that names Claude Code's deferred tool-loading protocol.
+    static func toolSearch(raw: String, status: Int?) -> TurnErrorFix? {
+        let key = "\(status ?? -1)\u{1f}\(raw)"
+        let matches = toolSearchCache(key) { _ in
+            let text = raw.lowercased()
+            // A `.row` carries no parsed status; read the same leading 400 after the API Error prefix without a regex.
+            var start = raw.drop(while: \.isWhitespace)
+            for prefix in ["API Error:", "API 错误："] where start.hasPrefix(prefix) { start = start.dropFirst(prefix.count) } // i18n-ignore
+            let body = start.drop(while: \.isWhitespace)
+            let raw400 = body.hasPrefix("400") && (body.dropFirst(3).first.map { !$0.isNumber } ?? true)
+            guard status == 400 || (status == nil && raw400) || text.contains("not representable") else { return false }
+            let markers = ["toolsearch", "tool_search", "tool search", "defer_loading", "tool_reference"]
+            return markers.contains(where: text.contains)
+        }
+        return matches ? TurnErrorFix(code: "tool_search_unsupported") : nil
     }
 
     init(title: String, detail: String, action: String) {

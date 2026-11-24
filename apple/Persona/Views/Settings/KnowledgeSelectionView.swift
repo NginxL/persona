@@ -1,4 +1,3 @@
-#if os(iOS) || os(visionOS)
 import SwiftUI
 
 /// Settings › Knowledge Selection (`KnowledgeSelectionModel`): the chats and documents with a setting of their own
@@ -641,5 +640,4 @@ private struct KnowledgeItemPicker: View {
         }
     }
 }
-#endif
 import PersonaWire

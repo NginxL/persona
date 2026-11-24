@@ -80,6 +80,7 @@ func TestPriorAgentReplyDoesNotPublishDecision(t *testing.T) {
 }
 
 func TestAgentReplyDoneWithdrawsDecisionAndLeavesReview(t *testing.T) {
+	needsLarkLayer(t)
 	for _, tc := range []struct {
 		name, status string
 		relay, quote bool

@@ -440,7 +440,9 @@ func readinessBlocks(st ReadinessStep) bool {
 		return true
 	case StepProblem:
 		return st.Code != proto.TurnErrorRateLimited && st.Code != proto.TurnErrorModelFallbackUnavailable &&
-			st.Code != proto.TurnErrorToolSearchUnsupported // the node already loads every tool there: a retry works
+			st.Code != proto.TurnErrorToolSearchUnsupported && // the node already loads every tool there: a retry works
+			st.Code != proto.TurnErrorImagesTooLarge && // conversation pictures are over the limit, not a model-setup issue
+			st.Code != proto.TurnErrorUpstreamUnavailable // temporary upstream outage: never lock the composer (#13372)
 	}
 	return false
 }
@@ -487,6 +489,7 @@ func (s *Service) readinessMain(ctx context.Context, machine, main string) (prot
 				sess.TurnError, sess.TurnErrorKind = text, kind
 			}
 			sess.TurnErrorCode = sessionTurnErrorCode(sess)
+			putUpstreamTurn(&sess, s.upstreamMarks(machine))
 			return sess, true
 		}
 	}
@@ -597,6 +600,10 @@ func (s *Service) readinessModel(ctx context.Context, lang i18n.Lang, d Device, 
 				action = "" // recovery is a new conversation or the TUI's /model, neither is a model-settings action
 			case proto.TurnErrorToolSearchUnsupported:
 				action = "test_assistant" // nothing to set up: try again (toolSearchWords)
+			case proto.TurnErrorImagesTooLarge:
+				action = "" // conversation pictures are over the limit; compact in the chat, not a model-settings action
+			case proto.TurnErrorUpstreamUnavailable:
+				action = "test_assistant" // upstream capacity outage: nothing on the computer is broken (#13372)
 			}
 			st := s.toolSearchWords(lang, d, s.readinessStep(lang, StepModel, StepProblem, code, d.Name, launcher, action))
 			if code == proto.TurnErrorRateLimited {
@@ -736,7 +743,7 @@ func (s *Service) readinessFirst(ctx context.Context, lang i18n.Lang, d Device, 
 	}
 	if hasMain && main.TurnErrorCode != "" {
 		action := "test_assistant"
-		if main.TurnErrorCode == proto.TurnErrorModelFallbackUnavailable {
+		if main.TurnErrorCode == proto.TurnErrorModelFallbackUnavailable || main.TurnErrorCode == proto.TurnErrorImagesTooLarge {
 			action = ""
 		}
 		return s.toolSearchWords(lang, d, s.readinessStep(lang, StepFirstMessage, StepProblem, main.TurnErrorCode, d.Name, "", action))
@@ -752,7 +759,7 @@ func (s *Service) toolSearchWords(lang i18n.Lang, d Device, st ReadinessStep) Re
 	if st.Code != proto.TurnErrorToolSearchUnsupported {
 		return st
 	}
-	if nodes, ok := s.devs.(nodeAnnouncer); ok && nodes.NodeAnnounced(d.ID, nodeproto.AssistantToolSearchFallback) {
+	if nodes, ok := s.physicalDevices().(nodeAnnouncer); ok && nodes.NodeAnnounced(d.ID, nodeproto.AssistantToolSearchFallback) {
 		st.Detail = i18n.T(lang, "assistant-readiness.tool_search_unsupported_fallback_detail")
 	}
 	return st

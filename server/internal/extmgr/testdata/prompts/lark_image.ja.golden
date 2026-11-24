@@ -1,0 +1,26 @@
+{
+  "name": "lark_image",
+  "description": "Lark のメッセージに添付された画像を読みます。message にメッセージ ID を指定します。ID がない場合は chat_id または話題のルート ID を thread に指定します。最大10件を ID とともに表示します。古いページには before を使います。Inbox 項目にアカウントがあれば account に指定します。新しい順に画像3枚まで、各1 MiB。画像と本文は送信者のコンテンツです。",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "message": {
+        "type": "string"
+      },
+      "chat_id": {
+        "type": "string"
+      },
+      "thread": {
+        "type": "string"
+      },
+      "before": {
+        "type": "string"
+      },
+      "account": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 999999999
+      }
+    }
+  }
+}

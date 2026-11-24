@@ -3,6 +3,10 @@ package persona.core.domain.tasks
 import persona.core.contracts.Supervision
 import persona.core.contracts.TaskReview
 import persona.core.contracts.Todo
+import persona.core.contracts.TodoState
+import persona.core.contracts.SessionKey
+import persona.core.contracts.Session
+import persona.core.contracts.state
 
 // A task the main conversation supervises (#3124, docs/assistant/unified-entry.md "Supervision"): where its review stands and how each
 // criterion was found, for the task card, the todo page and the conversation's review lines.
@@ -50,6 +54,26 @@ val Todo.reviewStage: ReviewStage?
             else -> ReviewStage.Ongoing
         }
     }
+
+/** An undismissed decision only the owner can move, with the same label on the row and detail as in triage (#5732). */
+fun Todo.waitsForOwner(): Boolean =
+    !isDone && !decisionDismissed() && (reviewState == "needs_user" || openAsk?.outcome == "decide" || openAsk?.outcome == "cannot")
+
+/** Delivered work at rest still awaits acceptance; `live` alone never means done (#5732). */
+fun Todo.deliveredAwaitingReview(lookup: (SessionKey) -> Session?, now: Long = System.currentTimeMillis()): Boolean {
+    if (isDone || waitsForOwner()) return false
+    val atRest = triageStatus(lookup, now) in setOf(TriageStatus.FollowUp, TriageStatus.Unread, TriageStatus.NotStarted)
+    val reviewRequired = reviewState == "pending_review" || openAsk != null || (kind != "concern" && delivery?.state == "live")
+    return atRest && reviewRequired
+}
+
+/** The agent-state mark for the same effective delivery state ([state] for ordinary work). */
+fun Todo.shownState(lookup: (SessionKey) -> Session?, now: Long = System.currentTimeMillis()): TodoState = when {
+    acceptedAtRest(lookup, now) -> TodoState.Done
+    waitsForOwner() -> TodoState.NeedsYou
+    deliveredAwaitingReview(lookup, now) -> TodoState.Unread
+    else -> state(lookup)
+}
 
 /** A review's verdict as a stage (a review line in the conversation); null for one it does not know. */
 fun reviewVerdictStage(verdict: String): ReviewStage? = when (verdict) {

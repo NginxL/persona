@@ -6,7 +6,7 @@ import (
 	"strings"
 )
 
-// ExpandHome makes a leading "~" in p the given machine's home: "~" is home itself, "~/x" is x under home. Anything
+// ExpandHome makes a leading "~" in p the given machine's home: "~" is home itself, "~/x" (or `~\x` on Windows) is x under home. Anything
 // else, and every p when home is unknown (""), comes back unchanged. Only the user's own home is meant: "~user" stays.
 func ExpandHome(p, home string) string {
 	if home == "" {
@@ -17,6 +17,11 @@ func ExpandHome(p, home string) string {
 	}
 	if rest, ok := strings.CutPrefix(p, "~/"); ok {
 		return filepath.Join(home, rest)
+	}
+	if filepath.Separator == '\\' {
+		if rest, ok := strings.CutPrefix(p, `~\`); ok {
+			return filepath.Join(home, rest)
+		}
 	}
 	return p
 }

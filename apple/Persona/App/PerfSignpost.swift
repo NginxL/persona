@@ -2,11 +2,7 @@
 import os
 import QuartzCore
 import SwiftUI
-#if canImport(UIKit)
 import UIKit
-#elseif canImport(AppKit)
-import AppKit
-#endif
 
 nonisolated enum PerfTrace {
     private static let log = OSLog(subsystem: "Persona.Performance", category: .pointsOfInterest)
@@ -53,17 +49,13 @@ nonisolated enum PerfTrace {
     static func body(_ name: String) {
         guard enabled else { return }
         bodies[name, default: 0] += 1
-        #if os(iOS) || os(visionOS)
         if PerfScroll.shared.scrolling { PerfScroll.shared.bodies[name, default: 0] += 1 }
-        #endif
     }
 
     static func pushArrived(_ kind: String) {
         guard enabled else { return }
         events += 1
-        #if os(iOS) || os(visionOS)
         PerfScroll.shared.pushed(kind)
-        #endif
         guard started == nil else { return }
         started = CACurrentMediaTime()
         // After Core Animation's commit (order 2,000,000), when the main run loop has nothing left to do.
@@ -84,11 +76,7 @@ nonisolated enum PerfTrace {
 
     static var summary: String {
         let b = bodies.sorted { $0.key < $1.key }.map { "\"\($0.key)\":\($0.value)" }.joined(separator: ",")
-        #if os(iOS) || os(visionOS)
         let scroll = ",\"scroll\":" + PerfScroll.shared.summary
-        #else
-        let scroll = ""
-        #endif
         let blocks: String
         if let data = try? JSONSerialization.data(withJSONObject: MainThreadWatchdog.shared.report, options: [.sortedKeys]),
            let json = String(data: data, encoding: .utf8) {
@@ -110,14 +98,11 @@ struct PerfCountProbe: View {
             }
             .frame(width: Theme.Size.dotXS, height: Theme.Size.dotXS)
             .clipped()
-            #if os(iOS) || os(visionOS)
             .onAppear { PerfScroll.shared.start() }
-            #endif
         }
     }
 }
 
-#if os(iOS) || os(visionOS)
 /// Scrolling under the hub's pushes (`-perfCounts YES`; `ScrollUnderPushTests`, docs/archive/apple/live-updates.md). Every frame
 /// a scroll view is dragged or gliding, where what is on it sits on screen: its cells (a `List`), or the layers SwiftUI
 /// draws a `ScrollView`'s rows in. Under the finger and in a glide everything on screen moves together and smoothly;
@@ -352,7 +337,6 @@ struct PerfCountProbe: View {
         os_log(.default, log: Self.log, "PERFSCROLL %{public}@ %{public}@ cause=%{public}@", what, detail, cause)
     }
 }
-#endif
 
 @MainActor private final class PerfTabLifetime: ObservableObject {
     nonisolated let name: String
@@ -388,7 +372,6 @@ struct PerfCountProbe: View {
     }
 }
 
-#if os(iOS) || os(visionOS)
 @MainActor private struct PerfWindowProbe: UIViewRepresentable {
     let name: String
     func makeUIView(context: Context) -> PerfProbeView { PerfProbeView(name) }
@@ -417,31 +400,4 @@ struct PerfCountProbe: View {
     }
     deinit { PerfTrace.event("Tab UIView destroy", detail) }
 }
-#else
-/// The Mac's probe: when the tab's view joins or leaves a window.
-@MainActor private struct PerfWindowProbe: NSViewRepresentable {
-    let name: String
-    func makeNSView(context: Context) -> PerfProbeView { PerfProbeView(name) }
-    func updateNSView(_ view: PerfProbeView, context: Context) { PerfTrace.event("Tab NSView update", view.detail) }
-}
-
-@MainActor private final class PerfProbeView: NSView {
-    nonisolated let name: String
-    nonisolated let token = UUID()
-    nonisolated var detail: String { "\(name) \(token)" }
-
-    init(_ name: String) {
-        self.name = name
-        super.init(frame: .zero)
-        PerfTrace.event("Tab NSView create", detail)
-    }
-
-    required init?(coder: NSCoder) { fatalError() }
-    override func viewDidMoveToWindow() {
-        super.viewDidMoveToWindow()
-        PerfTrace.event("Tab window", "\(detail) attached=\(window != nil)")
-    }
-    deinit { PerfTrace.event("Tab NSView destroy", detail) }
-}
-#endif
 #endif

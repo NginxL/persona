@@ -121,7 +121,7 @@ func (s *Service) historyDeps(data string) kbhistory.Deps {
 			if why.Code == "plan_changed" {
 				title, body = "assistant-kb_history.plan_changed_title", "assistant-kb_history.plan_changed_body"
 			}
-			s.push(ctx, Notification{Subtitle: "Persona", Title: i18n.T(l, title),
+			s.push(withCard(ctx, cardKBHistory), Notification{Subtitle: "Persona", Title: i18n.T(l, title),
 				Body: i18n.T(l, body, i18n.Args{"source": source, "reason": kbhistory.ReasonText(l, why), "count": why.Args["count"]})})
 		},
 		Calls:    &s.kb.history.calls,

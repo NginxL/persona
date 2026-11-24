@@ -76,7 +76,8 @@ func (ps *extensions) projectContext(slugs []string) []assistantwire.ExtensionCo
 		return out
 	}
 	for _, p := range ps.reg.List() {
-		if !p.Record.Enabled || p.Problem != "" {
+		// An extension that declares memory_sources gives its memory through the hub's filter (memory_sources.go).
+		if !p.Record.Enabled || p.Problem != "" || extension.DeclaresMemorySources(p) {
 			continue
 		}
 		dir := ps.reg.DataDir(p.Record.ID)
@@ -112,11 +113,14 @@ func (ps *extensions) inboxContext() assistantwire.ExtensionContextResult {
 			continue
 		}
 		dir := ps.reg.DataDir(p.Record.ID)
+		// An extension that declares memory_sources gives its memory through the hub's filter (memory_sources.go): its
+		// background text is left out, the sentences a draft must not repeat still count.
+		memory := extension.DeclaresMemorySources(p)
 		for _, it := range p.Manifest.DataPrompts(extension.PromptInboxContext) {
 			text, _, _, err := readContextText(dir, it.File, inboxContextMost)
 			if err != nil {
 				ps.dataLog(dataKey(p.Record.ID, it.ID), fmt.Sprintf("plugin %s: inbox context %s: not used, %v", p.Record.ID, it.File, err))
-			} else if text != "" {
+			} else if text != "" && !memory {
 				out.Blocks = append(out.Blocks, assistantwire.ExtensionContextBlock{Extension: p.Record.ID, Name: p.Full.Name, Text: text})
 			}
 			if it.NeverQuote == "" {

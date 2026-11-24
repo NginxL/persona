@@ -15,6 +15,7 @@ import (
 // A long answer whose second card does not get out: the other cards go, and a line under the owner's message says
 // which part is missing and that the whole answer is in the app. All cards out: no such line.
 func TestFeishuAnswerSaysWhichPieceIsMissing(t *testing.T) {
+	needsLarkLayer(t)
 	for _, fail := range []bool{true, false} {
 		s, posts, _ := cotHub(t, false)
 		f := s.hub.(*fakeHub)

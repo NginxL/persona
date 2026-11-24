@@ -1,6 +1,6 @@
 import Foundation
 
-/// Reed-Solomon erasure coding for the video over UDP (#7873): the node's `internal/screenlink` rs.go, the same code.
+/// Reed-Solomon erasure coding for the video over UDP (#7873): the node's `internal/modules/screen-share/screenlink` rs.go, the same code.
 /// Systematic, over GF(2⁸) with x⁸ + x⁴ + x³ + x² + 1; parity row i, data column j of a block with k data shards is
 /// 1 / ((k + i) XOR j), a Cauchy matrix, so any k of a block's k + m shards rebuild it.
 public enum ReedSolomon {

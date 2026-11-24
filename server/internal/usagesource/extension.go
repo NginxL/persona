@@ -2,6 +2,7 @@ package usagesource
 
 import (
 	"encoding/json"
+	"math"
 	"strings"
 	"time"
 
@@ -53,6 +54,8 @@ type ExtensionWindow struct {
 	Group         string     `json:"group"`
 	Title         string     `json:"title"`
 	Note          string     `json:"note"`
+	// ProtectPercent is the gateway's protection line for this window, in percent (0-100); omitted when unknown.
+	ProtectPercent *float64 `json:"protect_percent"`
 }
 
 // FromExtension turns an extension's answer into accounts the sidebar draws as they are (Pass: they are not merged with
@@ -86,9 +89,10 @@ func FromExtension(raw json.RawMessage, now time.Time) (Result, error) {
 			if !ok || minutes <= 0 {
 				continue
 			}
+			protect := protectLine(w.ProtectPercent)
 			wins = append(wins, proto.UsageWindow{Label: proto.WindowLabel(minutes), WindowMinutes: minutes, UsedPercent: used,
 				ResetsAt: utc(w.ResetsAt), Model: clip(plain(w.Model), extShortMost),
-				Group: clip(plain(w.Group), extShortMost), Title: clip(plain(w.Title), extShortMost), Note: clip(plain(w.Note), extLineMost)})
+				Group: clip(plain(w.Group), extShortMost), Title: clip(plain(w.Title), extShortMost), Note: clip(plain(w.Note), extLineMost), ProtectPercent: protect})
 		}
 		headline, notice := clip(plain(a.Headline), extLineMost), clip(plain(a.Notice), extLineMost)
 		if len(wins) == 0 && notice == "" && headline == "" {
@@ -109,6 +113,16 @@ func FromExtension(raw json.RawMessage, now time.Time) (Result, error) {
 		res.Seen.Providers[provider]++
 	}
 	return res, nil
+}
+
+// protectLine is an extension's protection line when it is a number from 0 to 100; anything else (absent, NaN, out of
+// range) is "not said", never repaired into a value, so a client draws no marker rather than a wrong one.
+func protectLine(p *float64) *float64 {
+	if p == nil || math.IsNaN(*p) || math.IsInf(*p, 0) || *p < 0 || *p > 100 {
+		return nil
+	}
+	v := *p
+	return &v
 }
 
 // plain is s as one line of text: trimmed, with line breaks and other control characters turned into spaces.

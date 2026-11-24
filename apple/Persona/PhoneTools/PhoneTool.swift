@@ -23,9 +23,7 @@ enum PhoneDataSource: String, CaseIterable, Identifiable, Codable {
 
     /// The sources this device has tools for, in order (Settings › Phone Data).
     static var onThisDevice: [PhoneDataSource] {
-        #if os(macOS)
-        allCases.filter { $0 != .health && !iPhoneOnly.contains($0) } // no health data on a Mac (PhoneToolRegistry.healthTools)
-        #elseif os(iOS)
+        #if os(iOS)
         // Home needs the HomeKit capability in the build (#2285), alarms AlarmKit (iOS 26).
         allCases.filter { ($0 != .home || HomeAccess.isBuilt) && ($0 != .alarms || AlarmsAccess.isSupported) }
         #else
@@ -39,7 +37,7 @@ enum PhoneDataSource: String, CaseIterable, Identifiable, Codable {
         case .calendar: String(localized: "Calendar")
         case .reminders: String(localized: "Reminders")
         case .location: String(localized: "Location")
-        case .health: String(localized: "Health")
+        case .health: String(localized: "Apple Health")
         case .photos: String(localized: "Photos")
         case .device: String(localized: "Device Info")
         case .clipboard: String(localized: "Clipboard")
@@ -92,7 +90,7 @@ enum PhoneDataSource: String, CaseIterable, Identifiable, Codable {
         case .calendar: String(localized: "View events, and create them once you confirm")
         case .reminders: String(localized: "View and create reminders")
         case .location: String(localized: "Current location and address")
-        case .health: String(localized: "Summaries of steps, heart rate, sleep, and more; saves once you confirm")
+        case .health: String(localized: "Reads steps, heart rate, sleep, and more from Apple Health; saves to it once you confirm")
         case .photos: String(localized: "Recent photos and screenshots")
         case .device: String(localized: "Battery, storage, OS version, network")
         case .clipboard: String(localized: "Read and write the clipboard")

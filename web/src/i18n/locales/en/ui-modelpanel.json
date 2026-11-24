@@ -43,5 +43,9 @@
   "current_launcher": "Current",
   "default_launcher": "Default",
   "quick_picks": "Recent and favorites",
-  "recommended": "Recommended"
+  "recommended": "Recommended",
+  "launchers": "Launchers",
+  "speed": "Speed",
+  "speed_standard": "Standard",
+  "no_levels": "No thinking effort to choose for this model"
 }

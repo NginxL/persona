@@ -55,7 +55,9 @@ import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.IOException
 import java.lang.reflect.Proxy
+import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.atomic.AtomicInteger
+import persona.core.inbox.*
 
 /** A connector row uses the same immediate initial, fixed layout and loaded-picture cache as a Lark row. */
 @OptIn(DelicateCoilApi::class)
@@ -66,7 +68,7 @@ class ConnectorInboxAvatarTest {
     @get:Rule val rule = createComposeRule()
 
     private lateinit var pictures: ImageLoader
-    private val requestedSizes = mutableListOf<Size>()
+    private val requestedSizes = CopyOnWriteArrayList<Size>()
     private var loading: CompletableDeferred<ByteArray>? = null
     private val picture: ByteArray by lazy {
         val bitmap = Bitmap.createBitmap(16, 16, Bitmap.Config.ARGB_8888).apply { eraseColor(android.graphics.Color.MAGENTA) }
@@ -247,7 +249,7 @@ class ConnectorInboxAvatarTest {
     }
 
     @Test fun connectorRowsRequestAndDecodeAtTheirDrawnPixelSize() {
-        val refs = mutableListOf<String>()
+        val refs = CopyOnWriteArrayList<String>()
         fun avatar(name: String) = larkAvatar("/api/v1/avatars/telegram/$name", "hub/a") { sized ->
             refs += sized
             picture
@@ -269,9 +271,16 @@ class ConnectorInboxAvatarTest {
             }
         }
         rule.waitUntil(5_000) {
+            // The image read is on Dispatchers.IO; pump the Android main looper while its request is being scheduled.
+            // Do not wait for only the first picture before checking both rows' exact URLs and decode sizes.
+            org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle()
+            refs.toSet().size == 2
+        }
+        rule.waitUntil(5_000) {
             rule.onAllNodesWithText("N", useUnmergedTree = true).fetchSemanticsNodes().isEmpty() &&
                 rule.onAllNodesWithText("A", useUnmergedTree = true).fetchSemanticsNodes().isEmpty()
         }
+        rule.waitForIdle()
         assertEquals(setOf(
             "/api/v1/avatars/telegram/normal?size=152",
             "/api/v1/avatars/telegram/action?size=168",

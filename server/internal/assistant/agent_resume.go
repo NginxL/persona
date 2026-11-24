@@ -23,14 +23,16 @@ import (
 //   - the same node call as the user's Resume: session.start with resume_session_id and a node-side recovery guard
 //     (node node.go fillResume: the session's own launcher, directory, model and permission mode; the shell it left
 //     when that is still there, else a new tab), the text as its first message;
-//   - never unsupervised: the agent is on an open task of this conversation already, or the call gives task (main
-//     conversation), which makes it one as agent_send with a task does, the card marked resumed (wakeResumed);
+//   - never unsupervised: the agent is on an open task of this conversation already, or the call gives task (the main
+//     conversation, or a direction's lead within leadTakeAllowed, #12953), which makes it one as agent_send with a
+//     task does, the card marked resumed (wakeResumed);
 //   - visible: the phone's confirmation and the task's card say which agent was resumed and why (resume_note);
 //   - compacted before the text goes in when its context is nearly full (#11137): resumed without a first message,
 //     then the text sent with compact_if_full, so the node runs the runtime's own /compact and sends once it is done
 //     (node compact_before_send.go). Only a failed compaction, or a runtime Persona cannot compact, falls back to a
 //     replacement, saying why;
-//   - refused for user/unknown stops, offline computers, or the node's own start refusals.
+//   - refused for the user's stops, archived Agents with no recorded non-user stop, offline computers, or the node's own
+//     start refusals. An unknown stop is resumable (#11528).
 
 // resumeRequest is what agent_send's resume asks for: why its context is needed.
 type resumeRequest struct {
@@ -43,7 +45,7 @@ func stoppedRefusal(c proto.Session) error {
 		"Nothing was sent. Choose how to go on: when the next work depends on what this agent already knows (it has just "+
 		"investigated this and should now fix it, rework of its own work, the user asked for the agent with the context), "+
 		"send again with resume true and resume_why, which resumes this same session with its context on its own "+
-		"launcher and permission mode (from the main conversation also give task, unless it is on an open task of yours). "+
+		"launcher and permission mode (also give task, unless it is on an open task of yours). "+
 		"A nearly full context is no reason to start over: the resume compacts it with the agent's own /compact before your "+
 		"text goes in. For unrelated work, or when it went off track, start a replacement and give it what "+
 		"it needs (read this one with agent_read): for its task, task_plan with continues (the task's todo id) and "+
@@ -71,9 +73,17 @@ func (s *Service) resumeAllowed(ctx context.Context, self string, am Device, c p
 		}
 		cause = info.StopCause
 	}
-	if !cause.AllowsSupervisorResume() {
-		return fmt.Errorf("%s cannot be resumed by the assistant: stop cause is %s. User stops and unknown causes require "+
-			"the user's Resume on its terminal page. Nothing was started or sent", agentLabel(c), cause)
+	// Every stop but the user's may be resumed (#11528): an unknown cause too, an Agent that quit by itself or that a
+	// restart of its machine cut off. An archived one only with a cause the node recorded as not the user's: archiving
+	// it was the user's (or the assistant's own close, which records its cause).
+	if c.Capabilities == nil && !c.Archived {
+		return fmt.Errorf("%s cannot be resumed by the assistant: its computer's node reports no stop cause (too old). "+
+			"The user's Resume on its terminal page can. Nothing was started or sent", agentLabel(c))
+	}
+	if c.Archived && !cause.AllowsSupervisorResume() || !cause.SupervisorMayResume() {
+		return fmt.Errorf("%s cannot be resumed by the assistant: stop cause is %s. %s require "+
+			"the user's Resume on its terminal page. Give that instruction separately from the choices on a decision card. Nothing was started or sent",
+			agentLabel(c), cause, userResumeOnly(c.Archived, cause))
 	}
 	if why == "" {
 		return fmt.Errorf("resume_why is required: say why this agent's own context is needed (the user sees it). Nothing was started or sent")
@@ -93,13 +103,39 @@ func (s *Service) resumeAllowed(ctx context.Context, self string, am Device, c p
 	}
 	t, ok := s.openTodoOfAgent(am.ID, c.SessionID)
 	if !ok {
-		return fmt.Errorf("%s is on no open task of yours: a resumed agent must be supervised. Give task (from the main "+
-			"conversation) to make it your task as you resume it. Nothing was started or sent", agentLabel(c))
+		if !s.supervises(ctx, self) {
+			return fmt.Errorf("%s is on no open task of yours: a resumed agent must be supervised, and only the main "+
+				"conversation and a direction's lead supervise agents. Nothing was started or sent", agentLabel(c))
+		}
+		return fmt.Errorf("%s is on no open task of yours: a resumed agent must be supervised. Give task to make it your "+
+			"task as you resume it. Nothing was started or sent", agentLabel(c))
 	}
 	if err := othersTask(c, t, self); err != nil {
 		return fmt.Errorf("%w; it is not yours to resume. Nothing was started or sent", err)
 	}
 	return nil
+}
+
+// eventMayResume: an event Persona routes on its own (a PR's, an Inbox item's) may resume c only after a stop the node
+// recorded as not the user's. An unknown stop the supervisor resumes on purpose (agent_send, a rework), deciding that
+// the Agent's context is wanted; an event does not decide that (#11528). An archived one is left to resumeAllowed,
+// which reads the node's own cause.
+func eventMayResume(c proto.Session) error {
+	if c.Archived || c.Capabilities != nil && c.Capabilities.StopCause.AllowsSupervisorResume() {
+		return nil
+	}
+	return fmt.Errorf("%s has no recorded non-user stop: an event does not resume it; its supervisor may", agentLabel(c))
+}
+
+// userResumeOnly names the stops that need the user's Resume, for resumeAllowed's refusal of one with cause.
+func userResumeOnly(archived bool, cause proto.StopCause) string {
+	switch {
+	case cause.UserStopped():
+		return "Stops by the user (Stop, Close, Archive and close, /exit)"
+	case archived:
+		return "Archived Agents without a recorded non-user stop"
+	}
+	return "Stop causes this hub does not know"
 }
 
 // contextFull: what the model saw in c's latest reply fills proto.ContextNearlyFullShare of its window (both known).
@@ -221,6 +257,9 @@ func (s *Service) resumeAndSend(ctx context.Context, self string, am Device, c p
 		delete(startParams, "prompt")
 	} else if id, ok := params["client_msg_id"]; ok {
 		startParams["client_msg_id"] = id
+	}
+	if task != nil {
+		sctx = context.WithValue(sctx, placementTaskKey{}, task.todo.ID)
 	}
 	err = s.call(sctx, am.ID, DeviceSessionStart, startParams, &res)
 	if err != nil {

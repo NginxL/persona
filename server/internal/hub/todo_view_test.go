@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"reflect"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -24,17 +25,32 @@ import (
 // todoReplies is what a test manager answers GET /api/v1/todos and GET /api/v1/todos/places with, and any other path
 // it is given a body for (items).
 type todoReplies struct {
-	mu     sync.Mutex
-	list   string // the list's body
-	places string // the places' body; "" answers placesStatus (405 when 0: an older manager's mux)
-	status int
-	items  map[string]string
+	mu            sync.Mutex
+	list          string // the list's body
+	places        string // the places' body; "" answers placesStatus (405 when 0: an older manager's mux)
+	status        int
+	items         map[string]string
+	revision      string // X-Persona-Todos-Revision on the list and revision route; "": an older manager
+	fullReads     int
+	revisionReads int
 }
 
 func (r *todoReplies) set(list, places string, status int) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.list, r.places, r.status = list, places, status
+}
+
+func (r *todoReplies) setRevision(revision string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.revision = revision
+}
+
+func (r *todoReplies) reads() (full, revision int) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.fullReads, r.revisionReads
 }
 
 func (r *todoReplies) answer(method string, params json.RawMessage) (any, error) {
@@ -52,7 +68,17 @@ func (r *todoReplies) answer(method string, params json.RawMessage) (any, error)
 	}
 	switch {
 	case req.Path == "/api/v1/todos":
-		return json200(r.list), nil
+		r.fullReads++
+		resp := json200(r.list)
+		if r.revision != "" {
+			resp.Header["X-Persona-Todos-Revision"] = []string{r.revision}
+		}
+		return resp, nil
+	case req.Path == "/api/v1/todos/revision" && r.revision != "":
+		r.revisionReads++
+		resp := json200(`{"revision":` + strconv.Quote(r.revision) + `}`)
+		resp.Header["X-Persona-Todos-Revision"] = []string{r.revision}
+		return resp, nil
 	case req.Path == "/api/v1/todos/places" && r.places != "":
 		return json200(r.places), nil
 	case r.items[req.Path] != "":
@@ -498,5 +524,81 @@ func TestTodoTimelineOnAnOlderHub(t *testing.T) {
 	todoViewGet(t, h, srv, "/api/v1/todos/todo_a1", nil)
 	if calls := archiveHTTPCalls(t, a)[before:]; len(calls) != 1 || calls[0].Path != "/api/v1/todos/todo_a1" {
 		t.Fatalf("the to-do itself: %+v", calls)
+	}
+}
+
+// The pushed web read checks the merged managers' revisions, not their full lists (#13804). An unchanged conditional
+// read is a 304 without one manager rebuilding /todos; a change returns a new hub-wide token; an older manager fails the
+// cheap route closed so the web falls back to the original full read rather than trusting a partial answer.
+func TestTodoRevisionMergedWithoutFullReads(t *testing.T) {
+	h, srv, _, _, ra, rb := todoViewHub(t)
+	ra.set(`{"todos":[{"id":"todo_a1"}]}`, "", 0)
+	rb.set(`{"todos":[{"id":"todo_b1"}]}`, "", 0)
+	ra.setRevision(`W/"manager-a1"`)
+	rb.setRevision(`W/"manager-b1"`)
+
+	full, body := todoViewGet(t, h, srv, "/api/v1/todos", nil)
+	tag := full.Header.Get("X-Persona-Todos-Revision")
+	if full.StatusCode != http.StatusOK || tag == "" {
+		t.Fatalf("full list: %d, revision %q, %s", full.StatusCode, tag, body)
+	}
+	aFull, _ := ra.reads()
+	bFull, _ := rb.reads()
+
+	same, body := todoViewGet(t, h, srv, "/api/v1/todos/revision", map[string]string{"If-None-Match": tag})
+	if same.StatusCode != http.StatusNotModified || len(body) != 0 || same.Header.Get("ETag") != tag {
+		t.Fatalf("unchanged: %d %q %s", same.StatusCode, same.Header.Get("ETag"), body)
+	}
+	for name, r := range map[string]*todoReplies{"default": ra, "other": rb} {
+		fullReads, revisionReads := r.reads()
+		wantFull := aFull
+		if name == "other" {
+			wantFull = bFull
+		}
+		if fullReads != wantFull || revisionReads != 1 {
+			t.Errorf("%s reads: full %d→%d, revision %d", name, wantFull, fullReads, revisionReads)
+		}
+	}
+
+	rb.setRevision(`W/"manager-b2"`)
+	changed, body := todoViewGet(t, h, srv, "/api/v1/todos/revision", map[string]string{"If-None-Match": tag})
+	if changed.StatusCode != http.StatusOK || changed.Header.Get("ETag") == "" || changed.Header.Get("ETag") == tag {
+		t.Fatalf("changed: %d %q %s", changed.StatusCode, changed.Header.Get("ETag"), body)
+	}
+	if a, _ := ra.reads(); a != aFull {
+		t.Fatalf("a changed revision read built the default's full list: %d→%d", aFull, a)
+	}
+	if b, _ := rb.reads(); b != bFull {
+		t.Fatalf("a changed revision read built the other full list: %d→%d", bFull, b)
+	}
+
+	rb.setRevision("") // rolling upgrade: one old manager means no trustworthy merged revision
+	unsupported, _ := todoViewGet(t, h, srv, "/api/v1/todos/revision", map[string]string{"If-None-Match": tag})
+	if unsupported.StatusCode != http.StatusConflict {
+		t.Fatalf("mixed managers: %d, want 409 so the client falls back", unsupported.StatusCode)
+	}
+	mixed, _ := todoViewGet(t, h, srv, "/api/v1/todos", nil)
+	if got := mixed.Header.Get("X-Persona-Todos-Revision"); got != "" {
+		t.Fatalf("mixed full list passed off the base manager's token as hub-wide: %q", got)
+	}
+}
+
+func TestTodoRevisionFeatureNeedsEveryManager(t *testing.T) {
+	h, _, a, b, _, _ := todoViewHub(t)
+	listed := func() bool { return slices.Contains(h.features(), "todo_revision") }
+	if listed() {
+		t.Fatal("listed before either manager named todo_revision")
+	}
+	todoViewCapabilities(t, a, "todo_revision")
+	if listed() {
+		t.Fatal("listed while the other manager is old")
+	}
+	todoViewCapabilities(t, b, "todo_revision")
+	if !listed() {
+		t.Fatal("not listed with every manager capable")
+	}
+	todoViewCapabilities(t, b)
+	if listed() {
+		t.Fatal("still listed after one manager stopped naming it")
 	}
 }

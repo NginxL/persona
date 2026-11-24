@@ -20,6 +20,7 @@ import (
 // (#7314) when the launcher declares a larger window. What is not declared is left to the agent, Claude Code by the
 // model's own window, Codex by its model's default.
 type assistantCompaction struct {
+	cacheProxyBase string
 	// window: the declared automatic compaction window (CLAUDE_CODE_AUTO_COMPACT_WINDOW, a managed launcher's
 	// CompactWindow); capacity: the declared context window (CLAUDE_CODE_MAX_CONTEXT_TOKENS, MaxContext, the provider
 	// model's ContextWindow, Codex's model_context_window). 0: not declared.
@@ -227,6 +228,26 @@ func (n *Node) assistantCompactionPolicy(launcher, cwd, settings string, executi
 // (Anthropic's own API). A value the shell has only because the node has it is not the launcher's own; a managed one
 // counts as the launcher's (nothing Persona writes would win over it).
 func claudeEndpoint(p Probe, own, configDir, cwd, home string) (endpoint string, ownToolSearch bool) {
+	layers, shell := claudeEnvLayers(p, own, configDir, cwd, home)
+	base, set := "", false
+	for _, layer := range layers {
+		if v, ok := layer["ANTHROPIC_BASE_URL"]; ok && !set {
+			base, set = v, true
+		}
+		if _, ok := layer[toolSearchEnv]; ok {
+			ownToolSearch = true
+		}
+	}
+	if !set {
+		base = shell["ANTHROPIC_BASE_URL"]
+	}
+	if v, ok := shell[toolSearchEnv]; ok && p.Shell != nil && os.Getenv(toolSearchEnv) != v {
+		ownToolSearch = true
+	}
+	return base, ownToolSearch
+}
+
+func claudeEnvLayers(p Probe, own, configDir, cwd, home string) ([]map[string]string, map[string]string) {
 	read := func(arg string) map[string]string {
 		if arg == "" {
 			return nil
@@ -262,22 +283,7 @@ func claudeEndpoint(p Probe, own, configDir, cwd, home string) (endpoint string,
 			}
 		}
 	}
-	base, set := "", false
-	for _, layer := range layers {
-		if v, ok := layer["ANTHROPIC_BASE_URL"]; ok && !set {
-			base, set = v, true
-		}
-		if _, ok := layer[toolSearchEnv]; ok {
-			ownToolSearch = true
-		}
-	}
-	if !set {
-		base = shell["ANTHROPIC_BASE_URL"]
-	}
-	if v, ok := shell[toolSearchEnv]; ok && p.Shell != nil && os.Getenv(toolSearchEnv) != v {
-		ownToolSearch = true // the user's startup files export it
-	}
-	return base, ownToolSearch
+	return layers, shell
 }
 
 // capMain holds the main conversation on a managed launcher (pin: Persona writes its values) to the window the manager
@@ -406,6 +412,13 @@ func (n *Node) assistantCompactionSettings(id, cwd, settings string, c assistant
 	}
 	if c.toolSearchOff { // the endpoint refused tool search: over the provider's, the launcher's and the user's (#10365)
 		env[toolSearchEnv] = "false"
+	}
+	if c.cacheProxyBase != "" {
+		env["ANTHROPIC_BASE_URL"] = c.cacheProxyBase
+		// The refresh replays only requests that declare a one-hour cache (cachewarm.Replay). Claude Code declares
+		// one only for a subscriber or with this switch; on an API key or a gateway it sends a bare five-minute
+		// ephemeral marker, so nothing was ever retained to refresh.
+		env[promptCaching1hEnv] = "1"
 	}
 	s["env"] = env
 

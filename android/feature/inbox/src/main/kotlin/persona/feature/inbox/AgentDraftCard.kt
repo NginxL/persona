@@ -7,6 +7,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import persona.core.navigation.Navigator
 import kotlinx.coroutines.CoroutineScope
+import persona.core.inbox.*
 
 /**
  * The AI twin's work on an item, in its row and on its page: busy or failed as a status line, and an AI draft (the AI

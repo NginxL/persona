@@ -19,7 +19,7 @@
 | [inbox.json](inbox.json) | GET `/api/v1/inbox` | `InboxItem.listed` 清理列表中的内部字段，再经 `writeJSON` |
 | [feed.json](feed.json) | GET `/api/v1/assistant/conversations/{id}/feed` | `answeredBody` 由 `answeredItems` 等生成，再经 `writeJSON` |
 | [queue.json](queue.json) | POST `/api/v1/sessions/{mid}/{sid}/queue` 的应答（Persona 对话取回、删除、移动排队消息） | `proto.QueueEdit` 按 node 的编码生成，再经 `writeJSON` 写出；hub 对此应答原样转发 |
-| [errors.json](errors.json) | 未鉴权请求的 401；发送及屏幕操作拒绝的 409 | 调用 `Hub.auth`、`callErr`，同时断言 HTTP 状态 |
+| [errors.json](errors.json) | 未鉴权请求的 401；发送及屏幕操作拒绝的 409；a message with too many pictures, 413 `images_over_limit` | 调用 `Hub.auth`、`callErr`、`apierr.ImagesOverLimit`，同时断言 HTTP 状态 |
 | [compatibility.json](compatibility.json) | 上述类型的旧格式、未知字段及异常类型 | 用 Go 编码器构造兼容性输入，交当前 iOS 解码；异常输入不代表 hub 正常输出 |
 
 `wireNode` 通过内存管道提供固定的 `session.items` RPC 响应；hub 仍执行真实的分页包装、图片处理和补发逻辑。所有样本都没有启动完整 hub、node、herdr，不监听端口，也不访问数据库。

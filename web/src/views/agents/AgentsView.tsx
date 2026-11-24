@@ -5,6 +5,7 @@ import { AgentAvatar, type AvatarSession } from "./AgentAvatar";
 import {
   blockView,
   fetchMessages,
+  fetchAgentOutbox,
   arrangeSessions,
   togglePin,
   updateAgentPrefs,
@@ -20,6 +21,15 @@ import {
   type AgentMessage,
   type Outgoing,
 } from "../../lib/agents";
+import {
+  applyPersonalOutbox,
+  discardPersonalOutgoing,
+  personalOutgoingStore,
+  personalOutgoingStoreCurrent,
+  reconcilePersonalOutgoing,
+  restorePersonalOutgoing,
+  savePersonalOutgoing,
+} from "../../lib/agent-outgoing";
 import { ApiError, errorText } from "../../lib/api";
 import { ago, clock, uuid } from "../../lib/format";
 import { href, navigate, onLinkClick } from "../../lib/router";
@@ -38,7 +48,8 @@ import { PagedSessionList } from "./PagedSessionList";
 import { SESSION_LIST_METRICS, SESSION_LIST_STYLE } from "../../ui/list-metrics";
 
 export function AgentsView({ id, onToggleSidebar }: { id?: string; onToggleSidebar: () => void }) {
-  return id ? <AgentSessionView id={id} onToggleSidebar={onToggleSidebar} /> : <AgentList onToggleSidebar={onToggleSidebar} />;
+  // one mount per conversation: its outgoing list and storage scope belong to that id, never the previous one (#12555)
+  return id ? <AgentSessionView key={id} id={id} onToggleSidebar={onToggleSidebar} /> : <AgentList onToggleSidebar={onToggleSidebar} />;
 }
 
 function Header({ title, sub, avatar, onToggleSidebar }: { title: string; sub?: string; avatar?: AvatarSession; onToggleSidebar: () => void }) {
@@ -200,7 +211,18 @@ function AgentSessionView({ id, onToggleSidebar }: { id: string; onToggleSidebar
   const [error, setError] = useState("");
   // the hub has no such conversation (an old or mistyped link, or one removed since): said plainly, with the way back
   const [missing, setMissing] = useState(false);
-  const [out, setOut] = useState<Outgoing[]>([]);
+  const [outgoingStore] = useState(() => personalOutgoingStore(id));
+  const [out, setOutState] = useState<Outgoing[]>(() => restorePersonalOutgoing(outgoingStore));
+  const outRef = useRef(out);
+  // Persist synchronously, before a composer clears or a late response can be overtaken by Discard. React only renders
+  // the committed list; the ref is the serial send/reconcile/discard order for this mounted conversation.
+  const commitOut = useCallback((next: Outgoing[], persist = true): Outgoing[] => {
+    if (next === outRef.current) return next;
+    const saved = persist ? savePersonalOutgoing(outgoingStore, next) : next;
+    outRef.current = saved;
+    setOutState(saved);
+    return saved;
+  }, [outgoingStore]);
   const scroller = useRef<HTMLDivElement>(null);
   const stick = useRef(true);
   const keepFromBottom = useRef<number | null>(null);
@@ -210,9 +232,15 @@ function AgentSessionView({ id, onToggleSidebar }: { id: string; onToggleSidebar
   const loadLatest = useCallback(
     async (first: boolean) => {
       try {
-        const p = await fetchMessages(id);
+        const [p, metadata] = await Promise.all([
+          fetchMessages(id),
+          // An older hub or a failed metadata read must not take the transcript down with it. Null changes no status.
+          fetchAgentOutbox(id).then((r) => r.outbox).catch(() => null),
+        ]);
+        if (!personalOutgoingStoreCurrent(outgoingStore)) return;
         if (p.session) setPageSession(p.session);
         setMessages((cur) => (cur && !first ? mergeMessages(cur, p.messages) : p.messages));
+        commitOut(reconcilePersonalOutgoing(outRef.current, p.messages, metadata));
         if (first) {
           setCursor(p.nextCursor);
           setHasMore(p.hasMore);
@@ -225,11 +253,12 @@ function AgentSessionView({ id, onToggleSidebar }: { id: string; onToggleSidebar
           void markRead(id).then(() => setLocalRead(id)).catch(() => {});
         }
       } catch (e) {
+        if (!personalOutgoingStoreCurrent(outgoingStore)) return;
         if (e instanceof ApiError && e.status === 404) setMissing(true);
         setError(errorText(e));
       }
     },
-    [id],
+    [id, outgoingStore, commitOut],
   );
 
   useEffect(() => {
@@ -267,15 +296,26 @@ function AgentSessionView({ id, onToggleSidebar }: { id: string; onToggleSidebar
   }, [messages, shown.length]);
 
   const deliver = async (o: Outgoing) => {
-    setOut((xs) => [...xs.filter((x) => x.clientId !== o.clientId), { ...o, status: "sending", error: undefined }]);
+    const started: Outgoing = { ...o, status: "sending", error: undefined, updatedAt: Date.now() };
+    const staged = commitOut([...outRef.current.filter((x) => x.clientId !== o.clientId), started]);
+    // Another mounted view may have discarded this id. Its tombstone wins; only a newly composed message gets a new id.
+    if (!staged.some((x) => x.clientId === o.clientId)) return;
     stick.current = true;
     try {
       const r = await sendMessage(id, o.clientId, o.text);
+      if (!personalOutgoingStoreCurrent(outgoingStore)) return;
       const failed = r.outbox?.status === "failed";
-      setOut((xs) => xs.map((x) => (x.clientId === o.clientId ? { ...x, status: failed ? "failed" : "sent", error: failed ? r.outbox.error || t("agents-agentsview.send_failed") : undefined } : x)));
+      commitOut(outRef.current.flatMap((x) => {
+        if (x.clientId !== o.clientId) return [x];
+        if (!r.outbox) return [{ ...x, status: "sent" as const, error: undefined, updatedAt: Date.now() }];
+        const receipt = failed ? { ...r.outbox, error: r.outbox.error || t("agents-agentsview.send_failed") } : r.outbox;
+        const next = applyPersonalOutbox(x, receipt);
+        return next ? [next] : [];
+      }));
       void loadLatest(false);
     } catch (e) {
-      setOut((xs) => xs.map((x) => (x.clientId === o.clientId ? { ...x, status: "failed", error: errorText(e) } : x)));
+      if (!personalOutgoingStoreCurrent(outgoingStore)) return;
+      commitOut(outRef.current.map((x) => (x.clientId === o.clientId ? { ...x, status: "failed", error: errorText(e), updatedAt: Date.now() } : x)));
     }
   };
 
@@ -304,7 +344,7 @@ function AgentSessionView({ id, onToggleSidebar }: { id: string; onToggleSidebar
           {messages?.map((m) => <MessageRow key={m.externalId} m={m} />)}
           {shown.map((o) => (
             <div key={o.clientId} className="flex flex-col items-end gap-1">
-              <div className={cx("max-w-[85%] rounded-[14px] bg-accent-tint px-3 py-2 text-[13.5px] whitespace-pre-wrap text-ink", o.status === "failed" && "ring-1 ring-red")}>{o.text}</div>
+              <div className={cx("max-w-[85%] rounded-[14px] bg-accent-tint px-3 py-2 text-[13.5px] break-words whitespace-pre-wrap text-ink", o.status === "failed" && "ring-1 ring-red")}>{o.text}</div>
               <div className="flex items-center gap-2 text-[11px] text-ink-3">
                 {o.status === "sending" && <><Spinner size={10} /> {t("agents-agentsview.sending")}</>}
                 {o.status === "sent" && t("agents-agentsview.sent")}
@@ -314,7 +354,7 @@ function AgentSessionView({ id, onToggleSidebar }: { id: string; onToggleSidebar
                     <button type="button" onClick={() => void deliver(o)} className="flex items-center gap-1 text-accent hover:underline">
                       <Icon name="retry" size={11} /> {t("agents-agentsview.retry")}
                     </button>
-                    <button type="button" onClick={() => setOut((xs) => xs.filter((x) => x.clientId !== o.clientId))} className="hover:text-ink-2">{t("agents-agentsview.discard")}</button>
+                    <button type="button" onClick={() => commitOut(discardPersonalOutgoing(outgoingStore, outRef.current, o.clientId), false)} className="hover:text-ink-2">{t("agents-agentsview.discard")}</button>
                   </>
                 )}
               </div>
@@ -322,7 +362,7 @@ function AgentSessionView({ id, onToggleSidebar }: { id: string; onToggleSidebar
           ))}
         </div>
       </div>
-      <AgentComposer id={id} disabled={!canSend} reason={session ? t("agents-agentsview.cannot_send") : t("agents-agentsview.loading")} onSend={(text) => void deliver({ clientId: uuid(), text, at: Date.now(), status: "sending" })} />
+      <AgentComposer id={id} disabled={!canSend} reason={session ? t("agents-agentsview.cannot_send") : t("agents-agentsview.loading")} onSend={(text) => { const at = Date.now(); void deliver({ clientId: uuid(), text, at, updatedAt: at, status: "sending" }); }} />
     </div>
   );
 }
@@ -355,7 +395,7 @@ function MessageRow({ m }: { m: AgentMessage }) {
         const v = blockView(b);
         if (v.kind === "text")
           return mine ? (
-            <div key={i} className="max-w-[85%] rounded-[14px] bg-accent-tint px-3 py-2 text-[13.5px] whitespace-pre-wrap text-ink">{v.text}</div>
+            <div key={i} className="max-w-[85%] rounded-[14px] bg-accent-tint px-3 py-2 text-[13.5px] break-words whitespace-pre-wrap text-ink">{v.text}</div>
           ) : (
             <div key={i} className="max-w-full min-w-0 text-[13.5px] text-ink"><Markdown text={v.text} /></div>
           );

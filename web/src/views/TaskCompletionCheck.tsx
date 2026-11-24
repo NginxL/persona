@@ -76,15 +76,15 @@ const deliveryKeys: Record<string, string> = {
   merged: "todos.delivery_merged", off: "todos.delivery_off",
 };
 const unblockKeys: Record<string, string> = {
-  user: "todos.unblock_user", agent: "todos.unblock_agent", other: "todos.unblock_other",
+  user: "todos.unblock_user", agent: "todos.unblock_agent", other: "todos.unblock_other", supervisor: "todos.unblock_supervisor",
 };
 
 const labelKey = (keys: Record<string, string>, code: string, fallback: string) => Object.hasOwn(keys, code) ? keys[code] : fallback;
 
-/** What applying the check did (#4867): a done verdict closes an unsupervised task and puts a supervised one up for
- *  review; any other verdict is only kept on the task. */
-const appliedKey = (check: TaskDoneCheck, supervised: boolean) =>
-  check.verdict !== "done" ? "todos.check_applied_kept" : supervised ? "todos.check_applied_review" : "todos.check_applied_closed";
+/** What applying the check did (#4867): every done verdict enters supervisor review; a judge never closes the task
+ *  (#5732). Any other verdict is only kept on the task. The second argument stays for older callers. */
+const appliedKey = (check: TaskDoneCheck, _supervised: boolean) =>
+  check.verdict !== "done" ? "todos.check_applied_kept" : "todos.check_applied_review";
 
 export function CompletionCheckResult({ check, at, supervised = false }: { check: TaskDoneCheck; at: Date; supervised?: boolean }) {
   const delivery = check.delivery;

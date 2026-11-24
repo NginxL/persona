@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"sync"
@@ -47,8 +48,12 @@ func appEffortChatOwned(t *testing.T, owned, later string) (n *Node, id string, 
 	cwd := t.TempDir()
 	rollout = writeAppRollout(t, home, appChat, cwd, time.Now())
 	at := time.Now().Add(-time.Hour).UTC().Format(time.RFC3339Nano)
+	cwdJSON, err := json.Marshal(cwd)
+	if err != nil {
+		t.Fatal(err)
+	}
 	appendLines(t, rollout,
-		`{"timestamp":"`+at+`","type":"turn_context","payload":{"cwd":"`+cwd+`","model":"gpt-x","effort":"high","approval_policy":"never","sandbox_policy":{"type":"danger-full-access"}}}`,
+		`{"timestamp":"`+at+`","type":"turn_context","payload":{"cwd":`+string(cwdJSON)+`,"model":"gpt-x","effort":"high","approval_policy":"never","sandbox_policy":{"type":"danger-full-access"}}}`,
 		`{"timestamp":"`+at+`","type":"event_msg","payload":{"type":"task_started"}}`,
 		`{"timestamp":"`+at+`","type":"event_msg","payload":{"type":"task_complete"}}`)
 	n = remoteTestNode(t)
@@ -287,6 +292,9 @@ func TestCodexAppEffortsAreTheModelsOnTheAppsCodex(t *testing.T) {
 
 // The App's codex is asked over stdio as the App's client, hidden models included, its efforts per model.
 func TestReadCodexAppModelsAsksTheAppsCodex(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Unix shell fixture; Windows coverage uses TestWindowsReadCodexAppModelsAsksTheAppsCodex")
+	}
 	bin, seen := t.TempDir(), filepath.Join(t.TempDir(), "seen")
 	cli := filepath.Join(bin, "codex")
 	list := `{"id":2,"result":{"data":[{"model":"gpt-x","hidden":true,"defaultReasoningEffort":"low","supportedReasoningEfforts":[{"reasoningEffort":"low"},{"reasoningEffort":"ultra"}]}],"nextCursor":null}}`

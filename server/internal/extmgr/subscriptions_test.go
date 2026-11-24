@@ -211,7 +211,7 @@ func TestSubscriptionsAreInboxAndKnowledgeBaseSources(t *testing.T) {
 	at := now.Add(-2 * time.Minute)
 	items := []subscriptions.Item{{UID: "n1", Title: "Office hours moved", Time: &at, Body: "Made-up text", Kind: "sub_notice"},
 		{UID: "n2", Title: "Form due", Time: &at, Body: "Made-up text", Kind: "sub_notice"}}
-	if err := store.CommitRun(ctx, subscriptions.RunCommit{Sub: sub, Revision: 1, Items: items, Now: mark}); err != nil {
+	if _, err := store.CommitRun(ctx, subscriptions.RunCommit{Sub: sub, Revision: 1, Items: items, Now: mark}); err != nil {
 		t.Fatal(err)
 	}
 	h.subs = subscriptions.New(h.subscriptionOptions(store))

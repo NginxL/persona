@@ -1,6 +1,7 @@
 // The sidebar's entries around Persona (#1239): which row a route lights up, the pages under Persona, and how a long list
 // keeps the open row. Pure, so the order and the selection are tested without a DOM.
 import { parse, type Route } from "./router";
+import { moduleNavKey } from "../core/module-host";
 
 /** The route whose row the sidebar lights (#12055). An Agent's page opened from inside another page (a to-do, a
  *  knowledge project, a meeting, a Persona conversation's card) is a drill-down: the sidebar keeps the row of the page it
@@ -23,8 +24,10 @@ export function sidebarActiveKey(route: Route, main?: string, from?: string): st
       return !r.sid || r.sid === main ? "persona" : `j:${r.sid}`;
     case "persona-new":
       return "j:new";
-    case "health":
-      return "health";
+    case "module":
+      return moduleNavKey(r);
+    case "track":
+      return spaceNavKey(r.slug);
     case "history":
       return r.origin ? `auto:${r.origin}` : "history";
     case "machine":
@@ -38,6 +41,9 @@ export function sidebarActiveKey(route: Route, main?: string, from?: string): st
   }
 }
 
+/** A domain space's sidebar row (the Spaces section, views/SidebarSpaces.tsx). */
+export const spaceNavKey = (slug: string) => `track:${slug}`;
+
 /** An extension page's sidebar row (docs/extensions/extensions.md "UI slots" nav_page). */
 export const extensionNavKey = (extension: string, ui: string) => `p:${extension}/${ui}`;
 
@@ -49,8 +55,9 @@ export function firstAndCurrent<T>(list: readonly T[], n: number, isCurrent: (x:
 }
 
 /** The page entries under Persona, in the sidebar's order (the app's "Assistant" first, then the rest of its drawer). "Messages" shows
- * only in a browser that turned on "Show messages on home" (lark-chats.ts), on a hub with feature `lark`. The extensions' pages (nav_page) go right before "Settings". */
-export const NAV_PAGES = ["home", "inbox", "health", "messages", "starred", "workspace-board", "todos", "routines", "kb", "machines", "terminal", "settings"] as const;
+ * only in a browser that turned on "Show messages on home" (lark-chats.ts), on a hub with feature `lark`. The extensions' pages (nav_page) go right before "Settings".
+ * The enabled feature modules' pages (core/module-host.ts navItems) go right after the page each names (`after`). */
+export const NAV_PAGES = ["home", "inbox", "messages", "starred", "workspace-board", "todos", "routines", "kb", "machines", "terminal", "settings"] as const;
 
 /**
  * Where the page goes when another assistant becomes the current one (the sidebar's switcher): a page about one thing

@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/nwverse/persona/server/internal/aiwire"
+	"github.com/nwverse/persona/server/internal/modelhttp"
 	"github.com/nwverse/persona/server/internal/proto"
 	"github.com/nwverse/persona/server/internal/rpc"
 	"github.com/nwverse/persona/server/internal/shellcmd"
@@ -43,6 +44,9 @@ const (
 // modelRunSlots: at most this many runs at a time on this computer; the others wait within their own time.
 // ponytail: a fixed two, a setting if someone's computer takes more.
 var modelRunSlots = make(chan struct{}, 2)
+
+// An API purpose's request answered by a launcher here; the handler zeroes the params it is handed.
+func init() { nodeRPC(proto.MethodModelRun, (*Node).modelRun) }
 
 // modelRun answers model.run. params are zeroed once read.
 func (n *Node) modelRun(ctx context.Context, params json.RawMessage) (any, error) {
@@ -178,7 +182,11 @@ func (n *Node) modelRunClaude(ctx context.Context, p proto.ModelRunParams, dir s
 	if err != nil {
 		return proto.ModelRunAnswer{}, err
 	}
-	b.WriteString(scriptSettingsFlag(n.claudeSettings(ctx, p.Launcher, ours, dir)))
+	settings, err := n.sourceClaudeSettings(ctx, p.Launcher, dir, n.claudeSettings(ctx, p.Launcher, ours, dir), "", modelhttp.Source{Role: "background"})
+	if err != nil {
+		return proto.ModelRunAnswer{}, err
+	}
+	b.WriteString(scriptSettingsFlag(settings))
 	in, err := writeTempFile(dir, "prompt.md", p.Prompt)
 	if err != nil {
 		return proto.ModelRunAnswer{}, err
@@ -301,7 +309,8 @@ func (n *Node) modelRunCodex(ctx context.Context, p proto.ModelRunParams, dir st
 	if err != nil {
 		return proto.ModelRunAnswer{}, err
 	}
-	cmd := loginShell(ctx, "cd "+scriptPath(dir)+" && "+n.launcherForScript(p.Launcher)+b.String()+" < "+scriptPath(in))
+	cmd := loginShell(ctx, "cd "+scriptPath(dir)+" && "+codexShellWith(n.launcherForScript(p.Launcher)+b.String(), "")+" < "+scriptPath(in))
+	cmd.Env = append(cmd.Environ(), modelSourceEnvironment(modelhttp.Source{Role: "background"}, n.bin)...)
 	killGroupOnCancel(cmd)
 	raw, runErr := cmd.CombinedOutput()
 	text := strings.TrimSpace(string(raw))

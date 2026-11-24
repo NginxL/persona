@@ -1,0 +1,13 @@
+{
+  "name": "resource_status",
+  "description": "读取共享门禁、排队票号、重复标记和镜像时效。未知或过期不代表运行成功。",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "resource": {
+        "type": "string"
+      }
+    },
+    "required": []
+  }
+}

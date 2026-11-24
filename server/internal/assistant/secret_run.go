@@ -96,7 +96,7 @@ func (s *Service) toolSecretRun(ctx context.Context, machine, self string, args 
 		"delivery": "stdin"})
 	now := time.Now().UTC()
 	expires := now.Add(secretRunCardWait)
-	r, err := s.ask(ctx, proto.Interaction{ID: "ix_" + randomHex(6), MachineID: machine, SessionID: self, SessionTitle: "Persona",
+	r, err := s.ask(withCard(ctx, cardSecretForm), proto.Interaction{ID: "ix_" + randomHex(6), MachineID: machine, SessionID: self, SessionTitle: "Persona",
 		Kind: proto.IxPermission, ToolName: proto.SecretRunTool, ToolInput: input, Summary: secretRunSummary(l, name, a.Purpose, a.Commands),
 		Fields: []proto.Field{{Key: secretRunField, Label: i18n.T(l, "assistant-secret_run.password"),
 			Placeholder: i18n.T(l, "assistant-secret_run.password_hint"), Secret: true}},
@@ -113,7 +113,7 @@ func (s *Service) toolSecretRun(ctx context.Context, machine, self string, args 
 	case r.Allow != nil && !*r.Allow:
 		out.Status, out.Message = secretDeclined, "The user declined on the phone: nothing ran."
 	case r.Dismiss:
-		out.Status, out.Message = secretRunDismissal(time.Now(), expires)
+		out.Status, out.Message = secretRunDismissal(r, time.Now(), expires)
 	case r.Allow == nil, strings.TrimSpace(password) == "", password == redactedValue: // a replay only ever has the marker
 		out.Status, out.Message = secretRefused, secretRefusedText
 	case strings.ContainsFunc(password, unicode.IsControl): // sudo would read up to a line break, the rest left on stdin
@@ -147,9 +147,19 @@ const (
 // manager's timer, or the hub's queue on its own clock) may say so a moment before the deadline by this clock.
 const secretRunExpirySlack = 2 * time.Second
 
-// secretRunDismissal is how a card dismissed at now ended: before its deadline (expires) the user closed it on the
-// phone ("hand back to computer", or a client that only closes it); at its deadline it expired. Nothing ran either way.
-func secretRunDismissal(now, expires time.Time) (status, message string) {
+// secretRunDismissal is how a card dismissed (r) at now ended. The manager says when it expired, or was withdrawn or
+// cleared before anyone answered it (r.Reason): nobody answered, which is no decline (status expired, as a card whose
+// time ran out, with what happened in its message). Otherwise before its deadline (expires) the user closed it on the
+// phone ("hand back to computer", or a client that only closes it), and at its deadline it expired. Nothing ran either
+// way.
+func secretRunDismissal(r proto.Resolution, now, expires time.Time) (status, message string) {
+	switch r.Outcome() {
+	case proto.OutcomeWithdrawn, proto.OutcomeCleared:
+		return secretExpired, "The password card was withdrawn before anyone answered it: nothing ran. The user did NOT " +
+			"decline it, so do not say they did."
+	case proto.OutcomeExpired:
+		now = expires // expired, whatever the clock says
+	}
 	if now.Before(expires.Add(-secretRunExpirySlack)) {
 		return secretDeclined, "The user closed the password card on the phone without running it: nothing ran."
 	}

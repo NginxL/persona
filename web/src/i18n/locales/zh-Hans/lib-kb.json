@@ -60,11 +60,6 @@
   "related_recordings": "关联的录音",
   "related_topics": "关联的主题",
   "hit_transcript": "转写",
-  "device_phone": "手机",
-  "device_watch": "手表",
-  "duration_hours": "{h} 小时 {m} 分",
-  "duration_minutes": "{m} 分 {s} 秒",
-  "duration_seconds": "{s} 秒",
   "hit_minutes": "会议纪要",
   "hit_recap": "全天回顾"
 }

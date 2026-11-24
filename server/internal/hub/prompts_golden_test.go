@@ -396,7 +396,8 @@ func TestTodoLessonsGolden(t *testing.T) {
 				Answers:       []prompts.TodoLessonsAnswer{{Question: "Which simulator?", Choice: "The stock one"}},
 				Result:        []prompts.TodoLessonsCriterion{{Criterion: "No crash in landscape", State: "met", Evidence: "Screenshot test passes"}},
 				ExpectMinutes: 30, ActualMinutes: 95, Reply: "Fixed: the page used a fixed width.",
-				Known: []prompts.TodoLessonsKnown{{ID: "lesson-1", Kind: "missing_context", Text: "Use the stock simulator for layout bugs."}},
+				Known:   []prompts.TodoLessonsKnown{{ID: "lesson-1", Kind: "missing_context", Text: "Use the stock simulator for layout bugs."}},
+				Deleted: []prompts.TodoLessonsKnown{{ID: "lesson-retired-2", Kind: "wasted_step", Text: "Rebuild all targets before testing."}},
 			}))
 			golden(t, "todo_project_lessons."+tc.name, prompts.RenderTodoProjectLessons(prompts.TodoProjectLessons{
 				Language: tc.language, Name: `Weather "direction"`, Lessons: []prompts.TodoProjectLesson{

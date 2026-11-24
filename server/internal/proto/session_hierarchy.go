@@ -47,15 +47,21 @@ type SessionHierarchy struct {
 	// StartedAt is when the session began: its transcript's first line, a runtime's created time. Set by the node where
 	// it knows it (Codex rollouts, runtime rows); zero when it does not.
 	StartedAt time.Time `json:"started_at,omitzero"`
+	// CreationID correlates an assistant-dispatched start with its pre-created to-do, including when the start's answer is
+	// lost. Empty for manually opened and older sessions (#5732). Set by the node from its persisted creation record.
+	CreationID string `json:"creation_id,omitempty"`
 	// AskingParentSessionID names the parent of a runtime child that waits for the user (status blocked). Such a row
 	// has is_subagent, parent_session_id and root_session_id cleared, so that apps which fold every child under its
 	// parent still list it while it needs the user (#4494); this keeps its parent known to those that fold it as a card
 	// in the parent's chat. Set by the node.
 	AskingParentSessionID string `json:"asking_parent_session_id,omitempty"`
-	// FoldedUnder is the listed session on the same machine this child folds under: its topmost listed ancestor. Set by
-	// the manager (foldSessions, assistant/fleet_fold.go); empty for a session that is not a child, an orphan and a
-	// member of a cycle.
+	// FoldedUnder is the listed session this child folds under: its topmost listed ancestor (on the same machine when
+	// FoldedUnderMachineID is empty, or on FoldedUnderMachineID when cross-machine). Set by the manager (fleet_fold.go);
+	// empty for a session that is not a child, an orphan and a member of a cycle.
 	FoldedUnder string `json:"folded_under,omitempty"`
+	// FoldedUnderMachineID is the machine of FoldedUnder when the parent lives on another computer; empty when on the
+	// same machine as the session itself. Set by the manager beside FoldedUnder.
+	FoldedUnderMachineID string `json:"folded_under_machine_id,omitempty"`
 	// FoldedAs says why a row that is no child folds under FoldedUnder: FoldedAsWorker for a worker of a tab's lead
 	// (#5180), FoldedAsSide for a side session (#7944). Set by the manager beside FoldedUnder; empty for a child, whose
 	// own fields say why.
@@ -64,6 +70,15 @@ type SessionHierarchy struct {
 	// side (a side's own Codex children): its card and child card belong to that side's chat, not FoldedUnder's (#7944).
 	// Set by the manager beside FoldedUnder.
 	FoldedSide string `json:"folded_side,omitempty"`
+	// ParentMachineID is the machine of ParentSessionID when the parent lives on another computer; empty when on the
+	// same machine as the session itself. Set by the manager for cross-machine subagents (e.g. A2A / dispatch).
+	ParentMachineID string `json:"parent_machine_id,omitempty"`
+	// A2ATaskID is the durable A2A task that launched this subagent session, when started via A2A or A2A-backed dispatch.
+	// Empty for ordinary A2A peer messages to existing sessions and non-A2A subagents. Set by the manager.
+	A2ATaskID string `json:"a2a_task_id,omitempty"`
+	// SubagentOrigin classifies how a subagent session was created: SubagentOriginNative, SubagentOriginA2A,
+	// SubagentOriginDispatch, SubagentOriginRuntime or SubagentOriginSpawned. Set by the manager.
+	SubagentOrigin string `json:"subagent_origin,omitempty"`
 	// Children counts the sessions folded under this one, all depths, by their own states. Set by the manager on the
 	// topmost listed ancestor only.
 	Children *SessionChildren `json:"children,omitempty"`
@@ -84,7 +99,30 @@ type SessionHierarchy struct {
 	// counting only running work. Oldest first, at most eight; the node lists entries from the last day. Sparse storage
 	// keeps ordinary Session rows in their allocation size class.
 	BackgroundEnded []BackgroundTask `json:"background_ended,omitempty"`
-	Deleted         bool             `json:"deleted,omitempty"` // Permanent manager tombstone; use Session.IsDeleted/SetDeleted.
+	// ContextBreakdown splits current context window occupancy by category with an exact/estimated honesty marker.
+	// Stored here so ordinary Session rows stay inside their 1,536-byte allocation size class; encoded as a top-level
+	// "context_breakdown" wire key.
+	ContextBreakdown *ContextBreakdown `json:"context_breakdown,omitempty"`
+	Deleted          bool              `json:"deleted,omitempty"` // Permanent manager tombstone; use Session.IsDeleted/SetDeleted.
+}
+
+// ContextBreakdown returns the session's structured context window breakdown, or nil when unavailable.
+// Shared with the row's other copies: not to be modified in place.
+func (s *Session) ContextBreakdown() *ContextBreakdown {
+	if s.Hierarchy == nil {
+		return nil
+	}
+	return s.Hierarchy.ContextBreakdown
+}
+
+// SetContextBreakdown replaces the session's context breakdown without changing other copies of the row.
+func (s *Session) SetContextBreakdown(b *ContextBreakdown) {
+	if s.ContextBreakdown().Equal(b) {
+		return
+	}
+	h := s.hierarchy()
+	h.ContextBreakdown = b.Clone()
+	s.setHierarchy(h)
 }
 
 // BackgroundEnded returns recent shell / Monitor outcomes, oldest first; nil when none are retained.
@@ -131,6 +169,15 @@ const FoldedAsWorker = "worker"
 // (docs/protocol/protocol.md "Session hierarchy", #7944).
 const FoldedAsSide = "side"
 
+// SubagentOrigin values for SessionHierarchy.SubagentOrigin.
+const (
+	SubagentOriginNative   = "native"
+	SubagentOriginA2A      = "a2a"
+	SubagentOriginDispatch = "dispatch"
+	SubagentOriginRuntime  = "runtime"
+	SubagentOriginSpawned  = "spawned"
+)
+
 // SessionChildren is the rollup a parent row carries of the children folded under it (SessionHierarchy.Children).
 type SessionChildren struct {
 	Total    int `json:"total"`
@@ -147,10 +194,11 @@ type SessionChildren struct {
 }
 
 func (h *SessionHierarchy) empty() bool {
-	return !h.HiddenByDirectory && h.ParentAgentID == "" && h.StartedAt.IsZero() && h.AskingParentSessionID == "" && h.FoldedUnder == "" && h.FoldedAs == "" &&
-		h.FoldedSide == "" &&
+	return !h.HiddenByDirectory && h.ParentAgentID == "" && h.StartedAt.IsZero() && h.CreationID == "" && h.AskingParentSessionID == "" &&
+		h.FoldedUnder == "" && h.FoldedUnderMachineID == "" && h.FoldedAs == "" && h.FoldedSide == "" &&
+		h.ParentMachineID == "" && h.A2ATaskID == "" && h.SubagentOrigin == "" &&
 		h.Children == nil && len(h.EngineHistory) == 0 && h.CompletedTodo == nil && len(h.Aliases) == 0 &&
-		len(h.BackgroundEnded) == 0 && !h.Deleted
+		len(h.BackgroundEnded) == 0 && h.ContextBreakdown == nil && !h.Deleted
 }
 
 // HiddenByDirectory reports the manager's directory visibility without growing every session row.
@@ -199,6 +247,7 @@ func (s *Session) hierarchy() SessionHierarchy {
 	h.EngineHistory = slices.Clone(h.EngineHistory)
 	h.Aliases = slices.Clone(h.Aliases)
 	h.BackgroundEnded = slices.Clone(h.BackgroundEnded)
+	h.ContextBreakdown = h.ContextBreakdown.Clone()
 	return h
 }
 
@@ -252,6 +301,24 @@ func (s *Session) StartedAt() time.Time {
 	return s.Hierarchy.StartedAt
 }
 
+// CreationID is the identity the node recorded for an assistant-dispatched start; "" for any other session.
+func (s *Session) CreationID() string {
+	if s.Hierarchy == nil {
+		return ""
+	}
+	return s.Hierarchy.CreationID
+}
+
+// SetCreationID records an assistant-dispatched start's identity ("" when there is none).
+func (s *Session) SetCreationID(id string) {
+	if s.CreationID() == id {
+		return
+	}
+	h := s.hierarchy()
+	h.CreationID = id
+	s.setHierarchy(h)
+}
+
 // AskingParentSessionID is the parent of a blocked runtime child (SessionHierarchy.AskingParentSessionID).
 func (s *Session) AskingParentSessionID() string {
 	if s.Hierarchy == nil {
@@ -266,6 +333,78 @@ func (s *Session) FoldedUnder() string {
 		return ""
 	}
 	return s.Hierarchy.FoldedUnder
+}
+
+// FoldedUnderMachineID is the machine of FoldedUnder when cross-machine (SessionHierarchy.FoldedUnderMachineID); "" when same machine or none.
+func (s *Session) FoldedUnderMachineID() string {
+	if s.Hierarchy == nil {
+		return ""
+	}
+	return s.Hierarchy.FoldedUnderMachineID
+}
+
+// ParentMachineID is the machine of ParentSessionID when cross-machine (SessionHierarchy.ParentMachineID); "" when same machine or none.
+func (s *Session) ParentMachineID() string {
+	if s.Hierarchy == nil {
+		return ""
+	}
+	return s.Hierarchy.ParentMachineID
+}
+
+// SetParentMachineID sets the parent's machine ID ("" for same machine / none).
+func (s *Session) SetParentMachineID(id string) {
+	if s.ParentMachineID() == id {
+		return
+	}
+	h := s.hierarchy()
+	h.ParentMachineID = id
+	s.setHierarchy(h)
+}
+
+// A2ATaskID is the A2A task that launched this subagent session (SessionHierarchy.A2ATaskID); "" when none.
+func (s *Session) A2ATaskID() string {
+	if s.Hierarchy == nil {
+		return ""
+	}
+	return s.Hierarchy.A2ATaskID
+}
+
+// SetA2ATaskID sets the A2A task ID that launched this subagent ("" for none).
+func (s *Session) SetA2ATaskID(id string) {
+	if s.A2ATaskID() == id {
+		return
+	}
+	h := s.hierarchy()
+	h.A2ATaskID = id
+	s.setHierarchy(h)
+}
+
+// SubagentOrigin is how this subagent session was created (SessionHierarchy.SubagentOrigin); "" when unset.
+func (s *Session) SubagentOrigin() string {
+	if s.Hierarchy == nil {
+		return ""
+	}
+	return s.Hierarchy.SubagentOrigin
+}
+
+// SetSubagentOrigin sets the subagent origin ("" for unset).
+func (s *Session) SetSubagentOrigin(origin string) {
+	if s.SubagentOrigin() == origin {
+		return
+	}
+	h := s.hierarchy()
+	h.SubagentOrigin = origin
+	s.setHierarchy(h)
+}
+
+// SetSubagentProvenance updates parent_machine_id, a2a_task_id and subagent_origin in one copy-on-write step.
+func (s *Session) SetSubagentProvenance(parentMachine, a2aTaskID, origin string) {
+	if s.ParentMachineID() == parentMachine && s.A2ATaskID() == a2aTaskID && s.SubagentOrigin() == origin {
+		return
+	}
+	h := s.hierarchy()
+	h.ParentMachineID, h.A2ATaskID, h.SubagentOrigin = parentMachine, a2aTaskID, origin
+	s.setHierarchy(h)
 }
 
 // FoldedAs says why this row folds under FoldedUnder when it is no child (SessionHierarchy.FoldedAs); "" otherwise.
@@ -353,21 +492,29 @@ func (s *Session) SetAskingParentSessionID(id string) {
 	s.setHierarchy(h)
 }
 
-// SetFold sets what folding says of the session: the session it folds under ("" for none), why when it is no child
-// (as: FoldedAsWorker or FoldedAsSide, "" for none), the side session it belongs to when it is not that side (side, ""
-// for none) and the rollup of those folded under it (nil for none). Nothing new is made when the session already says
-// so.
+// SetFold sets what folding says of the session on its own machine: the session it folds under ("" for none), why
+// when it is no child (as: FoldedAsWorker or FoldedAsSide, "" for none), the side session it belongs to when it is not
+// that side (side, "" for none) and the rollup of those folded under it (nil for none). Nothing new is made when the
+// session already says so.
 func (s *Session) SetFold(under, as, side string, children *SessionChildren) {
+	s.SetFoldWithMachine("", under, as, side, children)
+}
+
+// SetFoldWithMachine is SetFold with an optional cross-machine parent machine ID (empty for same machine or none).
+func (s *Session) SetFoldWithMachine(underMachine, under, as, side string, children *SessionChildren) {
+	if under == "" {
+		underMachine = ""
+	}
 	cur := s.Hierarchy
-	if cur == nil && under == "" && as == "" && side == "" && children == nil {
+	if cur == nil && underMachine == "" && under == "" && as == "" && side == "" && children == nil {
 		return
 	}
-	if cur != nil && cur.FoldedUnder == under && cur.FoldedAs == as && cur.FoldedSide == side &&
+	if cur != nil && cur.FoldedUnderMachineID == underMachine && cur.FoldedUnder == under && cur.FoldedAs == as && cur.FoldedSide == side &&
 		(cur.Children == nil) == (children == nil) && (children == nil || *cur.Children == *children) {
 		return
 	}
 	h := s.hierarchy()
-	h.FoldedUnder, h.FoldedAs, h.FoldedSide = under, as, side
+	h.FoldedUnderMachineID, h.FoldedUnder, h.FoldedAs, h.FoldedSide = underMachine, under, as, side
 	h.Children = nil
 	if children != nil {
 		c := *children

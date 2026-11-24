@@ -84,7 +84,7 @@ internal fun FileMarkdown(
                         val section = index > 0 && node.type in sectionHeadings
                         // A column: the element puts its block spacer above itself, a Box would stack the two.
                         Column(Modifier.padding(horizontal = side).then(if (section) Modifier.padding(top = Tokens.Space.s) else Modifier)) {
-                            MarkdownElement(node, components, success.content, includeSpacer = index > 0)
+                            ReadingContent { MarkdownElement(node, components, success.content, includeSpacer = index > 0) }
                         }
                     }
                 }

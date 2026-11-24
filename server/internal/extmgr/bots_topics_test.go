@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/nwverse/persona/server/internal/assistantwire"
-	"github.com/nwverse/persona/server/internal/feishubot"
+	"github.com/nwverse/persona/server/internal/botcard"
 	"github.com/nwverse/persona/server/internal/rpc"
 )
 
@@ -51,6 +51,17 @@ func (w *botWorld) topicsOn(t *testing.T, chats ...string) {
 	}
 }
 
+// botInfoRead waits for the bot's start-up read of its own identity (GET /bot/v3/info, in the background after each
+// restart): a count of the calls the bot makes taken before it ends would count that read as one.
+func (w *botWorld) botInfoRead(t *testing.T) {
+	t.Helper()
+	eventually(t, 5*time.Second, "the bot's own identity read", func() bool {
+		w.h.bots.mu.Lock()
+		defer w.h.bots.mu.Unlock()
+		return w.h.bots.info.OpenID != ""
+	})
+}
+
 func (w *botWorld) settings() FeishuBotSettings {
 	_, set := w.h.botAPI()
 	return set
@@ -74,6 +85,7 @@ func (w *botWorld) quiet(t *testing.T, total int, marker string) {
 // 1. The owner's message in a topic of an opted-in group goes to the assistant, without an owner action (it answers no
 // card), and it leaves the owner's private chat as it was (5).
 func TestTopicOwnerMessageInAnOptedInGroupReachesTheAssistant(t *testing.T) {
+	needsLarkModule(t)
 	w := newBotWorld(t)
 	w.pair(t)
 	w.topicsOn(t, topicChat)
@@ -92,6 +104,7 @@ func TestTopicOwnerMessageInAnOptedInGroupReachesTheAssistant(t *testing.T) {
 // 2, 3, 4. Anything short of the five conditions is dropped without a word: no reply, no reaction, no "owner only"
 // note, and nothing handed over.
 func TestTopicMessagesThatAreNotTheOwnersInAnOptedInTopicAreDroppedSilently(t *testing.T) {
+	needsLarkModule(t)
 	w := newBotWorld(t)
 	w.pair(t)
 	w.topicsOn(t, topicChat)
@@ -115,6 +128,7 @@ func TestTopicMessagesThatAreNotTheOwnersInAnOptedInTopicAreDroppedSilently(t *t
 
 // Not paired: a group message is dropped too, with no pairing hint (the hint is for the private chat).
 func TestTopicMessageBeforePairingIsDropped(t *testing.T) {
+	needsLarkModule(t)
 	w := newBotWorld(t)
 	time.Sleep(300 * time.Millisecond) // the bot's own start-up calls (its info) are done
 	total := w.api.total()
@@ -129,6 +143,7 @@ func TestTopicMessageBeforePairingIsDropped(t *testing.T) {
 // 6. /topics (or /话题群) in a group opts it in, but only from the owner, and says so in the group; /topics off takes
 // it out; neither goes to the assistant; unpairing empties the list.
 func TestTopicsCommand(t *testing.T) {
+	needsLarkModule(t)
 	w := newBotWorld(t)
 	w.pair(t)
 	total := w.api.total()
@@ -194,6 +209,7 @@ func TestTopicsCommand(t *testing.T) {
 // The app's list: PUT topic_chats replaces it (and needs a paired bot), GET shows it, a bad id is refused, and it is
 // the list the gate uses.
 func TestTopicChatsSetting(t *testing.T) {
+	needsLarkModule(t)
 	w := newBotWorld(t)
 	if code, _ := w.do(t, "PUT", "/api/v1/bots/feishu", `{"topic_chats":[{"chat_id":"oc_a"}]}`); code != 400 {
 		t.Fatalf("a list with no owner: %d", code)
@@ -250,10 +266,11 @@ func (w *botWorld) sendErr(method string, params any) error {
 // 7. The bot sends into an opted-in group and not into another; a reply goes where its parent is, so a parent in a
 // chat the bot may not send into is refused whatever chat_id says, and nothing is sent.
 func TestTopicChatsSendAndReplyChecks(t *testing.T) {
+	needsLarkModule(t)
 	w := newBotWorld(t)
 	w.pair(t)
 	w.topicsOn(t, topicChat)
-	card := feishubot.NewCard("t", "green", "a").Markdown("topic card").JSON()
+	card := botcard.NewCard("t", "green", "a").Markdown("topic card").JSON()
 
 	if err := w.sendErr(assistantwire.FeishuText, map[string]any{"text": "到话题群", "chat_id": topicChat}); err != nil {
 		t.Fatal(err)
@@ -345,6 +362,7 @@ func TestTopicChatsSendAndReplyChecks(t *testing.T) {
 // 9. A press on a card in a group counts only from the owner, and only in a group the owner opted in; the private
 // chat's cards work as ever.
 func TestTopicChatCardPressIsTheOwnersAlone(t *testing.T) {
+	needsLarkModule(t)
 	w := newBotWorld(t)
 	w.pair(t)
 	w.topicsOn(t, topicChat)
@@ -395,6 +413,7 @@ func TestTopicChatCardPressIsTheOwnersAlone(t *testing.T) {
 // A press whose callback names no chat is judged by the chat of the card's message, not let through: a card in a group
 // the owner did not opt in (or took out again) is dead whether or not the callback says where it is.
 func TestCardPressWithoutChatIsJudgedByItsMessage(t *testing.T) {
+	needsLarkModule(t)
 	w := newBotWorld(t)
 	w.pair(t)
 	w.topicsOn(t, topicChat)
@@ -452,6 +471,7 @@ func TestCardPressWithoutChatIsJudgedByItsMessage(t *testing.T) {
 // A recall in an opted-in group goes to the assistant only for a message the hub handed over (the event does not say
 // whose it was); one in a group not listed, or of a message never handed over, does not.
 func TestTopicChatRecall(t *testing.T) {
+	needsLarkModule(t)
 	w := newBotWorld(t)
 	w.pair(t)
 	w.topicsOn(t, topicChat)
@@ -473,6 +493,7 @@ func TestTopicChatRecall(t *testing.T) {
 }
 
 func TestBotChatAllowedWithTopicChats(t *testing.T) {
+	needsLarkModule(t)
 	set := FeishuBotSettings{Owner: &BotOwner{OpenID: "ou_owner", ChatID: "oc_p2p"}, TopicChats: []BotChat{{ChatID: topicChat}}}
 	for chat, want := range map[string]bool{"oc_p2p": true, topicChat: true, topicOther: false, "": false} {
 		if got := botChatAllowed(set, chat); got != want {
@@ -486,7 +507,8 @@ func TestBotChatAllowedWithTopicChats(t *testing.T) {
 }
 
 func TestTopicsCommandText(t *testing.T) {
-	bot := []feishubot.Mention{{Key: "@_user_1", Name: "Persona"}}
+	needsLarkModule(t)
+	bot := []botcard.Mention{{Key: "@_user_1", Name: "Persona"}}
 	for _, c := range []struct {
 		text     string
 		on, isIt bool
@@ -505,6 +527,7 @@ func TestTopicsCommandText(t *testing.T) {
 
 // An owner's topic message the assistant cannot take is answered that it could not be sent, in the topic.
 func TestTopicMessageWhileTheAssistantIsAwayIsAnsweredInTheTopic(t *testing.T) {
+	needsLarkModule(t)
 	w := newBotWorld(t)
 	w.pair(t)
 	w.topicsOn(t, topicChat)
@@ -519,6 +542,7 @@ func TestTopicMessageWhileTheAssistantIsAwayIsAnsweredInTheTopic(t *testing.T) {
 // What the hub remembers of where a message is: the owner's own, and what the bot sent. Strangers' messages do not push
 // them out; a parent that is not remembered is asked about, and a lookup that blips still finds it.
 func TestReplyParentLookup(t *testing.T) {
+	needsLarkModule(t)
 	w := newBotWorld(t)
 	w.pair(t)
 	w.topicsOn(t, topicChat)
@@ -595,6 +619,7 @@ func TestReplyParentLookup(t *testing.T) {
 
 // An agent message may answer in an opted-in topic, but never under a parent in a chat the bot may not use.
 func TestCotCreateParentMustBeInAnAllowedChat(t *testing.T) {
+	needsLarkModule(t)
 	w := newBotWorld(t)
 	w.pair(t)
 	w.topicsOn(t, topicChat)
@@ -613,13 +638,14 @@ func TestCotCreateParentMustBeInAnAllowedChat(t *testing.T) {
 // /topics is the hub's: the list is changed before the next message is let go (pass). So a message right after
 // /topics off is not handed over, and one right after /topics is.
 func TestTopicsCommandIsInForceForTheNextMessage(t *testing.T) {
+	needsLarkModule(t)
 	w := newBotWorld(t)
 	w.pair(t)
 	api := w.h.bots.api
 	at := func(id, text, thread string) []string { // the list at the moment the next message is let go
 		var seen []string
 		ev := groupEvent(id, "ou_me", text, topicChat, thread)
-		var m feishubot.MessageEvent
+		var m botcard.MessageEvent
 		var env struct {
 			Event json.RawMessage `json:"event"`
 		}
@@ -654,6 +680,7 @@ func TestTopicsCommandIsInForceForTheNextMessage(t *testing.T) {
 // A group message from an app (a bot) is dropped even when it carries the owner's open id; and after unpairing and
 // pairing again the list starts empty and the command works again.
 func TestTopicGroupMessageFromAnAppAndRePairing(t *testing.T) {
+	needsLarkModule(t)
 	w := newBotWorld(t)
 	w.pair(t)
 	w.topicsOn(t, topicChat)
@@ -690,6 +717,7 @@ func TestTopicGroupMessageFromAnAppAndRePairing(t *testing.T) {
 // A request that cannot keep its list is refused whole: a new App ID unpairs the owner, so a list sent with it is a 400
 // and the App ID stays.
 func TestTopicChatsWithANewAppIDChangeNothing(t *testing.T) {
+	needsLarkModule(t)
 	w := newBotWorld(t)
 	w.pair(t)
 	w.topicsOn(t, topicChat)
@@ -710,6 +738,7 @@ func TestTopicChatsWithANewAppIDChangeNothing(t *testing.T) {
 // feishu.status carries the chats the bot may send into, so the assistant can tell before it posts: the owner's
 // private chat and the opted-in groups, nothing else, and nothing before pairing.
 func TestFeishuStatusListsTheChatsTheBotMaySendInto(t *testing.T) {
+	needsLarkModule(t)
 	w := newBotWorld(t)
 	if st := w.feishu(t, assistantwire.FeishuStatusGet, nil); st["chats"] != nil {
 		t.Fatalf("chats before pairing: %v", st["chats"])
@@ -731,6 +760,7 @@ func TestFeishuStatusListsTheChatsTheBotMaySendInto(t *testing.T) {
 // A line of the bot's own in an opted-in topic is not a reply (it comes with a sender that is not a user): the hub drops
 // it, whatever open id it carries, so a to-do's own post into its topic can never come back as the owner's words.
 func TestTopicBotsOwnPostIsDropped(t *testing.T) {
+	needsLarkModule(t)
 	w := newBotWorld(t)
 	w.pair(t)
 	w.topicsOn(t, topicChat)

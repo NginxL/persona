@@ -10,23 +10,23 @@ final class PersonaCoreContinuityTests: XCTestCase {
         ProductionContinuityShadow.shared.installForTests()
     }
 
-    func testEveryContinuityFixtureThroughRealCBinding() throws {
-        let result = try ContinuityBindingReplay.replayAll()
+    func testEveryContinuityFixtureThroughRealCBinding() async throws {
+        let result = try await ContinuityBindingReplay.replayAll()
         XCTAssertEqual(result.cases, 39)
         XCTAssertEqual(result.steps, 95)
         print("iOS C binding: \(result.cases) cases, \(result.steps) steps, \(result.patches) patches")
     }
 
-    func testNativeAndCoreShadowReplayMatchesFoldAndReloadRules() throws {
-        let cases = try ContinuityCase.all(in: ContinuityCase.repositoryDirectory)
+    func testNativeAndCoreShadowReplayMatchesFoldAndReloadRules() async throws {
+        let cases = try await ContinuityCase.all(in: ContinuityCase.repositoryDirectory)
         for `case` in cases {
-            try NativeChatStoreContinuityReplay.replayShadow(`case`)
+            try await NativeChatStoreContinuityReplay.replayShadow(`case`)
         }
         XCTAssertEqual(cases.count, 39)
     }
 
-    func testEveryContinuityFixtureAgainstNativeChatStore() throws {
-        let result = try NativeChatStoreContinuityReplay.replayAll()
+    func testEveryContinuityFixtureAgainstNativeChatStore() async throws {
+        let result = try await NativeChatStoreContinuityReplay.replayAll()
         XCTAssertEqual(result.cases, 39)
         XCTAssertEqual(result.steps, 95)
         print("iOS native ChatStore: \(result.cases) cases, \(result.steps) steps")

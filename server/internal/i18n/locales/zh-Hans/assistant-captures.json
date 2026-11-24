@@ -1,0 +1,11 @@
+{
+  "push_title": "随手记",
+  "filed": "{title} → {track}",
+  "count_one": "{count} 条随手记",
+  "count_other": "{count} 条随手记",
+  "heading": "随手记",
+  "waiting_one": "{count} 条待归类",
+  "waiting_other": "{count} 条待归类",
+  "more_one": "另有 {count} 条已归档",
+  "more_other": "另有 {count} 条已归档"
+}

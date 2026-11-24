@@ -16,6 +16,7 @@ import { href, navigate, parse } from "./router";
 import { hubNotice } from "./hub-notify";
 import { stripBase } from "./base";
 import { needsFieldValues } from "./quick-answers";
+import { supervisorHeld } from "./supervisor-held";
 import { t } from "../i18n";
 import { requestRoute } from "./card-focus";
 import type { AgentState, Interaction, Session } from "./types";
@@ -230,7 +231,8 @@ function notify(s: Session | undefined, kind: "needs" | "finished", card?: Inter
   const icon = document.querySelector<HTMLLinkElement>(ICONS)?.dataset.original ?? document.querySelector<HTMLLinkElement>(ICONS)?.href;
   // a permission card's gets Allow / Deny (#4464), when the session can be answered from here and nothing has to be
   // filled in first (fields: as the hub's push and the overview's quick answers); the rest need the conversation
-  const ix = waiting.ix?.kind === "permission" && !needsFieldValues(waiting.ix) && interactionCanAnswer(waiting.ix, s) ? waiting.ix.id : undefined;
+  // (never on a card a task's supervisor holds: it is not the user's to answer, lib/supervisor-held.ts)
+  const ix = waiting.ix?.kind === "permission" && !supervisorHeld(waiting.ix) && !needsFieldValues(waiting.ix) && interactionCanAnswer(waiting.ix, s) ? waiting.ix.id : undefined;
   // inside quiet hours a "Needs you" one comes without a sound (a finished one doesn't come at all: wants)
   postNotification({ title, body, tag, url: href(route), icon, ix, silent: inQuietHours(notifyPrefs()) }, () => navigate(route));
   return { about: waiting.ix?.id };
@@ -509,7 +511,7 @@ export function useAttentionSignals(label: string, pane: { mid: string; sid: str
       if (attentionSoundEnabled() && !hushed && !looking && allow.current(Date.now())) play("needs");
       if (unannounced() || !claimNotification(n.card ? `${n.tag}@${n.card}` : n.tag)) return;
       const ix = n.card ? state.interactions.find((c) => c.id === n.card) : undefined;
-      const answer = ix?.kind === "permission" && !needsFieldValues(ix) && interactionCanAnswer(ix, row) ? ix.id : undefined;
+      const answer = ix?.kind === "permission" && !supervisorHeld(ix) && !needsFieldValues(ix) && interactionCanAnswer(ix, row) ? ix.id : undefined;
       const route = parse(n.path);
       const icon = document.querySelector<HTMLLinkElement>(ICONS)?.dataset.original ?? document.querySelector<HTMLLinkElement>(ICONS)?.href;
       postNotification({ title: n.title, body: n.body, tag: n.tag, url: href(route), icon, ix: answer, silent: hushed }, () => navigate(route));

@@ -388,7 +388,7 @@ describe("the round button (#5324)", () => {
 
   it("queues what is typed while the agent works, a second Stop left of voice", () => {
     localStorage.setItem(`draft:${KEY}`, "and also this");
-    render({ working: true, onStop: () => {}, voice: { mode: "start", label: "voice", onClick: () => {} } });
+    render({ working: true, onStop: () => {}, action: { icon: "voice", name: "Voice", label: "voice", primary: true, onClick: () => {}, attributes: { "data-testid": "composer-voice" } } });
     expect(send()!.getAttribute("aria-label")).toBe(t("chat-composer.queue"));
     expect(send()!.title).toBe(t("chat-composer.queue_hint"));
     expect(stops()).toHaveLength(1);

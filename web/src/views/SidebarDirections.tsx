@@ -16,7 +16,7 @@ import type { GoFn, RegFn } from "./SidebarParts";
 import { TreeTodoRows, useMachineLabel } from "./SidebarTree";
 
 type Props = {
-  /** The leader conversation's id (its direction's id in the tree). */
+  /** The direction's opaque id (its leader conversation's when it has one, never the external Agent's session id). */
   id: string;
   /** Its name as the row shows it, for the disclosure's label. */
   name: string;

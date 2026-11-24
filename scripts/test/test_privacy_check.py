@@ -217,6 +217,22 @@ class AddressHintTests(unittest.TestCase):
 
 
 class LoopbackTests(unittest.TestCase):
+    def test_build_config_override_cannot_read_hub_credentials(self):
+        with tempfile.TemporaryDirectory(prefix="privacy-check-test-") as temp:
+            home = Path(temp)
+            runtime = home / ".persona"
+            runtime.mkdir()
+            config = runtime / "hub.json"
+            config.write_text('{"token":"fixture-runtime-value"}')
+            alias = home / "build.json"
+            alias.symlink_to(config)
+            overrides = {"XDG_CONFIG_HOME": str(home / ".config"), "PERSONA_CONFIG": str(config),
+                         pc.CONFIG_ENV[1]: str(alias)}
+            with patch.dict(os.environ, overrides), patch.object(pc, "HOME", str(home)):
+                with patch.object(pc, "open", wraps=open, create=True) as opened:
+                    pc.config_values()
+                self.assertTrue({str(config), str(alias)}.isdisjoint(call.args[0] for call in opened.call_args_list))
+
     def test_both_config_and_private_word_profiles_are_scanned(self):
         with tempfile.TemporaryDirectory(prefix="privacy-check-test-") as temp:
             home = Path(temp)

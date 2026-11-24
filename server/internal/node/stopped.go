@@ -29,7 +29,7 @@ const stoppedReason = "Agent 已停止：对话和终端可以看，它不再收
 // on from): the app's session, which a message continues as before (claudedesktop_open.go), not a stopped agent. Only
 // where the app takes it (claudeDesktopOpens): elsewhere a send is handled as it was before the index was read.
 func (n *Node) desktopSession(id string) bool {
-	if !claudeDesktopOpens {
+	if n.sessionScope != nil || !claudeDesktopOpens {
 		return false
 	}
 	x := readClaudeDesktopIndex(n.home)

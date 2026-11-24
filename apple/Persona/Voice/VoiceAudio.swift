@@ -1,9 +1,7 @@
 import Foundation
 import Observation
-#if os(iOS) || os(visionOS)
 import AVFoundation
 import UIKit
-#endif
 
 /// The rates of a call's audio: the microphone's PCM16 goes up at `inputRate`, the voice comes down at `outputRate`
 /// (the `ready` frame's `input_rate` / `output_rate`).
@@ -182,27 +180,17 @@ nonisolated struct SystemVoiceClock: VoiceClock {
 
 struct SystemMicPermission: MicPermission {
     func request() async -> Bool {
-        #if os(iOS) || os(visionOS)
         await AVAudioApplication.requestRecordPermission()
-        #else
-        false
-        #endif
     }
 }
 
 final class SystemIdleTimer: IdleTimerControl {
     var isDisabled: Bool {
         get {
-            #if os(iOS) || os(visionOS)
             UIApplication.shared.isIdleTimerDisabled
-            #else
-            false
-            #endif
         }
         set {
-            #if os(iOS) || os(visionOS)
             UIApplication.shared.isIdleTimerDisabled = newValue
-            #endif
         }
     }
 }

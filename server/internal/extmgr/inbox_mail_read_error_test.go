@@ -13,7 +13,7 @@ import (
 
 	"github.com/nwverse/persona/server/internal/assistantwire"
 	"github.com/nwverse/persona/server/internal/connector"
-	"github.com/nwverse/persona/server/internal/mail"
+	"github.com/nwverse/persona/server/internal/mailwire"
 )
 
 // brokenMail is slowMail whose accounts in errs fail with their own error. Once a read of it failed, an account in
@@ -29,10 +29,10 @@ type brokenMail struct {
 	tried  map[string]bool
 }
 
-func (m *brokenMail) ListAccounts() ([]mail.MailAccount, error) {
+func (m *brokenMail) ListAccounts() ([]mailwire.MailAccount, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	out := make([]mail.MailAccount, 0, len(m.accounts))
+	out := make([]mailwire.MailAccount, 0, len(m.accounts))
 	for _, a := range m.accounts {
 		a.Status = "ok"
 		switch {
@@ -46,7 +46,7 @@ func (m *brokenMail) ListAccounts() ([]mail.MailAccount, error) {
 	return out, nil
 }
 
-func (m *brokenMail) ListMessages(ctx context.Context, opts mail.ListOptions) (*mail.ListResult, error) {
+func (m *brokenMail) ListMessages(ctx context.Context, opts mailwire.ListOptions) (*mailwire.ListResult, error) {
 	if err := m.errs[opts.AccountID]; err != nil {
 		m.mu.Lock()
 		if m.tried == nil {
@@ -91,7 +91,7 @@ func newBrokenMailHub(t *testing.T, m Mail) *Manager {
 // not named. The error's words never go on the wire. The account stays out of accounts, so an assistant from before
 // this reads the round as it always did.
 func TestMailRoundSaysWhichAccountCouldNotBeRead(t *testing.T) {
-	m := &brokenMail{slowMail: slowMail{accounts: []mail.MailAccount{
+	m := &brokenMail{slowMail: slowMail{accounts: []mailwire.MailAccount{
 		{ID: "a", Email: "a@example.com"}, {ID: "b", Email: "b@example.com"}, {ID: "c", Email: "c@example.com"},
 		{ID: "d", Email: "d@example.com"}, {ID: "e", Email: "e@example.com"}, {ID: "f", Email: "f@example.com"},
 		{ID: "g", Email: "g@example.com"},
@@ -100,8 +100,8 @@ func TestMailRoundSaysWhichAccountCouldNotBeRead(t *testing.T) {
 		"c": &net.OpError{Op: "read", Net: "tcp", Err: os.ErrDeadlineExceeded},
 		"d": errors.New("邮箱服务器拒绝了登录：user me@example.com, password hunter2"),
 		"e": errors.New("select INBOX: imaps://me:hunter2@imap.example.com: broken pipe"),
-		"f": mail.ErrTimedOut,
-		"g": &mail.UnknownAccountError{Account: "g"},
+		"f": mailwire.ErrTimedOut,
+		"g": unknownMailAccount("g"),
 	}, refuse: map[string]bool{"d": true}, gone: map[string]bool{"g": true}}
 	h := newBrokenMailHub(t, m)
 
@@ -148,7 +148,7 @@ func TestMailRoundSaysWhichAccountCouldNotBeRead(t *testing.T) {
 // When every account is read the round's mail is what it was before failed accounts were named (no "failed" key), and
 // one whose accounts' status can't be listed again still names the account that failed, as "failed".
 func TestMailRoundWithoutFailuresIsUnchanged(t *testing.T) {
-	m := &brokenMail{slowMail: slowMail{accounts: []mail.MailAccount{{ID: "a", Email: "a@example.com"}}}}
+	m := &brokenMail{slowMail: slowMail{accounts: []mailwire.MailAccount{{ID: "a", Email: "a@example.com"}}}}
 	raw, err := json.Marshal(newBrokenMailHub(t, m).readMail(context.Background()))
 	if err != nil {
 		t.Fatal(err)
@@ -157,7 +157,7 @@ func TestMailRoundWithoutFailuresIsUnchanged(t *testing.T) {
 		t.Fatalf("a round that read every account names failed ones: %s", raw)
 	}
 
-	h := newBrokenMailHub(t, &unlistedMail{brokenMail: brokenMail{slowMail: slowMail{accounts: []mail.MailAccount{{ID: "b", Email: "b@example.com"}}},
+	h := newBrokenMailHub(t, &unlistedMail{brokenMail: brokenMail{slowMail: slowMail{accounts: []mailwire.MailAccount{{ID: "b", Email: "b@example.com"}}},
 		errs: map[string]error{"b": errors.New("broken pipe")}}})
 	r := h.readMail(context.Background())
 	if r == nil || len(r.Failed) != 1 || r.Failed[0].ID != "b" || r.Failed[0].ReadError != assistantwire.ReadFailed {
@@ -171,7 +171,7 @@ type unlistedMail struct {
 	listed bool
 }
 
-func (m *unlistedMail) ListAccounts() ([]mail.MailAccount, error) {
+func (m *unlistedMail) ListAccounts() ([]mailwire.MailAccount, error) {
 	if m.listed {
 		return nil, errors.New("the store is gone")
 	}

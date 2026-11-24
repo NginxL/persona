@@ -13,8 +13,6 @@ nonisolated struct RequestClientMetadata: Equatable, Sendable {
             .visionOS
             #elseif os(iOS)
             .iOS
-            #elseif os(macOS)
-            .macOS
             #else
             .other
             #endif

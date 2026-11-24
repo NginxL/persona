@@ -14,6 +14,7 @@ import persona.core.contracts.api.InboxEntry
 import persona.core.designsystem.PersonaTheme
 import persona.core.navigation.AppTab
 import persona.core.navigation.Navigator
+import persona.core.inbox.*
 
 /** The filter button's dot is color only; TalkBack has to hear that a filter is on (#3729). */
 @RunWith(AndroidJUnit4::class)

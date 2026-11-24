@@ -10,6 +10,33 @@ import Foundation
 nonisolated enum CardSource {
     static func item(for ix: Interaction, in items: [Item]) -> String? {
         guard ix.kind == .question, let call = callIndex(ix, items) else { return nil }
+        return message(before: call, in: items)
+    }
+
+    /// The message a task's card is about, for its View in Chat from the assistant's pager into its Agent's chat (#12625):
+    /// the call that asked it by its tool use id, whatever its kind (a question, a tool approval); a card without one (a
+    /// question read off a terminal) goes to the chat's newest question call. Nil: no call in the loaded items, and the
+    /// chat opens at its newest message.
+    static func source(for ix: Interaction, in items: [Item]) -> String? {
+        let floor = max(items.count - lookBack, 0)
+        let call: Int?
+        if let id = ix.toolUseID, !id.isEmpty {
+            call = items[floor...].lastIndex { $0.kind == .toolUse && $0.toolUseID == id }
+        } else {
+            call = items[floor...].lastIndex { $0.kind == .toolUse && isQuestionCall($0.toolName) }
+        }
+        return call.flatMap { message(before: $0, in: items) }
+    }
+
+    /// A tool call that asks the owner a question: Claude Code's AskUserQuestion, Persona's `ask_user`, Codex's
+    /// `request_user_input`.
+    static func isQuestionCall(_ name: String?) -> Bool {
+        guard let name else { return false }
+        return name == "AskUserQuestion" || name == "ask_user" || name.hasSuffix("__ask_user") || name == "request_user_input"
+    }
+
+    /// The agent's last words before the call at `call` in its turn, or the message that started the turn.
+    private static func message(before call: Int, in items: [Item]) -> String? {
         var i = call - 1
         while i >= 0 {
             let it = items[i]

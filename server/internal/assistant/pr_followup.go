@@ -43,14 +43,16 @@ var followupRecheck = deployRecheck
 // followupStaleAfter is how long a non-terminal subscription stays silent before it surfaces in the daily briefing.
 const followupStaleAfter = 24 * time.Hour
 
-// deliveryPRsForFollowup is the set of a closed to-do's own delivery PRs: the stage-tracked current and earlier PRs
-// (#7935's bounded set), not every repository link (which may include mere references).
+// deliveryPRsForFollowup returns the stage-tracked delivery PRs that may still change after closure.
 func deliveryPRsForFollowup(t Todo) []string {
 	out := make([]string, 0, 1+len(t.PRs))
 	seen := map[string]bool{}
 	add := func(u string) {
 		u = strings.TrimSpace(u)
 		if u == "" || seen[u] || !ciPRURL.MatchString(u) && !otherReviewLink(u) {
+			return
+		}
+		if facts := prFacts(t, u); facts != nil && facts.State == repository.ReviewMerged {
 			return
 		}
 		seen[u] = true
@@ -63,11 +65,10 @@ func deliveryPRsForFollowup(t Todo) []string {
 	return out
 }
 
-// createPRFollowups runs when a to-do is accepted and closed: it records one subscription per delivery PR, leaving
-// whether each is still open to the next sweep. It never reopens the to-do and is idempotent on repeated acceptance.
+// createPRFollowups records the task's closure time so the first sweep can date any terminal events it finds.
 func (s *Service) createPRFollowups(ctx context.Context, t Todo) {
 	st := s.prFollowupDB()
-	if st == nil {
+	if st == nil || t.DoneAt == nil {
 		return
 	}
 	prs := deliveryPRsForFollowup(t)
@@ -82,13 +83,13 @@ func (s *Service) createPRFollowups(ctx context.Context, t Todo) {
 	if supervisor == "" {
 		supervisor = origin // no recorded supervisor: fall back to the to-do's own conversation rather than dropping it
 	}
-	if err := st.UpsertPRFollowups(ctx, t.ID, supervisor, origin, prs, time.Now().UTC()); err != nil {
+	if err := st.UpsertPRFollowups(ctx, t.ID, supervisor, origin, prs, *t.DoneAt); err != nil {
 		s.logf("task %s: PR follow-up subscriptions not saved: %v", t.ID, err)
 	}
 }
 
-// sweepPRFollowups polls every active post-closure subscription independently of the to-do's DoneAt: terminal PRs
-// notify once and clear the subscription; a new conflict or a current-head changes-requested review notifies the
+// sweepPRFollowups polls every active post-closure subscription: terminal PRs clear the subscription and notify on
+// post-closure transitions; a new conflict or a current-head changes-requested review notifies the
 // original supervisor once per head. A forge that cannot read the PR degrades silently rather than pretending to
 // watch it. The to-do is never reopened.
 func (s *Service) sweepPRFollowups(ctx context.Context, now time.Time) {
@@ -159,8 +160,8 @@ func (s *Service) observeFollowupPR(ctx context.Context, url string, f prStatusF
 	return status, true
 }
 
-// applyFollowupObservation reconciles one observation with the subscription: terminal clears it after a closing
-// notice; conflict and current-head review notify once per head; everything else just refreshes stored facts.
+// applyFollowupObservation clears terminal subscriptions, notifies once per conflict or review head, and refreshes
+// the stored facts for PRs that remain open.
 func (s *Service) applyFollowupObservation(ctx context.Context, st prFollowupStore, sub repository.PRFollowup, status TodoPRStatus, observedAt time.Time) {
 	terminal := status.State == "merged" || status.State == "closed"
 	// Conflict and review only act on the current head, and each head wakes the supervisor once.
@@ -169,12 +170,6 @@ func (s *Service) applyFollowupObservation(ctx context.Context, st prFollowupSto
 	newReview := status.State == "open" && status.Review == "changes_requested" && status.HeadOID != "" &&
 		status.ChangesRequestedAt != nil && sub.NotifiedReviewHead != status.HeadOID &&
 		!status.ChangesRequestedAt.After(observedAt)
-
-	sub.HeadOID = status.HeadOID
-	sub.State = status.State
-	sub.Review = status.Review
-	sub.ChangesRequestedAt = status.ChangesRequestedAt
-	sub.LastObservedAt = &observedAt
 
 	t, hasTodo := s.todoNow(sub.TodoID)
 	title := sub.TodoID
@@ -185,7 +180,10 @@ func (s *Service) applyFollowupObservation(ctx context.Context, st prFollowupSto
 
 	switch {
 	case terminal:
-		s.notifyFollowup(ctx, sub, title, supervisor, status.State, false)
+		// An open observation proves a transition. Forge time can also prove one before the first poll.
+		if sub.State == repository.ReviewOpen || status.terminalAt.After(sub.CreatedAt) {
+			s.notifyFollowup(ctx, sub, title, supervisor, status.State, false)
+		}
 		if err := st.DeletePRFollowup(ctx, sub.ID); err != nil {
 			s.logf("PR follow-up %s: delete failed: %v", sub.PRURL, err)
 		}
@@ -198,6 +196,11 @@ func (s *Service) applyFollowupObservation(ctx context.Context, st prFollowupSto
 		sub.NotifiedReviewHead = status.HeadOID
 	}
 
+	sub.HeadOID = status.HeadOID
+	sub.State = status.State
+	sub.Review = status.Review
+	sub.ChangesRequestedAt = status.ChangesRequestedAt
+	sub.LastObservedAt = &observedAt
 	if _, err := st.SavePRFollowupObservation(ctx, sub); err != nil {
 		s.logf("PR follow-up %s: observation not saved: %v", sub.PRURL, err)
 	}

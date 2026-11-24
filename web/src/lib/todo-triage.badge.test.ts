@@ -92,8 +92,8 @@ describe("the sidebar's To-dos badge, the issue's acceptance (#11085)", () => {
     const resolved = makeSessionLookup(sessions);
     expect(waitsOnOwner(pendingTodo, triage(pendingTodo, makeSessionLookup(sessions, []), NOW))).toBeNull();
     expect(waitsOnOwner(linked, triage(linked, resolved, NOW))).toBeNull();
-    // The existing no-Agent-on-it badge rule still counts the parked task once; the link does not change that policy.
-    expect([...ownerBadge([linked], resolved, NOW)]).toEqual(["linked"]);
+    // Once answered, a conversation's parked task with no Agent on it is its supervising conversation's, not counted.
+    expect([...ownerBadge([linked], resolved, NOW)]).toEqual([]);
   });
 });
 
@@ -105,9 +105,10 @@ describe("the badge's rules", () => {
       task("leaf", { part_of: "mid", agents: [agent("run")] }),
     ];
     expect(counted(list)).toEqual([]);
-    // the Agent at the bottom stops: nothing is on any of them any more
+    // the Agent at the bottom stops: nothing is on any of them any more. The owner's own goal counts again; the
+    // conversation's pieces are its supervising conversation's to pick up
     const stopped = list.map((td) => (td.id === "leaf" ? { ...td, agents: [agent("idle")] } : td));
-    expect(counted(stopped)).toEqual(["goal", "leaf", "mid"]);
+    expect(counted(stopped)).toEqual(["goal"]);
     // the bottom one waits on the owner: it counts, the two above it do not again
     const asking = list.map((td) => (td.id === "leaf" ? { ...td, agents: [agent("ask")] } : td));
     expect(counted(asking)).toEqual(["leaf"]);
@@ -153,10 +154,36 @@ describe("the badge's rules", () => {
     expect(counted([personal("goal"), approval])).toEqual(["held"]);
   });
 
-  it("counts a cut-off Agent's task, and keeps counting tasks no Agent is on", () => {
+  it("counts a cut-off Agent's task, and the owner's own to-dos no Agent is on, not a conversation's idle task", () => {
     expect(counted([task("cut", { agents: [agent("cut")] })])).toEqual(["cut"]);
-    // its Agents stopped; a piece waiting for its turn with no Agent yet
-    expect(counted([task("stopped", { agents: [agent("idle")] }), task("queued", { part_of: "x", after: ["y"] })])).toEqual(["queued", "stopped"]);
+    // a conversation's task whose Agents stopped, or a piece waiting for its turn: its supervising conversation's to pick up
+    expect(counted([task("stopped", { agents: [agent("idle")] }), task("queued", { part_of: "x", after: ["y"] })])).toEqual([]);
+    // the owner's own to-do whose Agent stopped is still theirs
+    expect(counted([personal("mine", { agents: [agent("idle")] })])).toEqual(["mine"]);
+  });
+
+  it("reads the hub's view when it has one: what a supervisor holds is not the owner's", () => {
+    const failed = task("failed", { start_error: "Desk Mac is offline", done_at: hoursAgo(1), supervision: { supervisor: "lead", done_when: [], state: "", round: 0, reviews: [] } as unknown as Todo["supervision"] });
+    expect(counted([failed])).toEqual(["failed"]); // no view: the web's own triage
+    expect(counted([{ ...failed, view: { phase: "working", section: "working", reason: "persona_working", rank: 0 } }])).toEqual([]);
+    const asking = task("asking", { agents: [agent("ask")] });
+    expect(counted([{ ...asking, view: { phase: "working", section: "working", reason: "persona_working", rank: 0 } }])).toEqual([]);
+    expect(Object.fromEntries(ownerNeeds([{ ...asking, view: { phase: "needs_you", section: "needs_you", reason: "agent_asks", rank: 0 } }], lookup, NOW))).toEqual({ asking: "agent_asks" });
+    expect(Object.fromEntries(ownerNeeds([{ ...asking, view: { phase: "needs_you", section: "needs_you", reason: "verify", rank: 0 } }], lookup, NOW))).toEqual({ asking: "owner_decides" });
+    // a view this web does not know falls back to its own triage
+    expect(counted([{ ...asking, view: { phase: "working", section: "a_newer_section", reason: "persona_working", rank: 0 } }])).toEqual(["asking"]);
+  });
+
+  it("counts what the hub counts in needs_you once it sends views: one number with the hub and the tray", () => {
+    const v = (section: string, phase = section) => ({ phase, section, reason: section === "needs_you" ? "owner_decides" : "rest", rank: 0 });
+    // the owner's own to-do the hub files under To do is not in its needs_you, so not in the badge
+    expect(counted([personal("mine", { view: v("todo") })])).toEqual([]);
+    // a step an open parent carries is counted with the parent only; a closed parent's step counts by itself
+    expect(counted([personal("goal", { view: v("needs_you") }), task("step", { part_of: "goal", view: v("needs_you") })])).toEqual(["goal"]);
+    expect(counted([personal("goal", { view: v("done") }), task("step", { part_of: "goal", view: v("needs_you") })])).toEqual(["step"]);
+    // an outside decision has its own answer home: never carried
+    expect(counted([personal("goal", { view: v("needs_you") }), task("todo_od_1", { part_of: "goal", view: v("needs_you") })]).sort()).toEqual(["goal", "todo_od_1"]);
+    expect(counted([task("q", { quiet: true, view: v("needs_you") })])).toEqual([]);
   });
 
   it("leaves quiet tasks out, while a quiet piece's Agent still carries its goal", () => {
@@ -197,19 +224,18 @@ describe("why the badge counts a to-do (#11838, ownerNeeds)", () => {
     task("quiet", { quiet: true }),
   ];
 
-  it("says what each counted to-do waits on the owner for, or that no Agent is on it", () => {
+  it("says what each counted to-do waits on the owner for, or that no Agent is on the owner's own one", () => {
     expect(Object.fromEntries(ownerNeeds(list, lookup, NOW))).toEqual({
       failed: "failed_start",
       asking: "agent_asks",
       decide: "owner_decides",
       held: "delivery_ok",
       errand: "unattended",
-      stopped: "unattended",
     });
   });
 
   it("is the badge: the same to-dos, so its size is the badge's number", () => {
     expect([...ownerBadge(list, lookup, NOW)].sort()).toEqual([...ownerNeeds(list, lookup, NOW).keys()].sort());
-    expect(ownerBadge(list, lookup, NOW).size).toBe(6);
+    expect(ownerBadge(list, lookup, NOW).size).toBe(5);
   });
 });

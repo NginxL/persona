@@ -16,6 +16,7 @@ import org.junit.Assert.*
 import org.junit.Test
 import persona.core.contracts.api.ManagerPins
 import persona.core.domain.inbox.InboxItem
+import persona.core.inbox.*
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class InboxConversationsTest {

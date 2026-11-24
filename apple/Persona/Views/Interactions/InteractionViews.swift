@@ -143,9 +143,7 @@ struct InteractionPreviewCard: View {
                     }
                 }
                 Spacer()
-                #if !os(macOS) // a phone's row says it opens; a Mac's list row does not (#2113)
                 ThemedIcon(Theme.Icon.disclosure).font(Theme.Font.labelStrong).foregroundStyle(.tertiary)
-                #endif
             }
             if !summary.isEmpty {
                 Text(summary)
@@ -175,14 +173,7 @@ struct InteractionPreviewCard: View {
     /// row's lines sit under its title (#2318). iOS: on the card's edge, as it always was.
     private struct UnderTitle: ViewModifier {
         func body(content: Content) -> some View {
-            #if os(macOS)
-            HStack(spacing: Theme.Space.s) { // the header row's icon column and its gap
-                Spacer(minLength: 0).scaledFrame(width: Theme.Size.icon)
-                content
-            }
-            #else
             content
-            #endif
         }
     }
 
@@ -216,6 +207,15 @@ struct InteractionPreviewCard: View {
     private var summary: String { interaction.askLine(includeToolName: true) ?? "" }
 
     @ViewBuilder private var quickActions: some View {
+        // A card its task's supervisor holds is not the user's to answer: no buttons, a line saying who has it.
+        if !interaction.answerableHere {
+            SupervisorHeldNote(compact: true).modifier(UnderTitle())
+        } else {
+            quickAnswers
+        }
+    }
+
+    @ViewBuilder private var quickAnswers: some View {
         switch interaction.kind {
         case .question:
             if let qs = interaction.questions, qs.count == 1, let q = qs.first, !q.multiSelect, q.options.count <= 4 {
@@ -263,6 +263,36 @@ struct InteractionPreviewCard: View {
         default:
             EmptyView()
         }
+    }
+}
+
+/// What a card its task's supervisor holds shows in place of its answers (`Interaction.supervisorHeld`): the supervisor
+/// has it, and it reaches the user only once the supervisor passes it up. Read-only: nothing here answers it.
+/// `compact`: the title line alone, under a list's card.
+struct SupervisorHeldNote: View {
+    var compact = false
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: Theme.Space.s) {
+            ThemedIcon(Theme.Icon.view)
+                .font(Theme.Font.captionStrong)
+                .foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: Theme.Space.xxs) {
+                Text("Supervisor is handling this")
+                    .font(Theme.Font.captionStrong)
+                if !compact {
+                    Text("This went to its task's supervisor first. It comes to you only if the supervisor passes it up.")
+                        .font(Theme.Font.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(compact ? Theme.Space.s : Theme.Space.m)
+        .background(Theme.Fill.well, in: .rect(cornerRadius: Theme.Radius.control, style: .continuous))
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("interaction.supervisor-held")
     }
 }
 
@@ -367,6 +397,8 @@ struct InteractionPanel: View {
     @Environment(\.cardResize) private var resize
     /// The question's Skip, drawn in the title row (#12306).
     @State private var headerSkip: HeaderSkip?
+    /// The card is the assistant's pager's (#12831): its fold and View in Chat collapse the pager.
+    @Environment(\.cardDock) private var dock
 
     /// The form's cap while the keyboard is up (`cardFits`): the area less the card's header and margins; at least a tap
     /// target, so a sliver of a form never shows (a small iPhone with the shell's composer leaves the cards little more).
@@ -491,10 +523,15 @@ struct InteractionPanel: View {
                 }
                 Spacer(minLength: 4)
                 // Back to the message the card is about (#9392): the chat goes there and the card folds out of the way.
-                if !collapsed, let open = sources?.opener(for: interaction.id) {
+                // A task's card in the assistant's pager opens its Agent's chat at that message instead (#12625), the pager
+                // left as it is for Back.
+                let inChat = sources?.opener(for: interaction.id)
+                if !collapsed, let open = inChat ?? dock?.source {
                     Button {
                         Haptics.tap()
-                        withAnimation(Theme.Motion.standard) { collapsed = true }
+                        if inChat != nil {
+                            if let dock { dock.collapse() } else { withAnimation(Theme.Motion.standard) { collapsed = true } }
+                        }
                         open()
                     } label: {
                         Text("View in Chat [Question Card]").lineLimit(1).fixedSize()
@@ -512,6 +549,12 @@ struct InteractionPanel: View {
                     QuestionSkipButton(inHeader: true) { skip.action() }
                         .fixedSize()
                         .disabled(skip.sending)
+                } else if !collapsed, noSkip != nil {
+                    // In the pager a card that can't be skipped says so: Skip greyed, the reason under the title (#12831).
+                    QuestionSkipButton(inHeader: true) {}
+                        .fixedSize()
+                        .disabled(true)
+                        .accessibilityIdentifier("question-skip-unavailable")
                 }
                 if interaction.kind == .plan && !collapsed {
                     Button { showFullPlan = true } label: {
@@ -538,9 +581,6 @@ struct InteractionPanel: View {
                     }
                     .labelOnlyMenu() // just the ⋯, next to the fold ⌄
                     .accessibilityIdentifier("interaction-menu")
-                    #if os(macOS)
-                    .help("More")
-                    #endif
                 }
                 // The fold, a button of its own (the whole row folds the card too): in a circle, so it reads as one.
                 Button(action: toggleFold) {
@@ -554,11 +594,16 @@ struct InteractionPanel: View {
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel(collapsed ? Text("Expand [Question Card]") : Text("Collapse [Question Card]"))
-                .accessibilityIdentifier("interaction-fold")
+                .accessibilityIdentifier(dock == nil ? "interaction-fold" : "question-dock.collapse")
             }
             // A side session's card in its parent's chat says whose it is: "From Side Session · <title>" (#7944).
             if let from {
                 Text(from).font(Theme.Font.caption).foregroundStyle(.secondary).lineLimit(1)
+            }
+            if let noSkip, !collapsed {
+                Text(Self.noSkipReason(noSkip)).font(Theme.Font.caption).foregroundStyle(Theme.cautionText)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("interaction-no-skip")
             }
             // A stopped Agent's work card says why only putting it off is on (#6839).
             if localOnly {
@@ -574,7 +619,24 @@ struct InteractionPanel: View {
 
     private func toggleFold() {
         Haptics.tap()
+        // In the pager the fold collapses the pager into its entry (#12831): a card folded to one line there hid itself.
+        if let dock { return dock.collapse() }
         withAnimation(Theme.Motion.standard) { collapsed.toggle() }
+    }
+
+    /// Why the card's Skip is greyed, in the pager only (#12831); nil where it keeps today's Skip.
+    private var noSkip: QuestionDockLogic.NoSkip? {
+        guard dock != nil else { return nil }
+        return QuestionDockLogic.noSkip(kind: interaction.kind, command: interaction.screenDialog?.commandAsk != nil,
+                                        canSkip: headerSkip != nil || interaction.canCancel == true)
+    }
+
+    static func noSkipReason(_ reason: QuestionDockLogic.NoSkip) -> String {
+        switch reason {
+        case .terminal: String(localized: "This question was read off the terminal and can't be skipped yet. To leave it, tap Reply in Chat Instead.")
+        case .permission: String(localized: "This is a permission request and can't be skipped. To stop it running, tap Deny.")
+        case .plan: String(localized: "This is a plan approval and can't be skipped. To not go ahead, send it back.")
+        }
     }
 
     /// Folded, a question card of several says how many are left: what the form reports, or all of them before it does.
@@ -585,6 +647,15 @@ struct InteractionPanel: View {
     }
 
     @ViewBuilder private var form: some View {
+        // A card its task's supervisor holds (`Interaction.supervisorHeld`): no form to answer it, a line saying who has it.
+        if !interaction.answerableHere {
+            SupervisorHeldNote()
+        } else {
+            answerForm
+        }
+    }
+
+    @ViewBuilder private var answerForm: some View {
         switch interaction.kind {
         case .question: QuestionForm(interaction: interaction)
         case .plan: PlanForm(interaction: interaction, showFull: $showFullPlan)
@@ -700,7 +771,21 @@ struct QuestionForm: View {
     private var skipInHeader: Bool { canSkip && headerTakesSkip }
 
     var body: some View {
-        if AppStyle.current.usesBeautifulUI { BUIQuestionForm(interaction: interaction) } else { plainLayout }
+        if AppStyle.current.usesBeautifulUI { BUIQuestionForm(interaction: interaction) } else {
+            plainLayout
+                // Its page, picks and typed answers outlive the view (#12831): the assistant's pager draws one card at a
+                // time and none while collapsed, and a card paged back to or opened again starts where it was.
+                .onAppear {
+                    guard let kept = QuestionFormMemory.shared.take(interaction.uid) else { return }
+                    picks = kept.picks
+                    other = kept.other
+                    page = min(kept.page, max(questions.count - 1, 0))
+                    reviewing = kept.reviewing
+                }
+                .onDisappear {
+                    QuestionFormMemory.shared.keep(interaction.uid, .init(picks: picks, other: other, page: page, reviewing: reviewing))
+                }
+        }
     }
 
     /// The options (or the review) scroll; Previous / Next / Submit are outside that scroll and stay in the panel.
@@ -1257,10 +1342,6 @@ struct PermissionForm: View {
             Button("Always Allow in Session") {
                 Task { await model.resolve(interaction, Resolution(allow: true, always: true)) }
             }
-            #if os(macOS)
-            // A text link as on iOS: the Mac's default style made it a third push button under Deny / Allow.
-            .buttonStyle(.link)
-            #endif
             // One line on every platform (button labels never wrap): large text or a narrow card shrinks it.
             .lineLimit(1)
             .minimumScaleFactor(0.8)
@@ -1342,9 +1423,6 @@ struct AgentPermissionForm: View {
                     Text("Always Approve").lineLimit(1).minimumScaleFactor(0.8)
                 }
             }
-            #if os(macOS)
-            .buttonStyle(.link)
-            #endif
             .font(Theme.Font.caption)
             .frame(maxWidth: .infinity)
             .accessibilityIdentifier("codex-always")
@@ -1385,9 +1463,6 @@ struct AgentPermissionForm: View {
             } label: {
                 Text("Deny and Explain…").lineLimit(1)
             }
-            #if os(macOS)
-            .buttonStyle(.link)
-            #endif
             .font(Theme.Font.caption)
             .foregroundStyle(.secondary)
             .frame(maxWidth: .infinity)
@@ -2770,24 +2845,15 @@ struct SessionlessCardSheet: View {
             }
             .themedPage()
             .navigationTitle(interaction.sessionlessPlace ?? String(localized: "Script"))
-            #if os(iOS) || os(visionOS)
             .navigationBarTitleDisplayMode(.inline)
-            #endif
-            #if os(macOS)
-            .macSheetDone { dismiss() }
-            #else
             .toolbar {
                 SheetClose { dismiss() }
             }
-            #endif
         }
         .presentationDetents([.medium, .large])
         .onChange(of: model.pendingInteractions.contains { $0.uid == interaction.uid }) { _, pending in
             if !pending { dismiss() }
         }
-        #if os(macOS)
-        .macSheet()
-        #endif
     }
 }
 
@@ -2795,7 +2861,7 @@ extension Interaction {
     /// The line under a card's title in a list: its session's title; a sessionless card says where it comes from, and
     /// Script when its title does not already name who asks (`personad ask` labels its cards Script, docs/integrations/script-cli.md).
     func placeLine(machine: String?) -> String {
-        if let under = foldedUnder, !under.isEmpty, under != sessionID {
+        if requestHomeKey != sessionKey {
             let title = sessionTitle?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
             // A side session's card says so (#7944), in the words its parent's chat uses.
             if foldedAs == SideFold.side || foldedSide != nil, !title.isEmpty {

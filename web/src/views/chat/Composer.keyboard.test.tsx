@@ -142,6 +142,22 @@ describe.sequential("composer keyboard sending without a reliable pointer query"
     expect(onSend).not.toHaveBeenCalled();
   });
 
+  it("marks Mod+Enter as Send now only where the running chat supports it", async () => {
+    const onSend = vi.fn(async (_m: Outgoing) => true);
+    const onSendNow = vi.fn();
+    mount({ working: true, onSend, onSendNow });
+    await type("Send this now");
+    await press({ ctrlKey: true });
+    expect(onSend).toHaveBeenLastCalledWith({ text: "Send this now", images: [], sendNow: true });
+    expect(onSendNow).toHaveBeenCalledTimes(1);
+
+    mount({ working: true, onSend });
+    await type("Wait for the turn");
+    await press({ ctrlKey: true });
+    expect(onSend).toHaveBeenLastCalledWith({ text: "Wait for the turn", images: [] });
+    expect(onSendNow).toHaveBeenCalledTimes(1);
+  });
+
   it("sends nothing during IME composition, including keyCode 229", async () => {
     const onSend = vi.fn(async (_m: Outgoing) => true);
     mount({ onSend });

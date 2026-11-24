@@ -14,3 +14,7 @@ func inode(st os.FileInfo) uint64 {
 	}
 	return 0
 }
+
+func statTranscript(path string) (os.FileInfo, error)      { return os.Stat(path) }
+func statOpenedTranscript(f *os.File) (os.FileInfo, error) { return f.Stat() }
+func openTranscript(path string) (*os.File, error)         { return os.Open(path) }

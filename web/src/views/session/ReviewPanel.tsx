@@ -171,7 +171,7 @@ export function ReviewPanel({ mid, sid, cwd, scope, at, opened, onClose }: { mid
   const went = useRef<ReviewSpot | undefined>(undefined);
   useEffect(() => {
     if (!at || went.current === at || loading) return;
-    const showFile = () => openPanel({ kind: "file", mid, path: at.path, cwd, sid });
+    const showFile = () => openPanel({ kind: "file", mid, path: at.path, cwd, sid }, { replace: true });
     if (failure) {
       went.current = at;
       if (at.file) showFile();

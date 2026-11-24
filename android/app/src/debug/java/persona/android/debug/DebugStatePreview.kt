@@ -5,7 +5,7 @@ import persona.android.navigation.DeveloperTools
 import persona.android.ui.ShellSession
 import persona.core.contracts.*
 import persona.core.contracts.api.*
-import persona.feature.inbox.InboxSnapshot
+import persona.core.inbox.InboxSnapshot
 import kotlinx.coroutines.flow.MutableStateFlow
 
 /** Fixed local snapshots keep captures independent of network timing and user pairing data. */

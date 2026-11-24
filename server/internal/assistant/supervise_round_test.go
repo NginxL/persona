@@ -3,7 +3,6 @@ package assistant
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -63,16 +62,23 @@ func lastSendTo(f *fakeHub, id string) map[string]any {
 	return all[len(all)-1]
 }
 
-// wakeRound has signals gs go out now, as the digest's timer would.
+// wakeRound has explicitly addressed legacy signals gs go out now, as the digest's timer would. New task signals still
+// default to main (#5732); these fixtures name the already configured background conversation to exercise old notices.
 func wakeRound(s *Service, gs ...superviseSignal) {
 	b := &s.supervise
+	legacy := s.settings(context.Background()).BackgroundSupervisor
 	b.mu.Lock()
 	b.init()
 	for _, g := range gs {
 		if g.At.IsZero() {
 			g.At = time.Now().Add(-time.Minute)
 		}
+		if g.To == "" {
+			g.To = legacy
+		}
 		b.pending[g.id()] = g
+		// These fixtures bypass signal, so establish the durable outbox entry that sendDigest requires before delivery.
+		s.updateSupervisePending(func(pending map[string]superviseSignal) { pending[g.id()] = g })
 	}
 	b.last = time.Time{}
 	b.mu.Unlock()
@@ -167,8 +173,8 @@ func TestBackgroundRoundStartsFresh(t *testing.T) {
 	}
 	agentTurn(s, f, proto.StatusWorking, "", 0)
 	agentTurn(s, f, proto.StatusDone, "做完了，PR https://github.com/o/r/pull/7 已合并", 0)
-	bg := backgroundID(t, s)
-	listBackground(t, s, f, bg)
+	bg := withBackgroundBG1(t, s, f)
+	wakeRound(s, superviseSignal{Todo: todo.ID, Kind: sigReview, Key: "legacy-review"})
 	waitFor(t, "the background supervisor's round", func() bool { return len(f.noticesTo(bg)) == 1 })
 	send := assistantSendsTo(f, bg)[0]
 	text, _ := send["text"].(string)
@@ -251,8 +257,8 @@ func TestBackgroundReviewFromThePreviousRound(t *testing.T) {
 	ctx := context.Background()
 	agentTurn(s, f, proto.StatusWorking, "", 0)
 	agentTurn(s, f, proto.StatusDone, "做完了", 0)
-	bg := backgroundID(t, s)
-	listBackground(t, s, f, bg)
+	bg := withBackgroundBG1(t, s, f)
+	wakeRound(s, superviseSignal{Todo: todo.ID, Kind: sigReview, Key: "legacy-review"})
 	waitFor(t, "round 1", func() bool { return len(f.noticesTo(bg)) == 1 })
 	wakeRound(s, superviseSignal{Todo: todo.ID, Kind: sigStalled, Key: "k2", Minutes: 40})
 	waitFor(t, "round 2", func() bool { return len(f.noticesTo(bg)) == 2 })
@@ -385,105 +391,58 @@ func TestBackgroundQueuedWakeAfterManagerRestart(t *testing.T) {
 	}
 }
 
-// A node that cannot start rounds from the first turn (no_anchor: compacted) gets the background supervisor replaced
-// at the next wake while it is idle, not while it works: a new one starts, what was queued for the old one moves, and
-// the old one is retitled and archived. A replacement whose rounds cannot start fresh either keeps its context, and
-// one more replacement waits backgroundRetry.
-func TestBackgroundWithoutAnchorIsReplacedOnce(t *testing.T) {
+// A legacy background that cannot start from its first turn keeps its queued work while busy. Once idle, that work
+// moves to main; the old conversation stays readable and no replacement is started (#5732, #7315).
+func TestBackgroundWithoutAnchorMovesLegacyWorkToMain(t *testing.T) {
 	s, f, todo, _ := newRoundService(t)
 	ctx := context.Background()
 	roundAnswers(f, map[string]any{"context": "kept", "why": "no_anchor", "transcript_bytes": 4096})
 	agentTurn(s, f, proto.StatusWorking, "", 0)
 	agentTurn(s, f, proto.StatusDone, "做完了", 0)
-	old := backgroundID(t, s)
-	listBackground(t, s, f, old)
+	old := withBackgroundBG1(t, s, f)
+	wakeRound(s, superviseSignal{Todo: todo.ID, Kind: sigReview, Key: "legacy-review"})
 	waitFor(t, "the answer noted", func() bool { return outgrownOf(s, old) == "no_anchor" })
 
-	// Working: it stays, and the wake queues for it.
+	// Working: it stays, and the explicitly legacy wake queues for it.
 	listRound(f, old, proto.StatusWorking, false)
 	wakeRound(s, superviseSignal{Todo: todo.ID, Kind: sigStalled, Key: "k1", Minutes: 50})
-	if got := s.settings(ctx).BackgroundSupervisor; got != old || len(conversationStarts(f)) != 1 || s.queuedFor(old) != 1 {
-		t.Fatalf("replaced while it works: %q, %d starts, %d queued", got, len(conversationStarts(f)), s.queuedFor(old))
+	if got := s.settings(ctx).BackgroundSupervisor; got != old || len(conversationStarts(f)) != 0 || s.queuedFor(old) != 1 {
+		t.Fatalf("retired while it works: %q, %d starts, %d queued", got, len(conversationStarts(f)), s.queuedFor(old))
 	}
 	if s.queueRelay(old, relayMsg{From: "conv1", FromTitle: "Main", Tool: "conversation_send", Text: "顺便看看", At: time.Now().UTC()}) == 0 {
 		t.Fatal("could not queue")
 	}
 
-	// Idle again (its queue not drained yet): the next wake replaces it.
+	// Idle again: both the known signals and the message with no in-memory signals move to main.
 	listRound(f, old, proto.StatusIdle, false)
 	wakeRound(s, superviseSignal{Todo: todo.ID, Kind: sigInterrupted, Key: "k2"})
-	bg := s.settings(ctx).BackgroundSupervisor
-	if bg == old || bg == "" || len(conversationStarts(f)) != 2 {
-		t.Fatalf("not replaced: %q, %d starts", bg, len(conversationStarts(f)))
-	}
-	if s.queuedFor(old) != 0 || s.queuedFor(bg) < 2 {
-		t.Fatalf("queued: old %d, new %d", s.queuedFor(old), s.queuedFor(bg))
-	}
-	if !s.isArchived(old) {
-		t.Fatal("the old one is not archived")
-	}
-	local := time.Now().In(s.location(ctx))
-	wantTitle := i18n.T(s.lang(ctx), "assistant-conversations.background_supervisor_former",
-		i18n.Args{"month": fmt.Sprint(int(local.Month())), "day": fmt.Sprint(local.Day())})
-	s.titles.mu.Lock()
-	title := s.titles.m[old]
-	s.titles.mu.Unlock()
-	if title == nil || title.Title != wantTitle || title.By != titleByUser {
-		t.Fatalf("the old one's title: %+v, want %q", title, wantTitle)
-	}
-	listBackground(t, s, f, bg)
-	waitFor(t, "the new one's round", func() bool {
-		for _, n := range f.noticesTo(bg) {
-			if strings.Contains(n, "50 分钟没有进展") && strings.Contains(n, "被模型服务出错打断了") {
-				return true
-			}
-		}
-		return false
+	// The moved conversation message may go in first, leaving this digest queued behind its turn. Let that turn finish,
+	// as the node's next idle session list does on a hub, before requiring both parts of the moved work.
+	waitFor(t, "the moved conversation message in main", func() bool {
+		return strings.Contains(strings.Join(f.noticesTo("conv1"), "\n"), "顺便看看")
 	})
-	waitFor(t, "the round's delivery to finish", func() bool {
-		s.relays.mu.Lock()
-		defer s.relays.mu.Unlock()
-		return !s.relays.draining[bg]
+	s.drainRelays("server", listRound(f, old, proto.StatusIdle, false))
+	waitFor(t, "the moved legacy work in main", func() bool {
+		got := strings.Join(f.noticesTo("conv1"), "\n")
+		return strings.Contains(got, "50 分钟没有进展") && strings.Contains(got, "被模型服务出错打断了") && strings.Contains(got, "顺便看看")
 	})
-	s.drainRelays("server", listRound(f, bg, proto.StatusIdle, false)) // its next turn: the message that moved
-	waitFor(t, "the moved message", func() bool {
-		return slices.ContainsFunc(f.noticesTo(bg), func(n string) bool { return strings.Contains(n, "顺便看看") })
-	})
+	if got := s.settings(ctx).BackgroundSupervisor; got != old || len(conversationStarts(f)) != 0 || s.isArchived(old) {
+		t.Fatalf("retirement replaced or archived the old conversation: %q, %d starts, archived %v", got, len(conversationStarts(f)), s.isArchived(old))
+	}
+	if s.queuedFor(old) != 0 || outgrownOf(s, old) != "no_anchor" {
+		t.Fatalf("after the move: old queue %d, outgrown %q", s.queuedFor(old), outgrownOf(s, old))
+	}
 	if got := f.noticesTo(old); len(got) != 1 {
-		t.Fatalf("the old one got %d messages", len(got))
-	}
-	// The new one cannot start rounds fresh either: it is not replaced again.
-	waitFor(t, "the new one's answer", func() bool {
-		return slices.ContainsFunc(assistantSendsTo(f, bg), func(a map[string]any) bool { return a[superviseRoundParam] == true })
-	})
-	settleService(t, s)
-	if why := outgrownOf(s, bg); why != "" {
-		t.Fatalf("the replacement is to be replaced (%s)", why)
-	}
-
-	// One that rounds worked for, compacted since: replaced again, but not within backgroundRetry of the last.
-	s.superviseRoundAnswered(bg, superviseRoundReply{Context: "fresh"})
-	s.superviseRoundAnswered(bg, superviseRoundReply{Context: "kept", Why: "no_anchor"})
-	listRound(f, bg, proto.StatusIdle, false)
-	if id, gone := s.ensureBackground(ctx); id != bg || gone != "" {
-		t.Fatalf("replaced again within backgroundRetry: %q %q", id, gone)
-	}
-	r := &s.background.rounds
-	r.mu.Lock()
-	r.replacedAt = time.Now().Add(-backgroundRetry - time.Minute)
-	r.mu.Unlock()
-	if id, gone := s.ensureBackground(ctx); id == bg || gone != bg {
-		t.Fatalf("not replaced after backgroundRetry: %q %q", id, gone)
+		t.Fatalf("the old conversation got another message after retirement: %q", got)
 	}
 }
 
-// A round whose transcript outgrew backgroundTranscriptLimit gets the background supervisor replaced at the next
-// chance; one at the limit does not, and with the switch on nothing is.
-func TestBackgroundOversizedTranscriptIsReplaced(t *testing.T) {
+// A transcript over backgroundTranscriptLimit moves legacy work to main at the next idle digest; one at the limit does
+// not, and background_supervisor_keeps_context keeps the existing long conversation instead.
+func TestBackgroundOversizedTranscriptMovesLegacyWorkToMain(t *testing.T) {
 	s, f, todo, _ := newRoundService(t)
 	ctx := context.Background()
 	bg := withBackgroundBG1(t, s, f)
-
 	s.superviseRoundAnswered(bg, superviseRoundReply{Context: "fresh", TranscriptBytes: backgroundTranscriptLimit})
 	if why := outgrownOf(s, bg); why != "" {
 		t.Fatalf("at the limit: %q", why)
@@ -495,23 +454,17 @@ func TestBackgroundOversizedTranscriptIsReplaced(t *testing.T) {
 	on := true
 	setSettings(t, s, func(v *Settings) { v.BackgroundSupervisorKeepsContext = &on })
 	if id, gone := s.ensureBackground(ctx); id != bg || gone != "" {
-		t.Fatalf("replaced with the switch on: %q %q", id, gone)
+		t.Fatalf("retired with the switch on: %q %q", id, gone)
 	}
 	off := false
 	setSettings(t, s, func(v *Settings) { v.BackgroundSupervisorKeepsContext = &off })
 	listRound(f, bg, proto.StatusIdle, false)
 	wakeRound(s, superviseSignal{Todo: todo.ID, Kind: sigIdle, Key: "k2"})
-	next := s.settings(ctx).BackgroundSupervisor
-	if next == bg || next == "" || !s.isArchived(bg) {
-		t.Fatalf("not replaced: %q, archived %v", next, s.isArchived(bg))
-	}
-	// The replacement's first round answers fresh and small: it stays.
-	roundAnswers(f, map[string]any{"context": "fresh", "transcript_bytes": 2048})
-	listBackground(t, s, f, next)
-	waitFor(t, "the new one's round", func() bool { return len(assistantSendsTo(f, next)) == 1 })
-	settleService(t, s)
-	if why := outgrownOf(s, next); why != "" {
-		t.Fatalf("the replacement is to be replaced (%s)", why)
+	waitFor(t, "the oversized legacy work in main", func() bool {
+		return strings.Contains(strings.Join(f.noticesTo("conv1"), "\n"), "signal="+sigIdle)
+	})
+	if len(conversationStarts(f)) != 0 || s.isArchived(bg) || outgrownOf(s, bg) != "oversized" {
+		t.Fatalf("after the move: %d starts, archived %v, outgrown %q", len(conversationStarts(f)), s.isArchived(bg), outgrownOf(s, bg))
 	}
 }
 
@@ -616,13 +569,13 @@ func TestBackgroundKeepsContextSetting(t *testing.T) {
 		}
 	})
 	t.Run("on", func(t *testing.T) {
-		s, f, _ := newBackgroundService(t)
+		s, f, todo := newBackgroundService(t)
 		on := true
 		setSettings(t, s, func(v *Settings) { v.BackgroundSupervisorKeepsContext = &on })
 		agentTurn(s, f, proto.StatusWorking, "", 0)
 		agentTurn(s, f, proto.StatusDone, "做完了", 0)
-		bg := backgroundID(t, s)
-		listBackground(t, s, f, bg)
+		bg := withBackgroundBG1(t, s, f)
+		wakeRound(s, superviseSignal{Todo: todo.ID, Kind: sigReview, Key: "legacy-review"})
 		waitFor(t, "the message", func() bool { return len(f.noticesTo(bg)) == 1 })
 		a := assistantSendsTo(f, bg)[0]
 		text, _ := a["text"].(string)
@@ -636,9 +589,8 @@ func TestBackgroundKeepsContextSetting(t *testing.T) {
 	})
 }
 
-// A background supervisor replaced because its rounds outgrew it keeps the model the owner picked for it (#9248: a pick
-// is never dropped behind the user's back); the old one keeps its own in the archive.
-func TestBackgroundReplacementKeepsItsModelPick(t *testing.T) {
+// Moving outgrown legacy work to main neither drops the owner's model pick nor archives the conversation it belonged to.
+func TestBackgroundOutgrownKeepsExistingModelPick(t *testing.T) {
 	s, f, todo, _ := newRoundService(t)
 	ctx := context.Background()
 	bg := withBackgroundBG1(t, s, f)
@@ -652,15 +604,12 @@ func TestBackgroundReplacementKeepsItsModelPick(t *testing.T) {
 	waitFor(t, "the answer noted", func() bool { return outgrownOf(s, bg) == "oversized" })
 	listRound(f, bg, proto.StatusIdle, false)
 	wakeRound(s, superviseSignal{Todo: todo.ID, Kind: sigIdle, Key: "k2"})
-	next := s.settings(ctx).BackgroundSupervisor
-	if next == bg || next == "" {
-		t.Fatalf("not replaced: %q", next)
-	}
-	got, ok := s.modelPickOf(ctx, machine, next)
+	waitFor(t, "the legacy work in main", func() bool { return len(f.noticesTo("conv1")) > 0 })
+	got, ok := s.modelPickOf(ctx, machine, bg)
 	if !ok || got.Launcher != pick.Launcher || got.Model != pick.Model {
-		t.Fatalf("the replacement's pick: %+v %v, want %+v", got, ok, pick)
+		t.Fatalf("the existing conversation's pick: %+v %v, want %+v", got, ok, pick)
 	}
-	if old, ok := s.modelPickOf(ctx, machine, bg); !ok || old.Model != pick.Model {
-		t.Fatalf("the archived one's pick: %+v %v, want it kept", old, ok)
+	if s.settings(ctx).BackgroundSupervisor != bg || s.isArchived(bg) || len(conversationStarts(f)) != 0 {
+		t.Fatalf("retirement changed the conversation: archived %v, %d starts", s.isArchived(bg), len(conversationStarts(f)))
 	}
 }

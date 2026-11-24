@@ -50,6 +50,7 @@ final class TreeSwapFoldTests: XCTestCase {
         let health = app.buttons["sidebar-health"].firstMatch
         XCTAssertTrue(health.waitForExistence(timeout: 20), "no Health in the sidebar:\n\(app.debugDescription)")
         health.tap()
+        XCTAssertTrue(app.buttons["health-upload-report"].waitForExistence(timeout: 10), "Health did not open its home")
         XCTAssertTrue(app.buttons["取消上传 \(names[0])"].waitForExistence(timeout: 15), "the reports did not start up:\n\(app.debugDescription)")
         XCTAssertEqual(app.probe("tree", as: Swaps.self)?.count, 0, "the width flipped before the reports were on their way")
         let flipEnd = Date.now.addingTimeInterval(60)
@@ -58,6 +59,7 @@ final class TreeSwapFoldTests: XCTestCase {
         let again = app.buttons["sidebar-health"].firstMatch
         XCTAssertTrue(again.waitForExistence(timeout: 10), "no Health in the sidebar after the fold:\n\(app.debugDescription)")
         again.tap()
+        XCTAssertTrue(app.buttons["health-upload-report"].waitForExistence(timeout: 10), "Health did not reopen its home after the fold")
         let going = NSPredicate { _, _ in names.contains { app.buttons["取消上传 \($0)"].exists } }
         expectation(for: going, evaluatedWith: nil)
         waitForExpectations(timeout: 10)

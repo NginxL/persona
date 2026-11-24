@@ -86,7 +86,7 @@ class ErrorReporting(
     @OptIn(ExperimentalCoroutinesApi::class)
     fun start(scope: CoroutineScope, hub: StateFlow<Hub?>) {
         scope.launch(Dispatchers.IO) {
-            runCatching { recordExits() }
+            val _ = runCatching { recordExits() }
             hub.flatMapLatest { selected ->
                 val connection = selected?.connection ?: return@flatMapLatest emptyFlow()
                 combine(connection.state, connection.serverFeatures) { state, features ->
@@ -94,7 +94,7 @@ class ErrorReporting(
                     if (state == ConnectionState.Online) features else null
                 }.filterNotNull().map { connection to it }
             }.collect { (connection, features) ->
-                runCatching { sender.flush(features, HttpErrorReportTransport(connection)) }
+                val _ = runCatching { sender.flush(features, HttpErrorReportTransport(connection)) }
             }
         }
     }
@@ -120,7 +120,7 @@ class ErrorReporting(
         plan.reports.forEach(queue::write)
         // The local recorder keeps every other exit reason too; hub reporting keeps its existing three kinds.
         if (lastSeen != null) historical.filter { it.timestamp > lastSeen }.forEach { info ->
-            runCatching { localExit(info.reason, info.timestamp) }
+            val _ = runCatching { localExit(info.reason, info.timestamp) }
         }
         // First run with no exits at all: still remember that the first run happened.
         prefs.edit { putLong(KeyLastExit, plan.lastSeen ?: 0L) }

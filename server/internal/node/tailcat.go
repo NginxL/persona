@@ -7,6 +7,7 @@ import (
 	"log"
 	"net"
 	"os"
+	"sync/atomic"
 	"time"
 
 	"github.com/tailscale/tailcat"
@@ -26,6 +27,8 @@ func ServeTailcat(ctx context.Context, logger *log.Logger, upgraded func()) (con
 		var exe string
 		if exe, err = tunnel.Executable(); err == nil {
 			c := make(chan net.Conn)
+			ctx, cancel := context.WithCancel(ctx)
+			tailcatStop.Store(&tailcatEndpoint{cancel: cancel, logger: logger})
 			go retryTailcat(ctx, k, logger, exe, c, upgraded, done)
 			return c, done, nil
 		}
@@ -35,6 +38,25 @@ func ServeTailcat(ctx context.Context, logger *log.Logger, upgraded func()) (con
 		return nil, done, nil
 	}
 	return nil, done, err
+}
+
+// tailcatEndpoint is the endpoint ServeTailcat started in this process, for stopTailcat.
+type tailcatEndpoint struct {
+	cancel context.CancelFunc
+	logger *log.Logger
+}
+
+// tailcatStop is this process's tailcat endpoint; nil when it serves none.
+var tailcatStop atomic.Pointer[tailcatEndpoint]
+
+// stopTailcat ends this process's tailcat endpoint for good, its relay connections and DERP map fetches included:
+// the hub is in office network mode (node.configure private_network). The endpoint stays down until the node restarts
+// and the hub says otherwise; a node that serves none does nothing.
+func stopTailcat() {
+	if e := tailcatStop.Swap(nil); e != nil {
+		e.logger.Printf("tailcat: stopped, the hub is in office network mode (delete ~/.persona/tailcat.json to keep it from starting)")
+		e.cancel()
+	}
 }
 
 func retryTailcat(ctx context.Context, k *tunnel.NodeKey, logger *log.Logger, exe string, conns chan<- net.Conn, upgraded func(), done chan<- struct{}) {

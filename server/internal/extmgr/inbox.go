@@ -53,10 +53,16 @@ type InboxConfig struct {
 	// Agent (model 3) works on the Needs you items (and those a policy hands it) and drafts the reply (the manager's
 	// inbox_agent.go).
 	Agent InboxAgentConfig `json:"agent,omitempty"`
+	// ReplyPolicy is the opt-in server-side category routing and fail-closed owner-draft gate (manager.json
+	// inbox.reply_policy). Disabled by default.
+	ReplyPolicy InboxReplyPolicyConfig `json:"reply_policy,omitempty"`
 }
 
 // InboxAgentConfig is manager.json's inbox.agent, handed to the manager as it is.
 type InboxAgentConfig = assistantwire.InboxAgentConfig
+
+// InboxReplyPolicyConfig is manager.json's inbox.reply_policy, handed to the manager as it is.
+type InboxReplyPolicyConfig = assistantwire.InboxReplyPolicyConfig
 
 // inboxSources is this code's part of the inbox: the wake-ups, one collection at a time, and what the manager
 // reported.

@@ -15,12 +15,13 @@ import (
 )
 
 // GET /api/v1/interactions/history (docs/protocol/protocol.md, docs/extensions/extensions.md "Question history"): the
-// cards that were raised and how each ended, newest first. Without since, before or kind it is the newest ≤500 as
-// before; with any of them it pages back by time: a full page carries next_before / next_before_id, the cursor of the
-// next older page (pass them as before and before_id).
+// cards that were raised and how each ended, plus decisions recorded directly as resolved (reversible-setting
+// auto-approval), newest first. Without since, before or kind it is the newest ≤500 as before; with any of them it pages
+// back by time: a full page carries next_before / next_before_id, the cursor of the next older page (pass them as before
+// and before_id).
 //
-// An extension's token (agents.read) is never shown a private card (a Just me turn's), a card of the health space, or
-// one whose space cannot be told; the values filled into a card's fields (a password a permission asked for) are left
+// An extension's token (agents.read) is never shown a private card (a Just me turn's), a card of a space hidden from
+// extensions, or one whose space cannot be told; the values filled into a card's fields (a password a permission asked for) are left
 // out of its resolution.
 
 // historyRecord is a record as the history answers it: Reanswerable says the user may still change the answer (one
@@ -114,37 +115,38 @@ func reanswerable(rec db.InteractionRecord) bool {
 }
 
 // extensionHiddenCards says which of recs an extension's token is not shown (none for anyone else): a private card, a
-// card of the health space by its directory or its conversation's space, and a card without a directory whose
-// conversation cannot be found (its machine's list unreadable, or the conversation not in it).
+// card of a space hidden from extensions by its directory or its conversation's space, and a card without a directory
+// whose conversation cannot be found (its machine's list unreadable, or the conversation not in it).
 func (s *Service) extensionHiddenCards(ctx context.Context, ext bool, recs []db.InteractionRecord) []bool {
 	hidden := make([]bool, len(recs))
 	if !ext {
 		return hidden
 	}
 	type listed struct {
-		health map[string]bool // session id → in the health space
-		ok     bool
+		hide map[string]bool // session id → in a space hidden from extensions
+		ok   bool
 	}
 	machines := map[string]*listed{}
 	for i, rec := range recs {
 		ix := rec.Interaction
-		if ix.Private || identity.InHealthSpace(ix.Cwd) {
+		if ix.Private || s.extensionHides(ctx, identity.SpaceAt(ix.Cwd)) {
 			hidden[i] = true
 			continue
 		}
 		l := machines[ix.MachineID]
 		if l == nil {
-			l = &listed{health: map[string]bool{}}
+			l = &listed{hide: map[string]bool{}}
 			if list, err := s.sessions(ctx, ix.MachineID); err == nil {
 				l.ok = true
 				for _, c := range list {
-					l.health[c.SessionID] = spaceOf(c) == SpaceHealth || identity.InHealthSpace(c.Cwd)
+					l.hide[c.SessionID] = s.extensionHides(ctx, spaceOf(c)) ||
+						s.extensionHides(ctx, identity.SpaceAt(c.Cwd))
 				}
 			}
 			machines[ix.MachineID] = l
 		}
-		inHealth, known := l.health[ix.SessionID]
-		hidden[i] = inHealth || ix.Cwd == "" && (!l.ok || !known)
+		hide, known := l.hide[ix.SessionID]
+		hidden[i] = hide || ix.Cwd == "" && (!l.ok || !known)
 	}
 	return hidden
 }

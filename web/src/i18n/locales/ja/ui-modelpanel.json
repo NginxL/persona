@@ -43,5 +43,9 @@
   "current_launcher": "現在",
   "default_launcher": "デフォルト",
   "quick_picks": "最近とお気に入り",
-  "recommended": "おすすめ"
+  "recommended": "おすすめ",
+  "launchers": "ランチャー",
+  "speed": "速度",
+  "speed_standard": "標準",
+  "no_levels": "このモデルには選べる思考の強さがありません"
 }

@@ -161,6 +161,23 @@ class RequestTests(unittest.TestCase):
         self.assertEqual(row["sources"]["tool_results"]["bytes"], 7)
         self.assertEqual(row["sources"]["attachments"]["items"], 2)
 
+    def test_anthropic_tool_result_turn_keeps_user_prompt_and_omits_zero_byte_largest(self):
+        row = request_row({"runtime": "anthropic", "request": {
+            "system": "sys",
+            "messages": [
+                {"role": "user", "content": "earlier"},
+                {"role": "assistant", "content": [{"type": "text", "text": "ok"}]},
+                {"role": "user", "content": "<persona-context>ctx</persona-context>current prompt"},
+                {"role": "assistant", "content": [{"type": "tool_use", "id": "t1", "name": "shot", "input": {}}]},
+                {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "t1",
+                                              "content": [{"type": "image", "source": {"data": "AAAA"}}]}]},
+            ]}})
+        self.assertEqual(row["sources"]["current_message"], {"bytes": len(b"current prompt"), "items": 1})
+        self.assertEqual(row["sources"]["history"], {"bytes": len(b"earlier") + len(b"ok"), "items": 2})
+        self.assertEqual(row["sources"]["tool_results"], {"bytes": 0, "items": 0})
+        self.assertEqual(row["sources"]["attachments"]["items"], 1)
+        self.assertIsNone(row["largest_tool_result"])
+
     def test_structured_tool_output_counts_as_result_not_an_envelope(self):
         e = exported()
         value = {"private-key": "private-value", "count": 12}

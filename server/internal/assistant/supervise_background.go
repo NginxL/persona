@@ -12,57 +12,43 @@ import (
 	"github.com/nwverse/persona/server/internal/proto"
 )
 
-// The background supervisor (#4927, docs/assistant/unified-entry.md "Background supervisor"). One built-in assistant
-// conversation follows up every supervised task no leader supervises, so the main conversation stays free for the
-// owner: the supervision messages the main conversation got for a task's own signals go to it (digestTo), and it
-// reviews the tasks with task_review as a leader does. It is made on first use on the assistant's machine, stays
-// listed (keptSessions), is no leader (not in assistant.leaders, no direction, no slot of the 20) and cannot be
-// archived. On by default; assistant.main_supervises_own_tasks turns it off, and signals raised from then on go to the
-// main conversation again.
+// The legacy background supervisor (#4927, docs/assistant/unified-entry.md "Background supervisor"). Since #5732 the
+// planning lead or main supervises newly dispatched work. An already configured background conversation may
+// finish notices explicitly queued for it, but is never a default owner for new work and needs no replacement.
+// Pending and queued legacy notices are regathered or moved to main intact rather than dropped.
 //
-// Nothing is written on the tasks for it: a task's ledger keeps the main conversation as its supervisor and the task's
-// origin stays where it was planned. So task cards, the dock, receipts, the to-do events and the direction tree (tasks
-// without a leader sit under Persona) are what they were, the main conversation's own right to review is the rule it
-// always had, a switch of the setting moves every open task at once, and a background supervisor that is gone leaves
-// no task naming a conversation that does not exist. Who gets a task's signals is decided when they are sent
-// (ownSupervisor), and what the background supervisor may do to a task follows the same rule (backgroundSupervises).
-//
-// Each of its rounds starts from its first turn, with only that round's facts and tools (#7315, supervise_round.go),
-// unless assistant.background_supervisor_keeps_context is on.
+// The ledger keeps its assigned supervisor and the dispatch chat as origin. Task cards, receipts, the direction
+// tree and review permissions keep one stable owner; the background conversation is only a compatibility endpoint for
+// old work (isBackground, backgroundSupervises, backgroundLost). Each of its rounds starts from its first turn, with
+// only that round's facts and tools (#7315, supervise_round.go), unless background_supervisor_keeps_context is on.
+
+// backgroundBook serializes legacy background selection and holds what its rounds answered (supervise_round.go).
+type backgroundBook struct {
+	mu     sync.Mutex
+	rounds superviseRounds
+}
 
 // purposeSupervise is the model purpose the background supervisor runs under; it inherits the main chat's.
 const purposeSupervise = "assistant.supervise"
 
-// backgroundGrace is how long after its start the background supervisor counts as there without its machine listing
-// it yet; backgroundRetry how long after a start that failed the next one is tried (its tasks' signals go to the main
-// conversation meanwhile).
-var backgroundGrace, backgroundRetry = 2 * time.Minute, 10 * time.Minute
+// backgroundGrace is how long after its start a legacy background conversation counts as there without its machine
+// listing it yet.
+var backgroundGrace = 2 * time.Minute
 
-// backgroundBook holds the background supervisor's start still: one at a time, and not again right after a failure.
-// rounds is what its rounds' answers said (supervise_round.go), under its own lock.
-type backgroundBook struct {
-	mu       sync.Mutex
-	failedAt time.Time
-	rounds   superviseRounds
-}
-
-// backgroundOn: the background supervisor is on with settings cfg (assistant.main_supervises_own_tasks is not on).
+// backgroundOn reports whether the legacy background setting is enabled. New supervision stays with main regardless.
 func (s *Service) backgroundOn(cfg Settings) bool {
 	return !s.noBackground && (cfg.MainSupervisesOwnTasks == nil || !*cfg.MainSupervisesOwnTasks)
 }
 
-// mainSupervisesOwnTasks is assistant.main_supervises_own_tasks in effect: the main conversation follows up its own
-// tasks itself (off by default: the background supervisor does).
+// mainSupervisesOwnTasks is the compatibility projection of assistant.main_supervises_own_tasks. Since #5732 main
+// supervises new work even when this legacy setting is off.
 func (s *Service) mainSupervisesOwnTasks(ctx context.Context) bool {
 	return !s.backgroundOn(s.settings(ctx))
 }
 
-// ownSupervisor is the conversation that gets the signals of the tasks no leader supervises, with settings cfg: the
-// background supervisor while it is on and there is one on the assistant's machine, else the main conversation.
+// ownSupervisor is the main conversation for task supervision (#5732). The background supervisor remains available
+// for work already queued for it, but no new task signal is routed away from the main conversation.
 func (s *Service) ownSupervisor(cfg Settings) string {
-	if id := cfg.BackgroundSupervisor; s.backgroundOn(cfg) && id != "" && id != cfg.Main && cfg.BackgroundSupervisorMachineID == cfg.MachineID {
-		return id
-	}
 	return cfg.Main
 }
 
@@ -76,10 +62,11 @@ func (s *Service) isBackground(ctx context.Context, id string) bool {
 	return id != cfg.Main && cfg.BackgroundSupervisor == id
 }
 
-// backgroundSupervises: conversation self is the background supervisor and task t is one whose signals it gets: a
-// supervised task whose ledger names no current leader conversation and no task leader's agent. It may review it,
-// change its scope, answer and escalate its cards and speak to its agent as the task's own supervisor does.
+// backgroundSupervises: self is the legacy background supervisor and has durable evidence for task t. A pre-upgrade
+// ledger may name it directly; a notice delivered or queued for it is also persisted in relayState. Merely being
+// configured is never enough: new main-supervised work cannot be accepted here, including after a restart.
 func (s *Service) backgroundSupervises(ctx context.Context, self string, t Todo) bool {
+	self = s.supervisionHoldKey(ctx, self) // an attested round fork uses its base's legacy evidence, never its own grant
 	if t.Origin == "" || t.Supervision == nil || !s.isBackground(ctx, self) {
 		return false
 	}
@@ -87,28 +74,109 @@ func (s *Service) backgroundSupervises(ctx context.Context, self string, t Todo)
 	if s.isLeaderRef(sup) {
 		return false
 	}
+	if sup == self || s.legacyBackgroundNotice(ctx, self, t.ID) {
+		return true
+	}
 	// A leader conversation on a runtime without supervision_policy cannot be told anything (digestTarget): its tasks are this route's to review.
-	return !s.isLeader(ctx, sup) || s.runtimeWithoutSupervisionPolicy(ctx, s.settings(ctx).MachineID, sup)
+	return s.isLeader(ctx, sup) && s.runtimeWithoutSupervisionPolicy(ctx, s.settings(ctx).MachineID, sup)
 }
 
-// followUpWords tells conversation self, in the answer of the tool that just made an agent its supervised task
-// (agent_supervise, agent_send with a task), who follows the task up: the background supervisor for the main
-// conversation while it is on, else self, in the words these answers always had.
+// legacyBackgroundKey is safe as a Postgres JSON object key: session and todo IDs cannot contain '|'. The former NUL
+// separator made every durable relay write fail with SQLSTATE 22P05; reads still accept that old in-memory encoding.
+func legacyBackgroundKey(conversation, todoID string) string { return conversation + "|" + todoID }
+
+func legacyBackgroundGrant(grants map[string]bool, conversation, todoID string) bool {
+	return grants[legacyBackgroundKey(conversation, todoID)] || grants[conversation+"\x00"+todoID]
+}
+
+// legacyBackgroundNotice reports whether a real old notice reached this background conversation. The in-memory grant
+// covers the current turn; relayState keeps it across restarts and reconstructs it for pre-upgrade queued messages.
+func (s *Service) legacyBackgroundNotice(ctx context.Context, self, todoID string) bool {
+	self = s.supervisionHoldKey(ctx, self)
+	b := &s.supervise
+	// deliverDigest publishes the grant after a visible send or queue admission, before sendDigest releases dedupMu.
+	// Serialize the check with that boundary so an immediate review cannot be rejected while its notice is in flight.
+	b.dedupMu.Lock()
+	defer b.dedupMu.Unlock()
+	b.mu.Lock()
+	granted := legacyBackgroundGrant(b.legacyBackground, self, todoID)
+	b.mu.Unlock()
+	if granted {
+		return true
+	}
+	r := &s.relays
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return s.relayLocked(ctx) && legacyBackgroundGrant(r.st.LegacyBackground, self, todoID)
+}
+
+// noMainOriginFallback identifies only the new delivery fallback that must not become closeout evidence. conversation
+// is the actual target, whereas g.To may still name an ask's old, now unreachable rung (routeTo). A current Supervisor
+// is not historical delivery evidence: main may have been restored and removed while the signal waited.
+func (s *Service) noMainOriginFallback(cfg Settings, conversation string, g superviseSignal) bool {
+	if cfg.Main != "" || conversation != cfg.BackgroundSupervisor || g.Todo == "" {
+		return false
+	}
+	t, ok := s.todoNow(g.Todo)
+	return ok && t.Origin == conversation
+}
+
+// restoredLegacyBackgroundNotice says whether a structured queue entry is itself evidence of an old background route.
+// Only its explicit destination is immutable per-delivery evidence. Origin and Supervisor can move during handover,
+// and a brief can be shared by a continuation, so neither can safely reconstruct authority for an ambiguous empty-To
+// entry. Such an entry stays queued for main instead of inventing a background grant. Persisted positive grants and
+// successful direct empty-To legacy deliveries retain their closeout permission.
+func (s *Service) restoredLegacyBackgroundNotice(cfg Settings, conversation string, g superviseSignal) bool {
+	return g.Todo != "" && !g.OriginOnly && g.To == conversation && !s.noMainOriginFallback(cfg, conversation, g)
+}
+
+// rememberLegacyBackground records the tasks whose old notices were delivered or queued for this background
+// conversation. Only explicit legacy signals can route there now (digestTo), so this is also the closeout permission.
+func (s *Service) rememberLegacyBackground(conversation string, list []superviseSignal) {
+	keys := make([]string, 0, len(list))
+	b := &s.supervise
+	b.mu.Lock()
+	b.init()
+	for _, g := range list {
+		if g.Todo != "" {
+			key := legacyBackgroundKey(conversation, g.Todo)
+			b.legacyBackground[key] = true
+			keys = append(keys, key)
+		}
+	}
+	b.mu.Unlock()
+	if len(keys) == 0 {
+		return
+	}
+	r := &s.relays
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if !s.relayLocked(context.Background()) {
+		return
+	}
+	if r.st.LegacyBackground == nil {
+		r.st.LegacyBackground = map[string]bool{}
+	}
+	for _, key := range keys {
+		r.st.LegacyBackground[key] = true
+	}
+	s.saveRelayLocked()
+}
+
+// followUpWords tells the caller who follows a newly handed-out task: the main conversation, with its supervision
+// messages and task_review (#5732).
 func (s *Service) followUpWords(ctx context.Context, self string) string {
-	if s.backgroundOn(s.settings(ctx)) && s.isMain(ctx, self) {
-		return "the background supervisor follows it up: its supervision messages (📋) go there and it reviews the task with " +
-			"task_review, so none comes to you for it. You still hear of what it hands to the user, and may review the task " +
-			"yourself (task_review)"
+	main := s.settings(ctx).Main
+	if main != "" && main != self {
+		return "the main conversation gets a supervision message (📋) when it needs review, and closes it with task_review"
 	}
 	return "you get a supervision message (📋) when it needs you, and close it with task_review"
 }
 
-// ensureBackground is the background supervisor to send to now, made if there is none yet or the one there was is
-// gone; "" while it is off, there is no main conversation or machine, or it cannot start (its tasks' signals then go
-// to the main conversation, and the start is tried again after backgroundRetry). gone is the one it found gone (on
-// another machine than the assistant's now, or no longer listed), or the one it replaced because its rounds can no
-// longer start from its first turn (backgroundOutgrown, supervise_round.go), whose queued message the caller takes
-// back (backgroundLost).
+// ensureBackground returns the already registered background conversation when it can still finish old work. Since
+// #5732 it never starts a replacement: new supervision stays with main, and notices for a conversation that is gone
+// move to main intact (backgroundLost). A legacy conversation whose rounds cannot start fresh is retired the same way:
+// its unread work moves to main without archiving the conversation or creating another one (#7315).
 func (s *Service) ensureBackground(ctx context.Context) (id, gone string) {
 	b := &s.background
 	b.mu.Lock()
@@ -117,42 +185,27 @@ func (s *Service) ensureBackground(ctx context.Context) (id, gone string) {
 	if !s.backgroundOn(cfg) || cfg.Main == "" || cfg.MachineID == "" {
 		return "", ""
 	}
-	if id := s.ownSupervisor(cfg); id != cfg.Main {
-		if s.backgroundThere(ctx, cfg, id) {
-			if why := s.backgroundOutgrown(ctx, cfg, id); why != "" {
-				if next := s.replaceBackground(ctx, cfg, id, why); next != id {
-					return next, id
-				}
-			}
-			return id, ""
+	id = cfg.BackgroundSupervisor
+	if id == "" || id == cfg.Main {
+		return "", ""
+	}
+	if cfg.BackgroundSupervisorMachineID == cfg.MachineID && s.backgroundThere(ctx, cfg, id) {
+		if why := s.backgroundOutgrown(ctx, cfg, id); why != "" {
+			s.logf("supervise: the legacy background supervisor %s cannot start another clean round (%s); its unread work moves to main", short(id), why)
+			return "", id
 		}
-		s.logf("supervise: the background supervisor %s is gone from %s", short(id), cfg.MachineID)
+		return id, ""
 	}
-	if cfg.BackgroundSupervisor != cfg.Main {
-		gone = cfg.BackgroundSupervisor
-	}
-	if !b.failedAt.IsZero() && time.Since(b.failedAt) < backgroundRetry {
-		return "", gone
-	}
-	id, err := s.startBackground(ctx)
-	if err != nil {
-		b.failedAt = time.Now()
-		s.logf("supervise: the background supervisor did not start: %v; its tasks' signals go to the main conversation", err)
-		return "", gone
-	}
-	b.failedAt = time.Time{}
-	return id, gone
+	return "", id
 }
 
-// backgroundLost takes back what was still queued for background supervisor old, which is gone. The signals of the
-// supervision message that waited there are returned with their deduplication entries forgotten, so they are told
-// again where they go now, and that message is dropped. When the signals are not known (the manager restarted since it
-// was queued: supervise.queued is memory only, the deduplication history is not) the message itself moves to
-// conversation to, the new background supervisor or the main conversation, as do the other messages that waited
-// there: nothing queued is dropped unread. A hand-over of the owner's words among them follows its message, and with no
-// conversation to move to it is not delivered (relay_handover.go). A background supervisor reserved for its
-// replacement (backgroundOutgrown) takes messages again from here: it is no longer the background supervisor, and
-// nothing waits for it. dedupMu is held.
+// backgroundLost takes back what was still queued for legacy background supervisor old, which is gone or cannot start
+// another clean round. Known signals are regathered with any explicit target to old cleared, so they route to main rather
+// than back to the retired conversation. When the signals are not known (the manager restarted since the message was
+// queued), the message itself moves to conversation to. A hand-over of the owner's words follows its message; with no
+// conversation to move to it is not delivered (relay_handover.go). Ordinary relays with no destination stay queued
+// for a later reconciliation. A conversation reserved by backgroundOutgrown is released here: no replacement starts.
+// dedupMu is held.
 func (s *Service) backgroundLost(ctx context.Context, old, to, web string) []superviseSignal {
 	if old == "" || old == to {
 		return nil
@@ -162,6 +215,11 @@ func (s *Service) backgroundLost(ctx context.Context, old, to, web string) []sup
 	lost := b.queued[old]
 	b.setQueuedLocked(old, nil)
 	b.mu.Unlock()
+	for i := range lost {
+		if lost[i].To == old {
+			lost[i].To = "" // regather for main; never route unread work back to the retired conversation
+		}
+	}
 	moved := 0
 	title := "" // the name of to, for a hand-over of the owner's words that moves there (relay_handover.go)
 	if to != "" {
@@ -176,11 +234,16 @@ func (s *Service) backgroundLost(ctx context.Context, old, to, web string) []sup
 	h.mu.Lock() // before the relay lock (handoverBook): the hand-overs change before the queue that moves them is saved
 	r := &s.relays
 	r.mu.Lock()
+	keepOld := to == "" // without a destination, ordinary relays wait for a later reconciliation (#5732)
 	if s.relayLocked(ctx) && len(r.st.Queue[old]) > 0 && !r.draining[old] {
 		var handovers []string
+		var retained []relayMsg
 		for _, msg := range r.st.Queue[old] {
 			if msg.Tool == superviseTool && len(lost) > 0 {
-				continue // told again from its signals
+				if to == "" {
+					retained = append(retained, msg)
+				}
+				continue // told again from its signals when a destination exists
 			}
 			if msg.Handover != "" {
 				handovers = append(handovers, msg.Handover)
@@ -189,9 +252,11 @@ func (s *Service) backgroundLost(ctx context.Context, old, to, web string) []sup
 				msg.OnceID = ""                                                     // another destination is a separate delivery
 				msg.TriedAt, msg.Looks, msg.LookAfter = time.Time{}, 0, time.Time{} // the earlier try was to another conversation
 				moved++
+			} else if msg.Handover == "" {
+				retained = append(retained, msg)
 			}
 		}
-		s.handoversMovedLocked(handovers, to, title)
+		s.handoversMovedLocked(handovers, to, title) // an owner-word hand-over with nowhere to go ends as not delivered
 		if to != "" {
 			for _, msg := range r.st.Queue[old] {
 				if msg.Tool == superviseTool && len(lost) > 0 {
@@ -199,11 +264,20 @@ func (s *Service) backgroundLost(ctx context.Context, old, to, web string) []sup
 				}
 				r.st.Queue[to] = append(r.st.Queue[to], msg)
 			}
+			delete(r.st.Queue, old)
+		} else {
+			keepOld = len(retained) > 0
+			if keepOld {
+				r.st.Queue[old] = retained
+			} else {
+				delete(r.st.Queue, old)
+			}
 		}
-		delete(r.st.Queue, old)
 		s.saveRelayLocked()
 	}
-	delete(r.replacing, old)
+	if !keepOld {
+		delete(r.replacing, old)
+	}
 	r.mu.Unlock()
 	h.mu.Unlock()
 	if moved > 0 {
@@ -222,10 +296,9 @@ func (s *Service) backgroundLost(ctx context.Context, old, to, web string) []sup
 	return lost
 }
 
-// backgroundStranded, from the watch loop: a message still queued for a background supervisor that is gone would wait
-// for ever when no new signal comes for it. Its signals go back among the pending ones, and the next digest sends them
-// to a new background supervisor, or to the main conversation; a message whose signals are not known (queued before a
-// restart) waits for the main conversation instead.
+// backgroundStranded, from the watch loop: a message still queued for a legacy background supervisor that is gone would
+// wait for ever when no new signal comes for it. Its signals go back among the pending ones, and the next digest sends
+// them to main; a message whose signals are not known (queued before a restart) waits for the main conversation instead.
 func (s *Service) backgroundStranded(ctx context.Context) {
 	cfg := s.settings(ctx)
 	id := cfg.BackgroundSupervisor
@@ -256,6 +329,13 @@ func (s *Service) backgroundStranded(ctx context.Context) {
 			b.pending[g.id()] = g
 		}
 	}
+	s.updateSupervisePending(func(pending map[string]superviseSignal) {
+		for _, g := range lost {
+			if cur, ok := b.pending[g.id()]; ok {
+				pending[g.id()] = cur
+			}
+		}
+	})
 	s.retryDigestLocked(s.superviseTimings().urgent)
 }
 
@@ -264,7 +344,7 @@ func (s *Service) backgroundStranded(ctx context.Context) {
 // queues until the machine is back. It is gone only when the machine is connected and lists its assistant
 // conversations without it. A list with no assistant conversation at all is not that: the manager answers session.get
 // and sessions.list from what the node last listed, which is empty from a manager's start until the node has
-// connected and listed, and calling it gone then would replace a background supervisor that is still there.
+// connected and listed, and calling it gone then would move a live legacy conversation's work to main by mistake.
 func (s *Service) backgroundThere(ctx context.Context, cfg Settings, id string) bool {
 	if s.backgroundFresh(cfg, id) {
 		return true
@@ -298,9 +378,9 @@ func (s *Service) backgroundThere(ctx context.Context, cfg Settings, id string) 
 
 // backgroundSignedOut: background supervisor c, started before this manager, ended its last turn "Not logged in". It was
 // made in a new private profile with no login, as every conversation the hub started was until #6015, and a conversation
-// cannot move to another profile: it counts as gone, so one that starts signed in replaces it (ensureBackground) and what
-// waited for it moves on. One this manager started is already in the signed-in profile (startConversation): replacing it
-// would not sign it in, only make a new conversation at every signal.
+// cannot move to another profile: it counts as gone, and its queued legacy work moves to main rather than starting a
+// replacement (#5732). One this manager started is already in the signed-in profile (startConversation): treating it as
+// gone would only move its work at every signal.
 func (s *Service) backgroundSignedOut(cfg Settings, c proto.Session) bool {
 	at := cfg.BackgroundSupervisorAt
 	return signedOut(c) && c.SessionID == cfg.BackgroundSupervisor && at != nil && at.Before(s.born)
@@ -312,10 +392,9 @@ func (s *Service) backgroundFresh(cfg Settings, id string) bool {
 	return id != "" && id == cfg.BackgroundSupervisor && at != nil && time.Since(*at) < backgroundGrace
 }
 
-// startBackground starts the background supervisor on the assistant's machine with what it is for
-// (prompts/assistant/supervisor_start), under its own model purpose, and keeps its id in the settings (replacing one
-// that is gone). It is listed with the scheduled tasks' conversations (origin task), titled in the owner's language,
-// and its turns are held from the pushes as a supervision message's are.
+// startBackground starts an explicitly requested background supervisor on the assistant's machine with what it is for
+// (prompts/assistant/supervisor_start), under its own model purpose, and keeps its id in the settings. New task work
+// remains main-supervised: ensureBackground does not call this to replace a lost legacy supervisor (#5732).
 func (s *Service) startBackground(ctx context.Context) (string, error) {
 	sctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 100*time.Second)
 	defer cancel()
@@ -340,11 +419,26 @@ func (s *Service) startBackground(ctx context.Context) (string, error) {
 	return c.SessionID, nil
 }
 
-// backgroundNeeded: one of the signals list would go to the background supervisor if there were one (digestTo).
+// backgroundNeeded: one of the signals list explicitly targets the configured legacy background, unread legacy work
+// needs its outgrown state reconciled even when this digest is main-only, or a signal would have used the pre-#5732
+// automatic background route (the probe). Only the first is possible for new work under #5732.
 func (s *Service) backgroundNeeded(ctx context.Context, cfg Settings, list []superviseSignal) bool {
 	const probe = "\x00background"
+	legacy := cfg.BackgroundSupervisor
+	if legacy != "" && legacy != cfg.Main {
+		b := &s.supervise
+		b.mu.Lock()
+		waiting := len(b.queued[legacy]) > 0
+		b.mu.Unlock()
+		if waiting || s.queuedFor(legacy) > 0 {
+			return true
+		}
+	}
 	cfg.BackgroundSupervisor, cfg.BackgroundSupervisorMachineID = probe, cfg.MachineID
 	for _, g := range list {
+		if legacy != "" && legacy != cfg.Main && g.To == legacy {
+			return true
+		}
 		if _, handled, _ := s.leaderRoute(g); !handled && s.digestTarget(ctx, cfg, g) == probe {
 			return true
 		}

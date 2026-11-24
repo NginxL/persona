@@ -89,7 +89,7 @@ func (n *Node) assistantCompact(ctx context.Context, id string, onlyRunning bool
 		// A guest (a meeting's room too) starts as on any resume: spawnClaude reads its tools and kind from its record
 		// (no built-in tools, strict MCP config, project setting sources, its own settings and profile), and
 		// spawnAssistant refuses one whose launcher runs another agent by now.
-		execution := modelExecution{Model: st.Model, Effort: st.ModelEffort, UseEffort: st.ModelFingerprint != "", Fingerprint: st.ModelFingerprint, IsMain: st.IsMain, MainCompactWindow: st.MainCompactWindow, ConfigDir: st.ConfigDir, SupervisionInstructions: st.SupervisionInstructions, Origin: st.Origin, OriginKnown: st.OriginKnown}
+		execution := modelExecution{Source: st.ModelSource, Model: st.Model, Effort: st.ModelEffort, UseEffort: st.ModelFingerprint != "", Fingerprint: st.ModelFingerprint, IsMain: st.IsMain, MainCompactWindow: st.MainCompactWindow, ConfigDir: st.ConfigDir, SupervisionInstructions: st.SupervisionInstructions, Origin: st.Origin, OriginKnown: st.OriginKnown}
 		resolved, current, _ := n.assistantModelDecision(ctx, id)
 		if current.OriginKnown {
 			execution.Origin, execution.OriginKnown = current.Origin, true
@@ -126,6 +126,10 @@ func (n *Node) assistantCompact(ctx context.Context, id string, onlyRunning bool
 		// It starts as a send would: in interactive Claude Code while the setting is on (#10058; tuiWanted leaves guests
 		// and plan mode in print mode), so neither the compaction nor the next message runs a process of the other kind.
 		execution.Interactive = current.Interactive
+		// The manager's current refresh role, read afresh (#12786): a main or lead conversation compacted cold
+		// starts with its proxy again (a new, empty one: the compacted prefix is captured anew), anything else
+		// without one.
+		execution.CacheKeepalive = current.CacheKeepalive
 		if proto.IsExternalLauncher(launcher) {
 			execution.StartupContext = ctx
 		}
@@ -162,6 +166,7 @@ func (n *Node) assistantCompact(ctx context.Context, id string, onlyRunning bool
 // Both the user's request and idle-aware delivery use the same completion reporting.
 func (n *Node) compactAssistantProc(ctx context.Context, p *assistantProc) error {
 	id := p.id
+	n.forgetCacheWarm(id)
 	p.mu.Lock()
 	p.compacting, p.compacted, p.manual = true, true, true
 	p.lastActive = time.Now()
@@ -171,7 +176,7 @@ func (n *Node) compactAssistantProc(ctx context.Context, p *assistantProc) error
 	if p.agent == "codex" {
 		err = p.cx.compact(ctx)
 	} else {
-		line, _ := json.Marshal(map[string]any{"type": "user", "message": map[string]any{"role": "user", "content": "/compact"}})
+		line, _ := json.Marshal(map[string]any{"type": "user", "message": map[string]any{"role": "user", "content": n.assistantCompactCommand(id)}})
 		err = p.write(line)
 	}
 	if err != nil {
@@ -382,4 +387,23 @@ func clipHandoff(s string, max int) string {
 		return s
 	}
 	return string(r[:max]) + "…"
+}
+
+// assistantCompactCommand supplies configured instructions for explicit and idle Claude compactions. Automatic
+// compaction reads the same instructions from the manager-generated CLAUDE.md.
+func (n *Node) assistantCompactCommand(id string) string {
+	instructions := n.assistantCompactInstructions(id)
+	if instructions == "" {
+		return "/compact"
+	}
+	return "/compact " + instructions
+}
+func (n *Node) assistantCompactInstructions(id string) string {
+	if n.peer != nil {
+		if instructions := n.assistantContext(id).CompactInstructions; instructions != "" {
+			return instructions
+		}
+	}
+	st, _ := n.state.get(id)
+	return st.CompactInstructions
 }

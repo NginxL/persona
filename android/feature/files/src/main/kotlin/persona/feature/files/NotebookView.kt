@@ -81,8 +81,9 @@ private fun NotebookCell(cell: Notebooks.Cell, language: String, base: String, o
     val palette = PersonaTheme.palette
     Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(Tokens.Space.s)) {
         when (cell.type) {
-            Notebooks.CellType.Markdown -> if (cell.source.isNotBlank())
+            Notebooks.CellType.Markdown -> if (cell.source.isNotBlank()) ReadingContent {
                 MarkdownText(cell.source, base, onOpenPath, loadImage, attachments = cell.attachments)
+            }
             Notebooks.CellType.Raw -> if (cell.source.isNotEmpty()) JCodeBlock(cell.source, small = true)
             Notebooks.CellType.Code -> {
                 Text(if (cell.count != null) "In [${cell.count}]" else "In [ ]", style = PersonaTheme.type.caption, color = palette.ink3, maxLines = 1)

@@ -682,3 +682,21 @@ func TestLaneWriterAnswerPassesARequestWaitingForCredit(t *testing.T) {
 	default:
 	}
 }
+
+// Once the link's rate is known and small, fillLocked bounds the credited frames packed into one write to frameSize so
+// a slow WebSocket transport does not glue several small bulk frames back into one 32 KiB message ahead of pings (#13761).
+func TestLaneWriterBatchRespectsSlowFrameSize(t *testing.T) {
+	lw := newLaneWriter(io.Discard, make(chan struct{}), func(error) {}, nil)
+	lw.win.cwnd = 64 << 10
+	lw.win.rate = 80_000 // frameSize = 8000 B
+	queue(t, lw, LaneControl, `{"id":"h1","method":"ping"}`)
+	queue(t, lw, LaneBulk, strings.Repeat("b", 32<<10))
+	batch, _ := lw.fillLocked(nil, nil, time.Now())
+	hs, ps := heads(t, batch)
+	if len(hs) != 2 || hs[0].lane != LaneControl || hs[1].lane != LaneBulk {
+		t.Fatalf("got frames %+v, want [control, one bulk frame]", hs)
+	}
+	if got, want := len(ps[1]), lw.win.frameSize(); got != want {
+		t.Fatalf("bulk frame payload = %d, want %d", got, want)
+	}
+}

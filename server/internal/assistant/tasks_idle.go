@@ -35,8 +35,14 @@ func (s *Service) idleCloseAfter(ctx context.Context) time.Duration {
 }
 
 // idleSeen: (machine, session) → when the pass first saw it running in a pane. A resumed agent's last activity can be
-// old until its first step lands, so the idle time counts from the later of the two.
+// old until its first step lands, so the idle time counts from the later of the two. The map lives in memory only: the
+// first list of a machine after the hub starts (marked by idlePrimed) counts from each agent's own last activity
+// instead, or every hub restart would start the clock again and an agent would never reach idle_close_hours. Agents
+// that start running after that (resumed, started) count from when they are seen.
 type idleSeen map[[2]string]time.Time
+
+// idlePrimed is the mark of a machine whose running agents the pass has listed once since the hub started.
+func idlePrimed(machine string) [2]string { return [2]string{machine, ""} }
 
 // openTaskOf reports key's open task, its last activity, and whether personal verification still protects it.
 func (s *Service) openTaskOf(key [2]string) (open bool, touched time.Time, userCheck bool) {
@@ -90,6 +96,9 @@ func (s *Service) closeIdleAgents(ctx context.Context, refused taskCloseRefused,
 			}
 			continue
 		}
+		_, primed := seen[idlePrimed(d.ID)]
+		seen[idlePrimed(d.ID)] = now
+		running[idlePrimed(d.ID)] = true
 		for _, c := range list {
 			if c.Status == proto.StatusOffline || c.PaneID == "" {
 				continue
@@ -98,8 +107,11 @@ func (s *Service) closeIdleAgents(ctx context.Context, refused taskCloseRefused,
 			running[key] = true
 			since, ok := seen[key]
 			if !ok {
-				seen[key] = now
 				since = now
+				if !primed && !c.UpdatedAt.IsZero() && c.UpdatedAt.Before(now) {
+					since = c.UpdatedAt // running since before the hub started: its own last activity
+				}
+				seen[key] = since
 			}
 			open, touched, userCheck := s.openTaskOf(key)
 			if userCheck || !idleCloseable(c, since, now, idle, open, touched) {

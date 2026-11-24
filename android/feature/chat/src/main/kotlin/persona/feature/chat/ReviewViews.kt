@@ -31,6 +31,7 @@ import persona.core.contracts.parseTime
 import persona.core.designsystem.JIcon
 import persona.core.designsystem.JTag
 import persona.core.designsystem.PersonaTheme
+import persona.core.designsystem.ReadingContent
 import persona.core.designsystem.Tokens
 import persona.core.designsystem.Tone
 import persona.core.designsystem.icons.PhIcons
@@ -135,7 +136,7 @@ internal fun LatestReport(todo: Todo, modifier: Modifier = Modifier) {
                 style = PersonaTheme.type.caption, color = PersonaTheme.palette.ink2, maxLines = 1, overflow = TextOverflow.Ellipsis)
             at?.let { Text(relativeTime(it, now, resources), style = PersonaTheme.type.micro, color = PersonaTheme.palette.ink3, maxLines = 1) }
         }
-        ChatMarkdown(text, "report/${todo.id}", PersonaTheme.type.callout)
+        ReadingContent { ChatMarkdown(text, "report/${todo.id}", PersonaTheme.type.callout) }
     }
 }
 

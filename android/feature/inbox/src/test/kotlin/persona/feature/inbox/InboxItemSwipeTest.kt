@@ -37,6 +37,7 @@ import persona.core.designsystem.PersonaTheme
 import persona.core.domain.inbox.InboxItem
 import persona.core.navigation.AppTab
 import persona.core.navigation.Navigator
+import persona.core.inbox.*
 
 /** Item-row gesture regressions that remain relevant after conversation rows leave the main list. */
 @RunWith(AndroidJUnit4::class)

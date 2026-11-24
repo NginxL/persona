@@ -371,14 +371,16 @@ func TestExternalPRParkReceiptAndReviewRecoverTogether(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
+	// conv2 is only a legacy side-supervisor, not an explicit manual leader: the recovered wake follows universal-main
+	// routing (#5732), without changing the external source's identity or duplicating the receipt.
 	third.signal(signals[0])
 	sendPendingPRConflicts(third)
 	hub.mu.Lock()
 	message := sentText(hub.sends)
 	hub.mu.Unlock()
-	if hub.sentTo("conv2") != 1 || hub.sentTo("conv1") != 0 ||
+	if hub.sentTo("conv1") != 1 || hub.sentTo("conv2") != 0 ||
 		!strings.Contains(message, "The bound PR is merged: "+externalPRSource) {
-		t.Fatalf("recovered wake did not reach the current supervisor with the receipt: %q", message)
+		t.Fatalf("recovered wake did not reach main with the receipt: %q", message)
 	}
 
 	fourth, _ := restartedOn(t, store)

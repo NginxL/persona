@@ -26,6 +26,7 @@ import type { BoardCard } from "../lib/workspace-board";
 import type { Machine, Session } from "../lib/types";
 import type { Todo } from "../lib/todos";
 import { WorkspaceBoard, WorkspaceCard } from "./WorkspaceBoard";
+import { t } from "../i18n";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -186,13 +187,14 @@ describe("the workflow board with many cards and Agents", () => {
     act(() => root.render(<WorkspaceBoard />));
     await flush();
 
-    expect(laneBadge("待验收")).toBe("6");
-    expect(laneOption("review")).toBe("待验收 · 6");
-    expect(lane("待验收")?.querySelectorAll("article").length).toBe(6);
+    expect(laneBadge("待验收")).toBe("5");
+    expect(laneOption("review")).toBe("待验收 · 5");
+    expect(lane("待验收")?.querySelectorAll("article").length).toBe(5);
     expect(inLane("待验收", "c1")).toBe(true);
     expect(workInLane("待验收", "session:m2/loose-unread")).toBe(true);
     expect(workInLane("待验收", "session:m0/loose-finished")).toBe(true);
-    expect(workInLane("待验收", "todo:accepted-decision")).toBe(true);
+    expect(workInLane("需要你", "todo:accepted-decision")).toBe(true);
+    expect(workInLane("待验收", "todo:accepted-decision")).toBe(false);
     expect(workInLane("待验收", "todo:pending-review")).toBe(true);
     expect(workInLane("待验收", "todo:unread-todo")).toBe(true);
     expect(inLane("空闲", "c0")).toBe(true);
@@ -202,7 +204,7 @@ describe("the workflow board with many cards and Agents", () => {
     expect(workInLane("空闲", "todo:closed")).toBe(true);
     expect(workInLane("待验收", "todo:accepted")).toBe(false);
     expect(workInLane("待验收", "todo:closed")).toBe(false);
-    expect(laneBadge("需要你")).toBe("2");
+    expect(laneBadge("需要你")).toBe("3");
     expect(laneBadge("工作中")).toBe("2");
     expect(laneBadge("待办")).toBe("1");
 
@@ -210,8 +212,8 @@ describe("the workflow board with many cards and Agents", () => {
     setAgents(rows);
     expect(inLane("待验收", "c0")).toBe(true);
     expect(inLane("空闲", "c0")).toBe(false);
-    expect(laneBadge("待验收")).toBe("7");
-    expect(laneOption("review")).toBe("待验收 · 7");
+    expect(laneBadge("待验收")).toBe("6");
+    expect(laneOption("review")).toBe("待验收 · 6");
   });
 
   it("keeps accepted to-dos and seen sessions accessible in Idle and opens the original session", async () => {
@@ -263,5 +265,27 @@ describe("the workflow board with many cards and Agents", () => {
     expect([shown("m0"), shown("m1"), shown("released")]).toEqual([true, false, false]);
     choose("m1");
     expect([shown("m0"), shown("m1"), shown("released")]).toEqual([false, true, false]);
+  });
+
+  it.each(["C:\\", "\\\\server\\share\\", "/"])("disables parent navigation at directory root %s", async (path) => {
+    localStorage.setItem("persona.workspace-board.view", "manual");
+    vi.stubGlobal("fetch", vi.fn((url: string) => {
+      const pathname = new URL(url, "http://x").pathname;
+      const response = pathname === "/api/v1/machines/m0/dirs" ? { path, parent: "", entries: [] } : answers[pathname] ?? {};
+      return Promise.resolve(new Response(JSON.stringify(response), { headers: { "Content-Type": "application/json" } }));
+    }));
+    await act(() => refresh());
+    act(() => root.render(<WorkspaceBoard />));
+    await flush();
+    const bind = [...host.querySelectorAll("button")].find((button) => button.textContent === t("workspaceboard.bind_workspace"));
+    expect(bind).toBeDefined();
+    act(() => bind!.click());
+    const directory = [...document.querySelectorAll("button")].find((button) => button.textContent === t("workspaceboard.mode_directory"));
+    expect(directory).toBeDefined();
+    act(() => directory!.click());
+    await flush();
+    const parent = document.querySelector<HTMLButtonElement>(`button[aria-label="${t("workspaceboard.parent_directory")}"]`);
+    expect(parent).not.toBeNull();
+    expect(parent!.disabled).toBe(true);
   });
 });

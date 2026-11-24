@@ -1,9 +1,6 @@
 #if DEBUG
 import Foundation
 import QuartzCore
-#if os(macOS)
-import AppKit
-#endif
 
 /// Simulator profiling (`-showAutoScroll YES`, ChatView): measures every frame while the chat list sweeps end to end
 /// and writes the hitches (frames late by more than half a frame) to Documents/frames.json for scripts to read.
@@ -52,12 +49,7 @@ final class FrameStats: NSObject {
         }
         for o in [wake, sleep] { CFRunLoopAddObserver(CFRunLoopGetMain(), o, .commonModes) }
         observers = [wake, sleep].compactMap { $0 }
-        #if os(iOS) || os(visionOS)
         let link = CADisplayLink(target: self, selector: #selector(tick(_:)))
-        #else
-        // A Mac's display link comes from the screen it draws on.
-        guard let link = NSScreen.main?.displayLink(target: self, selector: #selector(tick(_:))) else { return }
-        #endif
         link.add(to: .main, forMode: .common)
         self.link = link
     }
@@ -180,7 +172,6 @@ extension FrameStats {
     }
 }
 
-#if os(iOS) || os(visionOS)
 import UIKit
 
 /// Frames measured on a UI test's cue (`-showFrameProbe YES`, the performance UI tests, #5730): the test posts the
@@ -416,5 +407,4 @@ import UIKit
         }
     }
 }
-#endif
 #endif

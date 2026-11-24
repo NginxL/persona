@@ -1,6 +1,7 @@
 package persona.core.contracts.api
 
 import persona.core.contracts.DirectionTree
+import persona.core.contracts.ExternalDirection
 import persona.core.contracts.Session
 import persona.core.contracts.SessionKey
 import kotlinx.coroutines.flow.StateFlow
@@ -25,7 +26,7 @@ data class AssistantSnapshot(
     /** Stable owner identity, including when this manager becomes or ceases to be the default. */
     val managerId: String = manager ?: ManagerRoster.ASSISTANT_MANAGER,
     /**
-     * The leader conversations (`assistant.leaders`, docs/assistant/unified-entry.md "Leader conversations"), in the hub's
+     * The direction ids (`assistant.leaders`, including explicitly outside directions, docs/assistant/unified-entry.md), in the hub's
      * order: the drawer's 常驻 group. Empty when there are none or from an older hub.
      */
     val leaders: List<String> = emptyList(),
@@ -48,6 +49,8 @@ data class AssistantSnapshot(
     val backgroundSupervisor: String? = null,
     /** Whether scheduled task and background-supervisor chats belong in Recent; null from an older hub. */
     val recentTaskChats: Boolean? = null,
+    /** Outside-direction targets from the leaders fallback. A present tree is authoritative for its own directions. */
+    val externalDirections: Map<String, ExternalDirection> = emptyMap(),
     /** Saved ordinary-conversation order; null or empty means activity time. Unknown ids are preserved on writes. */
     val conversationOrder: List<String>? = null,
     /** Exact tag-filter entries/order; unsupported on a hub that omitted the field, automatic when its entries are null. */
@@ -59,6 +62,10 @@ data class AssistantSnapshot(
      */
     val leaderCounts: Map<String, LeaderCounts>
         get() = directionTree?.leaders.orEmpty().associate { it.id to LeaderCounts(it.running, it.counts.needsYou) }
+
+    /** Explicit outside metadata only; target fields without `external: true` never make a direction visible. */
+    fun externalDirection(id: String): ExternalDirection? =
+        if (directionTree != null) directionTree.direction(id)?.external else externalDirections[id]
 }
 
 /** The assistant's spaces besides its own (docs/assistant/health.md): their names on the wire (`space`). */

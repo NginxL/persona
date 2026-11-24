@@ -2,9 +2,7 @@ import MarkdownUI
 import PersonaKit
 import Photos
 import SwiftUI
-#if canImport(UIKit)
 import UIKit
-#endif
 
 /// An image the viewer shows: its bytes, a picture file on a machine (its thumbnail, as big as the node draws one), or
 /// a Feishu image (a hub path or a web URL, through `LarkMedia`). `title` / `detail` are the two lines of the top bar
@@ -112,10 +110,8 @@ struct ImageViewer: View {
         }
         // The viewer's own pull-down closes it (the system's zoom-transition drag would fight the zoomed picture's pan).
         .interactiveDismissDisabled()
-        #if os(iOS) || os(visionOS)
         .statusBarHidden(!showsChrome)
         .persistentSystemOverlays(showsChrome ? .automatic : .hidden)
-        #endif
         #if DEBUG
         // Screenshots: `-showViewerChromeHidden YES` opens with the bars hidden, `-showViewerInfo YES` with Info open.
         .task {
@@ -128,7 +124,6 @@ struct ImageViewer: View {
     // MARK: Pages
 
     @ViewBuilder private var pager: some View {
-        #if os(iOS) || os(visionOS)
         // UIKit pages the pictures: a page-style TabView stopped between two pages now and then (#5678, ImagePager.swift).
         ImagePagerView(count: images.count, images: decoded, index: $index,
                        onTap: toggleChrome,
@@ -145,26 +140,7 @@ struct ImageViewer: View {
             .task(id: index) {
                 for i in [index, index + 1, index - 1] { await load(i) }
             }
-        #else
-        // No page-style TabView on the Mac: one image at a time, ← / → and the pager's arrows move (ImagePager).
-        ImagePager(count: images.count, index: $index) { i in page(i) }
-        #endif
     }
-
-    #if os(macOS)
-    private func page(_ i: Int) -> some View {
-        Group {
-            if let img = decoded[i] {
-                ZoomableImage(image: img, onTap: toggleChrome)
-            } else if failed.contains(i) {
-                notLoaded(i)
-            } else {
-                ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
-            }
-        }
-        .task(id: i) { await load(i) }
-    }
-    #endif
 
     /// Decodes picture `i` once (a page asking again while it loads waits for nothing).
     private func load(_ i: Int) async {
@@ -202,11 +178,7 @@ struct ImageViewer: View {
     }
 
     private func toggleChrome() {
-        #if os(macOS)
-        // A click keeps the bars on the Mac (they hold the only close button besides Esc).
-        #else
         chrome.toggle()
-        #endif
     }
 
     // MARK: Bars
@@ -348,11 +320,7 @@ struct ImageViewer: View {
     // MARK: Actions
 
     static func pixels(_ img: UIImage) -> String {
-        #if canImport(UIKit)
         "\(Int(img.size.width * img.scale))×\(Int(img.size.height * img.scale))"
-        #else
-        "\(Int(img.size.width))×\(Int(img.size.height))"
-        #endif
     }
 
     private func copy(_ img: UIImage) {
@@ -366,9 +334,7 @@ struct ImageViewer: View {
         #if DEBUG // `-showViewerDecodeDelay`: legacy stress; `-showViewerDecodeDuringPan`: an event-driven gate.
         let delay = UserDefaults.standard.double(forKey: "showViewerDecodeDelay")
         if delay > 0 { try? await Task.sleep(for: .seconds(delay)) }
-        #if os(iOS) || os(visionOS)
         await ImagePagingProbe.shared.beforeDecode(i)
-        #endif
         #endif
         do {
             let image = try await ViewerLoader.image(images[i], side: nil)

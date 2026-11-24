@@ -60,6 +60,9 @@ describe("a channel's page", () => {
     expect(capabilityText({ images_in: true, voice_in: true, format: "plain", max_text: 3500, asks: "text", typing: true })).toEqual([
       "收文字、图片、语音", "回答是纯文字", "一条最多 3500 字，长的拆开发", "提问和批准回复序号或文字", "处理时显示「正在输入」",
     ]);
+    expect(capabilityText({ format: "plain", reply_only: true })).toEqual([
+      "收文字", "回答是纯文字", "仅回复收到的消息",
+    ]);
   });
 
   it("opens its own page in the settings", () => {

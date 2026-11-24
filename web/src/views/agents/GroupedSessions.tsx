@@ -14,6 +14,7 @@ import { groupMachines, holdsPlace, JUST_FINISHED_KEY, type GroupDimension, type
 import { onShownHint } from "../../lib/shown-hints";
 import { useFolded } from "../../lib/use-folded";
 import { nestUnderParents, type StableRowOrder } from "../../lib/side-sessions";
+import { useHeldOrder } from "../../lib/sidebar-engaged";
 import { Button } from "../../ui/atoms";
 import { Icon } from "../../ui/icons";
 import { SESSION_LIST_METRICS, SESSION_LIST_STYLE } from "../../ui/list-metrics";
@@ -28,10 +29,13 @@ export interface GroupedSource<T> {
   event: "sessions_list" | "agents";
   summary: boolean;
   roots: boolean;
+  crossMachineHierarchy?: boolean;
   /** The list's own parentOf (#5935): a section draws a side session under its parent as the flat list does. */
   parentOf?: (row: T) => string | undefined;
   /** Stable structural placement, separate from the transport's cursor order (#11801). */
   rowOrder?: StableRowOrder<T>;
+  /** Keep an open section's rows in the order they are drawn in while the sidebar is in use (the activity order). */
+  hold?: boolean;
   /** Row identities excluded from rendered section rows (e.g. in-flight launches shown under Starting). */
   excludeIdentities?: ReadonlySet<string>;
 }
@@ -130,13 +134,13 @@ function GroupPlaces({ group, machineName }: { group: SessionGroup; machineName:
 function GroupRows<T>({ group, dimension, scope, source, renderRow, onExcluded }: {
   group: SessionGroup; dimension: GroupDimension; scope: ListFilters; source: GroupedSource<T>; renderRow: (row: T, within: GroupDimension, group: SessionGroup) => ReactNode; onExcluded?: (n: number) => void;
 }) {
-  const { path, identity, compare, removeIdentity, event, summary, roots, parentOf, rowOrder, excludeIdentities } = source;
+  const { path, identity, compare, removeIdentity, event, summary, roots, crossMachineHierarchy, parentOf, rowOrder, excludeIdentities, hold = false } = source;
   // rows only: the section's numbers are the ones its heading already has. A runtime section passes over the hints that
   // name none of its rows (#9176): with several open, each read for every agent's update anywhere.
   const follows = event === "sessions_list";
   const list = useMemo(() => new (follows ? SectionList : SessionList)<T>(path, identity, compare, undefined, removeIdentity, {
-    summary, roots, counts: false, presentation: rowOrder ? { ...rowOrder, parentOf } : undefined,
-  }), [path, identity, compare, removeIdentity, summary, roots, follows, rowOrder, parentOf]);
+    summary, roots, crossMachineHierarchy, counts: false, presentation: rowOrder ? { ...rowOrder, parentOf } : undefined,
+  }), [path, identity, compare, removeIdentity, summary, roots, crossMachineHierarchy, follows, rowOrder, parentOf]);
   // the groups are built again with every read: the list follows what they select, not which object says it
   const selected = filterQuery({ ...scope, ...group.filters }, {});
   const filters = useMemo(() => ({ ...scope, ...group.filters }), [selected]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -160,11 +164,12 @@ function GroupRows<T>({ group, dimension, scope, source, renderRow, onExcluded }
     if (list.getSnapshot().loaded) list.invalidate();
   }, [list, heading]);
   const [limit, setLimit] = useState<number>(SESSION_LIST_METRICS.groupPreview);
-  const visibleRows = useMemo(
+  const unheldRows = useMemo(
     () => excludeIdentities?.size ? page.rows.filter((row) => !excludeIdentities.has(identity(row))) : page.rows,
     [page.rows, excludeIdentities, identity],
   );
-  const excluded = page.rows.length - visibleRows.length;
+  const excluded = page.rows.length - unheldRows.length;
+  const visibleRows = useHeldOrder(unheldRows, identity, hold) as T[];
   useEffect(() => {
     onExcluded?.(excluded);
     return () => onExcluded?.(0);

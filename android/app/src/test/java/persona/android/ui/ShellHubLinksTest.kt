@@ -7,9 +7,9 @@ import persona.core.contracts.Session
 import persona.core.contracts.SessionKey
 import persona.core.contracts.api.*
 import persona.core.navigation.*
-import persona.feature.knowledge.KnowledgeDetailRoute
-import persona.feature.knowledge.KnowledgeKindRoute
-import persona.feature.knowledge.KnowledgeRoute
+import persona.core.navigation.KnowledgeDetailRoute
+import persona.core.navigation.KnowledgeKindRoute
+import persona.core.navigation.KnowledgeRoute
 
 class ShellHubLinksTest {
     private val hub = "https://hub.example.com"

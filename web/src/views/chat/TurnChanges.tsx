@@ -6,9 +6,9 @@
 import { memo, useState } from "react";
 import { below } from "../../lib/files";
 import { openPanel } from "../../lib/panel";
-import { REVIEW_FEATURE } from "../../lib/session-review";
 import { hubHas, useStore } from "../../lib/store";
 import type { ChangedFile, TurnChangeSet } from "../../lib/turn-changes";
+import { REVIEW_FEATURE } from "../../lib/types";
 import { Button } from "../../ui/atoms";
 import { Icon } from "../../ui/icons";
 import { t } from "../../i18n";

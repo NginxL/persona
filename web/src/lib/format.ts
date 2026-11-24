@@ -238,12 +238,17 @@ export function sessionTitleDetail(s: SessionNameFields, preferTab: boolean): st
 
 // A path from a Windows computer: a drive letter or a UNC share. Only there is a backslash a separator; in any other
 // path it is a character of a name.
-const WINDOWS_PATH = /^[A-Za-z]:[\\/]|^\\\\/;
+const WINDOWS_PATH = /^[A-Za-z]:[\\/]|^\\\\|^\/\/[^\\/]+[\\/]/;
 
 export function baseName(p?: string): string {
   if (!p) return "";
-  const parts = (WINDOWS_PATH.test(p) ? p.replace(/\\/g, "/") : p).replace(/\/+$/, "").split("/");
+  const parts = pathSlashes(p).replace(/\/+$/, "").split("/");
   return parts[parts.length - 1] || p;
+}
+
+/** Remote Windows paths use either separator. A backslash inside a POSIX filename stays literal. */
+export function pathSlashes(path: string): string {
+  return WINDOWS_PATH.test(path) ? path.replaceAll("\\", "/") : path;
 }
 
 export function tabLabel(s: Session): string {

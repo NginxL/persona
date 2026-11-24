@@ -1,7 +1,5 @@
 import Foundation
-#if canImport(UIKit)
 import UIKit
-#endif
 import PersonaWire
 
 /// The part of the general pasteboard the clipboard tools use: `UIPasteboard` in the app, a stand-in in tests.

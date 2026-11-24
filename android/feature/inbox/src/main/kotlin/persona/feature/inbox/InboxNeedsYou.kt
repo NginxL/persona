@@ -3,6 +3,7 @@ package persona.feature.inbox
 import persona.core.domain.inbox.InboxListResult
 import persona.core.domain.inbox.InboxRow
 import persona.core.domain.inbox.InboxRowType
+import persona.core.inbox.*
 
 /**
  * Persona has this item in hand: the hub puts it In progress (`status`, inbox phase 1), or, from an older hub, the AI twin

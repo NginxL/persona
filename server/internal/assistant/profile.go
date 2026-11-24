@@ -49,8 +49,8 @@ type Settings struct {
 	WorkspaceRules workspacenaming.Rules `json:"workspace_rules,omitempty"`
 	MachineID      string                `json:"machine_id"`
 	Launcher       string                `json:"launcher"`
-	// DefaultPermissionMode applies only to new non-guest conversations without an explicit mode.
-	// Empty keeps the runtime's existing default; it never changes an existing conversation.
+	// DefaultPermissionMode applies to new non-guest conversations and stopped Claude Code resumes without an explicit mode.
+	// Empty selects the built-in bypassPermissions default; other agents keep legacy resume precedence, and live/explicit modes are unchanged.
 	DefaultPermissionMode string `json:"default_permission_mode,omitempty"`
 	// Timezone is the phone's (IANA name): routines and the snapshot read times in it, and the hub its own.
 	Timezone string `json:"timezone,omitempty"`
@@ -74,6 +74,9 @@ type Settings struct {
 	IdleAutoCompact        *bool `json:"idle_auto_compact,omitempty"`
 	IdleAutoCompactMinutes *int  `json:"idle_auto_compact_minutes,omitempty"`
 	IdleAutoCompactTokens  *int  `json:"idle_auto_compact_tokens,omitempty"`
+	CacheKeepalive         *bool `json:"cache_keepalive,omitempty"`
+	CacheKeepaliveMinutes  *int  `json:"cache_keepalive_minutes,omitempty"`
+	CacheKeepaliveMax      *int  `json:"cache_keepalive_max,omitempty"`
 	IdleReleaseMinutes     *int  `json:"idle_release_minutes,omitempty"` // #12008, idle_compact_settings.go
 	// StartRequestedTasks: a task_plan task the user asked for in so many words starts without the card's "Start"
 	// (#2559). nil is on (the default).
@@ -142,6 +145,14 @@ type Settings struct {
 	// InboxSignals: new Inbox messages the judge links to a supervised task reach its supervisor as the signal inbox
 	// (#4293, supervise_inbox.go). nil is off (the default): each one is a supervisor turn.
 	InboxSignals *bool `json:"inbox_signals,omitempty"`
+	// InboxTodoForward: deterministically forward PR/Issue Inbox items to the bound open to-do's Agent without LLM
+	// calls (#12492, inbox_forward.go). nil is off (the default): zero automatic forwards until opted in.
+	InboxTodoForward *bool `json:"inbox_todo_forward,omitempty"`
+	// PREventsRouteToAgent: when true, new actionable PR events observed by pr_status on an open to-do (merge conflict,
+	// current-head CI failure, or current-head changes_requested / actionable review) route directly to the bound Agent
+	// (send, queue, or non-user resume), falling back to supervisor wakes when unavailable (#12607, pr_status_route.go).
+	// nil is off (the default), preserving existing pr_status supervision behavior.
+	PREventsRouteToAgent *bool `json:"pr_events_route_to_agent,omitempty"`
 	// InboxPost: the assistant may put a conversation into the Inbox (inbox_post, a task's "put it in the Inbox when
 	// done", inbox_post.go). nil is on: a row only comes from the user's own request or a task they set. The Inbox
 	// Sources page's switch for it.
@@ -166,9 +177,11 @@ type Settings struct {
 	// Leaders are the side conversations the user made leaders (#3133, supervise_leader.go): a task one hands out with
 	// task_plan is supervised by it instead of the main conversation. Empty (the default): only the main one supervises.
 	Leaders []string `json:"leaders,omitempty"`
-	// BriefingWaits tunes only the deterministic wait rows in morning/evening facts. Nil uses the supervision
-	// thresholds documented by briefingWaitsOf; changes go through persona_settings' ordinary owner approval.
-	BriefingWaits *BriefingWaits `json:"briefing_waits,omitempty"`
+	// BriefingWaits tunes only the deterministic wait rows in morning/evening facts: the briefing module's setting
+	// (internal/modules/briefing, Waits), kept here as stored, also while the module is off. Nil uses the module's
+	// defaults (the supervision thresholds); changes go through persona_settings' ordinary owner approval (modules.go),
+	// except the administrator's exact reversible-setting switch for this key.
+	BriefingWaits moduleValue `json:"briefing_waits,omitempty"`
 	// InterjectBackground: a message the user sends while a Claude conversation is still answering moves what runs in
 	// the foreground (Bash commands, subagents) to the background, so the message is taken up at once instead of after
 	// them (Claude Code 2.1.139 or later, node/assistant_interject.go). nil is off (the default). A round the
@@ -260,6 +273,23 @@ func (s *Service) savedSettings(ctx context.Context) (Settings, bool) {
 
 // updateSettings changes the saved settings with fn (which may refuse) and saves them.
 func (s *Service) updateSettings(ctx context.Context, fn func(*Settings) error) (Settings, error) {
+	return s.updateSettingsSaveChecked(ctx, fn, nil, nil)
+}
+
+// updateSettingsChecked also checks the freshly read saved state while holding the settings write lock. The automatic
+// reversible-setting path uses it to reject a concurrent edit instead of rebasing its recorded before-image.
+func (s *Service) updateSettingsChecked(ctx context.Context, fn func(*Settings) error, check func(Settings) error) (Settings, error) {
+	return s.updateSettingsSaveChecked(ctx, fn, nil, check)
+}
+
+// updateSettingsSave is updateSettings with an optional atomic writer for state that must change with the settings.
+// The ordinary path still writes only the assistant setting; a custom writer receives the store and complete value.
+func (s *Service) updateSettingsSave(ctx context.Context, fn func(*Settings) error, save func(context.Context, Store, Settings) error) (Settings, error) {
+	return s.updateSettingsSaveChecked(ctx, fn, save, nil)
+}
+
+// updateSettingsSaveChecked composes the optional freshly-read-state check and atomic writer under one settings lock.
+func (s *Service) updateSettingsSaveChecked(ctx context.Context, fn func(*Settings) error, save func(context.Context, Store, Settings) error, check func(Settings) error) (Settings, error) {
 	b := &s.prefs
 	b.change.Lock()
 	defer b.change.Unlock()
@@ -270,14 +300,29 @@ func (s *Service) updateSettings(ctx context.Context, fn func(*Settings) error) 
 	if !ok {
 		return Settings{}, errors.New("the assistant's settings could not be read")
 	}
+	if check != nil {
+		if err := check(v); err != nil {
+			return Settings{}, err
+		}
+	}
 	if err := fn(&v); err != nil {
 		return Settings{}, err
 	}
 	if proto.IsExternalLauncher(v.Launcher) {
 		return Settings{}, i18n.Err("external-adapter.purpose_unsupported")
 	}
-	if st := s.store(); st != nil {
-		if err := st.PutSetting(ctx, settingsKey, v); err != nil {
+	st := s.store()
+	if st == nil && save != nil {
+		return Settings{}, errors.New("no database on this hub")
+	}
+	if st != nil {
+		var err error
+		if save != nil {
+			err = save(ctx, st, v)
+		} else {
+			err = st.PutSetting(ctx, settingsKey, v)
+		}
+		if err != nil {
 			return Settings{}, err
 		}
 	}
@@ -289,6 +334,12 @@ func (s *Service) updateSettings(ctx context.Context, fn func(*Settings) error) 
 }
 
 func (v Settings) workGuideOn() bool { return v.WorkGuide != nil && *v.WorkGuide }
+
+// prEventsRouteToAgentOn reports whether assistant.pr_events_route_to_agent is enabled (off by default).
+func (s *Service) prEventsRouteToAgentOn(ctx context.Context) bool {
+	v := s.settings(ctx).PREventsRouteToAgent
+	return v != nil && *v
+}
 
 // settings are the settings in effect, what the rest of the package reads (the main conversation, the machine, the time
 // zone; isMain and mainTasksQuiet for short): the machine one the hub has (else the hub's default), the launcher the
@@ -577,7 +628,8 @@ func (s *Service) profile(ctx context.Context, tasks []TaskView, todos *TodoRepo
 		return nil
 	}
 	v := s.effective(ctx, saved)
-	p := &Profile{MachineID: v.MachineID, Main: v.Main, MainMachineID: v.MainMachineID, Launcher: v.Launcher, Timezone: v.Timezone}
+	p := &Profile{MachineID: v.MachineID, Main: v.Main, MainMachineID: v.MainMachineID, Launcher: v.Launcher, Timezone: v.Timezone,
+		ExtensionOwners: s.extensionOwners(ctx), Attention: s.attentionProfile(ctx)}
 	if tasks != nil && todos != nil {
 		if placed, err := s.directionKeep(ctx, v); err != nil {
 			s.logf("assistant: keep: %v", err)
@@ -647,6 +699,12 @@ func (s *Service) leadSessions(ctx context.Context, v Settings) []SessionRef {
 		if id == "" || id == v.Main {
 			continue
 		}
+		if d := b.m[id]; loaded && d != nil && d.Outside != nil {
+			if d.Outside.MachineID != "" && d.Outside.SessionID != "" {
+				out = append(out, SessionRef{MachineID: d.Outside.MachineID, SessionID: d.Outside.SessionID})
+			}
+			continue // never keep a synthetic direction id as though it were a conversation
+		}
 		machine := v.MachineID
 		if d := b.m[id]; loaded && d != nil && d.MachineID != "" {
 			machine = d.MachineID
@@ -696,6 +754,9 @@ type assistantView struct {
 	IdleAutoCompact        bool               `json:"idle_auto_compact"`
 	IdleAutoCompactMinutes int                `json:"idle_auto_compact_minutes"`
 	IdleAutoCompactTokens  int                `json:"idle_auto_compact_tokens"`
+	CacheKeepalive         bool               `json:"cache_keepalive"`
+	CacheKeepaliveMinutes  int                `json:"cache_keepalive_minutes"`
+	CacheKeepaliveMax      int                `json:"cache_keepalive_max"`
 	IdleReleaseMinutes     int                `json:"idle_release_minutes"`
 	// StartRequestedTasks is in effect, like MainTasksQuiet.
 	StartRequestedTasks     bool   `json:"start_requested_tasks"`
@@ -745,6 +806,10 @@ type assistantView struct {
 	AgentAutoNamingIntervalHours int  `json:"agent_auto_naming_interval_hours"`
 	// InboxSignals is in effect, like DoneNeedsDelivery.
 	InboxSignals bool `json:"inbox_signals"`
+	// InboxTodoForward is in effect, like InboxSignals (#12492).
+	InboxTodoForward bool `json:"inbox_todo_forward"`
+	// PREventsRouteToAgent is in effect, like InboxSignals (false by default).
+	PREventsRouteToAgent bool `json:"pr_events_route_to_agent"`
 	// NextSuggestions is in effect, like DoneNeedsDelivery.
 	NextSuggestions bool `json:"next_suggestions"`
 	// MainSupervisesOwnTasks is in effect, like DoneNeedsDelivery: false means the background supervisor follows up
@@ -754,8 +819,8 @@ type assistantView struct {
 }
 
 // view is GET /api/v1/assistant; withArchived lists archived conversations too (flagged `archived`). It lists the
-// assistant's own conversations; space "health" lists the health space's instead (docs/assistant/health.md), with that
-// space's directory as Cwd.
+// assistant's own conversations; a space (space "health") lists that space's instead (docs/assistant/health.md), with
+// that space's directory as Cwd.
 func (s *Service) view(ctx context.Context, withArchived bool, space ...string) assistantView {
 	sp := ""
 	if len(space) > 0 {
@@ -771,6 +836,7 @@ func (s *Service) view(ctx context.Context, withArchived bool, space ...string) 
 	out := assistantView{WorkspaceNamingVersion: workspacenaming.Version, EffectiveWorkspaceRules: effectiveRules, Settings: v, Manager: s.managerIdentity(), PermissionDefaults: s.permissionDefaults(), Conversations: []proto.Session{}, NotesEffective: s.notes(ctx), MainTasksQuiet: quietOn(v.MainTasksQuiet),
 		StartRequestedTasks: quietOn(v.StartRequestedTasks), RecordingDays: recordingDaysOf(v), MinutesDays: kb.MinutesDaysFor(minutesDaysSetting(v), recordingDaysOf(v)),
 		IdleAutoCompact: s.idleAutoCompact(ctx), IdleAutoCompactMinutes: s.idleAutoCompactMinutes(ctx), IdleAutoCompactTokens: s.idleAutoCompactTokens(ctx),
+		CacheKeepalive: cacheKeepaliveOf(v).Enabled, CacheKeepaliveMinutes: cacheKeepaliveOf(v).IntervalMinutes, CacheKeepaliveMax: cacheKeepaliveOf(v).MaxRequests,
 		IdleReleaseMinutes: s.idleReleaseMinutes(ctx), MeetingAttendanceDefault: meetingAttendanceOf(v), KBTopics: quietOn(v.KBTopics),
 		MeetingTranscriptionDefault: meetingTranscriptionDefaultOf(v), MeetingGlossary: meetingGlossaryOf(v),
 		MeetingTranscriptionExtension: meetingTranscriptionExtensionOf(v), MeetingTranscriptionReady: s.transcriptionReadyNow(),
@@ -794,11 +860,14 @@ func (s *Service) view(ctx context.Context, withArchived bool, space ...string) 
 		AgentAutoNaming:              quietOn(v.AgentAutoNaming),
 		AgentAutoNamingMax:           agentNamingLimit(v),
 		AgentAutoNamingIntervalHours: agentNamingInterval(v),
-		InboxSignals:                 v.InboxSignals != nil && *v.InboxSignals, MainSupervisesOwnTasks: !s.backgroundOn(v),
-		SupervisionBatchMinutes: supervisionBatchMinutesOf(v),
-		NextSuggestions:         v.NextSuggestions != nil && *v.NextSuggestions}
+		InboxSignals:                 v.InboxSignals != nil && *v.InboxSignals,
+		InboxTodoForward:             v.InboxTodoForward != nil && *v.InboxTodoForward,
+		PREventsRouteToAgent:         v.PREventsRouteToAgent != nil && *v.PREventsRouteToAgent,
+		MainSupervisesOwnTasks:       !s.backgroundOn(v),
+		SupervisionBatchMinutes:      supervisionBatchMinutesOf(v),
+		NextSuggestions:              v.NextSuggestions != nil && *v.NextSuggestions}
 	if d, ok := s.device(ctx, v.MachineID); ok {
-		out.Cwd = s.spaceCwd(d, sp)
+		out.Cwd = s.spaceCwd(ctx, d, sp)
 		var list []proto.Session
 		if s.fleetOn() {
 			// Select the headless conversations before copying, decorating or serializing the inventory: coding
@@ -831,8 +900,8 @@ func (s *Service) profileRoutes() {
 		}
 		archived := r.URL.Query().Get("archived")
 		space := r.URL.Query().Get("space")
-		if !validSpace(space) {
-			apierr.Write(w, http.StatusBadRequest, fmt.Errorf("space %q: health or none", space))
+		if !s.trackKnown(r.Context(), space) {
+			apierr.Write(w, http.StatusBadRequest, fmt.Errorf("space %q: not a registered space", space))
 			return
 		}
 		out := s.view(r.Context(), archived == "1" || archived == "true", space)
@@ -949,7 +1018,7 @@ func (s *Service) warm(launcher string) {
 	// The spare is adopted only by a new conversation in the same profile (node/assistant_spare.go), and a new one is
 	// started in the main chat's, on a carried pick too (startMain, startOn).
 	profiled := s.withNewConversationProfile(ctx, machine, params)
-	ctx = context.WithValue(ctx, supervisionStartup{}, cfg.MainSupervisesOwnTasks != nil && *cfg.MainSupervisesOwnTasks)
+	ctx = context.WithValue(ctx, supervisionStartup{}, true)
 	err = s.call(ctx, machine, DeviceAssistantWarm, params, nil)
 	if profiled && (nodeOutdated(err) || profileRefused(err)) { // as startOn: an old node, or another agent than Claude Code
 		delete(params, "config_dir")
@@ -968,10 +1037,10 @@ func (s *Service) memory(ctx context.Context, op map[string]any, out any) error 
 	}
 	space, _ := op["space"].(string)
 	delete(op, "space")
-	if !validSpace(space) {
-		return badRequest(fmt.Errorf("space %q: health or none", space))
+	if !s.trackKnown(ctx, space) {
+		return badRequest(fmt.Errorf("space %q: not a registered space", space))
 	}
-	cwd := s.spaceCwd(d, space) // the health space keeps a memory of its own (docs/assistant/health.md)
+	cwd := s.spaceCwd(ctx, d, space) // a space keeps a memory of its own (docs/assistant/health.md)
 	if cwd == "" {
 		return errMemoryMachineOffline
 	}

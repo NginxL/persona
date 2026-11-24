@@ -52,7 +52,7 @@ object MediaShare {
             checkNotNull(resolver.openOutputStream(uri)) { "No output stream" }.use { it.write(bytes) }
             resolver.update(uri, ContentValues().apply { put(MediaStore.MediaColumns.IS_PENDING, 0) }, null, null)
         }.isSuccess
-        if (!written) runCatching { resolver.delete(uri, null, null) }
+        if (!written) { val _ = runCatching { resolver.delete(uri, null, null) } }
         written
     }
 

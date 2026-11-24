@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
@@ -231,6 +232,13 @@ func TestGeneratedPackages(t *testing.T) {
 		sort.Slice(want, func(i, j int) bool { return want[i].Path < want[j].Path })
 		if !reflect.DeepEqual(p.Files, want) || p.Hash != Hash(want) {
 			t.Fatalf("%s: unpacked files or hash differ from integrations/", name)
+		}
+		if name == "persona-antigravity-runtime" {
+			for _, path := range []string{"antigravity/lib/models.js", "antigravity/lib/provider.js"} {
+				if !slices.ContainsFunc(p.Files, func(f File) bool { return f.Path == path }) {
+					t.Errorf("%s: model discovery module %s is missing", name, path)
+				}
+			}
 		}
 		size := 0
 		for _, f := range p.Files {

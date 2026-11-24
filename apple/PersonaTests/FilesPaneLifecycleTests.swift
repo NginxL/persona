@@ -1,4 +1,3 @@
-#if os(iOS)
 import SwiftUI
 import Testing
 import UIKit
@@ -253,4 +252,3 @@ struct FilesPaneLifecycleTests {
         #expect(hub.sent("POST", "/api/v1/machines/m1/files/copy").count == 2)
     }
 }
-#endif

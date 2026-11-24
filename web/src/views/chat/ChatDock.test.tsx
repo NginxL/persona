@@ -263,7 +263,7 @@ describe("PendingCards", () => {
 
   it("names a child session's card by the child's title, on its parent's page (#5120)", () => {
     expect(permissionFrom({ folded_under: "lead", session_title: "  Write the\n tests " })).toBe("来自子 Agent · Write the tests");
-    expect(permissionFrom({ folded_under: "lead" })).toBe("来自子 Agent · 子 Agent 任务");
+    expect(permissionFrom({ folded_under: "lead" })).toBe("来自子 Agent · 子智能体任务");
     expect(permissionFrom({ folded_under: "lead", session_title: "y".repeat(80) })).toBe(`来自子 Agent · ${"y".repeat(47)}…`);
     // a question card says it too, at its top; the session's own cards say nothing
     const questions = [{ question: "用哪个框架？", options: [{ label: "A" }] }] as Interaction["questions"];
@@ -504,7 +504,8 @@ describe("QueuePanel (#5327, cindy's pending queue)", () => {
 
   it("marks the photos a Persona chat's queued message went with when this browser sent it (#4342)", () => {
     const persona = { ...queued, assistant: true, queued: ["请看图片", "顺便把截图换掉"] } as Session;
-    const html = panel({ session: persona, persona: "Nova", photosOf: (q) => (q === "请看图片" ? 2 : 0) });
+    const image = { mime: "image/png", data: "iVBORw0KGgo=" };
+    const html = panel({ session: persona, persona: "Nova", pending: [{ id: "local", raw: persona.queued![0], before: [], images: [image, image] }] });
     expect(html.match(/data-queue-mark="photo"/g)).toHaveLength(1);
     expect(html).toContain('aria-label="排队的第 1 条：2 张图片"');
     expect(html).not.toContain(">请看图片<");

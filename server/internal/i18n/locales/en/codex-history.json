@@ -1,0 +1,8 @@
+{
+  "stalled_turn": "{holder} has produced no output for a while and may be waiting for confirmation in the computer terminal or stalled; only local history can be synced",
+  "shared_socket_gone": "app-server is running, but its shared control socket is gone (try running codex app-server daemon restart on the computer); only local history can be synced for now",
+  "shared_endpoint_invalid": "app-server is running, but Persona could not validate its shared endpoint; only local history can be synced for now",
+  "shared_unreachable": "app-server is running, but Persona could not connect to its shared endpoint; only local history can be synced for now",
+  "shared_home_mismatch": "app-server is running, but its CODEX_HOME does not match this session; only local history can be synced for now",
+  "shared_not_loaded": "app-server is running, but this session is not loaded on its shared endpoint yet; only local history can be synced for now"
+}

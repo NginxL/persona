@@ -48,6 +48,7 @@ import org.intellij.markdown.ast.ASTNode
 import org.intellij.markdown.ast.findChildOfType
 import org.intellij.markdown.ast.getTextInNode
 import org.intellij.markdown.flavours.gfm.GFMElementTypes
+import persona.core.designsystem.InterfaceContent
 import persona.core.designsystem.JIcon
 import persona.core.designsystem.JIconButton
 import persona.core.designsystem.JTextButton
@@ -159,8 +160,10 @@ internal fun ReplyQuote(lineStyle: TextStyle, content: @Composable () -> Unit) {
         }
         JIcon(PhIcons.Quotes, null, Modifier.align(Alignment.TopEnd).padding(Tokens.Space.s), size = Tokens.Space.l,
             tint = palette.accent, decorative = true)
-        if (folds) JIconButton(if (open) PhIcons.CaretUp else PhIcons.CaretDown, if (open) collapse else expand,
-            { open = !open }, Modifier.align(Alignment.BottomEnd))
+        if (folds) InterfaceContent {
+            JIconButton(if (open) PhIcons.CaretUp else PhIcons.CaretDown, if (open) collapse else expand,
+                { open = !open }, Modifier.align(Alignment.BottomEnd))
+        }
     }
 }
 

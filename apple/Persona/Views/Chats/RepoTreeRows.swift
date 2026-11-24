@@ -172,19 +172,8 @@ struct WorkspaceSidebarCard<AgentContent: View, Actions: View>: View {
         WorkspaceSidebarControl(open: { selectAgent(session.key) }) {
             agent(session)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                #if os(macOS)
-                .background {
-                    if selectedWorkspace == nil && selectedSession == session.key {
-                        RoundedRectangle(cornerRadius: Theme.Radius.control).fill(Theme.Fill.macSelected)
-                    }
-                }
-                #endif
                 .contentShape(.rect)
         } actions: { actions(workspace, session) }
-        .macHoverShade(in: RoundedRectangle(cornerRadius: Theme.Radius.control), outset: 0)
-        #if os(macOS)
-        .macOptionClick { MacShellState.shared.chatWindow = session.key }
-        #endif
         .accessibilityIdentifier(agentIdentifier)
         .id(session.id)
         .onAppear { appeared(session) }

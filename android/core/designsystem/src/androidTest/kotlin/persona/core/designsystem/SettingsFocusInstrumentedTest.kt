@@ -92,7 +92,7 @@ class SettingsFocusInstrumentedTest {
                 PersonaTheme(darkTheme = false, reduceMotion = true) {
                     JSettingsSheet(onDismiss = {}) {
                         val second = remember { FocusRequester() }
-                        LaunchedEffect(Unit) { runCatching { second.requestFocus() } }
+                        LaunchedEffect(Unit) { val _ = runCatching { second.requestFocus() } }
                         Column(Modifier.verticalScroll(rememberScrollState())) {
                             Text("Blank area", Modifier.testTag("settings-blank-label"))
                             BasicTextField("first", {}, Modifier.testTag("first-settings-field"))

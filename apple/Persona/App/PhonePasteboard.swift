@@ -1,12 +1,9 @@
 import Foundation
 import UniformTypeIdentifiers
-#if canImport(UIKit)
 import UIKit
-#endif
 
 /// The phone's own clipboard, for sending it to a computer and putting a computer's on it (#3064). Closures, so the
-/// clipboard model's tests hand in a pasteboard of their own. On the Mac `UIPasteboard` is the general pasteboard
-/// (Mac/Compat).
+/// clipboard model's tests hand in a pasteboard of their own.
 struct PhonePasteboard {
     /// What is on it now, or nil when it is empty. On iOS reading what another app copied asks "Allow Paste?" first
     /// (unless Settings › Persona › Paste from Other Apps is Allow); refused, it reads as nil.

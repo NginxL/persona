@@ -12,8 +12,11 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"slices"
+	"strings"
 	"syscall"
 
+	"github.com/nwverse/persona/server/internal/builtinext"
 	"github.com/nwverse/persona/server/internal/clitext"
 	"github.com/nwverse/persona/server/internal/extension/sandbox"
 	"github.com/nwverse/persona/server/internal/extension/sourcevalidate"
@@ -23,8 +26,6 @@ import (
 	"github.com/nwverse/persona/server/internal/nodecmd"
 	"github.com/nwverse/persona/server/internal/nodeproto"
 	"github.com/nwverse/persona/server/internal/update"
-	"github.com/nwverse/persona/server/internal/voice"
-	"github.com/nwverse/persona/server/internal/volc"
 )
 
 // What the build wrote in (-X), as personad's (the hub's update checks a program by `version -v`).
@@ -70,15 +71,34 @@ const usage = `usage:
                            personad of its build beside it, or PERSONA_SPLIT_PROGRAMS=0 (personad node …)
   persona-manager version [-v]  the version; -v adds the channel and build number`
 
+// moduleCommands are the subcommands that run a built-in module's extension program (internal/builtinext), each
+// listed in the usage only when this build has the module.
+var moduleCommands = []string{"voice", "volc"}
+
+// usageText is usage without the lines of the module programs this build does not have.
+func usageText() string {
+	var keep []string
+	for _, line := range strings.Split(usage, "\n") {
+		if slices.ContainsFunc(moduleCommands, func(name string) bool {
+			_, ok := builtinext.LookupProgram(name)
+			return !ok && strings.HasPrefix(line, "  persona-manager "+name+" ")
+		}) {
+			continue
+		}
+		keep = append(keep, line)
+	}
+	return strings.Join(keep, "\n")
+}
+
 func main() {
 	modelhttp.SetVersion(version)
 	args := os.Args[1:]
 	if len(args) == 0 {
-		fmt.Fprintln(os.Stderr, usage)
+		fmt.Fprintln(os.Stderr, usageText())
 		os.Exit(2)
 	}
 	if clitext.IsHelpArg(args[0]) || args[0] == "help" {
-		fmt.Println(usage)
+		fmt.Println(usageText())
 		return
 	}
 	// An extension's sandbox and its source check run this program again (docs/extensions/extensions.md "Sandbox").
@@ -119,11 +139,13 @@ func main() {
 		err = managercli.TailcatKey("tailcat-key", args[1:])
 	case "extension", "ext", "plugin":
 		err = extmgr.ExtensionCommand(ctx, args[1:], os.Stdin, os.Stdout, os.Stderr)
-	case "voice":
-		err = voice.Run(ctx)
-	case "volc": // the built-in Volcengine speech extension's program (docs/extensions/volcengine-speech.md)
-		err = volc.Run(ctx, version)
 	default: // join, run, install, uninstall, status, search-reindex (manager.Main says what it does not know)
+		// A built-in module's extension program (`persona-manager volc`), when this build has the module
+		// (internal/builtinext; docs/architecture/core-and-modules.md "Provider seams").
+		if run, ok := builtinext.LookupProgram(args[0]); ok {
+			err = run(ctx, version)
+			break
+		}
 		err = managercli.Manager(ctx, buildInfo(), args)
 	}
 	finish(err)

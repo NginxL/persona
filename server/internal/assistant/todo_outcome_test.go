@@ -196,6 +196,7 @@ func TestReviewAcceptedRecordsOutcome(t *testing.T) {
 				s, f, todo := outcomeEnv(t, st, outcomeReply)
 				f.outcome = `{"outcome":"修好了","links":[],"decisions":[],"pitfalls":[]}`
 				ctx := context.Background()
+				setSettings(t, s, func(v *Settings) { v.Main = "conv1" })
 				s.superviseTodo(ctx, todo.ID, "conv1", []string{"PR 合并"}, 0)
 				args := map[string]any{"todo_id": todo.ID, "verdict": c.verdict, "note": "看过了"}
 				if c.verdict == reviewAccepted {

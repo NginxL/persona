@@ -289,7 +289,7 @@ func TestAskTodoHandedToAnAgentIsNoTask(t *testing.T) {
 			proto.Session{SessionID: "a1", Agent: "claude", Cwd: "/code/app", Status: status, State: state, LastText: text, UpdatedAt: time.Now()})
 	}
 	agent(proto.StatusWorking, proto.StateWorking, "")
-	e.s.taskWorking(ctx, "server", "a1")
+	e.s.taskWorking(ctx, "server", "a1", startRow{})
 	if got, ok := e.s.taskOf(ctx, "server", "a1"); ok {
 		t.Fatalf("the agent counts as working on task %+v", got)
 	}

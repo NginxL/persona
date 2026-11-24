@@ -10,6 +10,8 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import persona.core.contracts.DirectionCounts
 import persona.core.contracts.DirectionTaskState
+import persona.core.contracts.ExternalDirection
+import persona.core.contracts.SessionKey
 
 // GET /api/v1/assistant/directions/tree (#4352): read as the hub built it, nothing regrouped or recounted.
 class DirectionTreeParseTest {
@@ -59,6 +61,26 @@ class DirectionTreeParseTest {
         assertTrue(running("""{"id": "a", "counts": {"working": 1}}"""))
         assertFalse(running("""{"id": "a", "counts": {"needs_you": 1}}"""))
         assertFalse(running("""{"id": "a"}"""))
+    }
+
+    @Test fun outsideDirectionsRequireTheMarkerAndKeepIncompleteTargetsVisible() {
+        val tree = directionTreeOf(json("""{"directions": [
+            {"id": "bound", "name": "Outside work", "external": true, "machine_id": "work", "session_id": "agent"},
+            {"id": "targetless", "name": "Watching", "external": true},
+            {"id": "partial", "external": true, "machine_id": "work"},
+            {"id": "not-outside", "external": false, "machine_id": "work", "session_id": "agent"},
+            {"id": "old", "machine_id": "work", "session_id": "agent"},
+            {"id": "main", "secretary": true, "external": true, "machine_id": "work", "session_id": "agent"}
+        ]}"""))!!
+        assertEquals(ExternalDirection("work", "agent"), tree.direction("bound")?.external)
+        assertEquals(SessionKey("work", "agent"), tree.direction("bound")?.external?.target)
+        assertEquals(ExternalDirection(), tree.direction("targetless")?.external)
+        assertNull(tree.direction("targetless")?.external?.target)
+        assertEquals(ExternalDirection(machineId = "work"), tree.direction("partial")?.external)
+        assertNull(tree.direction("partial")?.external?.target)
+        assertNull(tree.direction("not-outside")?.external)
+        assertNull(tree.direction("old")?.external)
+        assertNull(tree.secretary?.external)
     }
 
     @Test fun anOlderHubsEmptyAnswerIsNoTree() {

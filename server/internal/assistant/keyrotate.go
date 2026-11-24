@@ -72,7 +72,7 @@ var errStopped = errors.New("stopped")
 // errRotatedElsewhere: another process rotated while this one staged (db.ErrSealingKeyChanged); run goes on from that.
 var errRotatedElsewhere = errors.New("another process rotated the key meanwhile")
 
-// legacyMailFile is the mail accounts file of old builds, imported once when the mail service starts (internal/mail):
+// legacyMailFile is the mail accounts file of old builds, imported once when the mail service starts (internal/modules/mail):
 // its passwords are sealed with the old key.
 const legacyMailFile = "mail_accounts.json"
 

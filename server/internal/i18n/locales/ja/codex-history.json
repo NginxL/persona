@@ -1,0 +1,8 @@
+{
+  "stalled_turn": "{holder} からしばらく出力がありません。コンピューターのターミナルで確認待ちか停止している可能性があります。ローカル履歴のみ同期できます",
+  "shared_socket_gone": "app-server は実行中ですが、共有制御ソケットが失われています（コンピューターで codex app-server daemon restart を実行してください）。現在はローカル履歴のみ同期できます",
+  "shared_endpoint_invalid": "app-server は実行中ですが、Persona が共有エンドポイントを検証できませんでした。現在はローカル履歴のみ同期できます",
+  "shared_unreachable": "app-server は実行中ですが、Persona が共有エンドポイントに接続できませんでした。現在はローカル履歴のみ同期できます",
+  "shared_home_mismatch": "app-server は実行中ですが、CODEX_HOME がこのセッションと一致しません。現在はローカル履歴のみ同期できます",
+  "shared_not_loaded": "app-server は実行中ですが、このセッションはまだ共有エンドポイントに読み込まれていません。現在はローカル履歴のみ同期できます"
+}

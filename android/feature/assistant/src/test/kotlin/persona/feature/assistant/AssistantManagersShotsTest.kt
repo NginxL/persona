@@ -21,6 +21,7 @@ import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.unit.dp
 import androidx.navigation3.runtime.NavKey
@@ -138,7 +139,13 @@ class AssistantManagersShotsTest {
         rule.waitForIdle()
         assertEquals("m-3fa21c", AssistantManagerChoice.current.value.manager)
         assertEquals(0, rule.onAllNodesWithText(offline).fetchSemanticsNodes().size)
-        capture("online-glass-light")
+        // The manager rename reaches the same shared name source: both the top bar and composer change together.
+        shown = shown.copy(managers = shown.managers.map { if (it.id == "m-3fa21c") it.copy(name = "公司") else it })
+        rule.waitForIdle()
+        rule.onNodeWithText("公司").assertExists()
+        rule.onNodeWithText("问 公司…").assertExists()
+        assertEquals(0, rule.onAllNodesWithText("问 工作…").fetchSemanticsNodes().size)
+        capture("renamed-online-glass-light")
         // The default: no header at all.
         AssistantManagerChoice.pick("assistant")
         rule.waitForIdle()

@@ -9,7 +9,7 @@ import persona.core.navigation.LarkChatRoute
 import persona.feature.inbox.InboxItemLookupResult
 import persona.feature.inbox.InboxItemPages
 import persona.feature.inbox.InboxLanding
-import persona.feature.inbox.InboxRecord
+import persona.core.inbox.InboxRecord
 import persona.feature.inbox.InboxRepository
 import persona.feature.inbox.LarkRoute
 import persona.feature.inbox.inboxRowPage

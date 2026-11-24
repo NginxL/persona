@@ -43,5 +43,9 @@
   "current_launcher": "当前",
   "default_launcher": "默认",
   "quick_picks": "最近与收藏",
-  "recommended": "推荐"
+  "recommended": "推荐",
+  "launchers": "启动器",
+  "speed": "速度",
+  "speed_standard": "标准",
+  "no_levels": "这个模型没有可选的思考强度"
 }

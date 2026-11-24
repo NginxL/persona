@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/nwverse/persona/server/internal/db"
 	"github.com/nwverse/persona/server/internal/proto"
 )
 
@@ -21,7 +22,10 @@ func durableQuestion(ix proto.Interaction) bool {
 // These owner cards are reconstructed from snapshots. A successful response must
 // survive that reconstruction before the owner is allowed to act on it.
 func (s *Service) persistQuestion(p *pending, status string, resolution proto.Resolution) error {
-	return s.finishQuestionPersistence(p, s.writeQuestionOutcome(p.ix, status, resolution))
+	s.fleet.mu.Lock()
+	by := cmpOr(p.endedBy, endedByOf(status, &resolution))
+	s.fleet.mu.Unlock()
+	return s.finishQuestionPersistence(p, s.writeQuestionOutcome(p.ix, status, by, resolution))
 }
 
 func (s *Service) finishQuestionPersistence(p *pending, err error) error {
@@ -39,12 +43,12 @@ func (s *Service) finishQuestionPersistence(p *pending, err error) error {
 	return err
 }
 
-func (s *Service) writeQuestionOutcome(ix proto.Interaction, status string, resolution proto.Resolution) error {
+func (s *Service) writeQuestionOutcome(ix proto.Interaction, status, by string, resolution proto.Resolution) error {
 	st := s.fleetStore()
 	if st == nil {
 		return fmt.Errorf("owned question outcome store is unavailable")
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), historyTimeout)
+	ctx, cancel := context.WithTimeout(db.WithEndedBy(context.Background(), by), historyTimeout)
 	defer cancel()
 	// The initial best-effort insert may have failed. FinishInteraction alone can
 	// succeed without updating a row; ensure the row exists, then verify its value.

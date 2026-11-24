@@ -82,6 +82,7 @@ type stream struct {
 	queue    [][]byte // bytes from the peer, not yet written to conn
 	queued   int
 	peerDone bool // the peer sent close: write what is queued, then close conn
+	aborted  bool // window exceeded in Event: finish runs in its own goroutine
 	done     bool // finished: nothing more is read, written or sent
 	conn     io.ReadWriteCloser
 
@@ -235,14 +236,19 @@ func (m *Mux) Event(event string, params json.RawMessage) bool {
 	}
 	switch event {
 	case EventData:
+		if len(p.Data) == 0 {
+			return true
+		}
 		s.mu.Lock()
-		if s.done || s.peerDone || s.peerEOF && s.halfConn != nil {
+		if s.done || s.peerDone || s.aborted || s.peerEOF && s.halfConn != nil {
 			s.mu.Unlock()
 			return true
 		}
 		if s.queued+len(p.Data) > window { // the peer ignored the window: drop the stream rather than the memory
+			s.aborted = true
+			s.queue, s.queued = nil, 0
 			s.mu.Unlock()
-			s.finish(errors.New("streams: window exceeded"), abortPeer)
+			go s.finish(errors.New("streams: window exceeded"), abortPeer)
 			return true
 		}
 		s.queue = append(s.queue, p.Data)
@@ -250,6 +256,9 @@ func (m *Mux) Event(event string, params json.RawMessage) bool {
 		s.cond.Broadcast()
 		s.mu.Unlock()
 	case EventAck:
+		if p.N <= 0 {
+			return true
+		}
 		s.mu.Lock()
 		s.inflight = max(0, s.inflight-p.N)
 		s.cond.Broadcast()

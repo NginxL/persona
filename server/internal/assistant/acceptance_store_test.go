@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/nwverse/persona/server/internal/feishubot"
+	"github.com/nwverse/persona/server/internal/botcard"
 	"github.com/nwverse/persona/server/internal/i18n"
 )
 
@@ -17,6 +17,7 @@ import (
 // be saved, every way to accept (the web button, the card's button, a reply) says the service is unavailable, never
 // "already handled" or "verified", and the task does not move on. Once the store answers, the same press accepts.
 func TestAcceptStoreFailureIsNotAccepted(t *testing.T) {
+	needsLarkLayer(t)
 	ctx := context.Background()
 	e := newBriefEnv(t)
 	e.verify("todo_v1", "Fix the login crash", 2*time.Hour)
@@ -39,8 +40,8 @@ func TestAcceptStoreFailureIsNotAccepted(t *testing.T) {
 		}
 		return textOf(e.texts[len(e.texts)-1])
 	}
-	press := func(asked string) *feishubot.CardResponse {
-		var a feishubot.CardAction
+	press := func(asked string) *botcard.CardResponse {
+		var a botcard.CardAction
 		a.Action.Value = map[string]any{"a": "accept", "id": "todo_v1"}
 		if asked != "" {
 			a.Action.Value["asked_at"] = asked

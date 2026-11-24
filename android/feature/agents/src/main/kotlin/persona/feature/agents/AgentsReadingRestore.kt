@@ -62,7 +62,13 @@ internal fun readingRestore(saved: SavedReadingAnchor, keys: List<String>, loade
  * The return is true while such a restore owns the list, so live-read anchoring leaves it alone until the row is back.
  */
 @Composable
-internal fun RestoreAgentReadingPosition(state: LazyListState, tree: List<AgentTreeEntry>, paginationFooter: Boolean, loaded: Boolean): Boolean {
+internal fun RestoreAgentReadingPosition(
+    state: LazyListState,
+    tree: List<AgentTreeEntry>,
+    paginationFooter: Boolean,
+    loaded: Boolean,
+    onProgrammaticScroll: () -> Unit = {},
+): Boolean {
     var savedKey by rememberSaveable { mutableStateOf<String?>(null) }
     var savedOffset by rememberSaveable { mutableIntStateOf(0) }
     // Read once: what this screen saves from now on is not what it starts from.
@@ -72,6 +78,7 @@ internal fun RestoreAgentReadingPosition(state: LazyListState, tree: List<AgentT
     // Built once per tree, not at every look at the list.
     val keySetNow by rememberUpdatedState(remember(keys) { keys.toHashSet() })
     val footer by rememberUpdatedState(paginationFooter)
+    val onProgrammaticScrollNow by rememberUpdatedState(onProgrammaticScroll)
 
     LaunchedEffect(state) {
         snapshotFlow { state.isScrollInProgress }.first { it }
@@ -85,6 +92,7 @@ internal fun RestoreAgentReadingPosition(state: LazyListState, tree: List<AgentT
             ReadingRestore.Top -> {
                 // Start from the top at once, but keep the place for a bounded time: a row that arrives in it (this effect
                 // restarts as a scroll) is still put back; past it the list is the list as it is, and the next load is not moved back.
+                onProgrammaticScrollNow()
                 state.scrollToItem(0)
                 delay(RESTORE_SETTLE_MILLIS)
                 pending = null
@@ -93,6 +101,7 @@ internal fun RestoreAgentReadingPosition(state: LazyListState, tree: List<AgentT
                 // The tree follows whatever sits above it, and ends before the optional footer.
                 snapshotFlow { state.layoutInfo.totalItemsCount }.first { it >= keysNow.size + (if (footer) 1 else 0) }
                 val start = state.layoutInfo.totalItemsCount - keysNow.size - (if (footer) 1 else 0)
+                onProgrammaticScrollNow()
                 state.scrollToItem(start + action.index, -action.offset)
                 pending = null
             }

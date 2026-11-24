@@ -97,6 +97,17 @@ type inboxBook struct {
 	purgedAt time.Time // the last purge of the done items past inboxKeepHistory (purgeInboxHistory), under mu
 
 	listMemo inboxListMemo // each listed item's JSON for GET /api/v1/inbox, under mu (inbox_list_memo.go)
+
+	// Deterministic PR/Issue to-do auto-forwarding state (inbox_forward.go).
+	forwarding      sync.Mutex
+	forwardAgain    atomic.Bool
+	forwardStoreMu  sync.Mutex // serializes ledger DB load and save (lock order: forwardStoreMu -> forwardMu)
+	forwardMu       sync.Mutex
+	forwardLoaded   bool
+	forwardGen      uint64
+	forwardLedger   map[string]inboxTodoForwardRecord
+	forwardPending  map[string]inboxTodoForwardRecord
+	forwardInFlight map[string]bool
 }
 
 // inboxVia is what the last round said a subscription reads (the connector's id and the source's name), for the AI

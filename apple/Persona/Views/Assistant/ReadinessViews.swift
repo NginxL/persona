@@ -43,6 +43,9 @@ enum ReadinessRoute: Identifiable, Hashable {
             if let launcher, !launcher.isEmpty { return .provider(launcher) }
             return .providerWizard
         case "edit_provider": return .provider(launcher)
+        case "pick_model":
+            // Pages without the conversation's own picker use Model Settings, never the add-provider wizard.
+            return .provider(nil)
         case "enable_tls", "open_admin":
             return model.config.map { .link($0.url.appending(path: "admin")) }
         default: return nil
@@ -58,6 +61,7 @@ enum ReadinessRoute: Identifiable, Hashable {
         case "install_claude": String(localized: "How to install [Readiness Views 0aa867]")
         case "login_claude": String(localized: "How to sign in")
         case "connect_model": String(localized: "Connect a model")
+        case "pick_model": String(localized: "Fix it")
         case "edit_provider": String(localized: "Change key")
         case "test_assistant": String(localized: "Try a message")
         case "enable_tls", "open_admin": String(localized: "Open admin page")
@@ -66,8 +70,11 @@ enum ReadinessRoute: Identifiable, Hashable {
     }
 
     /// What the send button says while the main conversation cannot answer (4.4).
-    static func sendTitle(_ step: AssistantReadiness.Step) -> String {
-        guard step.id == "computer" else { return String(localized: "Connect a model first") }
+    static func sendTitle(_ step: AssistantReadiness.Step, action: String? = nil) -> String {
+        guard step.id == "computer" else {
+            if step.code == "model_route", let action, let title = title(action) { return title }
+            return String(localized: "Connect a model first")
+        }
         switch step.code {
         case "node_unreachable": return String(localized: "Wake the computer first")
         case "machine_pending": return String(localized: "Confirm the computer first")
@@ -142,6 +149,8 @@ extension View {
 struct ReadinessHomeCard: View {
     @Environment(AppModel.self) private var model
     var key: SessionKey? = nil
+    /// The conversation's own picker when this card lives in its chat; elsewhere Model Settings is the fallback.
+    var pickModel: (() -> Void)? = nil
     @Binding var route: ReadinessRoute?
 
     private var store: AssistantReadinessModel { model.readiness }
@@ -168,8 +177,9 @@ struct ReadinessHomeCard: View {
     }
 
     private func stepCard(_ step: AssistantReadiness.Step) -> some View {
-        let primary = step.action?.id
-        let alt = step.altActions?.first?.id
+        let actions = store.actions(step, currentPick: model.assistantMain.flatMap { model.session($0) }?.modelPick)
+        let primary = actions.first
+        let alt = actions.dropFirst().first
         let trying = primary == "test_assistant" || alt == "test_assistant"
         let failed = trying ? store.probeError : nil
         let activeLauncher = key.map { AssistantCopyText.launcher($0, in: model) }
@@ -191,7 +201,11 @@ struct ReadinessHomeCard: View {
 
     private func run(_ action: String, launcher: String?, machine: String?) {
         if action == "test_assistant" {
-            Task { await store.refresh(api: model.api, probe: true) }
+            Task { await store.refresh(api: model.api, probe: true, modelPick: model.assistantMain.flatMap { model.session($0) }?.modelPick) }
+            return
+        }
+        if action == "pick_model", let pickModel {
+            pickModel()
             return
         }
         route = ReadinessRoute.route(for: action, launcher: launcher, machine: machine, model: model)
@@ -220,7 +234,7 @@ struct CodedFailureCard: View {
 
     private func run(_ action: String) {
         if action == "test_assistant" {
-            Task { await model.readiness.refresh(api: model.api, probe: true) }
+            Task { await model.readiness.refresh(api: model.api, probe: true, modelPick: model.assistantMain.flatMap { model.session($0) }?.modelPick) }
             return
         }
         route = ReadinessRoute.route(for: action, launcher: failure.launcher, machine: failure.machine, model: model)
@@ -345,12 +359,14 @@ private struct CommandLine: View {
 extension AppModel {
     /// The send button of a new main conversation while it cannot answer (nil: send as before): it goes where the
     /// missing step's button goes.
-    func readinessGate(route: Binding<ReadinessRoute?>) -> SendGate? {
+    func readinessGate(route: Binding<ReadinessRoute?>, pickModel: (() -> Void)? = nil) -> SendGate? {
         guard let step = readiness.blocking else { return nil }
-        return SendGate(title: ReadinessRoute.sendTitle(step)) { [self] in
-            let action = step.action?.id ?? ""
+        let action = readiness.actions(step, currentPick: assistantMain.flatMap { session($0) }?.modelPick).first ?? ""
+        return SendGate(title: ReadinessRoute.sendTitle(step, action: action)) { [self] in
             if action == "test_assistant" {
-                Task { await readiness.refresh(api: api, probe: true) }
+                Task { await readiness.refresh(api: api, probe: true, modelPick: assistantMain.flatMap { session($0) }?.modelPick) }
+            } else if action == "pick_model", let pickModel {
+                pickModel()
             } else {
                 route.wrappedValue = ReadinessRoute.route(for: action, launcher: step.launcher, machine: readiness.current?.machine?.name, model: self)
                     ?? .help("what_can_you_do", machine: nil)
@@ -364,7 +380,7 @@ extension AppModel {
     /// Asks for the readiness on a hub that has it (a visit, the machines changing).
     func refreshReadiness(force: Bool = true) async {
         guard hubFeatures.contains(AssistantReadiness.feature) else { return }
-        await readiness.refresh(api: api, force: force)
+        await readiness.refresh(api: api, force: force, modelPick: assistantMain.flatMap { session($0) }?.modelPick)
     }
 }
 
@@ -426,11 +442,7 @@ private struct ReadinessPoller: View {
     @Environment(AppModel.self) private var model
     @Environment(\.tabIsActive) private var tabActive
     @Environment(\.scenePhase) private var phase
-    #if os(macOS)
-    @State private var appActive = NSApp?.isActive ?? true
-    #else
     private let appActive = true
-    #endif
 
     var body: some View {
         let key = ReadinessPoll.key(model.readiness.current)
@@ -448,15 +460,6 @@ private struct ReadinessPoller: View {
                     await model.refreshReadiness(force: false)
                 }
             }
-            #if os(macOS)
-            .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
-                appActive = true
-                Task { await model.refreshReadiness(force: false) }
-            }
-            .onReceive(NotificationCenter.default.publisher(for: NSApplication.didResignActiveNotification)) { _ in
-                appActive = false
-            }
-            #endif
     }
 }
 

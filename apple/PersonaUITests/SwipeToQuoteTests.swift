@@ -128,6 +128,7 @@ final class SwipeToQuoteTests: XCTestCase {
         sleep(1)
         shot("header")
         more.tap()
+        app.openAgentMenuMore() // Files is More's (#13396); Back to Chat stays on the top level
         let item = app.buttons.matching(NSPredicate(format: "label == %@", "文件")).firstMatch
         XCTAssertTrue(item.waitForExistence(timeout: 5), "no 文件 in the ··· menu")
         sleep(1)

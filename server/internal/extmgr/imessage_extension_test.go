@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/nwverse/persona/server/internal/connector/imessage"
+	"github.com/nwverse/persona/server/internal/imessagewire"
 	"github.com/nwverse/persona/server/internal/proto"
 )
 
@@ -23,7 +23,7 @@ func imessageHub(t *testing.T, store *extensionStore, fromHubJSON string) *Manag
 		h.machines, h.byID[m.ID] = append(h.machines, mm), mm
 	}
 	if fromHubJSON != "" {
-		h.cfg.IMessage = &imessage.Config{Machine: fromHubJSON}
+		h.cfg.IMessage = &imessagewire.Config{Machine: fromHubJSON}
 	}
 	startTestExtensions(t, h)
 	return h
@@ -39,6 +39,7 @@ func imessageMacOf(h *Manager) string {
 // hub.json's imessage.machine moves into Settings › Extensions › Messages once (the name becomes the Mac's id, the
 // extension on), and is not put back after the user turns it off; turned off, Messages reads hub.json's again.
 func TestIMessageMigratesOnce(t *testing.T) {
+	needsIMessageModule(t)
 	ctx := context.Background()
 	store := newExtensionStore()
 	h := imessageHub(t, store, "示例 Mac")
@@ -71,6 +72,7 @@ func TestIMessageMigratesOnce(t *testing.T) {
 
 // A move that cannot be made leaves Messages on hub.json's: never cut off.
 func TestIMessageMigrationThatFailsKeepsHubJSON(t *testing.T) {
+	needsIMessageModule(t)
 	ctx := context.Background()
 	// A name that is no machine: nothing moved, not marked (tried at the next start), hub.json's read.
 	store := newExtensionStore()
@@ -109,6 +111,7 @@ func TestIMessageMigrationThatFailsKeepsHubJSON(t *testing.T) {
 // One Mac only: a second is refused with the one already on named; switching to another is turning one off, then
 // the other on; the connector follows at once.
 func TestIMessageExtensionPicksTheMac(t *testing.T) {
+	needsIMessageModule(t)
 	h := imessageHub(t, newExtensionStore(), "")
 	mux := h.routes()
 	put := func(cfg string) (int, map[string]any) {
@@ -120,7 +123,7 @@ func TestIMessageExtensionPicksTheMac(t *testing.T) {
 	if v := viewOf(h, imessageExtensionID); v.Status != extensionNeedsSetup || len(v.NeedsSetup) != 1 || !strings.Contains(v.NeedsSetup[0], "选一台 Mac") {
 		t.Fatalf("enabled without a Mac: %+v", v)
 	}
-	if got := h.extensions.reg.Get(imessageExtensionID).Full.Contributions()["connectors"]; len(got) != 1 || got[0] != imessage.ID {
+	if got := h.extensions.reg.Get(imessageExtensionID).Full.Contributions()["connectors"]; len(got) != 1 || got[0] != imessagewire.ID {
 		t.Fatalf("the settings page must link its connector: %v", got)
 	}
 	if code, _ := put(`{"machines":["mac"]}`); code != 200 || imessageMacOf(h) != "mac" {

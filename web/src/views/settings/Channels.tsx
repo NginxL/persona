@@ -180,6 +180,8 @@ export function ChannelPage({ id, manager: named, onBack, onSettings, headerBack
   const [busy, setBusy] = useState("");
   const [picking, setPicking] = useState(false);
   const [unbinding, setUnbinding] = useState(false);
+  const [testFeedback, setTestFeedback] = useState<{ tone: "ok" | "error"; text: string } | null>(null);
+  useEffect(() => setTestFeedback(null), [id]);
   // Every read and change of the detail takes the next number; only the newest one's answer is shown, since each is the
   // hub's whole detail and an older one would put back what a later request already changed.
   const seq = useRef(0);
@@ -244,6 +246,22 @@ export function ChannelPage({ id, manager: named, onBack, onSettings, headerBack
     );
   }
   const editable = !d.read_only && d.source !== "market";
+  const replyOnly = !!d.capabilities.reply_only;
+  const runTest = () =>
+    void exclusive("test", async () => {
+      setTestFeedback(null);
+      try {
+        const res = await testChannel(id);
+        const text = replyOnly || res?.reply_only
+          ? (res?.note || t("settings-channels.connection_ok", { name: d.name }))
+          : (res?.note || t("settings-channels.test_sent", { name: d.name }));
+        setTestFeedback({ tone: "ok", text });
+        toast(text, "ok");
+      } catch (e) {
+        setTestFeedback({ tone: "error", text: errorText(e) });
+        throw e;
+      }
+    });
   return (
     <>
       {head}
@@ -325,24 +343,26 @@ export function ChannelPage({ id, manager: named, onBack, onSettings, headerBack
         {d.surfaces && d.surfaces.length > 0 && <Row label={t("settings-channels.surfaces")}>{d.surfaces.join(t("settings-channels.list_separator"))}</Row>}
       </Group>
 
-      {editable && d.state === "connected" && d.capabilities.push && (
-        <Group footer={t("settings-channels.test_footer")}>
+      {editable && d.state === "connected" && (d.capabilities.push || replyOnly) && (
+        <Group footer={replyOnly ? t("settings-channels.check_connection_footer") : t("settings-channels.test_footer")}>
           <div className="px-4 py-2.5">
             <Button
               tone="secondary"
-              icon="send"
+              icon={replyOnly ? "check" : "send"}
               busy={busy === "test"}
               disabled={!!busy && busy !== "test"}
-              onClick={() =>
-                void exclusive(
-                  "test",
-                  async () => void (await testChannel(id)),
-                  () => toast(t("settings-channels.test_sent", { name: d.name }), "ok"),
-                )
-              }
+              onClick={runTest}
             >
-              {t("settings-channels.send_test")}
+              {replyOnly ? t("settings-channels.check_connection") : t("settings-channels.send_test")}
             </Button>
+            {testFeedback && (
+              <p
+                role={testFeedback.tone === "error" ? "alert" : "status"}
+                className={cx("mt-2 text-submeta break-words", testFeedback.tone === "error" ? "text-red" : "text-ink-2")}
+              >
+                {testFeedback.text}
+              </p>
+            )}
           </div>
         </Group>
       )}

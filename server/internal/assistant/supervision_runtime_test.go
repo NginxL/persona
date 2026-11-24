@@ -18,30 +18,20 @@ import (
 const runtimePlan = `{"tasks":[{"title":"Check the build","prompt":"Check the build result","machine":"box","cwd":"/code/app","readonly":true}]}`
 
 func TestRuntimeTaskPlanDeliversCompletionToCompatibleSupervisor(t *testing.T) {
-	for _, route := range []string{"main", "background"} {
-		t.Run(route, func(t *testing.T) {
+	for _, agent := range []string{"claude", "codex"} {
+		t.Run(agent, func(t *testing.T) {
 			ctx := context.Background()
 			s, f := newQuietService(t)
-			useMain := route == "main"
-			s.noBackground = false
-			setSettings(t, s, func(v *Settings) {
-				v.MainSupervisesOwnTasks = &useMain
-				v.BackgroundSupervisor, v.BackgroundSupervisorMachineID = "background", "server"
-			})
-			persona := proto.Session{SessionID: "conv1", MachineID: "server", Assistant: true, Agent: "claude", Status: proto.StatusIdle}
-			background := proto.Session{SessionID: "background", MachineID: "server", Assistant: true, Agent: "codex", Status: proto.StatusIdle}
+			persona := proto.Session{SessionID: "conv1", MachineID: "server", Assistant: true, Agent: agent, Status: proto.StatusIdle}
 			side := proto.Session{SessionID: "agy-side", MachineID: "server", Assistant: true, SourceKind: proto.SourceRuntime, Agent: "agy", Launcher: "agy", Status: proto.StatusIdle}
-			f.setSessions("server", persona, background, side)
-			f.mu.Lock()
-			f.known[background.SessionID] = true
-			f.mu.Unlock()
+			f.setSessions("server", persona, side)
 			guardRuntimeFollowUp(f, side.SessionID)
 
 			result, err := s.toolTaskPlan(ctx, side.SessionID, json.RawMessage(runtimePlan))
 			if err != nil {
 				t.Fatal(err)
 			}
-			if !strings.Contains(result, "conversation supervises them") && !strings.Contains(result, "background supervisor follows them up") {
+			if !strings.Contains(result, "conversation supervises them") {
 				t.Fatalf("plan did not explain who reviews the task: %s", result)
 			}
 			waitFor(t, "the worker to link", func() bool { return len(onlyTodo(s).Agents) == 1 })
@@ -50,9 +40,6 @@ func TestRuntimeTaskPlanDeliversCompletionToCompatibleSupervisor(t *testing.T) {
 				t.Fatalf("task origin or supervisor is wrong: %q, %+v", task.Origin, task.Supervision)
 			}
 			reviewer := persona.SessionID
-			if !useMain {
-				reviewer = background.SessionID
-			}
 			worker := task.Agents[0]
 			const report = "Build finished successfully."
 			if _, err := s.reportToSupervisor(ctx, worker.MachineID, worker.SessionID, json.RawMessage(`{"kind":"done","text":"`+report+`"}`), time.Now()); err != nil {
@@ -366,6 +353,69 @@ func capableRuntimeCaps() *proto.SessionCapabilities {
 	return &proto.SessionCapabilities{Read: true, Send: true, Interrupt: true, Approve: true, SupervisionPolicy: true}
 }
 
+func capableRuntimeTestSide() proto.Session {
+	return proto.Session{
+		SessionID: "agy-side", MachineID: "server", Assistant: true, SourceKind: proto.SourceRuntime,
+		Agent: "agy", Launcher: "agy", Status: proto.StatusIdle, Capabilities: capableRuntimeCaps(),
+	}
+}
+
+func TestCapableRuntimeWithoutMainSupervisesOwnTasks(t *testing.T) {
+	ctx := context.Background()
+	s, f := newQuietService(t)
+	side := capableRuntimeTestSide()
+	f.setSessions("server", side)
+	f.mu.Lock()
+	f.known[side.SessionID] = true
+	f.mu.Unlock()
+	setSettings(t, s, func(v *Settings) { v.Main = "" })
+
+	if _, err := s.toolTaskPlan(ctx, side.SessionID, json.RawMessage(runtimePlan)); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "the worker to link without main", func() bool { return len(onlyTodo(s).Agents) == 1 })
+	task := onlyTodo(s)
+	if task.Origin != side.SessionID || task.Supervision == nil || task.Supervision.Supervisor != side.SessionID {
+		t.Fatalf("capable runtime without main lost its own supervision: %q, %+v", task.Origin, task.Supervision)
+	}
+	if _, err := runJSON(t, s, side.SessionID, "task_review", map[string]any{
+		"todo_id": task.ID, "verdict": "accepted", "note": "verified without main",
+	}); err != nil {
+		t.Fatalf("capable runtime without main could not accept its own task: %v", err)
+	}
+	if todoNow(s, task.ID).DoneAt == nil {
+		t.Fatal("capable runtime without main did not close its accepted task")
+	}
+}
+
+func TestCapableRuntimeSideChatSurvivesRehome(t *testing.T) {
+	ctx := context.Background()
+	s, f := newQuietService(t)
+	persona := proto.Session{SessionID: "conv1", MachineID: "server", Assistant: true, Status: proto.StatusIdle}
+	side := capableRuntimeTestSide()
+	f.setSessions("server", persona, side)
+	f.mu.Lock()
+	f.known[side.SessionID] = true
+	f.mu.Unlock()
+	if _, err := s.toolTaskPlan(ctx, side.SessionID, json.RawMessage(runtimePlan)); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "the worker to link before rehome", func() bool { return len(onlyTodo(s).Agents) == 1 })
+	task := onlyTodo(s)
+	s.backfillPlanSupervisors(ctx)
+	if got := todoNow(s, task.ID).Supervision; got == nil || got.Supervisor != side.SessionID {
+		t.Fatalf("rehome rewrote the explicit capable-runtime topology: %+v", got)
+	}
+	if _, err := runJSON(t, s, side.SessionID, "task_review", map[string]any{
+		"todo_id": task.ID, "verdict": "accepted", "note": "verified after rehome",
+	}); err != nil {
+		t.Fatalf("capable runtime could not accept after rehome: %v", err)
+	}
+	if todoNow(s, task.ID).DoneAt == nil {
+		t.Fatal("capable runtime acceptance after rehome did not close the task")
+	}
+}
+
 // A runtime session that advertises capabilities.supervision_policy (e.g. Antigravity) supervises its own planned
 // tasks, receives separate supervision_instructions on supervision deliveries, and loses the policy once its last
 // open task closes.
@@ -458,9 +508,9 @@ func TestCapableRuntimeLeaderAndBackgroundSupervisor(t *testing.T) {
 	if s.backgroundThere(ctx, Settings{MachineID: "server", BackgroundSupervisor: dshSide.SessionID, BackgroundSupervisorMachineID: "server"}, dshSide.SessionID) {
 		t.Fatal("non-capable runtime background supervisor was treated as valid")
 	}
-	// Main chat (with background supervisor on) receives no supervision policy; background and leader both receive it.
-	if got := mustSupervisionInstructions(t, s, ctx, "server", main.SessionID); got != "" {
-		t.Fatalf("main chat with background supervisor on got policy (%d bytes)", len(got))
+	// Main keeps its policy for new main-supervised work (#5732); background and leader receive their own policies too.
+	if got := mustSupervisionInstructions(t, s, ctx, "server", main.SessionID); got != prompts.RenderSupervisionInstructions() {
+		t.Fatalf("main chat lost its supervision policy (%d bytes)", len(got))
 	}
 	for _, id := range []string{bg.SessionID, lead.SessionID} {
 		if got := mustSupervisionInstructions(t, s, ctx, "server", id); got != prompts.RenderSupervisionInstructions() {

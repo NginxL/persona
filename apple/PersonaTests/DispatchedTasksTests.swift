@@ -210,6 +210,8 @@ struct DispatchHandoffFailureTests {
         #expect(W.plain("这台电脑上没装 Claude Code，装好后再试") == "这台电脑上没装 Claude Code，装好后再试")
         let english = "Claude Code isn't installed on this computer. Install it, then retry."
         #expect(W.plain(english) == english)
+        let dirty = #"The previous workspace has uncommitted changes. Commit or stash them, then retry. Changed files include "timeout.swift"."#
+        #expect(W.plain(dirty) == dirty)
         #expect(W.plain("exit status 1") == nil)
         #expect(W.plain("  ") == nil)
         #expect(W.rowLine("exit status 1") == W.details)

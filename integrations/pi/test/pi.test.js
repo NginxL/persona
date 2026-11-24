@@ -310,8 +310,19 @@ test('the pi-web companion lists sessions on disk, opens one to send to it, and 
   assert.deepEqual(posts[1].body, { cwd: '/w/new', type: 'prompt', message: 'hello' })
 })
 
+test('an assistant start pi-web has not written yet is refused as delivered nothing, so a switch rolls back', async (t) => {
+  const { n, host, posts } = await setup(t, { web: true, disk: [], files: {}, listDisk: true })
+  const live = piSession('s-live')
+  host.register(live.pi)
+  await live.fire('session_start')
+  await n.ready
+  await assert.rejects(n.peer.call('session.start', { cwd: '/w/new', assistant: true, permission_mode: 'default' }),
+    (error) => error.code === 'assistant_supervision_runtime' && error.data?.delivered === 'none')
+  assert.deepEqual(posts.at(-1).body, { cwd: '/w/new', type: 'ensure_session' }, 'no prompt went to pi-web')
+})
+
 test('approvals of configured tools go to the phone when it drives the session; pi\'s dialog otherwise; no answer blocks', async (t) => {
-  const { n, host } = await setup(t, { approve: ['bash'], answerFirst: 'phone' })
+  const { n, host } = await setup(t, { approve: ['bash', 'edit'], answerFirst: 'phone' })
   const a = piSession('s-x')
   host.register(a.pi)
   await a.fire('session_start')
@@ -320,6 +331,13 @@ test('approvals of configured tools go to the phone when it drives the session; 
   n.resolve = () => ({ allow: true })
   assert.equal(await a.fire('tool_call', { toolName: 'bash', toolCallId: 'c1', input: { command: 'rm -rf build' } }), undefined)
   assert.deepEqual([n.asked[0].tool_name, n.asked[0].summary, n.asked[0].tool_input.command], ['Bash', 'rm -rf build', 'rm -rf build'])
+  assert.equal(await a.fire('tool_call', {
+    toolName: 'edit',
+    toolCallId: 'c1m',
+    input: { path: 'a.go', edits: [{ oldText: 'a', newText: 'b' }, { oldText: 'c', newText: 'd' }] },
+  }), undefined)
+  assert.equal(n.asked[1].tool_name, 'MultiEdit')
+  assert.equal(n.asked[1].always_label, '本会话不再问 Edit')
   n.resolve = () => ({ allow: false, message: 'not now' })
   assert.deepEqual(await a.fire('tool_call', { toolName: 'bash', toolCallId: 'c2', input: { command: 'ls' } }), { block: true, reason: 'not now' })
   assert.equal(await a.fire('tool_call', { toolName: 'read', toolCallId: 'c3', input: { path: 'x' } }), undefined, 'tools not listed run as pi runs them')
@@ -803,6 +821,43 @@ test('a host can serve another agent of the same extension API (omp)', async (t)
   n.resolve = () => ({ allow: true })
   await a.fire('tool_call', { toolName: 'bash', toolCallId: 'c1', input: { command: 'ls' } })
   assert.match(n.asked.at(-1).id, /^omp-/, 'its cards carry its own id prefix')
+})
+
+test('a turn settles on the agent\'s own event: omp on agent_end, pi only on agent_settled', async (t) => {
+  // omp's pi compatibility layer dispatches no agent_settled (pi's word for a run fully over): without settleEvents a
+  // session would list as working forever after its first turn.
+  const statusOf = (n) => () => n.last('runtime.sessions')?.sessions.find((s) => s.session_id === 's-ompe')?.status
+  const mk = async (options) => {
+    const n = await startFakeNode(t)
+    const host = createPiHost({ SessionManager: { listAll: async () => [], open: () => sessionManager('x', '/', []) }, pid: 4343, log: () => {} },
+      { socketPath: n.path, retryMs: 20, pushDelayMs: 5, agent: 'omp', name: 'omp', instancePrefix: 'omp', interactionPrefix: 'omp', ...options })
+    t.after(() => host.stop())
+    return { n, host }
+  }
+  const entries = [msg('u1', null, 'user', 'one'), msg('a1', 'u1', 'assistant', 'done')]
+  const omp = await mk({ settleEvents: ['agent_end'] })
+  const o = piSession('s-ompe', '/w/app', entries)
+  omp.host.register(o.pi)
+  await o.fire('session_start')
+  await omp.n.ready
+  await until('listed', () => statusOf(omp.n)() === 'done')
+  await o.fire('agent_start')
+  await until('working', () => statusOf(omp.n)() === 'working')
+  await o.fire('agent_end') // omp's own word for the turn being over
+  await until('settled to done', () => statusOf(omp.n)() === 'done')
+
+  const pi = await mk({}) // no settleEvents: pi as it always was
+  const p = piSession('s-ompe', '/w/app', entries)
+  pi.host.register(p.pi)
+  await p.fire('session_start')
+  await pi.n.ready
+  await until('listed', () => statusOf(pi.n)() === 'done')
+  await p.fire('agent_start')
+  await p.fire('agent_end') // the loop ended; its retry, compaction or queue may still run
+  await new Promise((r) => setTimeout(r, 50))
+  assert.equal(statusOf(pi.n)(), 'working', 'a pi settles only on agent_settled')
+  await p.fire('agent_settled')
+  await until('settled to done', () => statusOf(pi.n)() === 'done')
 })
 
 test('Assistant native shell gates survive bypass mode and unavailable rules; ordinary pi stays unchanged', async (t) => {

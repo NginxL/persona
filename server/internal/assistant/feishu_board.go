@@ -13,7 +13,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/nwverse/persona/server/internal/feishubot"
+	"github.com/nwverse/persona/server/internal/botcard"
 	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/proto"
 	"github.com/nwverse/persona/server/internal/transcript"
@@ -200,7 +200,7 @@ func (s *Service) standingBoardCommand(ctx context.Context) bool {
 }
 
 // boardPut writes the board as it is now: edits ref in place, or sends a new board (and remembers it) when there is
-// none, its edit period is over, or the edit fails for any reason that is not a passing one (feishubot.Transient): it
+// none, its edit period is over, or the edit fails for any reason that is not a passing one (botcard.Transient): it
 // was deleted or withdrawn, the period is over (Feishu's 230031: messages can be edited within 14 days of sending,
 // open.feishu.cn "Update sent message card"), it is not a card (a refused card goes out as rich text), or Feishu does not
 // take it for another reason; a board that cannot be edited must not stay the board for good. edited is whether it was
@@ -220,7 +220,7 @@ func (s *Service) boardPut(ctx context.Context, ref *botBoardRef, quiet bool) (e
 			p.written.id, p.written.rows = ref.MessageID, rows
 			return true, nil
 		}
-		if feishubot.Transient(err) {
+		if botcard.Transient(err) {
 			return false, err
 		}
 		s.logf("bots: the board can't be edited any more (%v): sending a new one", err)
@@ -417,21 +417,21 @@ func (s *Service) acceptanceRounds(ctx context.Context, includeReturned bool) []
 // boardCard is the board and the same as plain text (the fallback when Feishu refuses the card): one line a thing,
 // with what is waiting and a note of when it was written; when nothing is, it says so. said is the card without that
 // note, to tell an edit that would change nothing.
-func (s *Service) boardCard(ctx context.Context) (card *feishubot.Card, fallback, said string) {
+func (s *Service) boardCard(ctx context.Context) (card *botcard.Card, fallback, said string) {
 	l, web := s.botLang(ctx), s.webBase(ctx)
 	now := s.standing.clock()
 	rows := s.boardRows(ctx, l, web, now)
 	title := i18n.T(l, "assistant-feishu_cards.board_title")
 	summary := i18n.T(l, "assistant-feishu_cards.board_empty")
-	color := feishubot.Green
+	color := botcard.Green
 	if len(rows) > 0 {
 		summary = i18n.T(l, "assistant-feishu_cards.board_summary", i18n.Args{"count": len(rows)})
-		color = feishubot.Blue
+		color = botcard.Blue
 		if rows[0].blocking {
-			color = feishubot.Orange
+			color = botcard.Orange
 		}
 	}
-	c := feishubot.NewCard(title, color, summary)
+	c := botcard.NewCard(title, color, summary)
 	var plain []string
 	if len(rows) == 0 {
 		c.Markdown(i18n.T(l, "assistant-feishu_cards.board_empty"))
@@ -442,7 +442,7 @@ func (s *Service) boardCard(ctx context.Context) (card *feishubot.Card, fallback
 	shown := 0
 	for i, r := range rows {
 		md := boardRowMarkdown(l, i+1, r)
-		n := feishuElBytes(func(c *feishubot.Card) { c.Markdown(md) })
+		n := feishuElBytes(func(c *botcard.Card) { c.Markdown(md) })
 		if shown >= boardRowsMax || n > budget {
 			break
 		}
@@ -453,7 +453,7 @@ func (s *Service) boardCard(ctx context.Context) (card *feishubot.Card, fallback
 	}
 	if more := len(rows) - shown; more > 0 {
 		line := i18n.T(l, "assistant-feishu_cards.board_more", i18n.Args{"count": more})
-		c.Markdown(feishubot.EscapeMarkdown(line))
+		c.Markdown(botcard.EscapeMarkdown(line))
 		plain = append(plain, line)
 	}
 	said = c.JSON()
@@ -464,12 +464,12 @@ func (s *Service) boardCard(ctx context.Context) (card *feishubot.Card, fallback
 // boardRowMarkdown is one row: its number and what it is, then how long it has waited, whether it was nudged, who asked and a link.
 func boardRowMarkdown(l i18n.Lang, n int, r boardRow) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "**%d** %s\n", n, feishubot.EscapeMarkdown(r.summary))
-	b.WriteString(feishubot.EscapeMarkdown(i18n.T(l, "assistant-feishu_cards.board_waited", i18n.Args{"wait": boardWait(l, r.waited)})))
+	fmt.Fprintf(&b, "**%d** %s\n", n, botcard.EscapeMarkdown(r.summary))
+	b.WriteString(botcard.EscapeMarkdown(i18n.T(l, "assistant-feishu_cards.board_waited", i18n.Args{"wait": boardWait(l, r.waited)})))
 	if r.nudged {
 		b.WriteString(" · " + i18n.T(l, "assistant-feishu_cards.board_nudged"))
 	}
-	b.WriteString(" · " + feishubot.EscapeMarkdown(r.from))
+	b.WriteString(" · " + botcard.EscapeMarkdown(r.from))
 	if boardLinkOK(r.link) {
 		b.WriteString(" · [" + i18n.T(l, "assistant-feishu_cards.board_open") + "](" + r.link + ")")
 	}

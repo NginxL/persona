@@ -58,7 +58,9 @@ final class PasswordFieldFocusTests: XCTestCase {
         XCTAssertTrue(field.exists, "the password field is gone with the keyboard up:\n\(app.debugDescription)")
         // Settled: a cap that keeps refitting itself redraws the page every frame and leaves the app busy, yet still in
         // the foreground with the keyboard up; its cards' area never holds one frame.
-        let cards = app.scrollViews["pending-cards"]
+        // The assistant's pager (#12831) holds its cards; an Agent's chat keeps the stack.
+        let dock = app.otherElements["question-dock"].firstMatch
+        let cards = dock.exists ? dock : app.scrollViews["pending-cards"]
         let settled = cards.frame
         for _ in 0..<5 {
             Thread.sleep(forTimeInterval: 0.2)

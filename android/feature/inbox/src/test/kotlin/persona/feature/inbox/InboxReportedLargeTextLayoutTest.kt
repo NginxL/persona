@@ -34,12 +34,14 @@ import persona.core.contracts.InboxChainEntry
 import persona.core.contracts.InboxChainLink
 import persona.core.contracts.InboxEventFields
 import persona.core.designsystem.AppStyle
+import persona.core.designsystem.InterfaceFontScaleCap
 import persona.core.designsystem.PersonaTheme
 import persona.core.domain.inbox.InboxItem
 import persona.core.domain.sort.AgentPreferences
 import java.time.Instant
 import java.time.ZoneOffset
 import kotlin.math.abs
+import persona.core.inbox.*
 
 /** Measured geometry for reported originals, including the 200% text new-line contract. */
 @RunWith(AndroidJUnit4::class)
@@ -99,7 +101,7 @@ class InboxReportedLargeTextLayoutTest {
         val nodes = rule.onAllNodesWithText(text, useUnmergedTree = true).fetchSemanticsNodes()
         assertEquals("The original must occur in exactly one exact-text node", 1, nodes.size)
         val layouts = mutableListOf<TextLayoutResult>()
-        nodes.single().config[SemanticsActions.GetTextLayoutResult].action!!(layouts)
+        val _ = nodes.single().config[SemanticsActions.GetTextLayoutResult].action!!(layouts)
         return layouts.single()
     }
 
@@ -130,7 +132,7 @@ class InboxReportedLargeTextLayoutTest {
         rule.onAllNodesWithText(text, useUnmergedTree = true).assertCountEquals(1)
     }
 
-    private fun assertInlineAt100Percent() {
+    private fun assertInlineLayout(scale: Float) {
         val body = bounds(ORIGINAL)
         val time = bounds(TIME)
         val tag = bounds(ASSISTANT_SAYS)
@@ -138,16 +140,16 @@ class InboxReportedLargeTextLayoutTest {
         val contentRight = rowBounds.right - (time.left - rowBounds.left)
 
         assertTrue(
-            "At 100% the original must remain to the right of the time and Assistant says header: " +
+            "At $scale the original must remain to the right of the time and Assistant says header: " +
                 "body=$body, time=$time, tag=$tag",
             body.left > tag.right,
         )
         assertTrue(
-            "At 100% the original and header must overlap vertically on the same row: body=$body, tag=$tag",
+            "At $scale the original and header must overlap vertically on the same row: body=$body, tag=$tag",
             body.top < tag.bottom && body.bottom > tag.top,
         )
         assertTrue(
-            "At 100% the original must remain inside the row's content bounds: body=$body, right=$contentRight",
+            "At $scale the original must remain inside the row's content bounds: body=$body, right=$contentRight",
             body.right <= contentRight + TOLERANCE_DP,
         )
     }
@@ -205,13 +207,13 @@ class InboxReportedLargeTextLayoutTest {
         showEntry(style, fontScale = 1f) { entry() }
 
         assertCollapsed()
-        assertInlineAt100Percent()
+        assertInlineLayout(1f)
         row(ORIGINAL).performClick()
         assertExpanded()
-        assertInlineAt100Percent()
+        assertInlineLayout(1f)
         row(ORIGINAL).performClick()
         assertCollapsed()
-        assertInlineAt100Percent()
+        assertInlineLayout(1f)
     }
 
     @Test
@@ -237,6 +239,17 @@ class InboxReportedLargeTextLayoutTest {
     @Test
     fun expandedOriginalAt100KeepsCurrentInlineLayoutBoard() =
         assertDefaultTextLayoutAndRoundTrip(AppStyle.Board)
+
+    @Test
+    fun expandedOriginalAtTheInterfaceCapKeepsCurrentInlineLayout() {
+        showEntry(AppStyle.Glass, fontScale = InterfaceFontScaleCap) { entry() }
+        assertCollapsed()
+        row(ORIGINAL).performClick()
+        assertExpanded()
+        assertInlineLayout(InterfaceFontScaleCap)
+        row(ORIGINAL).performClick()
+        assertCollapsed()
+    }
 
     @Test
     fun nonReportedDetailKeepsSeparateLowerExpansionAt200() {

@@ -47,8 +47,9 @@ var inboxBookBridge = []string{
 }
 
 // inboxBookReaders are the other files that reach the book today (the plan's section 1), each with how many places it
-// does and the seam that replaces them (the plan's section 3.1). Shrink-only: lower a count when a place goes, drop the
-// entry when the last one does, and never add an entry or raise a count.
+// does and the seam that replaces them (the plan's section 3.1). Shrink-only: never add an entry or raise a count. A
+// file with fewer places than its count passes with a note; lowering the count (or dropping the entry at zero) is
+// tidying anyone can do, then or later (docs/operations/testing.md, "Count ratchets").
 var inboxBookReaders = map[string]struct {
 	sites int
 	seam  string
@@ -118,8 +119,8 @@ func TestInboxBookStaysInTheInbox(t *testing.T) {
 	}
 	for _, name := range slices.Sorted(maps.Keys(inboxBookReaders)) {
 		if r, n := inboxBookReaders[name], reached[name]; n < r.sites {
-			t.Errorf("inboxBookReaders allows %s %d places, and it has %d now: lower the count (drop the entry at zero)",
-				name, r.sites, n)
+			t.Logf("inboxBookReaders allows %s %d places, and it has %d now: lowering the count (dropping the entry at "+
+				"zero) is tidying anyone can do", name, r.sites, n)
 		}
 	}
 }
@@ -282,24 +283,21 @@ var inboxTools = []string{
 	"message_send", // #9782: described in prompts/mcp/inbox, it stays in toolNames when S5 moves the others
 }
 
-// inboxScopes are the Inbox routes RouteScopes (internal/extwire/scopes.go) may give a scope: main's, and those open
-// PRs add. An Inbox route is under /api/v1/inbox or /api/v1/translate, or needs an Inbox scope.
+// inboxScopes are the Inbox routes RouteScopes' literal (internal/extwire/scopes.go) may still give a scope: the ones
+// open PRs add there. The Inbox's other routes get theirs in its own file, extwire/inbox_scopes.go (step S6). When such
+// a PR lands, move its lines there and drop them here; drop them too when the PR closes. Never add one. An Inbox route
+// is under /api/v1/inbox or /api/v1/translate, or needs an Inbox scope.
 var inboxScopes = []string{
-	"GET /api/v1/inbox", "GET /api/v1/inbox/done", "GET /api/v1/inbox/done/days", "GET /api/v1/inbox/{id}",
-	"GET /api/v1/inbox/mutes", "GET /api/v1/inbox/policies", "POST /api/v1/inbox/done", "POST /api/v1/inbox/bulk",
-	"POST /api/v1/inbox/merge", "POST /api/v1/inbox/merge/undo", "POST /api/v1/inbox/todo",
-	"POST /api/v1/inbox/todo/undo", "POST /api/v1/inbox/{id}/done", "POST /api/v1/inbox/{id}/draft",
-	"POST /api/v1/inbox/{id}/reply", "POST /api/v1/inbox/{id}/retry", "POST /api/v1/inbox/{id}/suggestion",
-	"POST /api/v1/inbox/{id}/handoff", "POST /api/v1/inbox/{id}/task-link/recheck", "POST /api/v1/inbox/{id}/doc/status",
-	"PUT /api/v1/inbox/{id}/parent", "PUT /api/v1/inbox/{id}/folder", "GET /api/v1/inbox/folders",
-	"PUT /api/v1/inbox/folders", "GET /api/v1/inbox/tree/{kind}/{id...}", "POST /api/v1/inbox/mutes",
-	"DELETE /api/v1/inbox/mutes/{id}", "POST /api/v1/inbox/policies", "PATCH /api/v1/inbox/policies/{id}",
-	"DELETE /api/v1/inbox/policies/{id}", "POST /api/v1/inbox/refresh",
 	"POST /api/v1/inbox/{id}/tier", "GET /api/v1/inbox/rules", "PUT /api/v1/inbox/rules", // #4512
 }
 
-// toolNames and RouteScopes gain no Inbox entry: S5 registers the Inbox's tools with the Inbox and S6 moves its scopes
-// to an extwire file of its own, and both lists keep only what is there now and what open PRs add. An entry the move
+// inboxScopesFile is the Inbox's own file in internal/extwire, which gives the Inbox's routes their scopes through
+// addRouteScopes.
+const inboxScopesFile = "inbox_scopes.go"
+
+// toolNames and RouteScopes gain no Inbox entry. S5 registers the Inbox's tools with the Inbox, and toolNames keeps only
+// what is there now and what open PRs add. The Inbox's scopes are decided in inbox_scopes.go (S6): RouteScopes' literal
+// keeps only what open PRs add, that file decides only Inbox routes, and another domain's file none. An entry the move
 // took (or a PR that closed) leaves its allowance with it.
 func TestCentralListsGainNoInboxEntry(t *testing.T) {
 	described, err := filepath.Glob(filepath.Join(serverDir, "internal", "prompts", "mcp", "inbox", "*.md"))
@@ -318,23 +316,97 @@ func TestCentralListsGainNoInboxEntry(t *testing.T) {
 		}
 	}
 	for _, kv := range mapVar(t, fset, filepath.Join(serverDir, "internal", "extwire", "scopes.go"), "RouteScopes") {
-		key, ok := kv.Key.(*ast.BasicLit)
+		route, inbox, ok := inboxRouteScope(kv)
 		if !ok {
 			t.Errorf("%s: a RouteScopes key that is no string literal: this guard reads only those", pos(fset, kv))
-			continue
-		}
-		route, _ := strconv.Unquote(key.Value)
-		_, p, _ := strings.Cut(route, " ")
-		inbox := strings.HasPrefix(types.ExprString(kv.Value), "ScopeInbox")
-		for _, under := range []string{"/api/v1/inbox", "/api/v1/translate"} {
-			inbox = inbox || p == under || strings.HasPrefix(p, under+"/")
-		}
-		if inbox && !slices.Contains(inboxScopes, route) {
-			t.Errorf("%s: RouteScopes gains the Inbox route %q: give it its scope in the Inbox's own extwire file "+
-				"(step S6 of %s); before S6 lands, list it in inboxScopes with its PR, so that the move takes it along",
-				pos(fset, kv), route, inboxPlan)
+		} else if inbox && !slices.Contains(inboxScopes, route) {
+			t.Errorf("%s: RouteScopes gains the Inbox route %q: give it its scope in extwire/%s, the Inbox's own file "+
+				"(step S6 of %s)", pos(fset, kv), route, inboxScopesFile, inboxPlan)
 		}
 	}
+	added := addedRouteScopes(t, fset)
+	if len(added[inboxScopesFile]) == 0 {
+		t.Errorf("extwire/%s gives no route a scope: this guard reads addRouteScopes(map[string]string{…}) calls",
+			inboxScopesFile)
+	}
+	for _, file := range slices.Sorted(maps.Keys(added)) {
+		for _, kv := range added[file] {
+			route, inbox, ok := inboxRouteScope(kv)
+			switch {
+			case !ok:
+				t.Errorf("%s: an addRouteScopes key that is no string literal: this guard reads only those", pos(fset, kv))
+			case file == inboxScopesFile && !inbox:
+				t.Errorf("%s: %q is no Inbox route: give it its scope in its own domain's file, extwire/<domain>_scopes.go",
+					pos(fset, kv), route)
+			case file != inboxScopesFile && inbox:
+				t.Errorf("%s: the Inbox route %q gets its scope outside the Inbox's file: move it to extwire/%s",
+					pos(fset, kv), route, inboxScopesFile)
+			}
+		}
+	}
+}
+
+// inboxRouteScope reads one entry of a route scope table: its route, and whether that is an Inbox route (under
+// /api/v1/inbox or /api/v1/translate, or needing an Inbox scope); ok is false for a key that is no string literal.
+func inboxRouteScope(kv *ast.KeyValueExpr) (route string, inbox, ok bool) {
+	key, isLit := kv.Key.(*ast.BasicLit)
+	if !isLit || key.Kind != token.STRING {
+		return "", false, false
+	}
+	route, _ = strconv.Unquote(key.Value)
+	_, p, hasMethod := strings.Cut(route, " ")
+	if !hasMethod {
+		p = route
+	}
+	inbox = strings.HasPrefix(types.ExprString(kv.Value), "ScopeInbox")
+	for _, under := range []string{"/api/v1/inbox", "/api/v1/translate"} {
+		inbox = inbox || p == under || strings.HasPrefix(p, under+"/")
+	}
+	return route, inbox, true
+}
+
+// addedRouteScopes are the entries of every addRouteScopes(map[string]string{…}) call in internal/extwire's non-test
+// files, by file name. An argument that is no map literal fails, since its entries cannot be read.
+func addedRouteScopes(t *testing.T, fset *token.FileSet) map[string][]*ast.KeyValueExpr {
+	t.Helper()
+	paths, err := filepath.Glob(filepath.Join(serverDir, "internal", "extwire", "*.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := map[string][]*ast.KeyValueExpr{}
+	for _, path := range paths {
+		if strings.HasSuffix(path, "_test.go") {
+			continue
+		}
+		f, err := parser.ParseFile(fset, path, nil, parser.SkipObjectResolution)
+		if err != nil {
+			t.Fatal(err)
+		}
+		ast.Inspect(f, func(n ast.Node) bool {
+			call, ok := n.(*ast.CallExpr)
+			if !ok {
+				return true
+			}
+			if fn, ok := ast.Unparen(call.Fun).(*ast.Ident); !ok || fn.Name != "addRouteScopes" {
+				return true
+			}
+			var lit *ast.CompositeLit
+			if len(call.Args) == 1 {
+				lit, _ = ast.Unparen(call.Args[0]).(*ast.CompositeLit)
+			}
+			if lit == nil {
+				t.Errorf("%s: addRouteScopes takes no map literal: this guard reads only those", pos(fset, call))
+				return true
+			}
+			for _, e := range lit.Elts {
+				if kv, ok := e.(*ast.KeyValueExpr); ok {
+					out[filepath.Base(path)] = append(out[filepath.Base(path)], kv)
+				}
+			}
+			return true
+		})
+	}
+	return out
 }
 
 // stringListVar is the string literals of the package-level variable name in the file at path.

@@ -1,5 +1,9 @@
 # Lessons: testing and validation
 
+- A manager route's response contract is also asserted by hub relay tests (#13234). When making a closed plan's
+  dismiss response idempotent, update both the manager's route test and the hub's end-to-end plan lifecycle test;
+  verify the returned state and persisted state, rather than only replacing the expected HTTP status.
+
 - Execute release collection steps against the actual build-directory layout (#11684). The installer is rendered at
   `build-publish/install.sh`, while archives and indexes live in `build-publish/bin/`. A receipt that only hashes files
   that happened to be copied cannot detect an omitted installer. Stop on failed copies, require bootstrap files before
@@ -117,7 +121,7 @@
 
 Pitfalls, odd behavior, and the tradeoffs made at the time (originally in `CLAUDE.md`; index in `docs/lessons/README.md`). Add new lessons to the relevant section, or start a section if none fits.
 
-- Fixed `time.Sleep` calls in `_test.go` files under `server/` and `sdk/go/` are ratcheted by `scripts/ci/sleep_ratchet.py` (baseline `scripts/ci/sleep_baseline.json`): a file's count may stay or fall, never rise, a new file starts at zero, and `// sleep-ok: <reason>` on the call's line is the only escape. Prefer `testing/synctest`, a polling helper or a channel.
+- Fixed `time.Sleep` calls in `_test.go` files under `server/` and `sdk/go/` are ratcheted by `scripts/ci/sleep_ratchet.py` (baseline `scripts/ci/sleep_baseline.json`): a file's count may stay or fall, never rise, a new file starts at zero (a file git sees as moved keeps its entry under the new path), and `// sleep-ok: <reason>` on the call's line is the only escape. Prefer `testing/synctest`, a polling helper or a channel. Taking a sleep out does not need the baseline lowered in the same change: only a rise fails, and with a base a changed file may not rise above its count at the merge base either (`docs/operations/testing.md`, "Count ratchets"). When the strict direction failed a fall too, a forgotten lowering broke `main` again and again (#2761, #5635), and baseline edits were the commonest conflict between parallel PRs.
 
 - To keep a fake hub answer out (a press past `cardAnswerWait`), block it on a channel the test closes, not a fixed sleep (2026-11-11, #4274). The assistant's `fakeHub` runs app answers under its lock, so a held answer blocks every other fake call: close the channel before the test touches the hub again, and register the close with `t.Cleanup` so a failed assertion cannot leave it blocked (`heldAnswer` in `server/internal/assistant/feishu_answer_ended_test.go`). Then wait for the last effect of the late path (its note), not for a fixed time.
 
@@ -168,6 +172,12 @@ Pitfalls, odd behavior, and the tradeoffs made at the time (originally in `CLAUD
 - Assistant tests swap a service's hub with `setHub`, never `s.hub = h` (2026-11-11, #4006). The inbox's "Needs you" teller (`tellInboxNeedsYou`) reads `s.hub` on a goroutine of its own, and a test's service starts one at its first inbox read, so a plain assignment raced with it under `-race`. The teller reads the hub only under `needsYouMu`, and `setHub` swaps it under that lock. The teller is not the only reader: a timer armed while the service is set up (`directionsSoon`, which reads `s.hub` through `hello`) can fire during the test, on a `synctest` bubble's clock too, and nothing orders it after a swap. Where a test only needs a fake behavior, the fake hub does it under `f.mu` (`hangChannel`) and the hub is never swapped. A test with two racing readers can report one in a combined run and the other when run alone, so check each test in separate processes of its own. In the same run, two leader retry tests ended before their retry ran because `sendsTo` also counts sends the fake refused; the retry goroutine then read a package timing their cleanup restored. Such timings belong on the `Service` (`leaderResume`, like `taskRetry`), and a wait must see the effect it names (`deliveredTo`, the sends the fake took).
 
 - Prepared approval result counts need a resumable fake conversation and settled delivery lanes (#10455). Listing `s1` is not enough: the fake also needs `known["s1"]` for `resume_only`, or it records a refused direct try and its asynchronous queued retry as two sends. Mark the conversation known and wait for approval delivery plus relay draining before asserting exactly one terminal result; waiting for the first visible result hides the duplicate.
+
+- A snapshot observer must not own a prepared approval's lifecycle (#13303). `askOnPhone` replays connection snapshots and withdraws observers when they disappear. If it reattaches an unanswered prepared card through `awaitPrepared`, cancelling that observer takes the shared caller-cancellation path and removes the original card while its tool call is still waiting. Keep every active prepared card out of snapshot waiters, before clarification as well as after it; its original caller and prepared timer own cancellation, expiry and final delivery. A regression that only observes the flaky `pending = 0` outcome is not enough: assert that no observer is created, then clarify and resolve the original card exactly once.
+
+- Shortening a shared input window for one event must not expire another event's admission (#10480). `TestAvailabilityReplyWaitWithoutQueue` set `availInputFor` to 1 ms before starting its supervision round; an `inOrder` delay then expired the supervision input, recorded the round as `other`, and timed out the fixture. Scope the shortened window to the owner message and restore it immediately. Do not lengthen the assertion deadline or change production round attribution for a race the fixture created.
+
+- Waiting for an asynchronous event needs a threshold, not an exact global count (#10456). `TestReadinessAuthStatusRetry` waited for exactly two auth-status requests, but prefetch and the second readiness read could legitimately start a third first, so the check missed `==2` forever and timed out. Require the second request (`>=2`) and keep the old-node one-request control exact. Do not increase the deadline for a valid extra request.
 
 - A fake's one-shot hook keyed only by machine runs for whoever lists that machine next, a background goroutine included (2026-11-18, #10331). `TestACardMessageReopensOnlyItsOwnTask` armed `fakeHub.afterList["box"]` for the card message's own look at the task's agents. The acceptance before it had started the todo-token sync (`syncTodoTokens`), which lists the same machine; on a busy machine that list was still out when the hook was armed, took it and ran it in the background, so the card message never did (6 of 1000 runs at `-cpu 4`). Tie such a hook to the call under test (a context value the test sets, `listHooked`), not to whichever call comes next. To find who took one, print `debug.Stack()` where the hook fires and run until it fails.
 
@@ -459,7 +469,7 @@ What a hit would save, measured the same day with the build already cached (110 
 guard packages check-fast runs on every server change took 12 s uncached and 1 s cached, and its guard tests 10 to
 14 s uncached. Only packages the change did not reach can hit at all: the edited package and every package that imports
 it get a new test binary and run again. Caching also changes the run itself: `go test` passes `-test.testlogfile` only
-when the result may be cached, and `internal/office` failed only in that mode, because a test that lowered the file size
+when the result may be cached, and `internal/modules/office/office` failed only in that mode, because a test that lowered the file size
 limit also cut off that log (#8962, fixed by #8968).
 
 - Keep `-count=1` in every command whose result is reported as verification, and in any new entry point. A plain
@@ -506,7 +516,7 @@ The `scripts/ci/` lanes are written for the hosted runners; on a Mac developer m
   `kbEnd` closes for good, and test fixtures register `t.Cleanup(s.kbEnd)`, not `kbClose` (which stays reopenable,
   for the disconnected case and restart tests). A timer that already holds the engine still writes: the meeting
   fixture runs the attending feed on real timers, so its cleanup waits for the looks already running and lets none
-  start after (`trackAttendFeed` in `server/internal/assistant/meeting_live_test.go`).
+  start after (`trackAttendFeed` in `server/internal/modules/recording/fixtures_test.go`).
 - It shows only under load (one in four shuffled package runs on a busy Mac; six processes of `-run '^TestMeeting'
   -count=20 -cpu=1` reproduce it every time). To find such a writer, give the fixture a directory whose cleanup, when
   `os.RemoveAll` fails, lists what is left (with modification times against the cleanup's start) and dumps every
@@ -516,6 +526,11 @@ The `scripts/ci/` lanes are written for the hosted runners; on a Mac developer m
 
 - A test that needs Postgres skips without `PERSONA_TEST_DATABASE_URL`, and a plain `go test` prints `ok` for its package. #5031 changed what `task_plan` answers and checked `internal/hub` without a database, so `TestSupervisedTaskOverTheBus`, which drives that answer end to end, never ran and went red on `main` (#5182). Before a change that touches what a database test covers, run its package with `scripts/test/test-server.sh <package>`, or `go test -v` and check for `SKIP` lines.
 - Allocation budgets are set from numbers measured on the hub machine (linux/amd64). The same tests read about 2 KB lower on an arm64 Mac, so #5150 passed `TestReindexOneRevAllocation` and `TestIndexWholeListAllocation` there and failed them on the hub (#5188). Judge a budget only from a `test-server.sh` run. To find where a regression comes from, compare `allocated(...)` in a probe at both commits; the Mac shows the same difference, so a `pprof -sample_index=alloc_space` profile of the measured call can be taken there.
+
+## Settle task outcomes and query review history by ref in Postgres tests (#13231)
+
+- Accepting a task review starts `goRecordTaskOutcome`, which asynchronously writes a `DecisionOutcome` receipt. Call `s.tasks.outcomeRuns.Wait()` before inspecting the task's decisions, then keep rejecting every non-outcome row; neither deleting the assertion nor treating that receipt as an owner click tests supersession. Cancelling a review does not start this writer.
+- `DB.Feed` returns a bounded, oldest-first conversation page. In a shared Postgres shard, older rows can fill all 500 entries and push the review written by the current test out of that page. For a to-do's review audit, query `FeedByRef` with `feedReview` and retain the conversation and `superseded_reason` assertions; increasing the page size only moves the intermittent failure.
 
 ## "Not listed" holds for a transcript the list never shows (2026-11-12, #5054)
 
@@ -584,6 +599,14 @@ Ordinary `go test` and CI do not include `//go:build herdrlive`, so a node helpe
 ## A shell proxy sends the mock suites' loopback calls away (2026-11-18, #10465)
 
 - With `http_proxy` (or `HTTPS_PROXY`, `ALL_PROXY`) set in the shell, about 30 suites under `scripts/mock/` run by hand failed with socket timeouts: their `urlopen` calls to the mock on `127.0.0.1` went to the proxy. CI never sees it, since `scripts/ci/python-tests.py` starts every suite with the environment `server_test_env.clean_environment` cleans. By hand, unset the proxy variables or go through `python3 scripts/ci/python-tests.py`; a new suite opens loopback URLs with `build_opener(ProxyHandler({}))` (as `scripts/mock/test_todo_view_mock.py` does) and needs neither.
+
+## A test's premise must hold before the event it races with (2026-11-23, #14007)
+
+- `TestSayWaitsForTheUserToStop` (voice) ended the bound turn before the call began and then started talking. The hub
+link's first event can read that finished turn before the call has heard the first frame of the user's voice, and the
+answer is then rightly said at once: nobody was talking yet. It failed about one run in 25 on two loaded cores, and on
+the gate. Make the premise true first and wait on something observable (here: the service got the user's audio, which
+the call weighs before it sends it on), then trigger what it races with. A longer sleep only makes the race rarer.
 
 ## A moved file or block needs a test that fails when the old copy comes back (2026-11-20, #11476, #11543)
 
@@ -743,6 +766,11 @@ first, and the old copy's state goes its own way.
 - **With the keyboard up, `app.collectionViews.firstMatch` is not the list** (2026-11-05, #2189). The 44pt candidate/input accessory strip is itself a collection view,
   ordered before the list, outside `app.keyboards` frame (SE keyboard starts at 451, strip is 407–451). `swipeUp` there leaves the list still,
   looking like pinned filters and once described as "keyboard blocks element swipes". Find the list by its elements (`collectionViews.containing(.button, identifier:)`).
+- **A swipe on a system menu that does not scroll chooses the item under the finger** (2026-11-23, #13396). `AgentMenuParityUITests`
+  read the Agent menu with `menu.swipeDown()` between reads, which only scrolled while the menu ran past the screen. Once its top level
+  fit, the swipe became a drag-to-select and chose the last item, Close Agent…, whose confirmation then covered the menu ("no More in
+  the Agent menu"). Read what a menu shows without a swipe; where a submenu runs past the screen, compare what both menus show, the
+  shorter list as a prefix of the longer.
   Element swipes start at whole-frame center and can fail next to the keyboard on small screens; coordinate-drag within the visible row segment (`AgentsListTests.dragListUp`).
 - Simulators and Mac share loopback: an app listening on simulator `127.0.0.1:<port>` conflicts with Mac processes on that port (port forwarding falls back to a random port, testing that path).
 - **Scripts executed by tests really run on the development machine** (2026-11-01). `TestDeployScriptInstallsTheBinary` runs hub deployment, whose final
@@ -796,7 +824,7 @@ Retain strict checks for the complete target set, existing modules, artifact pat
 ## Go tests requiring macOS built-in commands (2026-11-02)
 
 - The Messages connector reads `chat.db` with macOS `/usr/bin/sqlite3` (personad has no cgo). The Linux hub lacks `sqlite3`, so these tests skip there.
-  If the development Mac has no Go, cross-compile on hub: `GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 go test -c -o x.test ./internal/connector/imessage`,
+  If the development Mac has no Go, cross-compile on hub: `GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 go test -c -o x.test ./internal/modules/imessage`,
   copy to Mac, and run **in the package directory** (`testdata` is relative). Use the same approach for macOS-dependent `node` tests.
 - `sqlite3 -json` prints nothing for no rows, not `[]`; check empty before parsing.
 
@@ -1261,7 +1289,7 @@ To check that a failure is this, move `dev.json` aside in the app's data contain
 - A result from a loaded machine can reverse once it is quiet: at a load of ~400, asking for VNC updates early looked
   239 ms faster for typing (3 of 6 pairs); at 25–80 it was slower in all 5 pairs (median +81 ms). Decide on runs made at
   a low load, interleaved (ABBA), and say the load next to the numbers.
-- Driving the real desktop (`server/cmd/vncbench run`): other lanes' windows and dialogs open on top of yours at any
+- Driving the real desktop (`server/internal/modules/screen-share/vncbench run`): other lanes' windows and dialogs open on top of yours at any
   time. Send a click, a wheel notch or a drag only where your own page is seen on the screen (vncbench's target
   checker), type only while your page says it has the keyboard, and bring your browser forward with `open -a`, never
   by clicking. A window's rounded corner clips a marker drawn in it: keep markers inset.

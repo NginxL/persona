@@ -306,6 +306,15 @@ Each received push redraws both the Dynamic Island and the Lock Screen, so the h
 - Tapping the activity itself (compact, Lock Screen): with one Agent, open it (`persona://open?machine=…&session=…`); with several, simply return to the App (`persona://open`), at the page and position where you left (a list stays a list, a chat stays the same chat and line; if the system ended the App, cold launch restores the last chat and the reading position recorded on backgrounding). Each expanded-view row opens its own session. Before 2026-10-29 it always opened the first item; the user reported "tapping the Dynamic Island goes into some Agent".
 - When the Lock Screen draws a single request (the one with buttons, or the one nameless line such as "A permission request is waiting" when details are hidden), tapping the Lock Screen opens that request's session (`FleetLink.lockScreen`, #4318): it opens what is drawn, not a guess. With several rows or only counts, as above. The Apple Watch Smart Stack (`.small`) still taps as the whole activity.
 - Simulator automation (`-pairURL`) doesn't report tokens, so the hub won't mistake the real device's activity for the simulator's.
+- **One card** (#12982): before applying a fleet (and once at launch) `keepOne` ends every Fleet activity but one, of either
+  attribute type, ended ones included: the running one updated last stays (latest stale date). iOS ends an activity after about
+  eight hours but leaves it on the Lock Screen, stale, for hours; the app no longer saw it and started a new one beside it, then
+  only ever updated the first of the two. The hub does its part: when a phone reports a new activity's token it ends the activity
+  that token replaces, and it ends an activity `fleetRetireBefore` (20 minutes) before `fleetMaxAge`, so the next start never sits
+  beside a card iOS ended.
+- **No push route, no card in the background** (#12982): going to the background while the first group's hub has no push route
+  to this phone (`PushRoute.route == "none"`, e.g. the relay refusing its topic), the app ends the activity: nothing could update
+  or end it any more, and it would keep old counts and an old request for hours. It starts again when the app is back in front.
 
 ## Buttons (`apple/LiveActivity/FleetIntents.swift`)
 
@@ -317,7 +326,13 @@ Each received push redraws both the Dynamic Island and the Lock Screen, so the h
 - `LiveActivityIntent`'s `perform` runs in the App process (the system starts it in the background if needed), so the extension only compiles the types, with empty `perform`
   (`WIDGET_EXTENSION` compilation condition). The App implementation is in `FleetActions`: call resolve, immediately remove this item from the activity (optimistic update; the hub push follows),
   and on failure send a local notification explaining why (410 "already handled" still removes it).
-- Stale content (`isStale`, no hub push for 15 minutes) has no buttons, to avoid tapping Allow on a request already handled.
+- Stale content (`isStale`, no hub push for 15 minutes) has no buttons, to avoid tapping Allow on a request already handled. Since
+  #12982 the stale Lock Screen draws only the persona and "Waiting for hub…": no counts and no rows, which are no longer known to be true.
+- **Buttons only with context** (#12982): Allow / Deny or Approve appear only when the card can say who asks, what, and what
+  approving does. The manager leaves `interaction` empty for a permission without a summary (a bare tool name), a plan without a
+  title and a private ("Just me") permission or plan (`decidable` in `server/internal/assistant/fleet_live.go`); with Lock Screen
+  details off (rows read "A permission request is waiting") both the hub (`forDevice`) and the app (`FleetState.tailored`) drop it
+  from every permission and plan row. Questions and terminal cards never have buttons and keep their `interaction`. Without buttons a tap on the request opens it in the app.
 
 ## Settings (Settings › Notifications › Live Activities)
 
@@ -398,14 +413,14 @@ rang but its countdown was not shown anywhere.
 - **Dynamic Island**: compact, the mark and the time (at limited width only the mark, matching `RecordingLiveActivity`); expanded, the label and the same buttons; minimal, the mark. The watch's Smart Stack gets the
   glance (mark, label, time). The alarm activity uses its own `IslandMetrics.alarm*` sizes so recording redesigns do not affect it.
 - **Buttons** are `LiveActivityIntent`s in `apple/LiveActivity/AlarmActivity.swift` (`PauseAlarmIntent`, `ResumeAlarmIntent`, `StopAlarmIntent`),
-  allowed without unlocking, that call `AlarmManager` in the app with the alarm's id; they only reach Persona's own alarms.
+  allowed without unlocking, routed through `AlarmIntentRouter` to `AlarmManager` in the app with the alarm's id; they only reach Persona's own alarms. In DEBUG builds, taps targeting the ActivityKit-only timer sample below are intercepted by `AlarmsTool.handleSampleAction` and never call `AlarmManager` (#13269).
 - The tint is the one the app gave the alarm (`AlarmAttributes.tintColor`, the app's accent resolved once: a dynamic colour encodes to about 5.7 KB);
   nothing is read from the App Group or the keychain. A timer's attributes still come to about 5.7 KB (each string carries its bundle and a sandbox
   token, each colour an archived UIColor, about 0.5 KB apiece), and every byte of the label counts about seven times (three titles, each with a key and
   a default value, and the metadata). An activity the app requests itself takes at most 4 KB of attributes (liveactivitiesd: "Request attribute size
-  … exceeds maximum size of 4096"), which only the DEBUG sample below does. AlarmKit's daemon (`mobiletimerd`) starts the real ones, and it holds
+  … exceeds maximum size of 4096"), which only the DEBUG sample below does. `AlarmPresentation` encodes both timer states when they are present, so the sample must retain only the state it draws (#12248). AlarmKit's daemon (`mobiletimerd`) starts the real ones, and it holds
   `com.apple.private.activitykit.allowOversizedPayloads`, which liveactivitiesd checks before that limit (read from the iOS 27.0 simulator runtime, #11058):
   a real timer is not held to 4 KB. Whether a longer cap applies to it is not known; it needs a device or an authorized AlarmKit.
 - The activities live in their own `LiveActivityBundle` inside `PersonaWidgetsBundle` (a widget bundle's builder takes ten at most), with `AlarmLiveActivity` gated by `if #available(iOS 26.0, *)`.
 - **Screenshots**: `-showAlarmSample timer|paused` (DEBUG) starts a 25-minute "Focus" timer as the tool does on a device, and `PersonaUITests/AlarmLiveActivityShots`
-  (`PERSONA_ALARM_SAMPLE=timer|paused`) photographs the island and the Lock Screen. On the simulator (`#if targetEnvironment(simulator)`), `AlarmsTool.showSample` goes straight to ActivityKit using the tool's own `attributes(label:timer:only:)`, cut to the state it draws so it fits in 4 KB (#11058; `PhoneSystemToolsTests.theTimerSampleFitsInsideActivityKitsLimit`), so shots never depend on a system prompt; `TerminationActivities` ends only that sample activity on SIGTERM (leaving real AlarmKit timers alone). That it rings through silent mode needs a device.
+  (`PERSONA_ALARM_SAMPLE=timer|paused`) photographs the island and the Lock Screen. On the simulator (`#if targetEnvironment(simulator)`), `AlarmsTool.showSample` goes straight to ActivityKit with `sampleAttributes(label:paused:)`: it retains the tool's label, resolved accent and the current state's Pause or Resume marker. Its `LocalizedStringResource` titles use the label as their default value and need no app-resource lookup: the custom widget never reads their app-bundle localization, so repeating the app path and sandbox token is unnecessary. The AlarmKit Alert keeps its required Stop configuration on iOS 26.0; iOS 26.1 deprecates that field and newer SDKs omit it when encoding. `AlarmButtons` draws Pause / Resume / Stop with its own words and colours from the unchanged `AlarmPresentationState` plus that marker. The simulator sample has its own alarm ID, tags `PersonaAlarmData.isSample = true` (DEBUG only) and schedules no `AlarmManager` timer. Its buttons still render `PauseAlarmIntent`, `ResumeAlarmIntent` and `StopAlarmIntent` so the widget UI matches real timers, and in DEBUG builds `AlarmIntentRouter` routes any sample ID to `AlarmsTool.handleSampleAction`: Pause and Resume update the sample ActivityKit activity's countdown/paused state directly (replacing a paused-only sample with a running one on Resume so Pause stays available under the 4 KB limit), Stop ends only that sample activity, and `AlarmManager` is never called with the unscheduled sample UUID (#13269). This is the only part made smaller; real timers keep `isSample == nil` (omitted in Release), still get both states and the app's localized resources from `attributes(label:timer:)`, and route directly to `AlarmManager` with AlarmKit owning their updates. `PhoneSystemToolsTests.theTimerSampleFitsInsideActivityKitsLimit` encodes and decodes both actual `ActivityContent` variants below 4 KB, as well as the attributes, and pins the decoded selected-state and opposite-state rules, Pause / Resume symbols, Stop configuration, `isSample` separation and original-to-decoded tint archives / RGBA (#12248); `theTimerSampleButtonsStayOffAlarmManagerAndUpdateTheSampleActivity` and `realTimerButtonsStillRouteToAlarmManagerAlongsideASample` verify the separated sample and real-timer button routing (#13269). Shots never depend on a system prompt; `TerminationActivities` ends only that sample activity on SIGTERM (leaving real AlarmKit timers alone). That it rings through silent mode needs a device.

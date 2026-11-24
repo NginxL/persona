@@ -145,6 +145,40 @@ func TestTodoLinksOfDifferentAgents(t *testing.T) {
 	}
 }
 
+// A delayed creation-id may link its exact done card, but it remains an automatic link: a manual membership committed
+// after the decision wins, and the done target is inserted without reviving an existing or dismissed row (#5732).
+func TestAutoLinkDoneCreationKeepsLaterManualChoice(t *testing.T) {
+	d, ctx := open(t), context.Background()
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	for _, id := range []string{"t_done", "t_hand"} {
+		if err := d.CreateTodo(ctx, TodoRow{ID: id, Title: id, CreatedAt: now, UpdatedAt: now}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	done := true
+	if _, err := d.UpdateTodo(ctx, "t_done", nil, nil, &done, now); err != nil {
+		t.Fatal(err)
+	}
+	decided := now
+	if _, err := d.LinkTodoAgent(ctx, "t_hand", "m", "s_choice", "", "", "", "", decided.Add(time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	inserted, released, err := d.AutoLinkUnlinkedTodoAgentOfDoneTask(ctx, "t_done", "m", "s_choice", "", "", "", "", "assistant_start", "t_done", decided)
+	if err != nil || inserted || len(released) != 0 {
+		t.Fatalf("late done creation overrode the manual choice: inserted=%v released=%v err=%v", inserted, released, err)
+	}
+	if got := activeTodosOf(t, d, "m", "s_choice"); len(got) != 1 || got[0] != "t_hand" {
+		t.Fatalf("late done creation moved the manual membership: %v", got)
+	}
+	inserted, released, err = d.AutoLinkUnlinkedTodoAgentOfDoneTask(ctx, "t_done", "m", "s_exact", "", "", "", "", "assistant_start", "t_done", decided)
+	if err != nil || !inserted || len(released) != 0 {
+		t.Fatalf("the exact unlinked done creation was not retained: inserted=%v released=%v err=%v", inserted, released, err)
+	}
+	if got := activeTodosOf(t, d, "m", "s_exact"); len(got) != 1 || got[0] != "t_done" {
+		t.Fatalf("exact done creation membership = %v", got)
+	}
+}
+
 // An automatic link of an agent whose only active link is on a done todo moves it there: the done todo keeps it as
 // taking part (#2904). A link on an open todo, or one made after the automatic decision, stays.
 func TestAutoLinkReleasesADoneTodo(t *testing.T) {

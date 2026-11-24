@@ -2,6 +2,10 @@ package assistant
 
 import (
 	"context"
+	"crypto/sha1"
+	"encoding/hex"
+	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -84,6 +88,297 @@ func TestMigratedInbox(t *testing.T) {
 	if !doc.Read {
 		t.Fatal("read elsewhere")
 	}
+}
+
+// An account-qualified document notice keeps one thread across repeated collection. The identical unread version
+// cannot recreate the item its owner handled; a later version still starts a new one.
+func TestMigratedDocumentDoneStaysDoneForAccount(t *testing.T) {
+	ctx := context.Background()
+	h := newInboxHub(t)
+	h.inboxReady(ctx)
+	p := &extensionLark{}
+	h.addConnector(p, false)
+	now := time.Now().UTC().Truncate(time.Millisecond)
+	docThing := func(last string, at time.Time) connector.InboxThing {
+		return connector.InboxThing{Thread: "doc:2:n1", Kind: KindDoc, Title: "Weekly plan", Sender: "A colleague", At: at, Last: last,
+			Extra: &connector.ThingExtra{Source: "lark", Account: "feishu", AccountName: "Feishu account 2", LegacyID: "doc:2:n1:" + last,
+				Count: 1, StartedAt: at, Doc: rawJSON(map[string]any{"notice_id": "n1", "account_id": 2, "type": "docx"})}}
+	}
+	collect := func(th connector.InboxThing) {
+		p.things = []connector.InboxThing{th}
+		h.collectInbox(ctx, roundPoll)
+	}
+	first := docThing("100", now.Add(-time.Minute))
+	collect(first)
+	collect(first) // the unread source card is still there when the owner handles the item
+
+	h.inbox.mu.Lock()
+	var before []*InboxItem
+	for _, it := range h.inbox.items {
+		if it.Doc != nil && it.Doc.NoticeID == "n1" {
+			before = append(before, it)
+		}
+	}
+	h.inbox.mu.Unlock()
+	var handled *InboxItem
+	for _, it := range before {
+		if strings.HasPrefix(it.ID, "lark:") { // the duplicate id produced by the old account-blind lookup
+			handled = it
+		}
+	}
+	if handled == nil && len(before) == 1 {
+		handled = before[0]
+	}
+	if handled == nil {
+		t.Fatalf("setup: document items = %+v", before)
+	}
+	code, out := inboxCall(t, h.routes(), "POST", "/api/v1/inbox/"+handled.ID+"/done", `{"done":true}`)
+	if code != 200 || out["done_by"] != "user" {
+		t.Fatalf("mark done: %d %v", code, out)
+	}
+
+	collect(first)
+	func() {
+		h.inbox.mu.Lock()
+		defer h.inbox.mu.Unlock()
+		var after []*InboxItem
+		for _, it := range h.inbox.items {
+			if it.Doc != nil && it.Doc.NoticeID == "n1" {
+				after = append(after, it)
+			}
+		}
+		if len(after) != 1 || after[0].ID != handled.ID || after[0].open() {
+			t.Fatalf("the unchanged notice reopened or duplicated the handled item: before=%+v after=%+v", before, after)
+		}
+	}()
+
+	later := docThing("101", now)
+	collect(later)
+	h.inbox.mu.Lock()
+	defer h.inbox.mu.Unlock()
+	if len(h.inbox.items) != 2 || h.inbox.items[handled.ID] == nil || h.inbox.items[handled.ID].open() {
+		t.Fatalf("the handled version was lost when later activity arrived: %+v", h.inbox.items)
+	}
+	var fresh *InboxItem
+	for _, it := range h.inbox.items {
+		if it.open() {
+			fresh = it
+		}
+	}
+	if fresh == nil || fresh.Last != "101" || fresh.Doc == nil {
+		t.Fatalf("later document activity did not open one account-qualified item: %+v", fresh)
+	}
+	raw, err := json.Marshal(fresh.Doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fields map[string]any
+	if err := json.Unmarshal(raw, &fields); err != nil || fields["account_id"] != float64(2) {
+		t.Fatalf("the new item did not retain its source account: %s (%v)", raw, err)
+	}
+}
+
+// Rows written by the account-blind version are adopted by their stable legacy id and deterministic fallback id.
+// If both are present, the row the owner handled survives and the duplicate open row is filed into it, not orphaned.
+func TestMigratedDocumentAccountUpgradeKeepsHandledRow(t *testing.T) {
+	ctx := context.Background()
+	h := newInboxHub(t)
+	h.inboxReady(ctx)
+	p := &extensionLark{}
+	h.addConnector(p, false)
+	now := time.Now().UTC().Truncate(time.Millisecond)
+	at := now.Add(-time.Minute)
+	sum := sha1.Sum([]byte("doc:2:n1\n100"))
+	fallbackID := "lark:" + hex.EncodeToString(sum[:8])
+	duplicate := &InboxItem{ID: "doc:2:n1:100", Source: "lark", Kind: KindDoc, Title: "Weekly plan", UpdatedAt: at, Last: "100",
+		Doc: &InboxDoc{NoticeID: "n1", Type: "docx"}}
+	doneAt := now.Add(-time.Second)
+	handled := &InboxItem{ID: fallbackID, Source: "lark", Kind: KindDoc, Title: "Weekly plan", UpdatedAt: at, Last: "100",
+		DoneAt: &doneAt, DoneBy: "user", Doc: &InboxDoc{NoticeID: "n1", Type: "docx"}}
+	h.inbox.mu.Lock()
+	h.inbox.items[duplicate.ID], h.inbox.items[handled.ID] = duplicate, handled
+	h.inbox.mu.Unlock()
+	p.things = []connector.InboxThing{{Thread: "doc:2:n1", Kind: KindDoc, Title: "Weekly plan", At: at, Last: "100",
+		Extra: &connector.ThingExtra{Source: "lark", Account: "feishu", LegacyID: duplicate.ID, Count: 1, StartedAt: at,
+			Doc: rawJSON(map[string]any{"notice_id": "n1", "account_id": 2, "type": "docx"})}}}
+	h.collectInbox(ctx, roundPoll)
+	func() {
+		h.inbox.mu.Lock()
+		defer h.inbox.mu.Unlock()
+		if len(h.inbox.items) != 2 || handled.open() || migratedThread(handled) != "doc:2:n1" {
+			t.Fatalf("the stored handled row was not adopted by its account-qualified thread: %+v", h.inbox.items)
+		}
+		if duplicate.open() || duplicate.MergedInto != handled.ID || migratedThread(duplicate) != "doc:2:n1" {
+			t.Fatalf("the old duplicate remains open or orphaned: %+v", duplicate)
+		}
+	}()
+
+	h.collectInbox(ctx, roundPoll)
+	func() {
+		h.inbox.mu.Lock()
+		defer h.inbox.mu.Unlock()
+		if len(h.inbox.items) != 2 || handled.open() || duplicate.open() {
+			t.Fatalf("the upgraded rows were recreated by the next identical round: %+v", h.inbox.items)
+		}
+	}()
+}
+
+// The first collection after an upgrade may already carry a newer version. Historical rows still need their account
+// recovered from each row's own Last, or an old hash row would stay open on the unqualified thread forever.
+func TestMigratedDocumentAccountUpgradeMigratesHistory(t *testing.T) {
+	ctx := context.Background()
+	h := newInboxHub(t)
+	h.inboxReady(ctx)
+	p := &extensionLark{}
+	h.addConnector(p, false)
+	now := time.Now().UTC().Truncate(time.Millisecond)
+	at100 := now.Add(-2 * time.Minute)
+	sum := sha1.Sum([]byte("doc:2:n1\n100"))
+	hashID := "lark:" + hex.EncodeToString(sum[:8])
+	doneAt := now.Add(-3 * time.Minute)
+	legacy := &InboxItem{ID: "doc:2:n1:100", Source: "lark", Kind: KindDoc, UpdatedAt: at100, Last: "100",
+		DoneAt: &doneAt, DoneBy: "user", Doc: &InboxDoc{NoticeID: "n1"}}
+	hashOpen := &InboxItem{ID: hashID, Source: "lark", Kind: KindDoc, UpdatedAt: at100, Last: "100", Doc: &InboxDoc{NoticeID: "n1"}}
+	h.inbox.mu.Lock()
+	h.inbox.items[legacy.ID], h.inbox.items[hashOpen.ID] = legacy, hashOpen
+	h.inbox.mu.Unlock()
+	p.things = []connector.InboxThing{{Thread: "doc:2:n1", Kind: KindDoc, At: now, Last: "101",
+		Extra: &connector.ThingExtra{Source: "lark", LegacyID: "doc:2:n1:101", Count: 1, StartedAt: now,
+			Doc: rawJSON(map[string]any{"notice_id": "n1", "account_id": 2})}}}
+	h.collectInbox(ctx, roundPoll)
+	func() {
+		h.inbox.mu.Lock()
+		defer h.inbox.mu.Unlock()
+		if migratedThread(hashOpen) != "doc:2:n1" || hashOpen.open() || hashOpen.MergedInto != legacy.ID {
+			t.Fatalf("the historical duplicate was left behind: %+v", hashOpen)
+		}
+		if legacy.open() || len(h.inbox.items) != 3 || h.inbox.items["doc:2:n1:101"] == nil || !h.inbox.items["doc:2:n1:101"].open() {
+			t.Fatalf("the current version or handled history changed incorrectly: %+v", h.inbox.items)
+		}
+	}()
+
+	h.collectInbox(ctx, roundPoll)
+	func() {
+		h.inbox.mu.Lock()
+		defer h.inbox.mu.Unlock()
+		if len(h.inbox.items) != 3 || legacy.open() || hashOpen.open() {
+			t.Fatalf("the historical rows were recreated by the next round: %+v", h.inbox.items)
+		}
+	}()
+}
+
+// Old account-blind writes can leave several versions open at once. Migration keeps the newest activity row and
+// files older open rows into it, whether that survivor is open or already handled.
+func TestMigratedDocumentAccountUpgradeConvergesOpenHistory(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		latestDone bool
+	}{{"latest_open", false}, {"latest_done", true}} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			h := newInboxHub(t)
+			h.inboxReady(ctx)
+			p := &extensionLark{}
+			h.addConnector(p, false)
+			now := time.Now().UTC().Truncate(time.Millisecond)
+			old := &InboxItem{ID: "doc:2:n1:100", Source: "lark", Kind: KindDoc, UpdatedAt: now.Add(-2 * time.Minute), Last: "100", Doc: &InboxDoc{NoticeID: "n1"}}
+			current := &InboxItem{ID: "doc:2:n1:101", Source: "lark", Kind: KindDoc, UpdatedAt: now.Add(-time.Minute), Last: "101", Doc: &InboxDoc{NoticeID: "n1"}}
+			if tc.latestDone {
+				doneAt := now.Add(-time.Second)
+				current.DoneAt, current.DoneBy = &doneAt, "user"
+			}
+			h.inbox.mu.Lock()
+			h.inbox.items[old.ID], h.inbox.items[current.ID] = old, current
+			h.inbox.mu.Unlock()
+			p.things = []connector.InboxThing{{Thread: "doc:2:n1", Kind: KindDoc, At: current.UpdatedAt, Last: "101",
+				Extra: &connector.ThingExtra{Source: "lark", LegacyID: current.ID, Count: 1, StartedAt: current.UpdatedAt,
+					Doc: rawJSON(map[string]any{"notice_id": "n1", "account_id": 2})}}}
+			h.collectInbox(ctx, roundPoll)
+			h.inbox.mu.Lock()
+			defer h.inbox.mu.Unlock()
+			if old.open() || old.MergedInto != current.ID || current.open() == tc.latestDone {
+				t.Fatalf("cross-version open rows were not converged: old=%+v current=%+v", old, current)
+			}
+			if len(h.inbox.items) != 2 {
+				t.Fatalf("migration added another row: %+v", h.inbox.items)
+			}
+		})
+	}
+}
+
+// An explicit reopen may leave an older account-qualified row open beside the current one. An ordinary unchanged
+// collection is not a legacy-account adoption and must not converge that reopened row into the current version.
+func TestMigratedDocumentAccountUpgradePreservesExplicitReopen(t *testing.T) {
+	ctx := context.Background()
+	h := newInboxHub(t)
+	h.inboxReady(ctx)
+	p := &extensionLark{}
+	h.addConnector(p, false)
+	now := time.Now().UTC().Truncate(time.Millisecond)
+	doneAt := now.Add(-3 * time.Minute)
+	reopened := &InboxItem{ID: "doc:2:n1:100", Source: "lark", Kind: KindDoc, UpdatedAt: now.Add(-2 * time.Minute), Last: "100",
+		DoneAt: &doneAt, DoneBy: "user", Doc: &InboxDoc{NoticeID: "n1", AccountID: 2}}
+	current := &InboxItem{ID: "doc:2:n1:101", Source: "lark", Kind: KindDoc, UpdatedAt: now.Add(-time.Minute), Last: "101",
+		Doc: &InboxDoc{NoticeID: "n1", AccountID: 2}}
+	h.inbox.mu.Lock()
+	h.inbox.items[reopened.ID], h.inbox.items[current.ID] = reopened, current
+	h.inbox.mu.Unlock()
+	p.things = []connector.InboxThing{{Thread: "doc:2:n1", Kind: KindDoc, At: current.UpdatedAt, Last: current.Last,
+		Extra: &connector.ThingExtra{Source: "lark", LegacyID: current.ID, Count: 1, StartedAt: current.UpdatedAt,
+			Doc: rawJSON(map[string]any{"notice_id": "n1", "account_id": 2})}}}
+
+	code, out := inboxCall(t, h.routes(), "POST", "/api/v1/inbox/"+reopened.ID+"/done", `{"done":false}`)
+	if code != 200 || !reopened.open() {
+		t.Fatalf("explicit reopen: code=%d out=%v row=%+v", code, out, reopened)
+	}
+	h.collectInbox(ctx, roundPoll)
+	h.inbox.mu.Lock()
+	defer h.inbox.mu.Unlock()
+	if !reopened.open() || reopened.MergedInto != "" {
+		t.Fatalf("ordinary collection filed the explicitly reopened row: %+v", reopened)
+	}
+	if !current.open() || len(current.MergedFrom) != 0 || len(h.inbox.items) != 2 {
+		t.Fatalf("ordinary collection changed the current row or its history: current=%+v items=%+v", current, h.inbox.items)
+	}
+}
+
+// A document item written before account-qualified blocks keeps its old id and thread. Replaying its version neither
+// duplicates nor detaches it; later activity still continues beside the handled row.
+func TestMigratedDocumentLegacyIDRemainsAttached(t *testing.T) {
+	ctx := context.Background()
+	h := newInboxHub(t)
+	h.inboxReady(ctx)
+	p := &extensionLark{}
+	h.addConnector(p, false)
+	now := time.Now().UTC().Truncate(time.Millisecond)
+	doneAt := now.Add(-time.Minute)
+	old := &InboxItem{ID: "doc:n1:100", Source: "lark", Kind: KindDoc, Account: "feishu", Title: "Weekly plan",
+		StartedAt: doneAt, UpdatedAt: doneAt, Last: "100", DoneAt: &doneAt, DoneBy: "user", Doc: &InboxDoc{NoticeID: "n1", Type: "docx"}}
+	h.inbox.mu.Lock()
+	h.inbox.items[old.ID] = old
+	h.inbox.mu.Unlock()
+	p.things = []connector.InboxThing{{Thread: "doc:n1", Kind: KindDoc, Title: old.Title, At: old.UpdatedAt, Last: old.Last,
+		Extra: &connector.ThingExtra{Source: "lark", Account: "feishu", LegacyID: old.ID, Count: 1, StartedAt: old.StartedAt,
+			Doc: rawJSON(InboxDoc{NoticeID: "n1", Type: "docx"})}}}
+	h.collectInbox(ctx, roundPoll)
+	func() {
+		h.inbox.mu.Lock()
+		defer h.inbox.mu.Unlock()
+		if len(h.inbox.items) != 1 || h.inbox.items[old.ID] != old || old.open() {
+			t.Fatalf("the legacy document was duplicated or detached: %+v", h.inbox.items)
+		}
+	}()
+
+	p.things[0].At, p.things[0].Last = now, "101"
+	p.things[0].Extra.LegacyID = "doc:n1:101"
+	h.collectInbox(ctx, roundPoll)
+	func() {
+		h.inbox.mu.Lock()
+		defer h.inbox.mu.Unlock()
+		if len(h.inbox.items) != 2 || h.inbox.items[old.ID] != old || old.open() || h.inbox.items["doc:n1:101"] == nil || !h.inbox.items["doc:n1:101"].open() {
+			t.Fatalf("later activity did not preserve the legacy row and its continuation: %+v", h.inbox.items)
+		}
+	}()
 }
 
 // A plugin connector's thing with its own fallback (extra.rule_tier, capability fallback) and no tier is still sorted

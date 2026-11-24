@@ -4,6 +4,9 @@ import android.content.Context
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import java.time.Instant
+import java.util.concurrent.Callable
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.*
 import org.junit.Test
@@ -91,6 +94,29 @@ class ChatLiveItemsTest {
             live.currentItems().map(Item::id),
         )
         assertEquals("first second third", live.currentItems().item("reply").text)
+    }
+
+    @Test
+    fun concurrentFirstReadersSeeOneCompleteOverlay() {
+        val live = ChatLiveItems(listOf(Item("reply", seq = 1, role = "assistant", kind = "text", text = "Old")))
+        live.updateText("reply", ChatTextUpdate("Latest", streaming = true))
+        val revision = live.revisions.value
+        val executor = Executors.newFixedThreadPool(8)
+        try {
+            val readers = (1..32).map {
+                Callable {
+                    val items = revision.items
+                    assertEquals("Latest", items.single().text)
+                    items
+                }
+            }
+            // Each thread materializes the same revision for the first time on a real JVM thread.
+            val results = executor.invokeAll(readers).map { it.get(10, TimeUnit.SECONDS) }
+            assertEquals(1, results.toSet().size)
+        } finally {
+            executor.shutdownNow()
+            assertTrue(executor.awaitTermination(10, TimeUnit.SECONDS))
+        }
     }
 
     private fun List<Item>.item(id: String) = single { it.id == id }

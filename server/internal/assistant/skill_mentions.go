@@ -8,6 +8,8 @@ import (
 	"github.com/nwverse/persona/server/internal/apierr"
 	"github.com/nwverse/persona/server/internal/assistantskills"
 	"github.com/nwverse/persona/server/internal/assistantwire"
+	"github.com/nwverse/persona/server/internal/i18n"
+	"github.com/nwverse/persona/server/internal/promptcontent"
 	"github.com/nwverse/persona/server/internal/rpc"
 )
 
@@ -26,6 +28,9 @@ func (s *Service) skillCatalogFor(ctx context.Context, machine, sid string, para
 		return assistantskills.Catalog{}, errors.New("assistant execution environment is unavailable")
 	}
 	cwd := s.assistantCwd(d)
+	if params["task_execution"] == true {
+		cwd, _ = params["cwd"].(string)
+	}
 	if sid != "" {
 		c, ok := s.session(ctx, machine, sid)
 		cfg := s.settings(ctx)
@@ -109,6 +114,28 @@ func (s *Service) validateSkillSelections(ctx context.Context, machine, sid stri
 		return skillReferenceError()
 	}
 	params["skill_owner"] = s.skillOwner()
+	return nil
+}
+
+// A scheduled selection requires a node that understands the complete scheduled prompt contract.
+func (s *Service) validateTaskSelections(ctx context.Context, machine, sid string, params map[string]any, promptSelections bool) error {
+	if err := s.validateSkillSelections(ctx, machine, sid, params); err != nil {
+		return err
+	}
+	if !promptSelections {
+		return nil
+	}
+	text, _ := params["text"].(string)
+	files, err := promptcontent.Files(text)
+	if err != nil {
+		return &rpc.Error{Code: "file_unavailable", Message: i18n.T(i18n.From(ctx), "assistant-schedule.selected_file_unavailable"), Data: []byte(`{"delivered":"none","retryable":false}`)}
+	}
+	if len(files) > 0 || params["skill_owner"] != nil {
+		params["task_input"] = true
+	}
+	if len(files) > 0 {
+		params["prompt_language"] = s.requestCtxLang(ctx).Name()
+	}
 	return nil
 }
 

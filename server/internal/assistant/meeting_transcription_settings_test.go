@@ -137,6 +137,9 @@ type settingsTranscribers struct {
 	hook  func(context.Context, string)
 }
 
+// ConnectorTool: none of its tools is a connector's.
+func (f *settingsTranscribers) ConnectorTool(string) bool { return false }
+
 func newSettingsTranscribers() *settingsTranscribers {
 	return &settingsTranscribers{info: extwire.TranscriptionInfo{Protocol: extwire.TranscriptionProtocol, Features: []string{extwire.TranscriptionLive, extwire.TranscriptionReplay}}}
 }
@@ -405,7 +408,7 @@ func TestMeetingTranscriptionCardsAndNoDatabase(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Finish the readiness check before replacing the store it reads.
-	s.hubTr.wg.Wait()
+	recWait(t, s)
 	s.store = func() Store { return nil }
 	if _, err := change.apply(ctx); err == nil {
 		t.Fatal("applied after database disappeared")

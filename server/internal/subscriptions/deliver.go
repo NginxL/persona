@@ -82,17 +82,25 @@ func (s *Service) InboxSources(ctx context.Context) ([]InboxSource, error) {
 			src.ID, src.Switched = builtin, true // the built-in's Inbox feed now: under its own source id (#6265)
 		}
 		src.ConnectorRows = sub.Recipe.Mode == wire.ConnectorSubscriptionModeThings
-		catchup, live, err := s.inboxHeld(ctx, sub, now)
-		if err != nil {
-			return nil, err
-		}
 		d := s.deliverer(sub, now)
 		d.replies = replying[sub.Connector] && sub.RunState != StateNotConnected
 		d.migrated = migrated
 		if kbFrom(sub) != nil {
 			d.chats = map[string]string{}
 		}
-		src.Things = append(src.Things, d.inboxThings(catchup, live)...)
+		answer, kept, err := s.answerRows(ctx, sub)
+		if err != nil {
+			return nil, err
+		}
+		if kept {
+			src.Things = append(src.Things, answer...)
+		} else {
+			catchup, live, err := s.inboxHeld(ctx, sub, now)
+			if err != nil {
+				return nil, err
+			}
+			src.Things = append(src.Things, d.inboxThings(catchup, live)...)
+		}
 		if !migrated { // a built-in's feed reads as the built-in's to the AI twin
 			src.Connector, src.SourceName, src.Chats = sub.Connector, cmpOr(sub.SourceName, sub.Source), d.chats
 		}
@@ -103,6 +111,40 @@ func (s *Service) InboxSources(ctx context.Context) ([]InboxSource, error) {
 		out = append(out, src)
 	}
 	return out, nil
+}
+
+// answerRows are a things recipe's latest answer as the Inbox gets it (#13637): every row the connector's last answer
+// had, as it is and in its order, as the built-in's round gets its Collect's. Several rows of one thread stay apart (a
+// conversation's batch of new messages and its events' state), and a row the connector no longer hands is not handed
+// again (a batch already related); the Inbox drops nothing it is not handed. kept false: no answer taken since the
+// Inbox took the subscription (an upgrade, one an older manager wrote back, a switch turned on again), and the rows are
+// each thread's newest stored, as before, until the next run.
+func (s *Service) answerRows(ctx context.Context, sub Subscription) ([]connector.InboxThing, bool, error) {
+	from := inboxFrom(sub)
+	if sub.Recipe.Mode != wire.ConnectorSubscriptionModeThings || sub.AnswerAt == nil || from == nil || sub.AnswerAt.Before(*from) {
+		return nil, false, nil
+	}
+	if len(sub.Answer) == 0 {
+		return nil, true, nil
+	}
+	held, err := s.o.Store.HeldItems(ctx, sub.ID, ItemQuery{UIDs: sub.Answer})
+	if err != nil {
+		return nil, false, err
+	}
+	rows := make(map[string]connector.InboxThing, len(held))
+	for _, h := range held {
+		var t connector.InboxThing
+		if len(h.Thing) > 0 && json.Unmarshal(h.Thing, &t) == nil {
+			rows[h.UID] = t
+		}
+	}
+	out := make([]connector.InboxThing, 0, len(sub.Answer))
+	for _, uid := range sub.Answer {
+		if t, ok := rows[uid]; ok {
+			out = append(out, t) // one stored before the answer was kept and pruned since is not: the Inbox had it
+		}
+	}
+	return out, true, nil
 }
 
 // replying are the connectors that are on and answer an inbox reply (connector.Inbox), by id. Their status is not

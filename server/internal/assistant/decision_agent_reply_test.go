@@ -209,6 +209,10 @@ func TestDecisionAgentReplyPauseSurvivesReload(t *testing.T) {
 	ownerTurnTimes(t, 0, 0)
 	database := todoTestDB(t)
 	s, f, todo, _, _ := conclusionServiceOn(t, database, false)
+	// This process never tells the supervisor: the pause must reach the reloaded one. With the test's 20 ms gather the
+	// reply's digest could go out while UserSpoke was still running on a loaded machine, before the timer below was
+	// stopped (#13670).
+	s.superviseTimes = superviseTimings{gather: time.Hour, every: time.Hour, urgent: time.Hour}
 	waitsForReview(t, s, f, todo.ID, "Choose a rollout option.")
 	reviewTask(t, s, todo.ID, rolloutDecision())
 	setSettings(t, s, func(v *Settings) { v.Main = "" })

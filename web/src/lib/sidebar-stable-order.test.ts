@@ -1,5 +1,4 @@
 import { describe, expect, it } from "vitest";
-import { machineTreeByUpdate } from "./agent-sort";
 import { buildMachineTree, machineSessionOrder, machineSessionPresentation } from "./herdr-tree";
 import { catalogGroups, countGroups, type SessionCatalog } from "./session-groups";
 import { mergeStableRows } from "./side-sessions";
@@ -30,7 +29,7 @@ const initial = [
 const refreshed = initial.map((s) => s.session_id === "a1" ? { ...s, updated_at: "2026-01-01T10:00:00Z" } : s);
 
 function treeOrder(sessions: Session[]) {
-  return machineTreeByUpdate(buildMachineTree(machines, sessions)).map((machine) => ({
+  return buildMachineTree(machines, sessions).map((machine) => ({
     machine: machine.machine.id,
     workspaces: machine.spaces.map((space) => ({ workspace: space.name, tabs: space.tabs.map((tab) => tab.slotId) })),
   }));

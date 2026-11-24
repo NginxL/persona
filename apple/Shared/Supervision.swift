@@ -233,7 +233,9 @@ nonisolated extension TodoItem {
 
     /// Why the hub closed it (auto-complete or a review), when it did.
     var closedReason: String? {
-        guard autoDone || reviewDone, let r = doneReason?.trimmingCharacters(in: .whitespacesAndNewlines), !r.isEmpty else { return nil }
+        guard isCancelled || autoDone || reviewDone else { return nil }
+        let text = isCancelled ? cancellationReason : doneReason
+        guard let r = text?.trimmingCharacters(in: .whitespacesAndNewlines), !r.isEmpty else { return nil }
         return r
     }
 }

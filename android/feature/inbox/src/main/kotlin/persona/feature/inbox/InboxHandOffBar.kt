@@ -44,6 +44,7 @@ import persona.core.designsystem.icons.PersonaIcons
 import persona.core.designsystem.rememberHaptics
 import persona.core.designsystem.rememberToastState
 import persona.core.designsystem.tapped
+import persona.core.inbox.*
 
 /** Production uses the pairing's store; lightweight fakes and previews can keep a model in the page scope. */
 @Composable

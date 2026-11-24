@@ -11,7 +11,6 @@ import persona.core.domain.inbox.InboxInteraction
 import persona.core.domain.inbox.InboxItem
 import persona.core.domain.sort.AgentPreferences
 import persona.core.domain.sort.AgentSession
-import persona.feature.inbox.*
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.sync.Mutex
@@ -20,6 +19,7 @@ import kotlinx.serialization.json.*
 import java.time.Instant
 import java.io.IOException
 import java.util.concurrent.atomic.AtomicInteger
+import persona.core.inbox.*
 
 enum class LarkWindowSyncState { Cached, Syncing, Complete, Incomplete, Failed }
 
@@ -67,7 +67,7 @@ class RealInboxRepository(
     private val inboxSourcesShownFlow: Flow<Boolean> = flowOf(false),
     // Last, so existing callers that pass it as a trailing lambda keep compiling.
     private val download: suspend (InboxAssistantTransport, LarkPart.File) -> String,
-) : persona.feature.inbox.InboxRepository {
+) : persona.core.inbox.InboxRepository {
     override val supportsThreadOutbox: Boolean get() = sendThread != null
     override val subscriptionsShown: Flow<Boolean> get() = subscriptionsShownFlow
     override val inboxSourcesShown: Flow<Boolean> get() = inboxSourcesShownFlow
@@ -208,9 +208,17 @@ class RealInboxRepository(
         scope.launch {
             combine(sessions.sessions, interactions.pending, sessions.listStatus) { agents, waiting, status ->
                 Triple(agents.map { AgentSession(it) }, waiting.map {
+                    val askLine = when (it.kind) {
+                        "plan" -> (it.plan ?: it.summary)?.lineSequence()?.map { line -> line.trim().trimStart('#').trim() }
+                            ?.firstOrNull { line -> line.isNotEmpty() }
+                        "question" -> it.questions?.firstOrNull()?.question?.takeIf { q -> q.isNotBlank() } ?: it.summary
+                        "permission" -> ((it.toolInput as? JsonObject)?.get("command") as? kotlinx.serialization.json.JsonPrimitive)
+                            ?.takeIf { c -> c.isString }?.content?.takeIf { c -> c.isNotBlank() } ?: it.summary
+                        else -> it.summary
+                    }?.trimStart('#')?.trim()?.takeIf { s -> s.isNotEmpty() }
                     InboxInteraction(it.id, it.machineId, it.sessionId, it.createdAt,
                         agents.firstOrNull { agent -> agent.key == it.sessionKey }?.displayTitle.orEmpty(), it.summary, it.headline.shown,
-                        manager = it.manager)
+                        manager = it.manager, kind = it.kind, askLine = askLine)
                 }, status.loaded)
             }.collect { (agents, waiting, targetsReady) ->
                 current.update { it.copy(sessions = agents, interactions = waiting, targetsReady = targetsReady) }
@@ -363,16 +371,16 @@ class RealInboxRepository(
         }
     }
 
-    override suspend fun inboxMutes(manager: String?): List<persona.feature.inbox.InboxMute> {
+    override suspend fun inboxMutes(manager: String?): List<persona.core.inbox.InboxMute> {
         val transport = requireTransport()
-        return persona.feature.inbox.inboxMutes(asStamped(manager) { transport.inboxMutes() })
+        return persona.core.inbox.inboxMutes(asStamped(manager) { transport.inboxMutes() })
     }
 
     // "Mute this repository / chat / sender": the items it covers are done at once (the hub files them too), back if it fails.
-    override suspend fun mute(record: InboxRecord, option: persona.feature.inbox.InboxMuteOption) {
+    override suspend fun mute(record: InboxRecord, option: persona.core.inbox.InboxMuteOption) {
         val transport = requireTransport()
         val covered = refreshLock.withLock {
-            val ids = persona.feature.inbox.mutedBy(current.value.records, record, option)
+            val ids = persona.core.inbox.mutedBy(current.value.records, record, option)
             val old = current.value.records.filter { it.item.id in ids }
             val doneAt = Instant.now().toString()
             current.update { it.copy(records = it.records.map { r -> if (r.item.id in ids) r.copy(item = r.item.copy(doneAt = doneAt)) else r }) }
@@ -391,18 +399,18 @@ class RealInboxRepository(
         asStamped(manager) { transport.unmuteInbox(id) }
     }
 
-    override suspend fun inboxPolicies(record: InboxRecord?, manager: String?): List<persona.feature.inbox.InboxPolicy> {
+    override suspend fun inboxPolicies(record: InboxRecord?, manager: String?): List<persona.core.inbox.InboxPolicy> {
         val transport = requireTransport()
         val read = suspend { transport.inboxPolicies() }
-        return persona.feature.inbox.inboxPolicies(if (record != null) asItem(record, read) else asStamped(manager, read))
+        return persona.core.inbox.inboxPolicies(if (record != null) asItem(record, read) else asStamped(manager, read))
     }
 
     // A rule's tier reaches the open, triaged items it covers at once (the hub moves them too), back if it fails.
     override suspend fun savePolicy(
-        target: persona.feature.inbox.InboxPolicyTarget,
-        tier: persona.feature.inbox.InboxPolicyTier,
-        twin: persona.feature.inbox.InboxPolicyTwin,
-    ): persona.feature.inbox.InboxPolicy? {
+        target: persona.core.inbox.InboxPolicyTarget,
+        tier: persona.core.inbox.InboxPolicyTier,
+        twin: persona.core.inbox.InboxPolicyTwin,
+    ): persona.core.inbox.InboxPolicy? {
         val transport = requireTransport()
         val record = target.record
         val id = target.policy?.id
@@ -412,11 +420,11 @@ class RealInboxRepository(
         val owner = ownerOf(target.manager)
         val moved = refreshLock.withLock {
             val before = current.value.records
-            val after = persona.feature.inbox.applyPolicyTier(before, target.source, target.option, tier) { ownerOf(it.manager) == owner }
+            val after = persona.core.inbox.applyPolicyTier(before, target.source, target.option, tier) { ownerOf(it.manager) == owner }
             current.update { it.copy(records = after) }
             before.zip(after).filter { (old, new) -> old !== new }
         }
-        val removing = tier == persona.feature.inbox.InboxPolicyTier.None && twin == persona.feature.inbox.InboxPolicyTwin.None
+        val removing = tier == persona.core.inbox.InboxPolicyTier.None && twin == persona.core.inbox.InboxPolicyTwin.None
         val send = suspend {
             if (id != null) transport.updateInboxPolicy(id, tier.wire, twin.wire)
             else transport.setInboxPolicy(checkNotNull(record).hubItemId, target.option.tag, tier.wire, twin.wire)
@@ -434,7 +442,7 @@ class RealInboxRepository(
         }
         quietly { refresh() }
         if (removing) return null
-        return result.obj("policy")?.let { persona.feature.inbox.inboxPolicy(it) }
+        return result.obj("policy")?.let { persona.core.inbox.inboxPolicy(it) }
     }
 
     override suspend fun removePolicy(id: String, manager: String?) {
@@ -501,14 +509,14 @@ class RealInboxRepository(
      * One page of a manager's done history (#2200, #2576), its items as the list's records (the app's ids, the manager
      * stamped). Kept out of the snapshot: the inbox page merges it under Done. An old hub (404) has none.
      */
-    override suspend fun doneHistory(manager: String?, cursor: persona.feature.inbox.InboxDoneCursor?): persona.feature.inbox.InboxDonePage {
+    override suspend fun doneHistory(manager: String?, cursor: persona.core.inbox.InboxDoneCursor?): persona.core.inbox.InboxDonePage {
         val transport = requireTransport()
         val body = try {
             transport.doneHistory(manager?.takeIf { it.isNotBlank() }, cursor?.before, cursor?.beforeId)
         } catch (e: UnsupportedOperationException) {
-            return persona.feature.inbox.InboxDonePage()
+            return persona.core.inbox.InboxDonePage()
         } catch (e: Exception) {
-            if ((e as? persona.core.contracts.api.HubCodedFailure)?.status == 404) return persona.feature.inbox.InboxDonePage()
+            if ((e as? persona.core.contracts.api.HubCodedFailure)?.status == 404) return persona.core.inbox.InboxDonePage()
             throw e
         }
         if (!owns(transport)) throw CancellationException("Pairing changed")
@@ -516,11 +524,11 @@ class RealInboxRepository(
             // the page is one manager's: an item it didn't stamp is still that manager's
             if (manager.isNullOrBlank() || item["manager"] != null) item else JsonObject(item + ("manager" to JsonPrimitive(manager)))
         }
-        val next = body.obj("next")?.let { n -> n.string("before").takeIf { it.isNotBlank() }?.let { persona.feature.inbox.InboxDoneCursor(it, n.string("before_id").ifBlank { null }) } }
-        return persona.feature.inbox.InboxDonePage(listed(data, transport).also { notePagedBack(transport, it) }, next)
+        val next = body.obj("next")?.let { n -> n.string("before").takeIf { it.isNotBlank() }?.let { persona.core.inbox.InboxDoneCursor(it, n.string("before_id").ifBlank { null }) } }
+        return persona.core.inbox.InboxDonePage(listed(data, transport).also { notePagedBack(transport, it) }, next)
     }
 
-    override suspend fun doneDays(manager: String?, zone: java.time.ZoneId): List<persona.feature.inbox.InboxDoneDay>? {
+    override suspend fun doneDays(manager: String?, zone: java.time.ZoneId): List<persona.core.inbox.InboxDoneDay>? {
         val transport = requireTransport()
         val body = try {
             transport.doneDays(manager?.takeIf { it.isNotBlank() }, zone.id)
@@ -536,7 +544,7 @@ class RealInboxRepository(
             val d = day as? JsonObject ?: return@mapNotNull null
             val date = runCatching { java.time.LocalDate.parse(d.string("day")) }.getOrNull() ?: return@mapNotNull null
             val count = (d["count"] as? JsonPrimitive)?.intOrNull ?: return@mapNotNull null
-            persona.feature.inbox.InboxDoneDay(date, count)
+            persona.core.inbox.InboxDoneDay(date, count)
         }
     }
 
@@ -1502,7 +1510,7 @@ class RealInboxRepository(
         val moment = data.obj("moment")
         val connector = data.obj("connector")?.let { c ->
             c.optional("thread")?.let { thread ->
-                persona.feature.inbox.InboxConnectorRef(thread, c.optional("label"), c.flag("can_reply"), c.optional("reply_to"), c.optional("url"),
+                persona.core.inbox.InboxConnectorRef(thread, c.optional("label"), c.flag("can_reply"), c.optional("reply_to"), c.optional("url"),
                     c.optional("avatar_url"))
             }
         }
@@ -1546,9 +1554,9 @@ class RealInboxRepository(
                     target to persona.core.contracts.api.ItemTranslation(t.string("subject"), t.string("preview"))
                 }
             }?.toMap().orEmpty(),
-            doc = persona.feature.inbox.inboxDocRef(data.obj("doc")),
+            doc = persona.core.inbox.inboxDocRef(data.obj("doc")),
             connector = connector,
-            mutes = persona.feature.inbox.inboxMuteOptions(data),
+            mutes = persona.core.inbox.inboxMuteOptions(data),
             event = event,
             manager = data.optional("manager"),
         )

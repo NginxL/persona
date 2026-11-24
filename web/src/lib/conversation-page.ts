@@ -28,5 +28,13 @@ export function conversationRoute(mid: string, sid: string, sessions: Record<str
   const s = (sessions[mid] ?? []).find((x) => x.session_id === sid);
   const own = assistant?.machine_id === mid && assistant.conversations.some((c) => c.session_id === sid);
   // the current assistant's own list has it: the current one's
+  if (s?.assistant && s.space) return spacePage(s.space, sid);
   return s?.assistant || own ? conversationPage(sid, mid, s?.manager ?? manager ?? (own ? chosenManager() ?? undefined : undefined)) : { name: "session", mid, sid };
+}
+
+/** A space's conversation's page: its track's `/tracks/<slug>/<sid>` (the health space's too, which the health module's
+ *  track page opens), where its plan cards, questions and tasks show (the bare `/s/…` chat is an agent's and shows none
+ *  of them). */
+export function spacePage(space: string, sid: string): Route {
+  return { name: "track", slug: space, sid };
 }

@@ -10,6 +10,7 @@ import persona.core.contracts.api.ConnectorReplyOutcome
 import persona.core.contracts.api.ConnectorThreadMessage
 import persona.core.contracts.api.ConnectorThreadPage
 import persona.core.contracts.api.ConnectorsManagement
+import persona.core.inbox.*
 
 /** How many older pages a tap on a quote reads back before saying the quoted message is not near. */
 internal const val QuoteJumpPages = 3

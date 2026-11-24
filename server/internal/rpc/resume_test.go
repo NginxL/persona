@@ -319,15 +319,26 @@ func TestResumeAgainDuringAResume(t *testing.T) {
 
 // Not resumed within the window: the peer closes as a connection always did, its calls dropped.
 func TestResumeWindowEnds(t *testing.T) {
+	arrived := make(chan struct{}, 1)
 	l := newResumeLink(t, netshape.Config{}, 200*time.Millisecond, true, true, func(h, n *Peer) {
 		n.OnRequest = func(ctx context.Context, method string, params json.RawMessage) (any, error) {
+			select {
+			case arrived <- struct{}{}:
+			default:
+			}
 			<-ctx.Done()
 			return nil, ctx.Err()
 		}
 	})
 	call := make(chan error, 1)
 	go func() { call <- l.h.Call(context.Background(), "wait", nil, nil) }()
-	eventually(t, func() bool { return len(l.h.pendingMethods()) == 1 })
+	// In flight: the node has the request. Pending alone is not enough: a call is pending before its line is written,
+	// and one cut before then was never sent (ErrClosed, not ErrDropped).
+	select {
+	case <-arrived:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the request never reached the node")
+	}
 	l.cut()
 	l.waitLost()
 	select {

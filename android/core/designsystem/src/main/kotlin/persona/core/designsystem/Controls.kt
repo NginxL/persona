@@ -68,6 +68,7 @@ import androidx.compose.ui.node.requireDensity
 import kotlinx.coroutines.launch
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import dev.chrisbanes.haze.HazeState
 import persona.core.designsystem.icons.PhIcon
 import persona.core.designsystem.icons.PhIcons
 
@@ -197,8 +198,14 @@ fun JButton(
 }
 
 @Composable
-fun JTextButton(text: String, onClick: () -> Unit, modifier: Modifier = Modifier, enabled: Boolean = true, icon: PhIcon? = null) =
-    JButton(text, onClick, modifier, kind = JButtonKind.Quiet, size = JButtonSize.Medium, icon = icon, enabled = enabled)
+fun JTextButton(
+    text: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    icon: PhIcon? = null,
+    loading: Boolean = false,
+) = JButton(text, onClick, modifier, kind = JButtonKind.Quiet, size = JButtonSize.Medium, icon = icon, enabled = enabled, loading = loading)
 
 /**
  * Plain icons sit in bars; [raised] ones are standalone controls (a glass circle, a wash disc, a bordered square).
@@ -234,10 +241,32 @@ fun JIconButton(
     }
 }
 
+/** A round floating navigation action, using the same Glass material as the home header actions. */
+@Composable
+fun JHomeNavigationIconButton(
+    icon: PhIcon,
+    contentDescription: String,
+    onClick: () -> Unit,
+) {
+    // A control inside the page body cannot sample the body's ancestor Haze source. Sample the
+    // window-aligned page backdrop just within the circle, without recapturing the transcript.
+    val glass = if (PersonaTheme.style == AppStyle.Glass && PersonaTheme.glass != GlassLevel.Solid &&
+        LocalGlassSource.current != null) remember { HazeState() } else null
+    CompositionLocalProvider(LocalGlassSource provides glass) {
+        HomeNavigationActions {
+            Box(Modifier.clip(CircleShape)) {
+                if (glass != null) PageBackdrop(Modifier.matchParentSize().glassSource())
+                JIconButtonBox(icon, contentDescription, onClick, Modifier, enabled = true, raised = true,
+                    tint = null, badge = false, selected = false, expandOnHomePress = false, circular = true)
+            }
+        }
+    }
+}
+
 @Composable
 private fun JIconButtonBox(
     icon: PhIcon, contentDescription: String?, onClick: () -> Unit, modifier: Modifier, enabled: Boolean, raised: Boolean,
-    tint: Color?, badge: Boolean, selected: Boolean, expandOnHomePress: Boolean,
+    tint: Color?, badge: Boolean, selected: Boolean, expandOnHomePress: Boolean, circular: Boolean = false,
 ) {
     val palette = PersonaTheme.palette
     val style = PersonaTheme.style
@@ -265,7 +294,10 @@ private fun JIconButtonBox(
         homeAction -> Modifier.size(Tokens.MinTouch.android).then(feedback).homeNavigationGlassSurface(interactive)
         style == AppStyle.Glass -> Modifier.size(44.dp).floatingSurface(CircleShape)
         style == AppStyle.Brief -> Modifier.size(42.dp).clip(CircleShape).background(palette.surface)
-        else -> Modifier.size(40.dp).clip(RoundedCornerShape(8.dp.corner)).background(palette.surface).border(1.dp, palette.line, RoundedCornerShape(8.dp.corner))
+        else -> {
+            val shape = if (circular) CircleShape else RoundedCornerShape(8.dp.corner)
+            Modifier.size(40.dp).clip(shape).background(palette.surface).border(1.dp, palette.line, shape)
+        }
     }
     Box(
         modifier.size(48.dp).then(if (interactive && expandOnHomePress) Modifier else Modifier.clip(CircleShape))
@@ -312,6 +344,8 @@ fun JTextField(
     autofill: Boolean = true,
     /** Configuration and code use the design system's code type scale, never a page-local font. */
     monospace: Boolean = false,
+    /** Long-form notes keep the typed words growing; labels, placeholders and accessories stay capped. */
+    readingContent: Boolean = false,
 ) {
     val palette = PersonaTheme.palette
     val style = PersonaTheme.style
@@ -325,35 +359,44 @@ fun JTextField(
     }
     Column(modifier) {
         label?.let {
-            Text(it, style = PersonaTheme.type.caption, color = palette.ink2, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            InterfaceContent {
+                Text(it, style = PersonaTheme.type.caption, color = palette.ink2, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
             Spacer(Modifier.height(6.dp.dense))
         }
-        BasicTextField(
-            value = value, onValueChange = onValueChange, enabled = enabled, singleLine = singleLine,
-            minLines = minLines, maxLines = maxLines, interactionSource = interaction,
-            textStyle = (if (monospace) PersonaTheme.type.code else PersonaTheme.type.body).copy(color = palette.ink), cursorBrush = SolidColor(palette.accent.takeIf { style != AppStyle.Brief } ?: palette.ink),
-            keyboardOptions = keyboardOptions, keyboardActions = keyboardActions, visualTransformation = visualTransformation,
-            // On the text field's own semantics node: Autofill reads the node it would fill, not its parents.
-            modifier = (if (autofill) Modifier.fillMaxWidth() else Modifier.fillMaxWidth().semantics { contentDataType = ContentDataType.None }).hardwareShortcutTextInput(),
-            decorationBox = { field ->
-                Row(
-                    Modifier.fillMaxWidth().heightIn(min = 48.dp.row).clip(shape).background(fill)
-                        .border(if (focused || style != AppStyle.Brief) 1.dp else 0.dp, if (isError) palette.danger.dot else border, shape)
-                        .stableAlpha(if (enabled) 1f else 0.5f).padding(horizontal = 14.dp.dense, vertical = 12.dp.dense),
-                    verticalAlignment = if (singleLine) Alignment.CenterVertically else Alignment.Top,
-                ) {
-                    leading?.let { JIcon(it, null, size = 20.dp, tint = palette.ink3); Spacer(Modifier.width(10.dp.dense)) }
-                    Box(Modifier.weight(1f)) {
-                        if (value.isEmpty() && placeholder != null) Text(placeholder, style = if (monospace) PersonaTheme.type.code else PersonaTheme.type.body, color = palette.ink3, maxLines = if (singleLine) 1 else maxLines, overflow = TextOverflow.Ellipsis)
-                        field()
+        val editor: @Composable () -> Unit = {
+            BasicTextField(
+                value = value, onValueChange = onValueChange, enabled = enabled, singleLine = singleLine,
+                minLines = minLines, maxLines = maxLines, interactionSource = interaction,
+                textStyle = (if (monospace) PersonaTheme.type.code else PersonaTheme.type.body).copy(color = palette.ink), cursorBrush = SolidColor(palette.accent.takeIf { style != AppStyle.Brief } ?: palette.ink),
+                keyboardOptions = keyboardOptions, keyboardActions = keyboardActions, visualTransformation = visualTransformation,
+                // On the text field's own semantics node: Autofill reads the node it would fill, not its parents.
+                modifier = (if (autofill) Modifier.fillMaxWidth() else Modifier.fillMaxWidth().semantics { contentDataType = ContentDataType.None }).hardwareShortcutTextInput(),
+                decorationBox = { field ->
+                    InterfaceContent {
+                        Row(
+                            Modifier.fillMaxWidth().heightIn(min = 48.dp.row).clip(shape).background(fill)
+                                .border(if (focused || style != AppStyle.Brief) 1.dp else 0.dp, if (isError) palette.danger.dot else border, shape)
+                                .stableAlpha(if (enabled) 1f else 0.5f).padding(horizontal = 14.dp.dense, vertical = 12.dp.dense),
+                            verticalAlignment = if (singleLine) Alignment.CenterVertically else Alignment.Top,
+                        ) {
+                            leading?.let { JIcon(it, null, size = 20.dp, tint = palette.ink3); Spacer(Modifier.width(10.dp.dense)) }
+                            Box(Modifier.weight(1f)) {
+                                if (value.isEmpty() && placeholder != null) Text(placeholder, style = if (monospace) PersonaTheme.type.code else PersonaTheme.type.body, color = palette.ink3, maxLines = if (singleLine) 1 else maxLines, overflow = TextOverflow.Ellipsis)
+                                field()
+                            }
+                            trailing?.let { Spacer(Modifier.width(6.dp.dense)); it() }
+                        }
                     }
-                    trailing?.let { Spacer(Modifier.width(6.dp.dense)); it() }
-                }
-            },
-        )
+                },
+            )
+        }
+        if (readingContent) ReadingContent { editor() } else editor()
         supportingText?.let {
             Spacer(Modifier.height(6.dp.dense))
-            Text(it, style = PersonaTheme.type.caption, color = if (isError) palette.danger.text else palette.ink3)
+            InterfaceContent {
+                Text(it, style = PersonaTheme.type.caption, color = if (isError) palette.danger.text else palette.ink3)
+            }
         }
     }
 }

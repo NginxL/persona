@@ -128,6 +128,43 @@ class ReleaseWorkflowTests(unittest.TestCase):
                 self.assertEqual(failed.returncode, 37)
                 self.assertIn("unverified artifacts are diagnostic only", failed.stderr)
 
+    def test_android_release_reuses_exact_source_shards_before_signing(self):
+        workflow = (ROOT / ".github/workflows/android-test.yml").read_text()
+        release = PR.read_text()
+        self.assertIn("required: true", workflow)
+        self.assertEqual(yaml.load((ROOT / ".github/workflows/ci.yml").read_text(), Loader=yaml.BaseLoader)["jobs"]["android"]["with"]["commit"], "${{ github.sha }}")
+        self.assertIn("ref: ${{ inputs.commit || github.sha }}", workflow)
+        self.assertIn("lane: [lint-build-test-0, test-1]", workflow)
+        self.assertIn("android-source-receipt-${{ inputs.commit || github.sha }}-${{ matrix.lane }}", workflow)
+        self.assertIn("JOB_STATUS: ${{ job.status }}", workflow)
+        self.assertIn("uses: ./.github/workflows/android-test.yml", release)
+        self.assertIn("commit: ${{ needs.plan.outputs.commit }}", release)
+        self.assertIn("pattern: android-source-receipt-${{ needs.plan.outputs.commit }}-*", release)
+        self.assertIn("--release-only", release)
+        self.assertIn("Android test evidence belongs to another commit", release)
+        self.assertEqual(self.pr["jobs"]["android"]["needs"], ["plan", "android-tests"])
+
+    def test_apple_export_keychain_is_visible_to_xcode(self):
+        steps = self.pr["jobs"]["apple"]["steps"]
+        install = next(step for step in steps if step.get("name") == "Install the Apple Distribution identity and provisioning profiles")
+        script = install["run"]
+        # Importing into a temporary file and finding the identity there is not enough: xcodebuild searches the
+        # default keychain domain. Add the temporary keychain without discarding the user's existing search list.
+        self.assertIn('subprocess.check_output(["security", "list-keychains", "-d", "user"], text=True).splitlines()', script)
+        self.assertIn('subprocess.run(["security", "list-keychains", "-d", "user", "-s", sys.argv[1], *paths], check=True)', script)
+        self.assertIn('security list-keychains -d user | grep -F "$PERSONA_SIGNING_KEYCHAIN"', script)
+        self.assertNotIn('security list-keychains -d user -s "$PERSONA_SIGNING_KEYCHAIN" $existing', script)
+
+    def test_apple_archive_stages_exact_source_and_resolved_input(self):
+        text = PR.read_text()
+        for required in ('scripts/ci/apple_release_source.py', '--source "$GITHUB_WORKSPACE"',
+                         '--destination "$RUNNER_TEMP/apple-release-source"', '--meta "$meta"',
+                         'PERSONA_RELEASE_SOURCE'):
+            self.assertIn(required, text)
+        release = (ROOT / 'scripts/release/release.sh').read_text()
+        self.assertIn('cd "$PERSONA_RELEASE_SOURCE"', release)
+        self.assertLess(release.index('cd "$PERSONA_RELEASE_SOURCE"'), release.index('python3 scripts/persona_config.py xcconfig'))
+
     def test_windows_requires_native_execution_and_authenticode(self):
         text = PR.read_text()
         for program in ("persona-link", "personad", "persona-node"):
@@ -213,7 +250,16 @@ class ReleaseWorkflowTests(unittest.TestCase):
         self.assertIn("missing RELEASE_PR_TOKEN", text)
         self.assertIn("git diff --cached --quiet", text)
         schedule = yaml.load(text, Loader=yaml.BaseLoader)
+        self.assertEqual(schedule["concurrency"]["group"], "release-schedule-${{ inputs.channel || 'automatic' }}")
+        self.assertEqual(schedule["concurrency"]["cancel-in-progress"], "${{ github.event_name == 'schedule' }}")
         self.assertEqual(schedule["jobs"]["plan"]["needs"], "channel")
+        self.assertIn("release_candidate.py", text)
+        select = next(step for step in schedule["jobs"]["plan"]["steps"]
+                      if step.get("id") == "select")["run"]
+        self.assertLess(select.index("release_candidate.py"), select.index("git fetch --no-tags origin main"))
+        self.assertIn("An open release PR already owns this channel", select)
+        self.assertNotIn("gh pr close", text)
+        self.assertNotIn("gh pr edit", text)
         for step in schedule["jobs"]["plan"]["steps"]:
             if "env" in step and "CHANNEL" in step["env"]:
                 self.assertEqual(step["env"]["CHANNEL"], "${{ needs.channel.outputs.name }}")

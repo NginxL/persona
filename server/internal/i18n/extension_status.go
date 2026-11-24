@@ -19,7 +19,7 @@ var extensionStatusTemplates = sync.OnceValue(func() []deploymentTemplate {
 			strings.HasPrefix(key, "extension-version.") || strings.HasPrefix(key, "extension-identity.") || key == "hub-extensions.missing" ||
 			key == "hub-extensions.socket_path_too_long" || key == "extension-market_git.git_missing" ||
 			key == "extension-market_git.git_too_old" ||
-			key == "extension-sandbox.probe_tmp" ||
+			key == "extension-sandbox.probe_tmp" || key == "hub-extension_sandbox.start_blocked" ||
 			strings.HasPrefix(key, "extension-source.") // why a source extension can't be checked or started here (#5639)
 	})
 })
@@ -43,6 +43,8 @@ func extensionStatusText(l Lang, text string, depth int) string {
 					return text
 				}
 				args[name] = n
+			case "why":
+				args[name] = extensionStatusText(l, value, depth+1)
 			case "err":
 				if knownExtensionStatus(value, depth+1) {
 					args[name] = extensionStatusText(l, value, depth+1)

@@ -273,11 +273,14 @@ struct ExtensionCard: View {
     var open: () -> Void
 
     private var opens: Bool { card.opens?.isEmpty == false }
-    /// A graph preview owns its tap (full screen). The card's title keeps the card's ordinary page-opening path.
+    /// A graph or 3D scene preview owns its tap (full screen). The card's title keeps the card's ordinary page-opening path.
     private var graphPreview: Bool {
         model.view?.sections.contains { section in
             section.items.contains { item in
-                if case .graph = item { true } else { false }
+                switch item {
+                case .graph, .scene: true
+                default: false
+                }
             }
         } == true
     }

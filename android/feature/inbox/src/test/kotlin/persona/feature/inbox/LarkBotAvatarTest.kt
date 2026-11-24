@@ -8,6 +8,7 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.annotation.Config
 import persona.core.contracts.api.InboxAssistantTransport
+import persona.core.inbox.*
 
 @RunWith(AndroidJUnit4::class)
 @Config(sdk = [35])
@@ -39,7 +40,7 @@ class LarkBotAvatarTest {
         assertArrayEquals(byteArrayOf(2), bot.read())
         val person = larkMessage(message("/api/v1/lark/media/k"), transport, "feed").avatar!!
         assertEquals("hub/a:/api/v1/lark/media/k?size=144", person.cacheKey)
-        person.read()
+        val _ = person.read()
         assertEquals(listOf("https://cdn.example.com/avatar/bot.jpg", "/api/v1/lark/media/k?size=144"), transport.avatars)
         assertEquals(emptyList<String>(), transport.media)
     }

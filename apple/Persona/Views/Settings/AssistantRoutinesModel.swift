@@ -8,11 +8,17 @@ struct AssistantDeps {
     var toast: (Toast) -> Void
     /// Show a conversation in the Persona tab (a task that was run now).
     var open: (SessionKey) -> Void
+    /// A successful local intake change; tests keep this side effect isolated.
+    var intakeChanged: () -> Void = {}
 
     static var live: AssistantDeps {
         let model = AppModel.shared
-        return AssistantDeps(api: { model.api }, report: { model.show($0) }, toast: { model.toast = $0 },
+        var deps = AssistantDeps(api: { model.api }, report: { model.show($0) }, toast: { model.toast = $0 },
                              open: { model.openAssistantConversation($0) })
+        #if os(iOS)
+        deps.intakeChanged = { Task { await HealthIntakeSync.shared.refresh(model: model) } }
+        #endif
+        return deps
     }
 }
 

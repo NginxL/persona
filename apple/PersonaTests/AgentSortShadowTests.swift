@@ -285,7 +285,7 @@ import PersonaWire
             "machine_id": .string("m"), "session_id": .string("child"), "title": .string("Failed"),
             "cwd": .string("/code/plain"), "state": .string("working"), "status": .string("idle"),
             "agent": .string("codex"), "source_kind": .string("codex_history"), "source_thread_id": .string("child"),
-            "is_subagent": .bool(true), "parent_session_id": .string("parent"), "turn_error": .string("Failed child"),
+            "parent_session_id": .string("parent"), "turn_error": .string("Failed child"),
             "goal": .object(["objective": .string("Needle objective"), "status": .string("active")]),
         ]))
         var settings = AgentListProjection.Settings(grouping: "state", query: "failed needle")
@@ -476,7 +476,7 @@ import PersonaWire
         input.sessions = [parent, branch, side, orphan]
         let sidePresentation = AgentSortPresentation(compact: true)
         let nativeSide = AgentSortComparable(native: input, presentation: sidePresentation)
-        #expect(nativeSide.presentationRows?.map(\.id) == ["box/orphan", "tab|box/herdr:w1/s1"])
+        #expect(nativeSide.presentationRows?.map(\.id) == ["tab|box/herdr:w1/s1"])
         #expect(nativeSide.presentationRows?.last?.rows == ["box/lead", "box/branch"])
         let coreSide = try AgentSortComparable(core: JSONDecoder().decode(AgentSortCoreProjection.self, from: Data(PersonaCoreProjections.sort(inputJSON: AgentSortProjectionAdapter.coreInput(input, presentation: sidePresentation)).utf8)), input: input, presentation: sidePresentation)
         #expect(coreSide.groups.map(\.visibleRows) == nativeSide.groups.map(\.visibleRows))
@@ -575,7 +575,7 @@ import PersonaWire
 
     @Test func nestedSubtaskSearchRetainsPreparedParentThroughRealCABI() throws {
         let parent = try session(.object(["machine_id": .string("machine-a"), "session_id": .string("e"), "title": .string("ordinary parent"), "state": .string("offline"), "status": .string("offline")]))
-        let child = try session(.object(["machine_id": .string("machine-a"), "session_id": .string("child"), "title": .string("needle"), "state": .string("working"), "status": .string("idle"), "source_kind": .string("runtime"), "is_subagent": .bool(true), "parent_session_id": .string("e")]))
+        let child = try session(.object(["machine_id": .string("machine-a"), "session_id": .string("child"), "title": .string("needle"), "state": .string("working"), "status": .string("idle"), "source_kind": .string("runtime"), "parent_session_id": .string("e")]))
         let machine = try JSON.decoder.decode(Machine.self, from: Data(#"{"id":"machine-a","name":"Machine A","kind":"local","online":true}"#.utf8))
         var settings = AgentListProjection.Settings(grouping: "state", query: "needle")
         settings.preferences[""] = .init()
@@ -594,7 +594,7 @@ import PersonaWire
 
     @Test func promotedSubtaskSearchDoesNotRetainItsOfflineParent() throws {
         let parent = try session(.object(["machine_id": .string("machine-a"), "session_id": .string("e"), "title": .string("ordinary parent"), "state": .string("offline"), "status": .string("offline")]))
-        let child = try session(.object(["machine_id": .string("machine-a"), "session_id": .string("child"), "title": .string("needle"), "state": .string("working"), "status": .string("idle"), "source_kind": .string("runtime"), "is_subagent": .bool(true), "parent_session_id": .string("e")]))
+        let child = try session(.object(["machine_id": .string("machine-a"), "session_id": .string("child"), "title": .string("needle"), "state": .string("working"), "status": .string("idle"), "source_kind": .string("runtime"), "parent_session_id": .string("e")]))
         let machine = try JSON.decoder.decode(Machine.self, from: Data(#"{"id":"machine-a","name":"Machine A","kind":"local","online":true}"#.utf8))
         let settings = AgentListProjection.Settings(grouping: "state", query: "needle")
         let input = AgentListProjection.Input(sessions: [parent, child], machines: [machine], settings: settings)
@@ -688,7 +688,7 @@ import PersonaWire
 
     @Test func nestedRowsAreNotFlattenedIntoTheCoreInventory() throws {
         let parent = try session(.object(["machine_id": .string("m"), "session_id": .string("parent"), "state": .string("working"), "status": .string("idle")]))
-        let child = try session(.object(["machine_id": .string("m"), "session_id": .string("child"), "state": .string("working"), "status": .string("idle"), "source_kind": .string("runtime"), "is_subagent": .bool(true), "parent_session_id": .string("parent")]))
+        let child = try session(.object(["machine_id": .string("m"), "session_id": .string("child"), "state": .string("working"), "status": .string("idle"), "source_kind": .string("runtime"), "parent_session_id": .string("parent")]))
         let input = AgentListProjection.Input(sessions: [parent, child], machines: [], settings: .init(grouping: "state"))
         let encoded = try AgentSortProjectionAdapter.coreInput(input)
         let object = try #require(JSONSerialization.jsonObject(with: Data(encoded.utf8)) as? [String: Any])

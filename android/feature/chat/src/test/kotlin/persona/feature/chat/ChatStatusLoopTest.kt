@@ -47,7 +47,7 @@ class ChatStatusLoopTest {
             }
         }
         val layouts = mutableListOf<TextLayoutResult>()
-        rule.onNodeWithText(prompt, useUnmergedTree = true).fetchSemanticsNode()
+        val _ = rule.onNodeWithText(prompt, useUnmergedTree = true).fetchSemanticsNode()
             .config[SemanticsActions.GetTextLayoutResult].action!!(layouts)
         val layout = layouts.single()
         assertFalse("the prompt is cut after ${layout.lineCount} lines", layout.hasVisualOverflow)

@@ -11,6 +11,7 @@ import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.time.temporal.ChronoUnit
 import java.util.Locale
+import persona.core.inbox.*
 
 /** The page's clock and zone, injectable for the shared showcase without changing production defaults. */
 internal val LocalInboxClock = compositionLocalOf<() -> Instant> { { Instant.now() } }
@@ -156,10 +157,10 @@ internal fun inboxLegacyRowMeta(record: InboxRecord, res: Resources, translatedP
     val sender = item.sender.orEmpty()
     return when {
         record.source == "assistant" -> item.preview
-        record.doc != null -> listOf(docTypeName(res, record.doc.type), item.preview).filter { it.isNotBlank() }.joinToString(" · ")
+        record.doc != null -> listOf(docTypeName(res, record.doc!!.type), item.preview).filter { it.isNotBlank() }.joinToString(" · ")
         record.moment != null -> senderPreview(sender, item.preview, res)
         record.connector != null -> {
-            val reference = record.connector.thread.takeIf { it.contains('#') }
+            val reference = record.connector!!.thread.takeIf { it.contains('#') }
             val who = if (sender.isBlank()) item.preview else senderPreview(sender, item.preview, res)
             listOfNotNull(reference, who.takeIf { it.isNotBlank() }).joinToString(" · ")
         }

@@ -26,11 +26,7 @@ struct ExtensionsView: View {
                 }
             }
             if let settingsSlots {
-                #if os(macOS)
-                ExtensionCardsSection(link: $cardLink, slots: settingsSlots)
-                #else
                 ExtensionSlotsSettingsSection(link: $cardLink, slots: settingsSlots)
-                #endif
             }
             if let plugins = page.plugins, plugins.isEmpty {
                 Section {
@@ -47,20 +43,7 @@ struct ExtensionsView: View {
                 }
             }
             if let error = page.error {
-                #if os(macOS)
-                // A page's empty state, not the request's error in red (#2113).
-                Section {
-                    EmptyStateView(symbol: Theme.Icon.plugins, title: page.missing ? String(localized: "No Extensions") : String(localized: "Couldn't Load Extensions"),
-                                   message: page.missing
-                                       ? (AppModel.shared.isDemo ? String(localized: "Demo mode has no extensions. Connect your own hub to turn on and set up installed extensions here.")
-                                                                 : String(localized: "This hub's version doesn't support extensions yet. Update the hub and check back."))
-                                       : error,
-                                   action: page.missing ? nil : (String(localized: "Retry [Components b8784c]"), { Task { await page.load() } }))
-                        .listRowBackground(Color.clear)
-                }
-                #else
                 Section { Text(error).font(Theme.Font.label).foregroundStyle(Theme.danger).textSelection(.enabled) }
-                #endif
             }
         }
         .accessibilityIdentifier("extensions-list")
@@ -185,6 +168,8 @@ struct ExtensionDetailView: View {
     /// Its updates and the managers: the page's, not a row's (`ExtensionSettingsPageWork`, #2988).
     @State private var lifecycle: ExtensionSettingsLifecycle
     @State private var roster: ManagerRoster?
+    /// What it may read of the user's personal information (#13500): the default manager's page only.
+    @State private var trust: ExtensionTrustModel
 
     /// `manager`: another manager's copy (docs/assistant/managers.md "Grouping"): everything the page reads and changes is
     /// that manager's, and so are the pages and connectors it opens. nil: the default manager's.
@@ -194,6 +179,7 @@ struct ExtensionDetailView: View {
         _signIn = State(initialValue: ExtensionSignInModel(id: id, manager: manager))
         _connectorInbox = State(initialValue: ExtensionConnectorsModel(manager: manager))
         _lifecycle = State(initialValue: ExtensionSettingsLifecycle(id: id, manager: manager))
+        _trust = State(initialValue: ExtensionTrustModel(extensionID: id))
     }
 
     /// Its sign-in, with a hub that has them (#4507): the latest of the page's and the pushes'.
@@ -237,6 +223,10 @@ struct ExtensionDetailView: View {
                                       hasConfiguration: hasConfiguration(d)) {
                     configuration(d)
                 } advancedInformation: {
+                    // Grants are the default manager's (docs/apple/ios.md "Domain spaces"): another manager's copy leaves it out.
+                    if page.manager == nil {
+                        ExtensionInfoAccessSection(page: trust, editable: ExtensionInfoAccessSection.editable(d))
+                    }
                     contributions(d)
                     dependencies(d)
                     permissions(d)
@@ -244,6 +234,7 @@ struct ExtensionDetailView: View {
             }
         }
         .modifier(ExtensionSettingsPageWork(page: page, lifecycle: lifecycle, roster: $roster))
+        .task(id: page.manager == nil) { if page.manager == nil { await trust.load() } }
         .themedPage()
         .detailTitle(page.detail?.plugin.name ?? String(localized: "Extensions"))
         .navigationBarTitleDisplayMode(.inline)
@@ -736,12 +727,7 @@ private struct ExtensionFieldRow: View {
     private func labeled(@ViewBuilder _ content: () -> some View) -> some View {
         VStack(alignment: .leading, spacing: Theme.Space.xs) {
             Text(title).font(Theme.Font.labelStrong).foregroundStyle(.secondary).lineLimit(2)
-            #if os(macOS)
-            // A Mac form draws a field's title as its label beside an empty box: the title is the prompt here (#1221).
-            content().labelsHidden()
-            #else
             content()
-            #endif
         }
     }
 
@@ -979,9 +965,6 @@ private struct ExtensionListField: View {
                 }
                 HStack(spacing: Theme.Space.s) {
                     TextField(String(localized: "Add item"), text: $adding)
-                        #if os(macOS)
-                        .labelsHidden() // the title is the prompt (#1221)
-                        #endif
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
                         .onSubmit(add)
@@ -1102,9 +1085,6 @@ private struct ExtensionSecretSheet: View {
             }
         }
         .presentationDetents([.medium])
-        #if os(macOS)
-        .macSheet()
-        #endif
     }
 }
 

@@ -55,18 +55,21 @@ final class HomeWidgetWriter {
     private var toldHub: Bool?
 
     /// Tells the hub whether any of the widgets is on this device's screens (`widgets` in its prefs), when that changed
-    /// since it last told it: the hub wakes the app for them while it is not open (#5721). From the foreground.
-    func tellHub() {
+    /// since it last told it. A cold background wake also obtains the configurations: its process has no in-memory
+    /// installed list yet (#5721).
+    func tellHub(forceRefresh: Bool = false) {
         guard let api = AppModel.shared.api, !api.config.isDemo else { return }
         let kinds = Set(HomeKind.allCases.map(\.widgetKind))
         let byName = Dictionary(uniqueKeysWithValues: HomeKind.allCases.map { ($0.widgetKind, $0) })
-        WidgetCenter.shared.getCurrentConfigurations { result in
+        WidgetCenter.shared.getCurrentConfigurations { @Sendable result in
             guard case .success(let infos) = result else { return }
             let has = infos.contains { kinds.contains($0.kind) }
             let shown = Set(infos.compactMap { byName[$0.kind] })
             Task { @MainActor in
+                await HomeWidgetData.shared.restore()
+                let placementChanged = HomeWidgetData.shared.installed != shown
                 HomeWidgetData.shared.installed = shown
-                HomeWidgetData.shared.refresh()
+                HomeWidgetData.shared.refresh(forceIntake: forceRefresh || placementChanged)
                 let writer = HomeWidgetWriter.shared
                 guard writer.toldHub != has else { return }
                 do {
@@ -97,6 +100,12 @@ final class HomeWidgetWriter {
         pending?.cancel()
         pending = nil
         write()
+    }
+
+    /// A background intent waits for its snapshot before handing execution back to the system.
+    func flushAndWait() async {
+        flush()
+        await writing?.value
     }
 
     private func write(now: Date = .now) {
@@ -205,6 +214,21 @@ final class HomeWidgetWriter {
     nonisolated static func parts(_ s: HomeSnapshot) -> [HomeKind: Data] {
         func data<T: Encodable>(_ value: T) -> Data { (try? JSONEncoder.sorted.encode(value)) ?? Data() }
         struct Common: Encodable { var paired: Bool; var look: HomeSnapshot.Look }
+        struct IntakePart: Encodable {
+            var supported: Bool
+            var day: String
+            var zone: String
+            var nextDay: Double
+            var portion: HomeSnapshot.Portion
+            var days: [Double]
+        }
+        func intakePart(water: Bool) -> Data {
+            let part = s.intake.map {
+                IntakePart(supported: $0.supported, day: $0.day, zone: $0.zone, nextDay: $0.nextDay,
+                           portion: water ? $0.water : $0.protein, days: $0.days.map { water ? $0.water : $0.protein })
+            }
+            return data(part)
+        }
         let common = data(Common(paired: s.paired, look: s.look))
         let parts: [HomeKind: Data] = [
             .agents: data(s.agents) + data(s.machines.map { [$0.id, $0.name] }),
@@ -214,6 +238,9 @@ final class HomeWidgetWriter {
             .computers: data(s.machines),
             .record: data(s.recording) + data(s.today),
             .health: data(s.health),
+            .water: intakePart(water: true),
+            .protein: intakePart(water: false),
+            .healthToday: data(s.health) + data(s.activity) + data(s.intake),
             .inbox: data(s.inbox),
         ]
         return parts.mapValues { common + $0 }
@@ -249,7 +276,7 @@ extension AppModel {
         case .record: MeetingRecorder.openRecordings()
         case .today, .todos: showShellPage(.todos)
         case .usage, .computers: showShellPage(.machines)
-        case .health: showShellPage(.health)
+        case .health, .water, .protein, .healthToday: showShellPage(.health)
         }
     }
 
@@ -317,6 +344,8 @@ extension AppModel {
         s.usage = HomeUsage.build(UsageWindows.live(UsageWindowsStore.shared.accounts, now: now), tokens: stats?.tokens ?? 0,
                                   tpm: stats?.tpm ?? 0, hourly: data.hourly, spent: data.spentToday(now))
         s.health = data.health
+        s.intake = data.intake
+        s.activity = data.activity
         return s
     }
 }

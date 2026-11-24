@@ -1,5 +1,5 @@
 📋 督办：你派出去的任务有 2 个要你处理
-（这是 Persona 的督办消息，不是用户发的。你是后台督办对话，任务由你代为督办。）
+（这是 Persona 的督办消息，不是用户发的。仅收尾旧任务；新任务归主管或主对话。）
 Question routing: timeout_minutes=5, low_distraction=false.
 <persona-supervision level="triage" />
 

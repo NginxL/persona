@@ -272,6 +272,25 @@ type GateFile struct {
 	Tool       *proto.GateTool    `json:"tool,omitempty"`
 	// Auth is how the node's proxy puts the credentials on a request (#1317); without it ProxyAuth decides.
 	Auth *GateFileAuth `json:"auth,omitempty"`
+	// SocketEnv names the one of env holding the extension's unix socket on the manager's machine: the gate is
+	// relayed (proto.CommandGate.Relay, #12904), its calls going node → manager → socket, so that it works from an
+	// assistant on another computer too. It needs base_env (the address the script calls when it is given one) and
+	// one secret (the token, put on the request as Auth, or Authorization: Bearer, says).
+	SocketEnv string `json:"socket_env,omitempty"`
+}
+
+// RelayAuth is how the manager puts a relayed gate's credentials on a call to its socket: the declared auth, or
+// Authorization: Bearer ${<the one secret>}. Nil for a gate that is not relayed.
+func (g *GateFile) RelayAuth() *proto.GateAuth {
+	switch {
+	case g.SocketEnv == "":
+		return nil
+	case g.Auth != nil && !g.Auth.Env:
+		return &proto.GateAuth{Header: g.Auth.Header, Value: g.Auth.Value}
+	case len(g.Secret) == 1:
+		return &proto.GateAuth{Header: "Authorization", Value: "Bearer ${" + g.Secret[0] + "}"}
+	}
+	return nil
 }
 
 // GateFileAuth is a gate file's auth: the header and its value (${NAME} for one of env), or env: the script needs its
@@ -330,6 +349,20 @@ func ParseGate(raw []byte) (*GateFile, error) {
 	}
 	if g.BaseEnv != "" && !slices.Contains(g.Env, g.BaseEnv) {
 		return nil, errors.New("gate base_env is not one of env")
+	}
+	if g.SocketEnv != "" {
+		switch {
+		case !slices.Contains(g.Env, g.SocketEnv):
+			return nil, errors.New("gate socket_env is not one of env")
+		case g.BaseEnv == "" || g.SocketEnv == g.BaseEnv:
+			return nil, errors.New("gate socket_env: needs base_env, the address the script calls instead")
+		case slices.Contains(g.Secret, g.SocketEnv):
+			return nil, errors.New("gate socket_env is a secret")
+		case g.Auth != nil && g.Auth.Env:
+			return nil, errors.New("gate socket_env: the credentials go on the call, not into the environment")
+		case g.Auth == nil && (len(g.Secret) != 1 || !slices.Contains(g.Env, g.Secret[0])):
+			return nil, errors.New("gate socket_env: one secret among env, or an auth saying how they go")
+		}
 	}
 	if a := g.Auth; a != nil {
 		switch {

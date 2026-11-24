@@ -9,8 +9,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/nwverse/persona/server/internal/assistantwire"
+	"github.com/nwverse/persona/server/internal/botcard"
 	"github.com/nwverse/persona/server/internal/channel"
-	"github.com/nwverse/persona/server/internal/feishubot"
 	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/prompts"
 	"github.com/nwverse/persona/server/internal/proto"
@@ -27,7 +28,7 @@ import (
 // both went under the earlier message. A message right after "/new …" could also read the target before the new
 // conversation was set, and start one more.
 func (s *Service) FeishuMessage(ctx context.Context, p FeishuMessage) error {
-	var ev feishubot.MessageEvent
+	var ev botcard.MessageEvent
 	if err := json.Unmarshal(p.Event, &ev); err != nil {
 		return badRequest(err)
 	}
@@ -80,7 +81,7 @@ func (s *Service) FeishuMessage(ctx context.Context, p FeishuMessage) error {
 	return nil
 }
 
-func (s *Service) feishuMessage(ev feishubot.MessageEvent, st FeishuStatus, action string) {
+func (s *Service) feishuMessage(ev botcard.MessageEvent, st FeishuStatus, action string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()
 	msg := ev.Message
@@ -88,7 +89,7 @@ func (s *Service) feishuMessage(ev feishubot.MessageEvent, st FeishuStatus, acti
 		s.logf("bots: a message recalled before its turn: not sent")
 		return
 	}
-	content := feishubot.ParseContent(msg.MessageType, msg.Content, msg.Mentions)
+	content := botcard.ParseContent(msg.MessageType, msg.Content, msg.Mentions)
 	if content.Sticker {
 		// A sticker carries no request: do not react, do not start an Agent turn.
 		s.logf("bots: a sticker was accepted silently: no turn")
@@ -103,23 +104,34 @@ func (s *Service) feishuMessage(ev feishubot.MessageEvent, st FeishuStatus, acti
 	if !content.Forward && len(content.Media) == 0 && noReplyCommand(content.Text) && s.chatNoReply(ctx, ev) {
 		return // "don't report back" for a to-do taken in this chat with no topic to say it in (todo_source.go)
 	}
-	if _, _, isCommand := parseBotCommand(content.Text); isCommand && !content.Forward && len(content.Media) == 0 {
+	var target botTarget
+	if cmd, _, isCommand := parseBotCommand(content.Text); isCommand && !content.Forward && len(content.Media) == 0 {
 		handled, rest := s.botCommand(ctx, st.Features, msg.MessageID, content.Text, msg.RootID, msg.ParentID)
 		if handled {
 			return
 		}
 		content.Text = rest
+		if cmd == "/new" || cmd == "/新对话" { // i18n-ignore: command alias typed by the user
+			// The first message explicitly starts a conversation, even when replying to an old card.
+			// Keep the reply metadata for quoted context, but do not answer or route by that card.
+			target = botTarget{Kind: targetPersona}
+		}
 	}
-	if !content.Forward && s.acceptReply(ctx, msg.MessageID, content.Text, len(content.Media) > 0, msg.ParentID, msg.RootID) {
-		return // about a "Please verify" card (acceptance_reply.go)
+	if target.Kind == "" {
+		if !content.Forward && s.conclusionQuestion(ctx, &ev, &content, st.Features) {
+			return
+		}
+		if !content.Forward && s.acceptReply(ctx, msg.MessageID, content.Text, len(content.Media) > 0, msg.ParentID, msg.RootID) {
+			return // about a "Please verify" card (acceptance_reply.go)
+		}
+		if !content.Forward && len(content.Media) == 0 && s.botApproveOwnerAction(ctx, ev, content.Text, action) {
+			return // an exact direct reply to an owner-action proposal (owner_action_reply.go)
+		}
+		if !content.Forward && len(content.Media) == 0 && s.botAnswerQuestion(ctx, msg.MessageID, content.Text, action, msg.RootID, msg.ParentID) {
+			return // the answer to the card waiting in this topic (feishu_text_answer.go)
+		}
+		target = s.botTargetFor(msg.RootID, msg.ParentID)
 	}
-	if !content.Forward && len(content.Media) == 0 && s.botApproveOwnerAction(ctx, ev, content.Text, action) {
-		return // an exact direct reply to an owner-action proposal (owner_action_reply.go)
-	}
-	if !content.Forward && len(content.Media) == 0 && s.botAnswerQuestion(ctx, msg.MessageID, content.Text, action, msg.RootID, msg.ParentID) {
-		return // the answer to the card waiting in this topic (feishu_text_answer.go)
-	}
-	target := s.botTargetFor(msg.RootID, msg.ParentID)
 	if err := botAllowed(s.botLang(ctx), st.Features, target); err != nil {
 		s.botNote(ctx, msg.MessageID, err.Error())
 		return
@@ -214,14 +226,14 @@ const (
 )
 
 // botSend passes a message on to its target and starts the run that answers it.
-func (s *Service) botSend(ctx context.Context, ev *feishubot.MessageEvent, content feishubot.Content, t botTarget) error {
+func (s *Service) botSend(ctx context.Context, ev *botcard.MessageEvent, content botcard.Content, t botTarget) error {
 	return s.botSendIn(ctx, ev, content, t, nil)
 }
 
 // botSendIn is botSend for a message said in a topic (topic given: the chat and thread of the todo it is bound to,
 // feishu_thread.go): the message quotes and forwards nothing in (what others said there is not the owner's words),
 // and the run's progress, answer and notes go back into that thread (runTo).
-func (s *Service) botSendIn(ctx context.Context, ev *feishubot.MessageEvent, content feishubot.Content, t botTarget, topic *feishuTopic) error {
+func (s *Service) botSendIn(ctx context.Context, ev *botcard.MessageEvent, content botcard.Content, t botTarget, topic *feishuTopic) error {
 	rt, err := s.resolveBotTarget(ctx, t)
 	if err != nil {
 		return err
@@ -244,7 +256,7 @@ func (s *Service) botSendIn(ctx context.Context, ev *feishubot.MessageEvent, con
 		todo, ok, err := s.todo(ctx, t.TodoID)
 		if err != nil {
 			s.logf("bots: reminder reply: todo %s: %v", t.TodoID, err)
-		} else if ok && !s.todoInHealth(ctx, todo) {
+		} else if ok && !s.todoPolicy(ctx, todo).Redact {
 			in.Todo = &prompts.BotTodo{ID: todo.ID, Title: clip(todo.Title, 500), Notes: clip(todo.Notes, 4000)}
 		}
 	}
@@ -254,14 +266,14 @@ func (s *Service) botSendIn(ctx context.Context, ev *feishubot.MessageEvent, con
 	type botMedia struct {
 		of     string // the message it is in
 		quoted bool   // not to be had is no reason to hold the message back
-		feishubot.Media
+		botcard.Media
 	}
 	var media []botMedia
 	for _, md := range content.Media {
 		media = append(media, botMedia{of: msg.MessageID, Media: md})
 	}
 	if msg.ParentID != "" && topic == nil {
-		var quoted []feishubot.Media
+		var quoted []botcard.Media
 		in.Quote, quoted = s.botQuote(ctx, msg.ParentID, lang)
 		for _, md := range quoted {
 			media = append(media, botMedia{of: msg.ParentID, quoted: true, Media: md})
@@ -278,28 +290,36 @@ func (s *Service) botSendIn(ctx context.Context, ev *feishubot.MessageEvent, con
 			var res struct {
 				Data     []byte `json:"data"`
 				MIME     string `json:"mime"`
+				Path     string `json:"path"`
+				Name     string `json:"name"`
 				TooLarge bool   `json:"too_large"`
 			}
-			if err := s.appCall(ctx, AppFeishu, FeishuResource, map[string]any{"message_id": bm.of, "key": md.Key, "kind": md.Kind}, &res); err != nil {
+			if err := s.appCall(ctx, AppFeishu, FeishuResource, map[string]any{"message_id": bm.of, "key": md.Key, "kind": md.Kind,
+				"machine_id": rt.machine, "as_file": len(images) >= botImagesMax}, &res); err != nil {
 				if bm.quoted {
 					s.logf("bots: the quoted message's image: %v", err)
 					continue
 				}
+				var coded *rpc.Error
+				if errors.As(err, &coded) && coded.Code == assistantwire.CodeFeishuSave {
+					return fmt.Errorf("%s%w", i18n.T(s.botLang(ctx), "assistant-feishu.save_file", i18n.Args{"machine": rt.machineName}), err)
+				}
 				return fmt.Errorf("%s%w", i18n.T(s.botLang(ctx), "assistant-feishu.download_image"), err)
+			}
+			if res.TooLarge || (res.Name != "" && res.Path == "") {
+				tooLarge = append(tooLarge, res.Name)
+				continue
+			}
+			if res.Path != "" {
+				in.Files = append(in.Files, res.Path)
+				continue
 			}
 			mime := res.MIME
 			if !strings.HasPrefix(mime, "image/") {
 				mime = "image/png"
 			}
-			if len(images) < botImagesMax && !res.TooLarge {
-				images = append(images, proto.Image{Mime: mime, Data: base64.StdEncoding.EncodeToString(res.Data)})
-				continue
-			}
-			// More pictures than a message takes, or one too big for the model: as a file.
-			md.Name = md.Key + map[string]string{"image/jpeg": ".jpg", "image/gif": ".gif", "image/webp": ".webp"}[mime]
-			if !strings.Contains(md.Name, ".") {
-				md.Name += ".png"
-			}
+			images = append(images, proto.Image{Mime: mime, Data: base64.StdEncoding.EncodeToString(res.Data)})
+			continue
 		}
 		var saved struct {
 			Path     string `json:"path"`
@@ -412,13 +432,16 @@ func botProbe(text string, in prompts.BotMessage) string {
 }
 
 // botQuote is the message a message replies to, and the pictures and files in it.
-func (s *Service) botQuote(ctx context.Context, id string, lang i18n.Lang) (*prompts.BotQuote, []feishubot.Media) {
+func (s *Service) botQuote(ctx context.Context, id string, lang i18n.Lang) (*prompts.BotQuote, []botcard.Media) {
 	items, err := s.botMessages(ctx, id)
 	if err != nil || len(items) == 0 {
 		return nil, nil
 	}
 	it := items[0]
-	c := feishubot.ParseContent(it.MsgType, it.Body.Content, it.MentionList())
+	if it.Deleted {
+		return nil, nil
+	}
+	c := botcard.ParseContent(it.MsgType, it.Body.Content, it.MentionList())
 	who := "Persona"
 	if it.Sender.SenderType == "user" {
 		who = s.botName(ctx, it.Sender.ID, lang)
@@ -442,7 +465,7 @@ func (s *Service) botForward(ctx context.Context, id string, lang i18n.Lang) str
 		if it.UpperMessageID != id {
 			continue
 		}
-		c := feishubot.ParseContent(it.MsgType, it.Body.Content, it.MentionList())
+		c := botcard.ParseContent(it.MsgType, it.Body.Content, it.MentionList())
 		text := c.Text
 		if text == "" {
 			text = "[" + it.MsgType + "]"

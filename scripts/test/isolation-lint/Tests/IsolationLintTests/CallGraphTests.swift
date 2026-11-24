@@ -372,4 +372,58 @@ final class CallGraphTests: XCTestCase {
         }
         """)
     }
+
+    /// An untyped `guard let activity = External.activities.first(...)` calling `activity.update(_:)` inside a
+    /// `nonisolated async` helper called from MainActor creates a weak edge to an unrelated `nonisolated` store's
+    /// `update(_:)`. Making the helper `@concurrent` and typing `activity` keeps the store's file read off MainActor
+    /// (#13770).
+    func testTypedConcurrentActivityUpdateDoesNotTaintUnrelatedStoreUpdate() {
+        expect("""
+        nonisolated struct Store {
+            func savedState() -> Data? { try? Data(contentsOf: url) } // unknown
+            func update(_ change: (inout Int) -> Void) { _ = savedState() }
+        }
+        struct Intent {
+            @concurrent nonisolated func perform() async {
+                Store().update { _ in }
+            }
+        }
+        enum Tool {
+            private nonisolated static func updateLiveActivity(_ content: Int) async {
+                guard let activity = ExternalActivity.activities.first(where: { $0 == 1 }) else { return }
+                await activity.update(content)
+            }
+            struct Backend {
+                var update: @MainActor @Sendable (Int) async -> Void
+                static var live: Self {
+                    Self(update: { content in await updateLiveActivity(content) })
+                }
+            }
+        }
+        """)
+        expect("""
+        nonisolated struct Store {
+            func savedState() -> Data? { try? Data(contentsOf: url) } // off
+            func update(_ change: (inout Int) -> Void) { _ = savedState() }
+        }
+        struct Intent {
+            @concurrent nonisolated func perform() async {
+                Store().update { _ in }
+            }
+        }
+        enum Tool {
+            @concurrent
+            private nonisolated static func updateLiveActivity(_ content: Int) async {
+                guard let activity: ExternalActivity = ExternalActivity.activities.first(where: { $0 == 1 }) else { return }
+                await activity.update(content)
+            }
+            struct Backend {
+                var update: @MainActor @Sendable (Int) async -> Void
+                static var live: Self {
+                    Self(update: { content in await updateLiveActivity(content) })
+                }
+            }
+        }
+        """)
+    }
 }

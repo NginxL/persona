@@ -29,7 +29,7 @@ vi.mock("../../lib/session-review", async (importOriginal) => {
 });
 vi.mock("../../lib/use-fs-live", () => ({ useFsLive: () => {} }));
 
-import { closePanel, getPanel, type ReviewSpot } from "../../lib/panel";
+import { closePanel, getPanel, getPanelHistory, openPanel, type ReviewSpot } from "../../lib/panel";
 import type { ReviewScope } from "../../lib/session-review";
 import { ReviewPanel } from "./ReviewPanel";
 
@@ -70,12 +70,15 @@ describe("the review panel opened again", () => {
     expect(went.some((el) => el.getAttribute("data-diff-path") === "src/a.ts")).toBe(true);
   });
 
-  it("opens a card's file the review does not list in the files panel instead", async () => {
+  it("opens a card's file the review does not list in the files panel instead, preserving back stack", async () => {
+    openPanel({ kind: "task", todo: "todo-1" });
+    openPanel({ kind: "review", mid: "m", sid: "s", cwd: "/w", scope: "branch" }, { push: true });
     draw({ opened: {} });
     await settle();
     draw({ scope: "branch", at: { path: "/w/src/other.ts", file: true }, opened: {} });
     await settle();
     expect(getPanel()).toEqual({ kind: "file", mid: "m", path: "/w/src/other.ts", cwd: "/w", sid: "s" });
+    expect(getPanelHistory()).toEqual([{ kind: "task", todo: "todo-1" }]);
   });
 
   it("opens a card's file in the files panel when the review cannot be read (not a repository)", async () => {

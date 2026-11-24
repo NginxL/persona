@@ -10,6 +10,7 @@ final class AgentFollowUpUITests: XCTestCase {
     /// The hub's defaults, as a fresh mock hub has them.
     private static func defaults() -> [String: Any] { [
         "start_requested_tasks": true, "task_workspace_preference": "prefer-existing", "main_supervises_own_tasks": false,
+        "default_permission_mode": "default",
         "agent_tasks": false, "idle_close_hours": 12, "archive_closed_days": 3,
         "agent_auto_naming": true, "agent_auto_naming_max": 1, "agent_auto_naming_interval_hours": 0,
     ] }
@@ -52,10 +53,20 @@ final class AgentFollowUpUITests: XCTestCase {
         XCTAssertEqual(now, value, key, file: file, line: line)
     }
 
-    @MainActor private func launch(_ page: String) -> XCUIApplication {
+    @MainActor private func hubHas(_ key: String, _ value: String, file: StaticString = #filePath, line: UInt = #line) async throws {
+        var now = try await assistant()[key] as? String
+        for _ in 0..<40 where now != value {
+            try await Task.sleep(for: .milliseconds(250))
+            now = try await assistant()[key] as? String
+        }
+        XCTAssertEqual(now, value, key, file: file, line: line)
+    }
+
+    @MainActor private func launch(_ page: String? = nil) -> XCUIApplication {
         let app = XCUIApplication()
         let pair = "persona://pair?url=" + hub.addingPercentEncoding(withAllowedCharacters: .alphanumerics)! + "&token=mock"
-        app.launchArguments = ["-pairURL", pair, "-tab", "settings", "-dev.openChat", "", "-openAssistantPage", page]
+        app.launchArguments = ["-pairURL", pair, "-tab", "settings", "-dev.openChat", ""]
+        if let page { app.launchArguments += ["-openAssistantPage", page] }
         if let size = ProcessInfo.processInfo.environment["PERSONA_SHOTS_SIZE"] {
             app.launchArguments += ["-UIPreferredContentSizeCategoryName", size]
         }
@@ -144,6 +155,21 @@ final class AgentFollowUpUITests: XCTestCase {
         try await hubHas("archive_closed_days", 30)
         reveal(element(app, "followup-auto-naming"), in: app)
         try shot(app, "tidying")
+    }
+
+    @MainActor func testNewConversationPermissionFromAgentSettings() async throws {
+        try await prepare()
+        let app = launch()
+        let agents = element(app, "settings-agents")
+        reveal(agents, in: app)
+        XCTAssertTrue(agents.waitForExistence(timeout: 10))
+        agents.tap()
+        let picker = element(app, "default-permission-mode")
+        XCTAssertTrue(picker.waitForExistence(timeout: 10), "Settings › Agent has no new-conversation permission control:\n\(app.debugDescription)")
+        try shot(app, "default-permissions")
+        try pick("default-permission-mode", ["完全访问", "Full access", "フルアクセス"], in: app)
+        try await hubHas("default_permission_mode", "bypassPermissions")
+        try shot(app, "default-permissions-full-access")
     }
 
     @MainActor func testSessionNamesUnlimitedAndRegularUpdates() async throws {

@@ -16,13 +16,11 @@ final class MeetingReminderUITests: XCTestCase {
         try shot(app, "settings")
     }
 
-    /// Settings' Meetings row, on every iPhone (with no Persona role to show where the hub offers none).
+    /// Settings › Advanced's Meetings row, on every iPhone (with no Persona role to show where the hub offers none).
     @MainActor func testTheRowOnEveryHub() throws {
         let app = try launch(["-tab", "settings"])
-        let settings = app.descendants(matching: .any)["settings-list"].firstMatch
-        XCTAssertTrue(settings.waitForExistence(timeout: 15), app.debugDescription)
-        let neighbor = app.buttons["settings-knowledge-selection"]
-        for _ in 0..<8 where !neighbor.isHittable { settings.swipeUp() }
+        XCTAssertTrue(app.openSettingsAdvancedPage(), "no Settings › Advanced:\n\(app.debugDescription)")
+        _ = app.settingsAdvancedRow("settings-knowledge-selection")
         XCTAssertTrue(app.buttons["settings-meetings"].exists, "no Meetings row:\n\(app.debugDescription)")
         try shot(app, "list")
     }

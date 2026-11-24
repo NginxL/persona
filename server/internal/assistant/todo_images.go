@@ -46,6 +46,12 @@ type todoImageInputJSON struct {
 
 // parseTodoImages applies the meeting-photo input rules before a to-do is created. The status distinguishes malformed
 // images (400) from decoded-size and count limits (413); DecodeConfig bounds pixels before the complete Decode.
+// The limits of a to-do's image, those of a meeting's photo (the recording module's meeting_photos.go).
+const (
+	maxPhotoBytes = 1 << 20 // its image, decoded
+	maxPhotoSide  = 4096    // pixels on the image's long side
+)
+
 func parseTodoImages(in []todoImageInputJSON) ([]db.TodoImage, int, error) {
 	if len(in) > kb.MaxPhotos {
 		return nil, http.StatusRequestEntityTooLarge, i18n.Err("assistant-meeting.too_many_images", i18n.Args{"max": kb.MaxPhotos})

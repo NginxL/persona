@@ -12,7 +12,7 @@ private extension Data {
     var hex: String { map { String(format: "%02x", $0) }.joined() }
 }
 
-/// The shared cases of the video over UDP (spec/fixtures/screen-udp, #7873): the node's internal/screenlink checks the
+/// The shared cases of the video over UDP (spec/fixtures/screen-udp, #7873): the node's internal/modules/screen-share/screenlink checks the
 /// same file, so both ends seal, number, cut and rebuild alike.
 final class ScreenUDPFixtureTests: XCTestCase {
     private static var file: URL {

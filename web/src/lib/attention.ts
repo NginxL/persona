@@ -8,6 +8,7 @@ import { stateOf } from "./format";
 import { agentKey } from "./pins";
 import { homeKey } from "./folded-rows";
 import { isDelegating } from "./delegate";
+import { supervisorHeld, supervisorHeldOnly } from "./supervisor-held";
 import { isMuted } from "./session-actions";
 import type { AgentMutes } from "./agent-groups";
 import { byTime } from "./times";
@@ -40,30 +41,40 @@ export type AttentionEvent = { kind: "needs" | "finished"; key: string; card?: I
  *   short wait (SETTLE_MS). The hub also drops a turn started by a background task's report (`WokeByTask`) and one
  *   the assistant already pushed about; the web client does not see those and chimes for them.
  * A session with no earlier state (the first snapshot, a new session) produces nothing, so opening the page does not chime.
- * A session "Needs you" only for questions the assistant is still looking at (`interactions`, lookingOnly) counts as
- * working: the hub pushes nothing for them either, and it becomes "Needs you" here once the assistant hands one to the user.
+ * A session "Needs you" only for questions the assistant is still looking at (`interactions`, lookingOnly), or only for
+ * cards its task's supervisor holds (supervisorHeldOnly), counts as working: the hub pushes nothing for them either, and
+ * it becomes "Needs you" here once the assistant or the supervisor hands one to the user.
  */
 /** Whether an urgency level is held back (non-interrupting) while hub push grading is on. */
 export function isHeldLevel(level: string | undefined): boolean {
   return level === "P1" || level === "P2";
 }
 
-/** Whether a "Needs you" session waits only on held (P1/P2) non-delegating cards. */
+/** Whether a "Needs you" session waits only on held (P1/P2) non-delegating cards. A card the assistant is still looking
+ *  at, or one a task's supervisor holds (lib/supervisor-held.ts), is not the user's yet and is passed over. */
 export function heldOnlyNeeds(s: Pick<Session, "machine_id" | "session_id">, interactions: readonly Interaction[]): boolean {
   const key = agentKey(s);
   let sawHeld = false;
   for (const ix of interactions) {
-    if (isDelegating(ix) || homeKey(ix) !== key) continue;
+    if (notYetTheUsers(ix) || homeKey(ix) !== key) continue;
     if (!isHeldLevel(ix.push_level)) return false;
     sawHeld = true;
   }
   return sawHeld;
 }
 
+/** A card nothing is pushed for yet: a question the assistant is still looking at (#544), or a card a task's supervisor
+ *  holds until it passes it up (supervisorHeld). */
+function notYetTheUsers(ix: Interaction): boolean {
+  return isDelegating(ix) || supervisorHeld(ix);
+}
+
 export function detectTransitions(prev: ReadonlyMap<string, AgentState>, sessions: Session[], mutes: AgentMutes, interactions: readonly Interaction[] = [], grading = false): { next: Map<string, AgentState>; events: AttentionEvent[] } {
   const next = new Map<string, AgentState>();
   const events: AttentionEvent[] = [];
   const looking = lookingOnly(interactions);
+  // as for those: a session "Needs you" only for cards its task's supervisor holds is at work (the supervisor is)
+  for (const key of supervisorHeldOnly(interactions)) looking.add(key);
   for (const s of sessions) {
     if (s.hidden_by_directory) continue;
     const key = agentKey(s);
@@ -120,13 +131,13 @@ export const FORGET_CARD_MS = 10 * 60_000;
  * sessions whose transition had no card yet, whose first card follows it (CardEvent.follows). `known` is the card ids
  * seen pending, with when they last were, undefined before the first snapshot (opening the page announces nothing).
  * Quiet tasks' sessions are left out, as detectTransitions does; several new cards for one session make one event, the oldest.
- * A question the assistant is still looking at is neither announced nor remembered: when it hands the same card to the
- * user, that is when it arrives.
+ * A question the assistant is still looking at, or a card a task's supervisor holds, is neither announced nor
+ * remembered: when it hands the same card to the user, that is when it arrives.
  */
 export function detectNewCards(known: ReadonlyMap<string, number> | undefined, interactions: readonly Interaction[], was: ReadonlyMap<string, AgentState>, next: ReadonlyMap<string, AgentState>, sessions: readonly Session[], bare: ReadonlySet<string>, now: number, grading = false): { ids: Map<string, number>; events: CardEvent[] } {
   const ids = new Map<string, number>();
   for (const [id, at] of known ?? []) if (now - at < FORGET_CARD_MS) ids.set(id, at);
-  const waiting = interactions.filter((ix) => !isDelegating(ix));
+  const waiting = interactions.filter((ix) => !notYetTheUsers(ix));
   for (const ix of waiting) ids.set(ix.id, now);
   if (!known) return { ids, events: [] };
   const quiet = new Set(sessions.filter((s) => s.quiet).map(agentKey));

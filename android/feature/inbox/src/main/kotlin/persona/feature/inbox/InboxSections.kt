@@ -22,6 +22,7 @@ import kotlinx.coroutines.launch
 import persona.core.domain.inbox.InboxGroups
 import persona.core.domain.inbox.InboxRow
 import persona.core.domain.inbox.InboxRowType
+import persona.core.inbox.*
 
 // The inbox's groups and Done's history on Android (#2576, as #2059 on the web and iOS; docs/assistant/inbox.md
 // "Grouping"): the rules are persona.core.domain.inbox.InboxGroups, this file gives them the rows' records and titles.
@@ -97,7 +98,7 @@ internal class InboxDoneHistory(private val repository: InboxRepository, private
             try {
                 val pages = asked.map { m -> async { m to repository.doneHistory(m.ifEmpty { null }, next[m]) } }.awaitAll()
                 add(pages.flatMap { it.second.records })
-                pages.forEach { (m, page) -> if (page.next == null) { ended += m; next.remove(m) } else next[m] = page.next }
+                pages.forEach { (m, page) -> val after = page.next; if (after == null) { ended += m; next.remove(m) } else next[m] = after }
                 more = asked.any { it !in ended }
             } catch (e: CancellationException) {
                 throw e
@@ -128,7 +129,7 @@ internal class InboxDoneHistory(private val repository: InboxRepository, private
             try {
                 val page = repository.doneHistory(manager.ifEmpty { null }, groupNext[id] ?: InboxDoneCursor(end.toString(), null))
                 add(page.records)
-                if (page.next == null) endedGroups = endedGroups + id else groupNext[id] = page.next
+                val after = page.next; if (after == null) endedGroups = endedGroups + id else groupNext[id] = after
             } catch (e: CancellationException) {
                 throw e
             } catch (_: Exception) {

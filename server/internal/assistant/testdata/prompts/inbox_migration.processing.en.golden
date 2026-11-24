@@ -5,6 +5,7 @@ The previous handling conversation is gone. Continue from the recap and handling
 Type: Lark direct message
 张三：1013 合了吗？
 Lark conversation id: f2
+For screenshots, use lark_image when available. Pass the message ID or this chat_id and the indicated account.
 
 </persona-context>
 

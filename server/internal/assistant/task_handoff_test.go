@@ -94,6 +94,20 @@ func assertScopedHandoff(t *testing.T, prompt string) {
 	}
 }
 
+// assertHandoffContract: wherever a handoff entry is offered, the note says it is for a separate part only and the
+// caller does the rest, and that the new session shares the caller's directory and reports to the supervisor, so the
+// caller neither edits what it changes nor polls it (#12995).
+func assertHandoffContract(t *testing.T, prompt string) {
+	t.Helper()
+	for _, want := range []string{"only to hand a separate part of this assignment", "never hand over all of it", "do the rest yourself",
+		"works in your directory with your permissions", "reports to your supervisor, not to you", "leave the files it changes alone",
+		"do not poll it, read its transcript or wait for it"} {
+		if !strings.Contains(prompt, want) {
+			t.Errorf("the handoff note lacks %q: %s", want, prompt)
+		}
+	}
+}
+
 // assertTerminalOwnTools: the terminal entry says it runs the Agent's own tools, with their arguments, and is not a
 // general entry (#12136).
 func assertTerminalOwnTools(t *testing.T, prompt string) {
@@ -125,6 +139,7 @@ func TestTaskHandoffCodexProductionEntrypoints(t *testing.T) {
 			}
 			assertTerminalOwnTools(t, prompt)
 			assertScopedHandoff(t, prompt)
+			assertHandoffContract(t, prompt)
 		})
 	}
 }
@@ -144,6 +159,7 @@ func TestTaskHandoffClaudeKeepsMCPWithoutMetadata(t *testing.T) {
 				t.Fatal("MCP handoff unnecessarily queried or advertised a terminal executable")
 			}
 			assertScopedHandoff(t, prompt)
+			assertHandoffContract(t, prompt)
 		})
 	}
 }
@@ -159,6 +175,7 @@ func TestTaskHandoffOtherTerminalFamilies(t *testing.T) {
 			}
 			assertTerminalOwnTools(t, prompt)
 			assertScopedHandoff(t, prompt)
+			assertHandoffContract(t, prompt)
 		})
 	}
 }
@@ -193,7 +210,8 @@ func TestTaskHandoffMissingMetadataDoesNotBlockAssignments(t *testing.T) {
 					t.Cleanup(func() { agentStartListTimeout = old })
 				}
 				prompt := taskHandoffTestStart(t, s, f, tool)
-				if strings.Contains(prompt, "task_spawn") || strings.Contains(prompt, "todo_decisions") || taskHandoffTestExecutable(t, prompt) != "" {
+				if strings.Contains(prompt, "task_spawn") || strings.Contains(prompt, "todo_decisions") || taskHandoffTestExecutable(t, prompt) != "" ||
+					strings.Contains(prompt, "do not poll it") {
 					t.Fatalf("an unverified entry was advertised: %s", prompt)
 				}
 				if !strings.Contains(prompt, "Continue the assigned work yourself") {

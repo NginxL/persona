@@ -13,5 +13,6 @@
   "bad_model": "这个模型现在用不了",
   "safeguards": "模型的安全检查拦截了这条消息",
   "conversation_invalid": "此会话已失效：压缩上下文属于另一个账号。请换新会话接着做。",
-  "invalid_label": "已失效"
+  "invalid_label": "已失效",
+  "images_too_large": "这个对话里的图片太多或太大，超出了模型限制。"
 }

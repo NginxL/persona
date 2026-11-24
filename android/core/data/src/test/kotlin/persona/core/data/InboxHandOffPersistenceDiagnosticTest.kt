@@ -18,7 +18,7 @@ import persona.core.contracts.api.MessageRequest
 import persona.core.contracts.api.MessageSender
 import persona.core.contracts.api.MessageTransport
 import persona.core.contracts.api.MessageTransportResult
-import persona.feature.inbox.InboxHandOffRequest
+import persona.core.inbox.InboxHandOffRequest
 import persona.core.hub.HttpChatComposerService
 import persona.core.hub.HubConnectionConfig
 import persona.core.hub.HubNetwork
@@ -766,6 +766,7 @@ class InboxHandOffPersistenceDiagnosticTest {
 
         suspend fun connect(): ChatComposerService = fixture.sender.connectComposer { transport ->
             HttpChatComposerService(pairing, transport, connection, "test-token",
+                onRetryStart = fixture.sender::beginComposerRetry,
                 onRetryDelivery = fixture.sender::recordComposerDelivery,
                 onPairingExpired = {})
         }

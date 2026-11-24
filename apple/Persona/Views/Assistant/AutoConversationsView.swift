@@ -63,9 +63,6 @@ struct AutoConversationsView: View {
             #if os(iOS) || os(visionOS)
             .navigationBarTitleDisplayMode(.inline)
             #endif
-            #if os(macOS)
-            .macSheetDone { dismiss() }
-            #else
             .toolbar {
                 // ✕ at the leading corner, the page's own menu at the trailing one (#9653).
                 SheetClose { dismiss() }
@@ -73,11 +70,7 @@ struct AutoConversationsView: View {
                     ToolbarItem(placement: .primaryAction) { recentMenu(on) }
                 }
             }
-            #endif
         }
-        #if os(macOS)
-        .macSheet()
-        #endif
     }
 
     /// The sidebar's Show Scheduled Task Chats (#8324) at the top left, opposite Done: the same setting as Assistant
@@ -182,6 +175,8 @@ struct AutoConversationsView: View {
                     lead ? Label("Unpin [Assistant Sidebar b7c40e]", systemImage: Theme.Icon.unpin)
                         : Label("Pin [Assistant Sidebar 6d1f2a]", systemImage: Theme.Icon.pin)
                 }
+                // File it under a direction, or on its own (#11516): only where the hub files sessions.
+                MoveToMenu(key: s.key, title: title, state: s.state)
                 Button { Task { await model.archiveConversation(s.key, true) } } label: {
                     Label("Archive", systemImage: Theme.Icon.archive)
                 }
@@ -203,7 +198,7 @@ struct AutoConversationsView: View {
             Button("Cancel", role: .cancel) {}
         } message: { session in
             if model.assistantLeaders.contains(session.sessionID) {
-                Text(String(localized: "Unpin Confirmation Message \(title) [Leader Actions 6214]"))
+                Text(UnpinWords.message(String(localized: "Unpin Confirmation Message \(title) [Leader Actions 6214]"), model: model))
             } else {
                 Text(String(localized: "Pin Confirmation Message [Leader Actions 6214]"))
             }

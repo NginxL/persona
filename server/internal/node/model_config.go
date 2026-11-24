@@ -6,21 +6,26 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"os"
 	"strings"
 
 	"github.com/nwverse/persona/server/internal/assistantwire"
 	"github.com/nwverse/persona/server/internal/i18n"
+	"github.com/nwverse/persona/server/internal/modelhttp"
 	"github.com/nwverse/persona/server/internal/proto"
 	"github.com/nwverse/persona/server/internal/rpc"
 )
 
 // modelExecution is non-secret per-turn execution metadata supplied by the hub.
 type modelExecution struct {
-	Strict           bool   `json:",omitempty"` // scheduled execution never substitutes another model or agent
-	TaskInstructions string `json:"-"`
-	TaskAttachments  string `json:"-"`
-	Model            string
-	Effort           string
+	Source modelhttp.Source `json:"ModelSource,omitzero"`
+
+	CodexEffortFallback string `json:"-"`
+	Strict              bool   `json:",omitempty"` // scheduled execution never substitutes another model or agent
+	TaskInstructions    string `json:"-"`
+	TaskAttachments     string `json:"-"`
+	Model               string
+	Effort              string
 	// Speed is a one-shot Agent start choice, resolved only against the actual terminal dispatch. FastMode is the
 	// Claude Code form. Neither is kept as process state or included in the execution fingerprint.
 	Speed    string `json:"-"`
@@ -37,8 +42,9 @@ type modelExecution struct {
 	// Runtime preserves an external request's raw value for admission only. Ordinary conversations always use the CLI.
 	Runtime string `json:"-"`
 	// StartupContext belongs to the current external send only and is cleared before recording a process model.
-	StartupContext context.Context `json:"-"`
-	IsMain         bool            `json:",omitempty"`
+	StartupContext context.Context               `json:"-"`
+	CacheKeepalive *assistantwire.CacheKeepalive `json:",omitempty"`
+	IsMain         bool                          `json:",omitempty"`
 	// FollowsSetting: a leader/background supervisor conversation the manager sends with the main chat's model
 	// setting (#7824). With IsMain it identifies conversations that must keep their configured model;
 	// worker Agent conversations have neither flag.
@@ -60,6 +66,13 @@ type modelExecution struct {
 	// OriginKnown distinguishes a manager's explicit ordinary (empty-origin) decision from a pre-upgrade record whose
 	// origin is unknown. It is likewise authorization metadata and never changes the execution fingerprint.
 	OriginKnown bool `json:"-"`
+	// InboxPermissionMode is the manager-only AI-twin choice, carried separately from caller-controlled mode. It is
+	// per-send authorization metadata, never a model fingerprint or a persisted process setting.
+	InboxPermissionMode string `json:"-"`
+	// DefaultPermissionMode is the manager's current default, not a per-conversation choice. PermissionModeExplicit
+	// distinguishes an explicit generic mode on a start/send; neither changes the execution fingerprint.
+	DefaultPermissionMode  string `json:"-"`
+	PermissionModeExplicit bool   `json:"-"`
 	// OriginDecisionRequired marks the RPC and autonomous-resume entries that must fail closed on a legacy unknown
 	// origin. Trusted in-process model plumbing may carry an existing execution without setting this per-entry gate.
 	OriginDecisionRequired bool `json:"-"`
@@ -195,7 +208,11 @@ func assistantOriginToolPolicy(origin string) string {
 // included): another process, resumed on the same conversation.
 func (n *Node) executionFingerprint(launcher string, m modelExecution) string {
 	m.Origin = assistantOriginToolPolicy(m.Origin)
+	m.Source.Session = "" // assigned once by the runtime; it cannot change the process role
 	raw, _ := json.Marshal(m)
+	if hosts := os.Getenv(modelhttp.SourceHostsEnv); hosts != "" {
+		raw = append(raw, []byte(hosts)...)
+	}
 	if l, ok := n.managedCatalog(launcher); ok { // as named: the same before and after a withheld one's pull (its Rev)
 		v, _ := json.Marshal(l)
 		raw = append(raw, v...)
@@ -231,23 +248,28 @@ func (n *Node) assistantModel(ctx context.Context, id string) (string, modelExec
 // hub and an unavailable answer all leave a pre-upgrade record unknown and must not start it with ordinary tools.
 func (n *Node) assistantModelDecision(ctx context.Context, id string) (string, modelExecution, bool) {
 	var res struct {
-		Launcher                string                   `json:"launcher"`
-		Model                   string                   `json:"model"`
-		Effort                  string                   `json:"effort"`
-		ModelFingerprint        string                   `json:"model_fingerprint"`
-		Runtime                 string                   `json:"runtime"`
-		IsMain                  bool                     `json:"is_main"`
-		MainCompact             int                      `json:"main_compact_window"`
-		External                *proto.ExternalExecution `json:"external"`
-		Origin                  string                   `json:"origin"`
-		OriginKnown             bool                     `json:"origin_known"`
-		SupervisionInstructions *string                  `json:"supervision_instructions"`
-		ClaudeInteractive       bool                     `json:"claude_interactive"` // #10058: a send's own flag, here for starts no send makes
+		Source                  modelhttp.Source              `json:"model_source"`
+		Launcher                string                        `json:"launcher"`
+		Model                   string                        `json:"model"`
+		Effort                  string                        `json:"effort"`
+		ModelFingerprint        string                        `json:"model_fingerprint"`
+		Runtime                 string                        `json:"runtime"`
+		CacheKeepalive          *assistantwire.CacheKeepalive `json:"cache_keepalive"`
+		IsMain                  bool                          `json:"is_main"`
+		MainCompact             int                           `json:"main_compact_window"`
+		External                *proto.ExternalExecution      `json:"external"`
+		Origin                  string                        `json:"origin"`
+		OriginKnown             bool                          `json:"origin_known"`
+		InboxPermissionMode     string                        `json:"inbox_permission_mode"`
+		DefaultPermissionMode   string                        `json:"default_permission_mode"`
+		PermissionModeExplicit  bool                          `json:"permission_mode_explicit"`
+		SupervisionInstructions *string                       `json:"supervision_instructions"`
+		ClaudeInteractive       bool                          `json:"claude_interactive"` // #10058: a send's own flag, here for starts no send makes
 	}
 	if n.peer == nil || n.peer.Call(ctx, "assistant.model", map[string]any{"session_id": id}, &res) != nil {
 		return "", modelExecution{}, false
 	}
-	return res.Launcher, (modelExecution{Model: res.Model, Effort: res.Effort, UseEffort: res.ModelFingerprint != "", Fingerprint: res.ModelFingerprint, Runtime: n.externalRuntime(id, res.Launcher, res.Runtime), IsMain: res.IsMain, MainCompactWindow: res.MainCompact, External: res.External, Origin: res.Origin, OriginKnown: res.OriginKnown, Interactive: res.ClaudeInteractive}).withSupervision(res.SupervisionInstructions), true
+	return res.Launcher, (modelExecution{Source: res.Source, Model: res.Model, Effort: res.Effort, UseEffort: res.ModelFingerprint != "", Fingerprint: res.ModelFingerprint, Runtime: n.externalRuntime(id, res.Launcher, res.Runtime), IsMain: res.IsMain, CacheKeepalive: res.CacheKeepalive, MainCompactWindow: res.MainCompact, External: res.External, Origin: res.Origin, OriginKnown: res.OriginKnown, InboxPermissionMode: res.InboxPermissionMode, DefaultPermissionMode: res.DefaultPermissionMode, PermissionModeExplicit: res.PermissionModeExplicit, Interactive: res.ClaudeInteractive}).withSupervision(res.SupervisionInstructions), true
 }
 
 // strictProtectedExecution identifies owner-facing conversations without changing worker/task retry policy.

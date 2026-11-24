@@ -246,14 +246,50 @@ describe("a request of one piece, and nothing queued", () => {
     expect(opened).toEqual(["req"]);
   });
 
-  it("draws one card or both for every root × piece, open requests in the graph and finished ones under Done", () => {
+  it("keeps a mixed completed and cancelled request out of Done, with its cancellation reason and real progress", () => {
+    render([
+      todo("req", { title: "Search page", done_at: at(30) }),
+      todo("piece", { title: "API fields", part_of: "req", done_at: at(20) }),
+      todo("cancelled", { title: "Old UI", part_of: "req", done_at: at(10), cancelled_at: at(10), cancelled_reason: "Owner chose another approach" }),
+    ]);
+    expect(host.querySelector("[data-graph-done]")).toBeNull();
+    expect(host.querySelector("[data-graph-all-done]")).toBeNull();
+    const fold = host.querySelector<HTMLButtonElement>("[data-graph-cancelled] > button");
+    expect(fold).not.toBeNull();
+    act(() => fold!.click());
+    act(() => host.querySelector<HTMLButtonElement>('[data-cancelled-request="todo:req"] > button')!.click());
+    expect(card("piece").dataset.state).toBe("done");
+    expect(card("cancelled").dataset.state).toBe("cancelled");
+    expect(card("cancelled").textContent).toContain("Cancelled");
+    expect(card("cancelled").textContent).toContain("Owner chose another approach");
+    expect(host.querySelector('[data-root="todo:req"]')!.textContent).toContain("1 of 2 done");
+  });
+
+  it("shows a cancelled parent separately from its ordinary Done piece and keeps the cancellation reason", () => {
+    render([
+      todo("req", { title: "Search page", done_at: at(30), cancelled_at: at(30), cancelled_reason: "Owner stopped the request" }),
+      todo("piece", { title: "Search page", part_of: "req", done_at: at(20) }),
+    ]);
+    expect(host.querySelector("[data-graph-done]")).toBeNull();
+    const fold = host.querySelector<HTMLButtonElement>("[data-graph-cancelled] > button");
+    expect(fold).not.toBeNull();
+    act(() => fold!.click());
+    act(() => host.querySelector<HTMLButtonElement>('[data-cancelled-request="todo:req"] > button')!.click());
+    const root = host.querySelector('[data-root="todo:req"]');
+    expect(root).not.toBeNull(); // a cancelled root never merges into an ordinary Done piece
+    expect(root!.textContent).toContain("Cancelled: Owner stopped the request");
+    expect(root!.textContent).not.toContain("1 of 1 done");
+    expect(card("piece").dataset.state).toBe("done");
+  });
+
+  it("draws one card or both for every root × piece, with active, Done and Cancelled requests in their own folds", () => {
     const all = MERGE_CASES.map((c) => caseTodos(c, at, todo));
     const opened: string[] = [];
     act(() => root.render(
       <TodoRequestGraph todos={all.flatMap((x) => x.todos)} lookup={makeSessionLookup(all.flatMap((x) => x.sessions))} machines={machines} onOpenTodo={(id) => opened.push(id)} />,
     ));
-    const fold = host.querySelector<HTMLButtonElement>("[data-graph-done] > button")!;
-    act(() => fold.click());
+    act(() => host.querySelector<HTMLButtonElement>("[data-graph-done] > button")!.click());
+    act(() => host.querySelector<HTMLButtonElement>("[data-graph-cancelled] > button")!.click());
     const check = (c: MergeCase, block: Element) => {
       const k = caseKey(c);
       const rootCard = block.querySelector<HTMLButtonElement>("[data-root]");
@@ -269,9 +305,10 @@ describe("a request of one piece, and nothing queued", () => {
     for (const c of MERGE_CASES) {
       const k = caseKey(c);
       const block = host.querySelector(`[data-request="todo:r-${k}"]`);
-      const active = block && !block.closest("[data-graph-done]") ? block : null;
-      const row = host.querySelector(`[data-done-request="todo:r-${k}"]`);
-      expect({ active: Boolean(active), done: Boolean(row) }, caseName(c)).toEqual({ active: !c.done, done: c.done });
+      const active = block && !block.closest("[data-graph-done], [data-graph-cancelled]") ? block : null;
+      const row = host.querySelector(`[data-done-request="todo:r-${k}"], [data-cancelled-request="todo:r-${k}"]`);
+      expect({ active: Boolean(active), done: Boolean(row?.matches("[data-done-request]")), cancelled: Boolean(row?.matches("[data-cancelled-request]")) }, caseName(c))
+        .toEqual({ active: !c.done && !c.cancelled, done: c.done, cancelled: Boolean(c.cancelled) });
       if (active) check(c, active);
       else {
         act(() => row!.querySelector<HTMLButtonElement>("button")!.click());

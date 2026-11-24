@@ -332,7 +332,7 @@ Only through the hub tunnel, no new externally exposed port:
   moving box (`MOCK_COMPUTER=ready MOCK_SCREEN=fake MOCK_SCREEN_ANIMATE=1`) `node web/e2e/screen-stats.mjs <web URL>`:
   off by default, measured numbers in light and dark, kept per Mac, no round-trip line while the hub's health is refused.
 
-### Native client in the App (#1343, `apple/Persona/Screen/`)
+### Native client in the App (#1343, `apple/Modules/ScreenShare/`, the `screen-share` module)
 
 Picture in Picture (`AVSampleBufferDisplayLayer`) needs access to each frame, which noVNC in a WebView can't provide, so the App speaks RFB itself. The web still uses noVNC.
 
@@ -383,7 +383,7 @@ Picture in Picture (`AVSampleBufferDisplayLayer`) needs access to each frame, wh
 
 ### Measuring (#3067)
 
-`server/cmd/vncbench` measures a VNC server the way the app uses it, from the computer the server runs on (straight to
+`server/internal/modules/screen-share/vncbench` measures a VNC server the way the app uses it, from the computer the server runs on (straight to
 `127.0.0.1:5900`) or through a hub's relay (`-hub <hub address> -machine <id>`, a device token in `VNCBENCH_TOKEN`).
 It signs in with the login keychain's generic password `persona-vnc-bench` (added once with
 `security add-generic-password -s persona-vnc-bench -a "$(id -un)" -w`) or `VNCBENCH_ACCOUNT` / `VNCBENCH_PASSWORD`, never printing it.
@@ -723,7 +723,7 @@ Android don't decode video yet: they keep RFB and show no switcher.
   closes, no frame or heartbeat for 3 s, a decoding error, or the Mac locks (`paused`), then retries video after 30 s
   doubling to 5 min, and at once when the helper reports the Mac unlocked (`resumed`). While capture is paused the
   helper sends no heartbeat, so the 3 s rule waits for `resumed`.
-- **iPhone** (`apple/Persona/Screen/ScreenVideoStream.swift`, `ScreenVideoLink.swift`): the iOS app links
+- **iPhone** (`apple/Modules/ScreenShare/ScreenVideoStream.swift`, `ScreenVideoLink.swift`): the iOS app links
   `PersonaScreenKit` (Mac and Vision compile the same sources and leave video out). `ScreenVideoStream` sends `start`,
   decodes each frame with VideoToolbox as it comes (the helper never reorders), sends a `report` for every frame, and
   shows only the newest picture of a burst. `ScreenVideoLink`, one per RFB session, opens the stream once RFB is
@@ -822,8 +822,10 @@ Android don't decode video yet: they keep RFB and show no switcher.
 
 The live screen, picture and input together, takes the fastest route the phone can reach: the same local network,
 Tailscale, or the hub relay ([#6398](https://github.com/nwverse/persona/issues/6398) has the design). The node's end is
-`internal/screenlink`. What is in place: the screen session over the hub's relays and the node's direct routes; the
-iPhone's side comes next.
+`internal/modules/screen-share/screenlink`, part of the `screen-share` module, which the node reaches through
+`internal/node/screenport` (`docs/architecture/core-and-modules.md` "The node's modules"); a node built without the
+module offers no session and the phone keeps the plain relayed stream. What is in place: the screen session over the
+hub's relays and the node's direct routes; the iPhone's side comes next.
 
 - **Screen session**: a phone that asks for one gets its RFB stream and its video stream as channels of one session at
   the node, keyed by `pair`: channel 1 is the connection to Screen Sharing (still followed for the login, so video binds
@@ -903,7 +905,7 @@ iPhone's side comes next.
   another VPN or a proxy); `PathPolicy` picks the route: by minimum round trip, a direct route winning a tie with the
   relay; at the stream's start at once, later only after 10 s healthy, a clear gain and 20 s since the last move; a lost
   route left at once and a degraded one (loss ≥ 5 %, or 50 ms over its own floor for 5 s) when another is healthy.
-- **The iPhone** (`apple/Persona/Screen/ScreenLinkRoutes.swift`): on since the acceptance before real devices passed
+- **The iPhone** (`apple/Modules/ScreenShare/ScreenLinkRoutes.swift`): on since the acceptance before real devices passed
   (a simulator on a real hub and a Mac on the same LAN: the direct route within a second, back on the relay 2.6 s after
   it went silent and 1.1 s after it broke, direct again 39 s after it recovered, every typed byte once). Still to check
   on a real iPhone: the Tailscale route, the local network question, and Wi-Fi to cellular. `ScreenRoutes.releaseEnabled`
@@ -963,7 +965,7 @@ iPhone's side comes next.
 On a direct route (same network or Tailscale), the live screen's video can ride a UDP flow instead of the route's TLS
 connection, so a lost packet delays only the frame it belongs to, usually by no round trip, and never slows the stream
 by itself ([#7873](https://github.com/nwverse/persona/issues/7873) has the design and the shaped-link numbers it rests
-on). The node's end is `internal/screenlink` (`udp.go`, `udp_wire.go`, `rs.go`); the shared cases are
+on). The node's end is `internal/modules/screen-share/screenlink` (`udp.go`, `udp_wire.go`, `rs.go`); the shared cases are
 `spec/fixtures/screen-udp`. In place: the node's side, offered in `paths` as `"udp": 1`, and the iPhone's, on in
 release builds since the live check against a real Mac (`ScreenRoutes.udpReleaseEnabled` turns it off again; a DEBUG
 build launched with -showScreenUDP has it either way). No setting of its own: the Settings switch for direct routes

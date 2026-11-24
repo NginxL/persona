@@ -108,7 +108,8 @@ async function settle(page) {
 }
 
 async function recording(theme, lang = "en", width = 1440) {
-  const s = JSON.parse(await readFile(new URL(`../src/i18n/locales/${lang}/knowledge-kbdetail.json`, import.meta.url), "utf8"));
+  // the knowledge page's strings and the recording module's (src/modules/recording, #13407)
+  const s = Object.assign(...await Promise.all(["knowledge-kbdetail", "recording"].map(async (ns) => JSON.parse(await readFile(new URL(`../src/i18n/locales/${lang}/${ns}.json`, import.meta.url), "utf8")))));
   const { ctx, state } = await context(theme, lang, width);
   const errors = [];
   const page = await ctx.newPage();

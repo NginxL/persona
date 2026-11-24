@@ -8,6 +8,7 @@ import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.withContext
 import kotlin.coroutines.CoroutineContext
 import kotlin.coroutines.EmptyCoroutineContext
+import persona.core.inbox.*
 
 /** This repository with [pins] on every request made through it (an item page's own); null pins: this one. */
 fun InboxRepository.pinned(pins: ManagerPins?): InboxRepository =

@@ -88,6 +88,25 @@ import Testing
         #expect(sidebar.root == .conversation && sidebar.roots.forgotten)
     }
 
+    /// A To-dos place picked in the sidebar (#10465): To-dos shows that place at its root, replaced without a pop, whether
+    /// it was in front (with a to-do pushed on it) or kept a to-do while the conversation was; the to-do kept belonged
+    /// to the place before.
+    @Test func aToDosPlacePickedStartsToDosAtItsRootWithoutAPop() {
+        let todos = SidebarPageRoot.page(ShellRoute.todos)
+        var roots = SidebarPageRoots()
+        _ = roots.select(todos, path: NavigationPath())
+        let inFront = roots.select(todos, path: path("kyoto"), fresh: true)
+        #expect(inFront.move == .switchRoot && !inFront.animated && inFront.path.isEmpty)
+        _ = roots.select(.conversation, path: path("kyoto"))
+        #expect(roots.keeps(todos))
+        let back = roots.select(todos, path: NavigationPath(), fresh: true)
+        #expect(back.move == .switchRoot && back.path.isEmpty && !roots.keeps(todos))
+        // To-dos picked again without another place: the tab-bar rule as before.
+        _ = roots.select(.conversation, path: path("x"))
+        _ = roots.select(todos, path: NavigationPath())
+        #expect(roots.select(todos, path: path("y")).move == .popToRoot)
+    }
+
     @Test func theShadedPlaceFollowsTheRoot() {
         #expect(inbox.place == .inbox && recordings.place == .recordings)
         #expect(SidebarPageRoot.page(SidebarRoute.health).place == .health)

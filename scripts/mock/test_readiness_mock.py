@@ -8,7 +8,7 @@ cannot make) with docs/protocol/protocol.md. Each case runs its own mock hub on 
 import json
 import os
 from pathlib import Path
-import socket
+import re
 import subprocess
 import tempfile
 import time
@@ -28,27 +28,33 @@ START_ELSEWHERE = {"offline"}
 
 class Hub:
     def __init__(self, **env):
-        with socket.socket() as sock:
-            sock.bind(("127.0.0.1", 0))
-            port = sock.getsockname()[1]
-        self.base = "http://127.0.0.1:%d" % port
-        self.log = tempfile.TemporaryFile()
+        # PORT=0: the hub binds a free port itself and prints it. A port chosen here and handed over could be taken by
+        # another suite of the shard in between, and the calls then reached that suite's hub with its own scenario.
+        self.base = None
+        self.log = tempfile.NamedTemporaryFile(prefix="readiness-mock-", suffix=".log")
         clean = {k: v for k, v in os.environ.items() if not k.startswith("MOCK_")}
         self.process = subprocess.Popen(["python3", "-I", str(HERE / "mock_hub.py")],
-                                        env=dict(clean, PORT=str(port), **env), stdout=self.log, stderr=self.log)
+                                        env=dict(clean, **env, PORT="0"), stdout=self.log, stderr=self.log)
         for _ in range(100):
             if self.process.poll() is not None:
-                self.log.seek(0)
-                out = self.log.read().decode(errors="replace")[-2000:]
+                out = self.output()[-2000:]
                 self.log.close()
                 raise RuntimeError("mock hub exited: %s" % out)
-            try:
-                with urlopen(self.base + "/api/v1/health", timeout=1):
-                    return
-            except (URLError, TimeoutError, ConnectionError):
-                time.sleep(0.1)
+            if self.base is None:
+                found = re.search(r"^mock hub on 127\.0\.0\.1:(\d+)$", self.output(), re.M)
+                self.base = "http://127.0.0.1:%s" % found.group(1) if found else None
+            if self.base is not None:
+                try:
+                    with urlopen(self.base + "/api/v1/health", timeout=1):
+                        return
+                except (URLError, TimeoutError, ConnectionError):
+                    pass
+            time.sleep(0.1)
         self.stop()
         raise RuntimeError("mock hub startup timed out")
+
+    def output(self):
+        return Path(self.log.name).read_text(errors="replace")
 
     def stop(self):
         self.process.terminate()

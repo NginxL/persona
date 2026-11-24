@@ -2,15 +2,110 @@ package update
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
 )
+
+func TestDevelopmentProgressAcceptsOnlySafeFields(t *testing.T) {
+	input := `{"phase":"building","step":"go_build","step_index":5,"step_total":6,"item_label":"personad (linux-amd64)","item_done":0,"item_total":4,"percent":0,"extra":"/private/fixture"}
+{"phase":"building","step":"go_build","step_index":5,"step_total":6,"item_label":"personad (/private/fixture)"}
+{"phase":"building","step":"private-fixture","step_index":5,"step_total":6}
+{"phase":"backing_up","step":"go_build","step_index":5,"step_total":6}
+{"phase":"building","step":"go_build","step_index":5,"step_total":6,"bytes_done":-1}
+{"phase":"building","step":"go_build","step_index":5,"step_total":6,"percent":101}
+child process output
+{"phase":"building","step":"manifest","step_index":6,"step_total":6,"elapsed_seconds":42}`
+	var events []DevelopmentProgress
+	readDevelopmentProgress(strings.NewReader(input), "build", false, func(p DevelopmentProgress) {
+		events = append(events, p)
+	})
+	if len(events) != 2 || events[0].ItemLabel != "personad (linux-amd64)" || events[0].Percent == nil || *events[0].Percent != 0 ||
+		events[1].Step != "manifest" || events[1].ElapsedSeconds != 42 {
+		t.Fatalf("wrong events: %+v", events)
+	}
+	encoded, err := json.Marshal(events)
+	if err != nil || strings.Contains(string(encoded), "private-fixture") || strings.Contains(string(encoded), "/private/fixture") {
+		t.Fatal("unrecognized fields were exposed", err)
+	}
+}
+
+func TestDevelopmentRequestStreamsBackupWhileHelperRuns(t *testing.T) {
+	python, err := exec.LookPath("python3")
+	if runtime.GOOS == "windows" || err != nil {
+		t.Skip("development helper needs Python on Unix")
+	}
+	dir := t.TempDir()
+	tools := t.TempDir()
+	t.Setenv("PATH", tools+string(os.PathListSeparator)+os.Getenv("PATH"))
+	dumped := filepath.Join(dir, "continue")
+	t.Setenv("FIXTURE_DUMP_CONTINUE", dumped)
+	const private = "fixture-private-diagnostic"
+	for name, source := range map[string]string{
+		"pg_dump": `import os, pathlib, sys, time
+print("fixture-private-diagnostic", file=sys.stderr)
+print('{"phase":"backing_up","step":"archive_programs","step_index":4,"step_total":5,"bytes_done":999999}')
+pathlib.Path(sys.argv[-1]).write_bytes(b"PGDMP" + bytes(1024))
+deadline = time.monotonic() + 5
+while not pathlib.Path(os.environ["FIXTURE_DUMP_CONTINUE"]).exists():
+    if time.monotonic() >= deadline:
+        sys.exit("no live bytes received")
+    time.sleep(0.02)
+`,
+		"pg_restore": "print('fixture dump inventory')\n",
+	} {
+		if err := os.WriteFile(filepath.Join(tools, name), []byte("#!"+python+"\n"+source), 0700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	home := t.TempDir()
+	if err := os.WriteFile(filepath.Join(home, "hub.json"), []byte(`{"database_url":"fixture-db"}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	binary := filepath.Join(dir, "personad")
+	if err := os.WriteFile(binary, []byte("fixture binary"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	var saved DevelopmentBackup
+	var events []DevelopmentProgress
+	var gateErr error
+	err = DevelopmentRequest(ctx, &DevelopmentConfig{Backup: DevelopmentBackupConfig{Builtin: true}}, dir, "backup",
+		map[string]any{"runtime": home, "candidate": DevelopmentCandidate{Commit: strings.Repeat("a", 40)},
+			"platform": "linux-amd64", "executables": map[string]string{"personad": binary}},
+		&saved, func(p DevelopmentProgress) {
+			events = append(events, p)
+			if p.Step == "database_dump" && p.ItemDone != nil && *p.ItemDone == 0 &&
+				p.BytesDone != nil && *p.BytesDone == 1029 && p.BytesPerSecond != nil && *p.BytesPerSecond > 0 {
+				gateErr = os.WriteFile(dumped, nil, 0600)
+			}
+		})
+	if err != nil || gateErr != nil || saved.ID == "" || saved.Retained != 1 {
+		t.Fatalf("backup result %+v, helper %v, gate %v", saved, err, gateErr)
+	}
+	if _, err := os.Stat(dumped); err != nil {
+		t.Fatal("did not receive live dump bytes", err)
+	}
+	encoded, err := json.Marshal(events)
+	for _, value := range []string{private, home, binary, "999999", "fixture-db"} {
+		if strings.Contains(string(encoded), value) {
+			t.Fatal("private command output reached the progress pipe")
+		}
+	}
+	log, logErr := os.ReadFile(filepath.Join(dir, "backup.log"))
+	if err != nil || logErr != nil || !strings.Contains(string(log), private) {
+		t.Fatalf("missing private diagnostics: %v, %v", err, logErr)
+	}
+}
 
 func TestDevelopmentWebRecoveryPreservesConflictingOverride(t *testing.T) {
 	dir := t.TempDir()
@@ -119,5 +214,33 @@ func TestDevelopmentAdoptionFenceMatchesExactAttempt(t *testing.T) {
 	}
 	if got := DevelopmentNumber(p.ToBuild); got <= p.ToBuild {
 		t.Fatal("non-monotonic identity", got)
+	}
+}
+
+func TestDevelopmentBackupConfigCoordinatedRequiresHooksForExtras(t *testing.T) {
+	cases := []struct {
+		name        string
+		cfg         DevelopmentBackupConfig
+		coordinated bool
+		external    bool
+	}{
+		{"builtin default", DevelopmentBackupConfig{}, true, false},
+		{"external hooks", DevelopmentBackupConfig{Quiesce: []string{"p"}, Resume: []string{"r"}}, true, true},
+		{"only quiesce", DevelopmentBackupConfig{Quiesce: []string{"p"}}, false, false},
+		{"only resume", DevelopmentBackupConfig{Resume: []string{"r"}}, false, false},
+		{"extra database without hooks", DevelopmentBackupConfig{ExtraDatabases: []string{"postgres://localhost/extra"}}, false, false},
+		{"extra root without hooks", DevelopmentBackupConfig{ExtraRoots: []string{"/srv/extra"}}, false, false},
+		{"extra database with hooks", DevelopmentBackupConfig{Quiesce: []string{"p"}, Resume: []string{"r"}, ExtraDatabases: []string{"postgres://localhost/extra"}}, true, true},
+		{"extra root with hooks", DevelopmentBackupConfig{Quiesce: []string{"p"}, Resume: []string{"r"}, ExtraRoots: []string{"/srv/extra"}}, true, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := tc.cfg.Coordinated(); got != tc.coordinated {
+				t.Fatalf("Coordinated() = %v, want %v", got, tc.coordinated)
+			}
+			if got := tc.cfg.ExternalQuiesce(); got != tc.external {
+				t.Fatalf("ExternalQuiesce() = %v, want %v", got, tc.external)
+			}
+		})
 	}
 }

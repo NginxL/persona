@@ -3,6 +3,8 @@ package node
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -39,7 +41,7 @@ type machinePathResolution struct {
 	SensitiveReason string
 }
 
-// handleMachineFiles dispatches read-only machine file browser RPCs.
+// handleMachineFiles dispatches machine file browser RPCs (Phase 6A reads + Phase 6B writes/uploads).
 func (n *Node) handleMachineFiles(ctx context.Context, method string, params json.RawMessage) (any, error) {
 	switch method {
 	case proto.MethodMachineFilesRoots:
@@ -70,6 +72,55 @@ func (n *Node) handleMachineFiles(ctx context.Context, method string, params jso
 			return nil, fmt.Errorf("bad params: %w", err)
 		}
 		return n.machineFileChunk(req)
+	case proto.MethodMachineFilesWrite:
+		var req proto.MachineFileWriteRequest
+		if err := json.Unmarshal(params, &req); err != nil {
+			return nil, fmt.Errorf("bad params: %w", err)
+		}
+		return n.machineFileWrite(req)
+	case proto.MethodMachineFilesCreate:
+		var req proto.MachineFileCreateRequest
+		if err := json.Unmarshal(params, &req); err != nil {
+			return nil, fmt.Errorf("bad params: %w", err)
+		}
+		return n.machineFileCreate(req)
+	case proto.MethodMachineFilesRename:
+		var req proto.MachineFileRenameRequest
+		if err := json.Unmarshal(params, &req); err != nil {
+			return nil, fmt.Errorf("bad params: %w", err)
+		}
+		return n.machineFileRename(req)
+	case proto.MethodMachineFilesDelete:
+		var req proto.MachineFileDeleteRequest
+		if err := json.Unmarshal(params, &req); err != nil {
+			return nil, fmt.Errorf("bad params: %w", err)
+		}
+		return n.machineFileDelete(req)
+	case proto.MethodMachineFilesUploadBegin:
+		var req proto.MachineFileUploadBeginRequest
+		if err := json.Unmarshal(params, &req); err != nil {
+			return nil, fmt.Errorf("bad params: %w", err)
+		}
+		return n.machineFileUploadBegin(req)
+	case proto.MethodMachineFilesUploadChunk:
+		var req proto.MachineFileUploadChunkRequest
+		if err := json.Unmarshal(params, &req); err != nil {
+			return nil, fmt.Errorf("bad params: %w", err)
+		}
+		return n.machineFileUploadChunk(req)
+	case proto.MethodMachineFilesUploadEnd:
+		var req proto.MachineFileUploadEndRequest
+		if err := json.Unmarshal(params, &req); err != nil {
+			return nil, fmt.Errorf("bad params: %w", err)
+		}
+		return n.machineFileUploadEnd(req)
+	case proto.MethodMachineFilesUploadAbort:
+		var req proto.MachineFileUploadAbortRequest
+		if err := json.Unmarshal(params, &req); err != nil {
+			return nil, fmt.Errorf("bad params: %w", err)
+		}
+		n.machineFileUploadAbort(req)
+		return map[string]any{"aborted": true}, nil
 	default:
 		return nil, fmt.Errorf("unknown method %s", method)
 	}
@@ -665,16 +716,6 @@ func (n *Node) machineFileList(req proto.MachineFileListRequest) (*proto.Machine
 
 // machineFilePreview returns a bounded UTF-8 text preview (hard cap 2 MiB) or refuses raw text for binaries.
 func (n *Node) machineFilePreview(req proto.MachineFilePreviewRequest) (*proto.MachineFilePreviewResponse, error) {
-	res, err := n.resolveMachinePath(req.Path, req.Root, machinePathOptions{})
-	if err != nil {
-		return nil, err
-	}
-	f, st, err := n.openSafeMachineRegularFile(res)
-	if err != nil {
-		return nil, err
-	}
-	defer f.Close()
-
 	maxBytes := req.MaxBytes
 	if maxBytes <= 0 {
 		maxBytes = proto.MachineFilePreviewDefaultBytes
@@ -683,69 +724,118 @@ func (n *Node) machineFilePreview(req proto.MachineFilePreviewRequest) (*proto.M
 		maxBytes = proto.MachineFilePreviewMaxBytes
 	}
 
-	size := st.Size()
-	want := min(size, int64(maxBytes))
-	buf := make([]byte, want)
-	var nr int
-	if want > 0 {
-		nr, err = f.ReadAt(buf, 0)
-		if err != nil && !errors.Is(err, io.EOF) {
+	const maxPreviewAttempts = 2
+	for attempt := 0; attempt < maxPreviewAttempts; attempt++ {
+		res, err := n.resolveMachinePath(req.Path, req.Root, machinePathOptions{})
+		if err != nil {
 			return nil, err
 		}
-		buf = buf[:nr]
-	}
-
-	more := size > int64(len(buf))
-	// Handle virtual zero-size regular files (e.g. /proc/cpuinfo) safely within maxBytes.
-	if size == 0 {
-		vbuf, verr := io.ReadAll(io.LimitReader(f, int64(maxBytes)+1))
-		if verr == nil && len(vbuf) > 0 {
-			if len(vbuf) > maxBytes {
-				more = true
-				vbuf = vbuf[:maxBytes]
-			}
-			buf = vbuf
-			size = int64(len(buf))
+		f, st, err := n.openSafeMachineRegularFile(res)
+		if err != nil {
+			return nil, err
 		}
-	}
 
-	binary, mime := isBinaryPreviewContent(res.DisplayPath, buf, false, more)
-	resp := &proto.MachineFilePreviewResponse{
-		Path:            res.DisplayPath,
-		CanonicalPath:   res.CanonicalPath,
-		Name:            filepath.Base(res.DisplayPath),
-		Size:            size,
-		Mode:            st.Mode().String(),
-		Perm:            uint32(st.Mode().Perm()),
-		ModTime:         st.ModTime().UTC(),
-		Mime:            mime,
-		Revision:        fileRevision(st),
-		Symlink:         res.Symlink,
-		LinkTarget:      res.LinkTarget,
-		Sensitive:       res.Sensitive,
-		SensitiveReason: res.SensitiveReason,
-		Binary:          binary,
-		BytesRead:       int64(len(buf)),
-		Truncated:       more,
-		MaxBytes:        maxBytes,
-	}
-	if binary {
+		size := st.Size()
+		want := min(size, int64(maxBytes))
+		buf := make([]byte, want)
+		var nr int
+		var readErr error
+		if want > 0 {
+			nr, readErr = f.ReadAt(buf, 0)
+			if readErr != nil && !errors.Is(readErr, io.EOF) {
+				_ = f.Close()
+				return nil, readErr
+			}
+			buf = buf[:nr]
+		}
+
+		more := size > int64(len(buf))
+		virtualZero := false
+		// Handle virtual zero-size regular files (e.g. /proc/cpuinfo) safely within maxBytes.
+		if size == 0 {
+			vbuf, verr := io.ReadAll(io.LimitReader(f, int64(maxBytes)+1))
+			if verr == nil && len(vbuf) > 0 {
+				virtualZero = true
+				if len(vbuf) > maxBytes {
+					more = true
+					vbuf = vbuf[:maxBytes]
+				}
+				buf = vbuf
+				size = int64(len(buf))
+			}
+		}
+
+		if n.machineFilePreviewAfterRead != nil {
+			n.machineFilePreviewAfterRead()
+		}
+
+		// Verify the file was not modified or replaced while being read so CAS mtime/revision/sha256 match buf.
+		if !virtualZero {
+			after, serr := f.Stat()
+			_ = f.Close()
+			if serr != nil {
+				return nil, serr
+			}
+			pathNow, perr := os.Stat(res.CanonicalPath)
+			if perr != nil {
+				return nil, explainDenied(res.DisplayPath, n.home, perr)
+			}
+			if int64(len(buf)) != want || !sameFileRead(st, after) || !sameFileRead(st, pathNow) {
+				if attempt+1 < maxPreviewAttempts {
+					continue
+				}
+				return nil, machineFileChangedError(pathNow, "")
+			}
+		} else {
+			_ = f.Close()
+		}
+
+		binary, mime := isBinaryPreviewContent(res.DisplayPath, buf, false, more)
+		resp := &proto.MachineFilePreviewResponse{
+			Path:            res.DisplayPath,
+			CanonicalPath:   res.CanonicalPath,
+			Name:            filepath.Base(res.DisplayPath),
+			Size:            size,
+			Mode:            st.Mode().String(),
+			Perm:            uint32(st.Mode().Perm()),
+			ModTime:         st.ModTime().UTC(),
+			Mime:            mime,
+			Revision:        fileRevision(st),
+			EditMaxBytes:    proto.MachineFileEditMaxBytes,
+			Symlink:         res.Symlink,
+			LinkTarget:      res.LinkTarget,
+			Sensitive:       res.Sensitive,
+			SensitiveReason: res.SensitiveReason,
+			Binary:          binary,
+			BytesRead:       int64(len(buf)),
+			Truncated:       more,
+			MaxBytes:        maxBytes,
+		}
+		if binary {
+			return resp, nil
+		}
+
+		if !more && !virtualZero && size <= proto.MachineFileEditMaxBytes {
+			sum := sha256.Sum256(buf)
+			resp.SHA256 = hex.EncodeToString(sum[:])
+			resp.Editable = true
+		}
+
+		text := buf
+		if more {
+			text = trimPartialRune(text)
+			if idx := bytes.LastIndexByte(text, '\n'); idx >= 0 {
+				text = text[:idx+1]
+			}
+		}
+		resp.Text = string(text)
+		resp.BytesRead = int64(len(text))
+		if !strings.HasPrefix(resp.Mime, "text/") && !strings.Contains(resp.Mime, "json") && !strings.Contains(resp.Mime, "xml") {
+			resp.Mime = "text/plain; charset=utf-8"
+		}
 		return resp, nil
 	}
-
-	text := buf
-	if more {
-		text = trimPartialRune(text)
-		if idx := bytes.LastIndexByte(text, '\n'); idx >= 0 {
-			text = text[:idx+1]
-		}
-	}
-	resp.Text = string(text)
-	resp.BytesRead = int64(len(text))
-	if !strings.HasPrefix(resp.Mime, "text/") && !strings.Contains(resp.Mime, "json") && !strings.Contains(resp.Mime, "xml") {
-		resp.Mime = "text/plain; charset=utf-8"
-	}
-	return resp, nil
+	return nil, &rpc.Error{Code: proto.CodeFileChanged, Message: "file changed during preview"}
 }
 
 // machineFileTail reads the last N lines (bounded by MaxBytes) from the end of a file without reading the whole file.

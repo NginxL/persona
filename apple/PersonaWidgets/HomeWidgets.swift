@@ -40,6 +40,7 @@ enum HomeTimeline {
             dates.insert(HomeDays.nextMidnight(after: now))
             if let back = HomeCalendarState.pickEnds(first.calendarSlot, after: now) { dates.insert(back) }
         }
+        if let snapshot { dates.formUnion(HomeHealthTimeline.dates(kind, snapshot: snapshot, after: now)) }
         let later = dates.sorted().map { entry(kind, family: family, at: $0, snapshot: snapshot, calendar: calendar, edit: edit) }
         return Timeline(entries: [first] + later, policy: .never)
     }
@@ -164,4 +165,16 @@ struct ComputersHomeWidget: Widget {
 
 struct HealthHomeWidget: Widget {
     var body: some WidgetConfiguration { HomeWidgetConfiguration.make(.health) }
+}
+
+struct WaterHomeWidget: Widget {
+    var body: some WidgetConfiguration { HomeWidgetConfiguration.make(.water) }
+}
+
+struct ProteinHomeWidget: Widget {
+    var body: some WidgetConfiguration { HomeWidgetConfiguration.make(.protein) }
+}
+
+struct HealthTodayHomeWidget: Widget {
+    var body: some WidgetConfiguration { HomeWidgetConfiguration.make(.healthToday, editing: HealthTodayWidgetEdit.self) }
 }

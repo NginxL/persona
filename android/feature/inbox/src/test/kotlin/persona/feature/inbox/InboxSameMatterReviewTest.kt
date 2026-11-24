@@ -33,6 +33,7 @@ import persona.core.designsystem.LocalAppFeedback
 import persona.core.designsystem.PersonaTheme
 import persona.core.domain.inbox.InboxItem
 import persona.core.navigation.Navigator
+import persona.core.inbox.*
 
 /**
  * The two picker entries on the real event page (review additions for batch ②): a link from the More menu must make the

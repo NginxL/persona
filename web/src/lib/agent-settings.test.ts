@@ -103,12 +103,13 @@ describe("agent settings", () => {
   it("name Claude Code's options in plain words, without the settings-file key (#3599)", () => {
     expect(settingTitle(recap)).toBe("回来时先说进展");
     expect(settingDetail(recap)).toContain("离开 5 分钟");
-    expect(optionText("effortLevel", "xhigh")).toBe("很高");
+    expect(optionText("effortLevel", "xhigh")).toBe("XHigh");
+    expect(optionText("model_reasoning_effort", "ultra")).toBe("Ultra");
     expect(optionText("autoUpdatesChannel", "latest")).toBe("最新版");
     expect(optionText("permissions.defaultMode", "auto")).toBe("自动审批");
     expect(optionText("permissions.defaultMode", "default")).toBe("默认权限");
     // An option or key the web does not know stays as the node wrote it.
-    expect(optionText("effortLevel", "ultra")).toBe("ultra");
+    expect(optionText("effortLevel", "future")).toBe("future");
     expect(optionText("approval_policy", "later")).toBe("later");
     const unknown: AgentSetting = { key: "newThing", title: "新东西", detail: "说明", type: "bool" };
     expect(settingTitle(unknown)).toBe("新东西");
@@ -137,7 +138,7 @@ describe("agent settings", () => {
     expect(valueText(false)).toBe("关");
     expect(valueText(null)).toBe("默认");
     expect(valueText("high")).toBe("high");
-    expect(valueText("high", "effortLevel")).toBe("高");
+    expect(valueText("high", "effortLevel")).toBe("High");
     expect(valueText("stable", "autoUpdatesChannel")).toBe("稳定版");
     expect(AGENT_TEXT.codex.path).toBe("codex-settings");
     expect(AGENT_TEXT.claude.footer).toContain("~/.claude/settings.json");

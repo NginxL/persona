@@ -4,11 +4,12 @@ import PersonaWire
 
 /// Replays the shared fixture spec/fixtures/needs-you/cases.json as the app reads it: the Agents tab's Needs You is one
 /// row per session that waits for the user (its cards under it), the section and the filter list those rows, and the
-/// badge counts the rows `expected.badge_rows` names, which leave out the muted agents, quiet tasks' agents and
-/// directory-hidden sessions. A case marked as iOS's known difference (`known_differences.ios`) is asserted at today's
-/// value; a mark on any client must name a decision and change what that client is asserted at. With the counts report
-/// switch on (spec/fixtures/counts/README.md, "Lane reports"), each case's rows and badge also go to the iOS lane's
-/// report.
+/// badge counts the rows `expected.badge_rows` names, which leave out the muted agents, quiet tasks' agents,
+/// directory-hidden sessions and sessions whose only cards are held; the section's header and the filter count
+/// `expected.header`. A case marked as iOS's known difference (`known_differences.ios`) is asserted at today's value; a
+/// mark on any client must name a decision and change what that client is asserted at. With the counts report switch
+/// on (spec/fixtures/counts/README.md, "Lane reports"), each case's badge and header, with their rows, also go to the
+/// iOS lane's report.
 @MainActor
 final class AgentsNeedsYouFixtureTests: XCTestCase {
     private static let repo = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
@@ -43,9 +44,11 @@ final class AgentsNeedsYouFixtureTests: XCTestCase {
         var rows: [Row]
         var badgeRows: [Row]
         var badge: Int
+        /// What the section's header and the Needs You filter show.
+        var header: Int
 
         enum CodingKeys: String, CodingKey {
-            case rows, badge
+            case rows, badge, header
             case badgeRows = "badge_rows"
         }
     }
@@ -62,9 +65,10 @@ final class AgentsNeedsYouFixtureTests: XCTestCase {
         var rows: [Row]?
         var badgeRows: [Row]?
         var badge: Int?
+        var header: Int?
 
         enum CodingKeys: String, CodingKey {
-            case rows, badge
+            case rows, badge, header
             case badgeRows = "badge_rows"
         }
     }
@@ -116,6 +120,7 @@ final class AgentsNeedsYouFixtureTests: XCTestCase {
             if let rows = mark.replace.rows { today.rows = rows }
             if let rows = mark.replace.badgeRows { today.badgeRows = rows }
             if let badge = mark.replace.badge { today.badge = badge }
+            if let header = mark.replace.header { today.header = header }
             XCTAssertNotEqual(today, c.expected, "\(c.name): \(lane)'s known difference changes nothing")
             if lane == "ios" { want = today }
         }
@@ -126,7 +131,7 @@ final class AgentsNeedsYouFixtureTests: XCTestCase {
         let data = try Data(contentsOf: Self.repo.appending(path: "spec/fixtures/needs-you/cases.json"))
         let fixture = try JSON.decoder.decode(Fixture.self, from: data)
         XCTAssertEqual(fixture.version, 1)
-        XCTAssertGreaterThanOrEqual(fixture.cases.count, 14)
+        XCTAssertGreaterThanOrEqual(fixture.cases.count, 16)
         var lines: [ReportLine] = []
         for c in fixture.cases {
             let i = c.input
@@ -145,6 +150,9 @@ final class AgentsNeedsYouFixtureTests: XCTestCase {
             let rows = AgentsNeedsYou.rows(cards: AgentsNeedsYou.cards(pending, session: { byKey[$0] }), waiting: waiting)
             let sectionRows = rows.map { Row(id: $0.id, cards: $0.cards.map(\.id)) }
             XCTAssertEqual(sectionRows, want.rows, c.name)
+            // The section's header and the Needs You filter count these rows (`ChatsView.agentList`, `lookup.needsYou`).
+            let header = rows.count
+            XCTAssertEqual(header, want.header, "\(c.name): header")
             // As countBadges counts it: every pending card but a directory-hidden session's (`directoryVisibleInteractions`;
             // the Persona tab's cards are its own place), every waiting session.
             func place(_ key: SessionKey) -> TabBadges.Place {
@@ -158,7 +166,7 @@ final class AgentsNeedsYouFixtureTests: XCTestCase {
             XCTAssertEqual(badgeRows, want.badgeRows, "\(c.name): badge rows")
             XCTAssertEqual(badge, want.badge, "\(c.name): badge")
             lines.append(ReportLine(name: c.name, surface: "agents_tab", value: badge, keys: badgeRows))
-            lines.append(ReportLine(name: c.name, surface: "agents_section", value: sectionRows.count, keys: sectionRows))
+            lines.append(ReportLine(name: c.name, surface: "agents_section", value: header, keys: sectionRows))
         }
         try Self.report(lines)
     }

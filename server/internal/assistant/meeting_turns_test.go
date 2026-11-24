@@ -13,82 +13,156 @@ import (
 	"github.com/nwverse/persona/server/internal/proto"
 )
 
-// A meeting turn's mark: sent, started, ended, then gone when the next turn starts; the user speaking during it makes
-// the rest of the turn theirs; an end before its start is an earlier turn's; it survives a restart, and a batch whose
-// turn never started runs out.
-func TestMeetingTurnLifecycle(t *testing.T) {
-	st := &memStore{}
-	f := newFakeHub()
-	s := newServiceOn(t, f, st)
-	now := time.Date(2026, 11, 10, 7, 0, 0, 0, time.UTC)
-	s.attend.turns.now = func() time.Time { return now }
-	running := func(s *Service) bool {
+// The user's own message to an attending Agent ends its meeting turn: the hub says so only for assistant
+// conversations, so the Agent's hooks do (a UserPromptSubmit whose prompt the node says is the user's). The batch's
+// own prompt, a relay's, a node too old to say and a replayed event from before the batch leave it; so does any prompt
+// to a Persona chat, whose user's messages the hub tells (UserSpoke).
+func TestMeetingTurnAgentUserPrompt(t *testing.T) {
+	needsRecordingModule(t) // a path of the recording module's
+	ft := newFleetTestNoStore(t)
+	fastDone(ft)
+	s, ctx := ft.s, context.Background()
+	work := proto.Session{SessionID: "s1", Title: "Fix login", Cwd: "/code/app", Agent: "claude", Status: proto.StatusWorking, PaneID: "p1",
+		UpdatedAt: time.Now()}
+	done := work
+	done.Status = proto.StatusDone
+	ft.sessions("mac", done)
+	sent, err := s.meetingTurnSent("mac", "s1", "rec", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ft.sessions("mac", work)
+	running := func(session string) bool {
 		t.Helper()
-		on, err := s.meetingTurnRunning(context.Background(), "server", "c1")
+		on, err := s.meetingTurnRunning(ctx, "mac", session)
 		if err != nil {
 			t.Fatal(err)
 		}
 		return on
 	}
-	if _, err := s.meetingTurnSent("server", "c1", "rec", false); err != nil {
+	prompt := func(session string, fields map[string]any) {
+		p := map[string]any{"session_id": session, "event": "UserPromptSubmit"}
+		maps.Copy(p, fields)
+		ft.event("mac", "hook.event", p)
+	}
+	prompt("s1", map[string]any{"prompt_source": "meeting"})
+	prompt("s1", map[string]any{"prompt_source": "conversation"})
+	prompt("s1", map[string]any{"prompt_source": "notification"})
+	prompt("s1", nil)
+	prompt("s1", map[string]any{"prompt_source": "user", "spooled_at": sent.Add(-time.Second), "spool_id": "e1"})
+	ft.event("mac", "hook.event", map[string]any{"session_id": "s1", "event": "Stop", "prompt_source": "user"})
+	if !running("s1") || !s.meetingTurnNow("mac", "s1") {
+		t.Fatal("a prompt that is not the user's own ended the meeting turn")
+	}
+	if _, refused := s.meetingRefuses(ctx, "mac", "s1", "todo_add", false); !refused {
+		t.Fatal("the meeting turn's tools are not refused")
+	}
+	prompt("s1", map[string]any{"prompt_source": "user"})
+	if running("s1") || s.meetingTurnNow("mac", "s1") {
+		t.Fatal("the user's own message did not end the Agent's meeting turn")
+	}
+	if _, refused := s.meetingRefuses(ctx, "mac", "s1", "todo_add", false); refused {
+		t.Fatal("the user's turn is refused tools")
+	}
+
+	_, _ = s.meetingTurnSent("mac", "c1", "rec", true)
+	s.meetingTurnStarted("mac", "c1", true)
+	prompt("c1", map[string]any{"prompt_source": "user"})
+	if !running("c1") {
+		t.Fatal("a Persona chat's hook ended its meeting turn (the hub tells its user's messages)")
+	}
+}
+
+// A meeting's batch is no one speaking in the conversation: a supervision hold stays (its turns stay unpushed), as it
+// does not for another send; and the batch carries its source in the text.
+func TestMeetingSendKeepsSupervisionHold(t *testing.T) {
+	f := newFakeHub().withMachine()
+	f.known["c1"] = true
+	s := newTestService(t, f)
+	ctx := context.Background()
+	s.holdPushes(ctx, "c1")
+	src := &proto.MessageSource{Kind: proto.SourceMeeting, Title: "Design review"}
+	if err := s.call(ctx, "server", DeviceAssistantSend, map[string]any{"session_id": "c1", "text": "lines", "message_source": src, "resume_only": true}, nil); err != nil {
 		t.Fatal(err)
 	}
-	if !running(s) || s.meetingTurnNow("server", "c1") {
-		t.Fatal("a batch sent: its turn may run (tools), but the hooks of the turn before are not its")
+	if !s.supervising("c1") {
+		t.Fatal("a meeting's batch released the supervision hold")
 	}
-	if s.meetingTurnEnded("server", "c1") {
-		t.Fatal("an end before the batch's turn started is the turn before's")
+	f.mu.Lock()
+	sent := f.sends[len(f.sends)-1]
+	f.mu.Unlock()
+	if text, _ := sent["text"].(string); !strings.Contains(text, `kind="message-source"`) || !strings.Contains(text, `"kind":"meeting"`) || sent["client_msg_id"] != nil {
+		t.Fatalf("sent %+v", sent)
 	}
-	if !s.meetingTurnStarted("server", "c1", false) || !s.meetingTurnNow("server", "c1") || !running(s) {
-		t.Fatal("the batch's turn started")
+	if err := s.call(ctx, "server", DeviceAssistantSend, map[string]any{"session_id": "c1", "text": "hi", "resume_only": true}, nil); err != nil {
+		t.Fatal(err)
 	}
-	if !s.meetingTurnStarted("server", "c1", false) {
-		t.Fatal("the same turn seen again (a reconnect) is still the meeting's")
+	if s.supervising("c1") {
+		t.Fatal("another send kept the hold")
 	}
-	// A restart: the mark is read back.
-	again := newServiceOn(t, f, st)
-	again.attend.turns.now = s.attend.turns.now
-	if !again.meetingTurnNow("server", "c1") || !running(again) {
-		t.Fatal("the mark did not survive a restart")
-	}
-	if !s.meetingTurnEnded("server", "c1") || running(s) || !s.meetingTurnNow("server", "c1") {
-		t.Fatal("ended: no tools are its any more, the hooks of its end still find it")
-	}
-	if !s.meetingTurnEnded("server", "c1") {
-		t.Fatal("the same end, told twice, says the same")
-	}
-	s.meetingTurnUserSpoke("server", "c1") // the user's message after it: the hooks of its end still find it
-	if !s.meetingTurnNow("server", "c1") {
-		t.Fatal("the user's next message dropped an ended mark before its turn started")
-	}
-	if s.meetingTurnStarted("server", "c1", true) || s.meetingTurnNow("server", "c1") {
-		t.Fatal("the turn after a meeting turn is not one")
-	}
+}
 
-	// The user speaks while the batch's turn runs: from there on it is theirs.
-	_, _ = s.meetingTurnSent("server", "c1", "rec", false)
-	s.meetingTurnStarted("server", "c1", true)
-	s.meetingTurnUserSpoke("server", "c1")
-	if running(s) || s.meetingTurnNow("server", "c1") {
-		t.Fatal("the user's own message did not end the meeting turn")
+// A meeting turn in the fleet: no finished push and nothing of it left in the turn tracker, so the next turn of the
+// user's is timed and pushed as ever; no triage, no channel mirror, never the task's.
+func TestMeetingTurnIsSideExchange(t *testing.T) {
+	needsRecordingModule(t) // a path of the recording module's
+	ft := newFleetTestNoStore(t)
+	fastDone(ft)
+	s := ft.s
+	work := proto.Session{SessionID: "s1", Title: "Fix login", Cwd: "/code/app", Agent: "claude", Status: proto.StatusWorking, PaneID: "p1",
+		UpdatedAt: time.Now()}
+	done := work
+	done.Status, done.LastText = proto.StatusDone, "Notes: Ada keeps the cap."
+	ft.sessions("mac", done)
+	if _, err := s.meetingTurnSent("mac", "s1", "rec", false); err != nil {
+		t.Fatal(err)
 	}
+	ft.sessions("mac", work)
+	if !s.meetingTurnNow("mac", "s1") || !s.quietTaskTurn(context.Background(), "mac", "s1") {
+		t.Fatal("the batch's turn is not a meeting turn")
+	}
+	ft.sessions("mac", done)
+	if got := ft.pushesOf(assistantwire.NotifyDone, 1, 300*time.Millisecond); len(got) != 0 {
+		t.Fatalf("a meeting turn was pushed: %+v", got)
+	}
+	if !s.turnsBook().startOf("mac/s1").IsZero() {
+		t.Fatal("the meeting turn is in the turn tracker")
+	}
+	s.triageTurn(context.Background(), s.newWorkView(context.Background()), "mac", done)
+	s.work.mu.Lock()
+	_, tried := s.work.tried[[2]string{"mac", "s1"}]
+	s.work.mu.Unlock()
+	if tried {
+		t.Fatal("the meeting turn was triaged")
+	}
+	// The user's own turn after it is pushed as ever.
+	user := work
+	user.UpdatedAt = time.Now()
+	ft.sessions("mac", user)
+	if s.meetingTurnNow("mac", "s1") {
+		t.Fatal("the turn after the meeting turn is one")
+	}
+	answer := user
+	answer.Status, answer.LastText = proto.StatusDone, "Fixed."
+	ft.sessions("mac", answer)
+	if got := ft.pushesOf(assistantwire.NotifyDone, 1, 2*time.Second); len(got) != 1 || got[0].Body != "Fixed." {
+		t.Fatalf("the user's turn: %+v", got)
+	}
+}
 
-	// A send that was refused takes its mark back; one whose turn never starts runs out.
-	at, _ := s.meetingTurnSent("server", "c1", "rec", false)
-	s.meetingTurnUnsent("server", "c1", at)
-	if running(s) {
-		t.Fatal("a refused batch left its mark")
-	}
-	_, _ = s.meetingTurnSent("server", "c1", "rec", false)
-	now = now.Add(meetingTurnStartWithin + time.Second)
-	if running(s) || s.meetingTurnStarted("server", "c1", true) {
-		t.Fatal("a batch whose turn never started still marks the next one")
+// A turn started by a meeting's batch is a side exchange to the task's completion: it never hands the task over.
+func TestTaskTurnSourceMeeting(t *testing.T) {
+	text := "<persona-context kind=\"message-source\" title=\"\">\n{\"kind\":\"meeting\",\"title\":\"Design review\"}\n</persona-context>\nNew lines"
+	_, source := taskTurnSource(Todo{}, []proto.Item{{Role: "user", Kind: proto.KindText, Text: text}})
+	if source != "meeting" {
+		t.Fatalf("source %q", source)
 	}
 }
 
 // During a meeting turn of the calling session only the reading tools work; every other hub tool says it needs the
 // user's own message. Another session, or the same once the turn ended, is not affected.
 func TestMeetingTurnToolsOnlyRead(t *testing.T) {
+	needsRecordingModule(t) // a path of the recording module's
 	f := newFakeHub()
 	f.hello.Locale = "en"
 	s := newTestService(t, f)
@@ -127,6 +201,7 @@ func TestMeetingTurnToolsOnlyRead(t *testing.T) {
 // gets only the reading tools, mail_save_attachment's bytes included. Nothing changes with no Agent's meeting turn
 // running: none, a Persona chat's (its calls name it), another machine's, or one that ended.
 func TestMeetingTurnSessionlessAgentCalls(t *testing.T) {
+	needsRecordingModule(t) // a path of the recording module's
 	f := newFakeHub()
 	f.hello.Locale = "en"
 	s := newTestService(t, f)
@@ -193,70 +268,12 @@ func TestMeetingTurnSessionlessAgentCalls(t *testing.T) {
 	}
 }
 
-// The user's own message to an attending Agent ends its meeting turn: the hub says so only for assistant
-// conversations, so the Agent's hooks do (a UserPromptSubmit whose prompt the node says is the user's). The batch's
-// own prompt, a relay's, a node too old to say and a replayed event from before the batch leave it; so does any prompt
-// to a Persona chat, whose user's messages the hub tells (UserSpoke).
-func TestMeetingTurnAgentUserPrompt(t *testing.T) {
-	ft := newFleetTestNoStore(t)
-	fastDone(ft)
-	s, ctx := ft.s, context.Background()
-	work := proto.Session{SessionID: "s1", Title: "Fix login", Cwd: "/code/app", Agent: "claude", Status: proto.StatusWorking, PaneID: "p1",
-		UpdatedAt: time.Now()}
-	done := work
-	done.Status = proto.StatusDone
-	ft.sessions("mac", done)
-	sent, err := s.meetingTurnSent("mac", "s1", "rec", false)
-	if err != nil {
-		t.Fatal(err)
-	}
-	ft.sessions("mac", work)
-	running := func(session string) bool {
-		t.Helper()
-		on, err := s.meetingTurnRunning(ctx, "mac", session)
-		if err != nil {
-			t.Fatal(err)
-		}
-		return on
-	}
-	prompt := func(session string, fields map[string]any) {
-		p := map[string]any{"session_id": session, "event": "UserPromptSubmit"}
-		maps.Copy(p, fields)
-		ft.event("mac", "hook.event", p)
-	}
-	prompt("s1", map[string]any{"prompt_source": "meeting"})
-	prompt("s1", map[string]any{"prompt_source": "conversation"})
-	prompt("s1", map[string]any{"prompt_source": "notification"})
-	prompt("s1", nil)
-	prompt("s1", map[string]any{"prompt_source": "user", "spooled_at": sent.Add(-time.Second), "spool_id": "e1"})
-	ft.event("mac", "hook.event", map[string]any{"session_id": "s1", "event": "Stop", "prompt_source": "user"})
-	if !running("s1") || !s.meetingTurnNow("mac", "s1") {
-		t.Fatal("a prompt that is not the user's own ended the meeting turn")
-	}
-	if _, refused := s.meetingRefuses(ctx, "mac", "s1", "todo_add", false); !refused {
-		t.Fatal("the meeting turn's tools are not refused")
-	}
-	prompt("s1", map[string]any{"prompt_source": "user"})
-	if running("s1") || s.meetingTurnNow("mac", "s1") {
-		t.Fatal("the user's own message did not end the Agent's meeting turn")
-	}
-	if _, refused := s.meetingRefuses(ctx, "mac", "s1", "todo_add", false); refused {
-		t.Fatal("the user's turn is refused tools")
-	}
-
-	_, _ = s.meetingTurnSent("mac", "c1", "rec", true)
-	s.meetingTurnStarted("mac", "c1", true)
-	prompt("c1", map[string]any{"prompt_source": "user"})
-	if !running("c1") {
-		t.Fatal("a Persona chat's hook ended its meeting turn (the hub tells its user's messages)")
-	}
-}
-
 // A meeting turn whose end was not seen ends all the same, or its attendee stays busy for the rest of the meeting:
 // the manager restarted while it ran and the first list shows the session stopped (whenever that was); it was
 // interrupted, or stopped on a card; and none runs past meetingTurnRunMax. A row from before the batch, or one still
 // waiting on a card, ends nothing.
 func TestMeetingTurnStuckEnds(t *testing.T) {
+	needsRecordingModule(t) // a path of the recording module's
 	ft := newFleetTest(t)
 	fastDone(ft)
 	s, ctx := ft.s, context.Background()
@@ -295,8 +312,12 @@ func TestMeetingTurnStuckEnds(t *testing.T) {
 	if running(again.s) || !again.s.meetingTurnNow("mac", "s1") {
 		t.Fatal("a meeting turn that ended during a restart still runs (or its end was dropped before its hooks ran)")
 	}
-	if _, v := again.s.attendeeCheck(ctx, ref, time.Now().Add(time.Minute)); v != "" {
-		t.Fatalf("the attendee after the restart: %q", v)
+	// The attendee after the restart: its computer and row as the module's attendee check reads them, and no turn
+	// settling (its verdict on them is the module's TestAttendeeVerdict).
+	if h := (recordingHost{again.s}); h.TurnSettling(ref.MachineID, ref.SessionID, time.Now().Add(time.Minute)) {
+		t.Fatal("the attendee after the restart is settling")
+	} else if _, found, err := h.AttendeeRow(ctx, ref.MachineID, ref.SessionID); err != nil || !found {
+		t.Fatalf("the attendee's row after the restart: %v %v", found, err)
 	}
 
 	// Interrupted, and stopped on a card: the end the lists show is not working → done.
@@ -347,7 +368,7 @@ func TestMeetingTurnStuckEnds(t *testing.T) {
 
 	// None runs past meetingTurnRunMax.
 	now := time.Now()
-	s.attend.turns.now = func() time.Time { return now }
+	recClock(s, func() time.Time { return now })
 	_, _ = s.meetingTurnSent("mac", "s1", "rec", false)
 	s.meetingTurnStarted("mac", "s1", true)
 	now = now.Add(meetingTurnRunMax - time.Minute)
@@ -357,90 +378,5 @@ func TestMeetingTurnStuckEnds(t *testing.T) {
 	now = now.Add(2 * time.Minute)
 	if running(s) || !s.meetingTurnNow("mac", "s1") {
 		t.Fatal("a meeting turn stuck running past its bound")
-	}
-}
-
-// A meeting's batch is no one speaking in the conversation: a supervision hold stays (its turns stay unpushed), as it
-// does not for another send; and the batch carries its source in the text.
-func TestMeetingSendKeepsSupervisionHold(t *testing.T) {
-	f := newFakeHub().withMachine()
-	f.known["c1"] = true
-	s := newTestService(t, f)
-	ctx := context.Background()
-	s.holdPushes(ctx, "c1")
-	src := &proto.MessageSource{Kind: proto.SourceMeeting, Title: "Design review"}
-	if err := s.call(ctx, "server", DeviceAssistantSend, map[string]any{"session_id": "c1", "text": "lines", "message_source": src, "resume_only": true}, nil); err != nil {
-		t.Fatal(err)
-	}
-	if !s.supervising("c1") {
-		t.Fatal("a meeting's batch released the supervision hold")
-	}
-	f.mu.Lock()
-	sent := f.sends[len(f.sends)-1]
-	f.mu.Unlock()
-	if text, _ := sent["text"].(string); !strings.Contains(text, `kind="message-source"`) || !strings.Contains(text, `"kind":"meeting"`) || sent["client_msg_id"] != nil {
-		t.Fatalf("sent %+v", sent)
-	}
-	if err := s.call(ctx, "server", DeviceAssistantSend, map[string]any{"session_id": "c1", "text": "hi", "resume_only": true}, nil); err != nil {
-		t.Fatal(err)
-	}
-	if s.supervising("c1") {
-		t.Fatal("another send kept the hold")
-	}
-}
-
-// A meeting turn in the fleet: no finished push and nothing of it left in the turn tracker, so the next turn of the
-// user's is timed and pushed as ever; no triage, no channel mirror, never the task's.
-func TestMeetingTurnIsSideExchange(t *testing.T) {
-	ft := newFleetTestNoStore(t)
-	fastDone(ft)
-	s := ft.s
-	work := proto.Session{SessionID: "s1", Title: "Fix login", Cwd: "/code/app", Agent: "claude", Status: proto.StatusWorking, PaneID: "p1",
-		UpdatedAt: time.Now()}
-	done := work
-	done.Status, done.LastText = proto.StatusDone, "Notes: Ada keeps the cap."
-	ft.sessions("mac", done)
-	if _, err := s.meetingTurnSent("mac", "s1", "rec", false); err != nil {
-		t.Fatal(err)
-	}
-	ft.sessions("mac", work)
-	if !s.meetingTurnNow("mac", "s1") || !s.quietTaskTurn(context.Background(), "mac", "s1") {
-		t.Fatal("the batch's turn is not a meeting turn")
-	}
-	ft.sessions("mac", done)
-	if got := ft.pushesOf(assistantwire.NotifyDone, 1, 300*time.Millisecond); len(got) != 0 {
-		t.Fatalf("a meeting turn was pushed: %+v", got)
-	}
-	if !s.turnsBook().startOf("mac/s1").IsZero() {
-		t.Fatal("the meeting turn is in the turn tracker")
-	}
-	s.triageTurn(context.Background(), s.newWorkView(context.Background()), "mac", done)
-	s.work.mu.Lock()
-	_, tried := s.work.tried[[2]string{"mac", "s1"}]
-	s.work.mu.Unlock()
-	if tried {
-		t.Fatal("the meeting turn was triaged")
-	}
-	// The user's own turn after it is pushed as ever.
-	user := work
-	user.UpdatedAt = time.Now()
-	ft.sessions("mac", user)
-	if s.meetingTurnNow("mac", "s1") {
-		t.Fatal("the turn after the meeting turn is one")
-	}
-	answer := user
-	answer.Status, answer.LastText = proto.StatusDone, "Fixed."
-	ft.sessions("mac", answer)
-	if got := ft.pushesOf(assistantwire.NotifyDone, 1, 2*time.Second); len(got) != 1 || got[0].Body != "Fixed." {
-		t.Fatalf("the user's turn: %+v", got)
-	}
-}
-
-// A turn started by a meeting's batch is a side exchange to the task's completion: it never hands the task over.
-func TestTaskTurnSourceMeeting(t *testing.T) {
-	text := "<persona-context kind=\"message-source\" title=\"\">\n{\"kind\":\"meeting\",\"title\":\"Design review\"}\n</persona-context>\nNew lines"
-	_, source := taskTurnSource(Todo{}, []proto.Item{{Role: "user", Kind: proto.KindText, Text: text}})
-	if source != "meeting" {
-		t.Fatalf("source %q", source)
 	}
 }

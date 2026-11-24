@@ -53,6 +53,7 @@ import java.io.File
 import java.time.Instant
 import java.time.ZoneOffset
 import java.util.Locale
+import persona.core.inbox.*
 
 /** The shared showcase as real list and detail pages, with its wire fields and clock, in every style and appearance. */
 @RunWith(AndroidJUnit4::class)

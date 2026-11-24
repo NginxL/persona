@@ -55,10 +55,10 @@ afterEach(() => {
 });
 
 /** The reply with the bar, once its code is in (it loads after the first screen). */
-async function draw({ actions = chat, itemId = "r1#0" as string | null, usage = undefined as string | undefined, usageMs = undefined as number | undefined } = {}) {
+async function draw({ actions = chat, itemId = "r1#0" as string | null, usage = undefined as string | undefined, usageMs = undefined as number | undefined, ttftMs = undefined as number | undefined } = {}) {
   await act(async () => root.render(
     <ChatActionsContext.Provider value={actions}>
-      <MessageActions text="All done." ts="2026-11-12T09:59:01Z" itemId={itemId ?? undefined} bar usage={usage} usageMs={usageMs}>
+      <MessageActions text="All done." ts="2026-11-12T09:59:01Z" itemId={itemId ?? undefined} bar usage={usage} usageMs={usageMs} ttftMs={ttftMs}>
         <p data-message>All done.</p>
       </MessageActions>
     </ChatActionsContext.Provider>,
@@ -309,6 +309,17 @@ describe("what the exchange cost, after the time", () => {
     expect(cardLines()).toEqual(["这条回复约 $0.35，按公开价格估算"]);
     await draw({ actions: { ...chat, assistant: true }, usage: usageKey({ entries: [tokens({ model: "claude-haiku-5-5", out: 10 })] }) });
     expect(usageText()).toBeNull();
+  });
+
+  it("includes TTFT in the Agent turn usage card when observed, while keeping Persona cards plain", async () => {
+    await draw({ usage: OPUS_TURN, usageMs: 65_000, ttftMs: 420 });
+    act(() => usageText()!.click());
+    expect(cardLines()).toContain("首字延迟 420 ms");
+    act(() => void document.body.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })));
+
+    await draw({ actions: { ...chat, assistant: true }, usage: OPUS_TURN, usageMs: 65_000, ttftMs: 420 });
+    act(() => usageText()!.click());
+    expect(cardLines()).toEqual(["这条回复约 $0.35，按公开价格估算"]);
   });
 });
 

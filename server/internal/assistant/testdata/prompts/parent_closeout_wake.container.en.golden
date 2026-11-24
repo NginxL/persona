@@ -1,0 +1,7 @@
+All 2 part_of child to-dos are now done.
+   Completed children:
+   - "Implement API" (todo_child_1; PRs: https://github.com/example/app/pull/101)
+   - "Add UI tests" (todo_child_2; PRs: https://github.com/example/app/pull/102)
+   Parent notes:
+   Track API + UI rollout
+   Closeout rule: if this parent is a pure aggregation container grouping those subtasks, close it with todo_complete and summarize the result for the owner. If this parent represents a personal item awaiting the owner's review, keep it open for the owner instead of silently auto-completing it.

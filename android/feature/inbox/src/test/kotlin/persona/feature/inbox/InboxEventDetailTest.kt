@@ -25,6 +25,7 @@ import persona.core.navigation.AppTab
 import persona.core.navigation.ChatRoute
 import persona.core.navigation.Navigator
 import persona.core.navigation.RouteSource
+import persona.core.inbox.*
 
 /** The detail's header, current-state fallbacks and the timeline interaction, separate from the showcase captures. */
 @RunWith(AndroidJUnit4::class)

@@ -4,6 +4,7 @@ import java.io.IOException
 import java.nio.file.Files
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.*
@@ -12,6 +13,8 @@ import org.junit.Assert.*
 import org.junit.Before
 import org.junit.Test
 import persona.core.contracts.Machine
+import persona.core.contracts.DirectionsEvent
+import persona.core.contracts.ExternalDirection
 import persona.core.contracts.Session
 import persona.core.contracts.SessionKey
 import persona.core.contracts.api.*
@@ -307,6 +310,125 @@ class AssistantSwitchIsolationTest {
         assertFalse(repository.assistant.value.conversations.any { it.sessionId == "null-created" })
     }
 
+    @Test fun treeAndLeadersFallbackPublishOutsideDirectionTargets() = runTest {
+        val treeTransport = Transport().apply {
+            tree = { buildJsonObject { put("directions", buildJsonArray {
+                add(buildJsonObject {
+                    put("id", "dir-outside")
+                    put("name", "Outside work")
+                    put("external", true)
+                    put("machine_id", "work")
+                    put("session_id", "agent")
+                })
+            }) } }
+        }
+        val treeRepository = RealAssistantRepository(Connection(treeTransport), Sessions(), backgroundScope)
+        runCurrent()
+        assertEquals(listOf("dir-outside"), treeRepository.assistant.value.leaders)
+        assertEquals(ExternalDirection("work", "agent"), treeRepository.assistant.value.externalDirection("dir-outside"))
+
+        AssistantManagerChoice.pick("work")
+        val fallbackTransport = Transport().apply {
+            read = { manager -> buildJsonObject {
+                config(manager).forEach { (key, value) -> put(key, value) }
+                put("leaders", buildJsonArray { add("dir-outside"); add("dir-watching") })
+            } }
+            leaders = { buildJsonObject { put("leaders", buildJsonArray {
+                add(buildJsonObject {
+                    put("id", "dir-outside")
+                    put("name", "Outside work")
+                    put("external", true)
+                    put("machine_id", "work")
+                    put("session_id", "agent")
+                })
+                add(buildJsonObject {
+                    put("id", "dir-watching")
+                    put("external", true)
+                })
+            }) } }
+        }
+        val fallbackRepository = RealAssistantRepository(Connection(fallbackTransport), Sessions(), backgroundScope)
+        runCurrent()
+        val snapshot = fallbackRepository.assistant.value
+        assertNull(snapshot.directionTree)
+        assertEquals(listOf("dir-outside", "dir-watching"), snapshot.leaders)
+        assertEquals("Outside work", snapshot.directionNames["dir-outside"])
+        assertEquals(ExternalDirection("work", "agent"), snapshot.externalDirection("dir-outside"))
+        assertEquals(ExternalDirection(), snapshot.externalDirection("dir-watching"))
+        assertNull(snapshot.externalDirection("dir-watching")?.target)
+    }
+
+    @Test fun offlineRestartRestoresOutsideDirectionOrderNamesAndTargets() = runTest {
+        val directory = Files.createTempDirectory("assistant-outside-cache").toFile()
+        try {
+            val snapshots = ListSnapshotStore(directory)
+            val online = Transport().apply {
+                tree = { buildJsonObject { put("directions", buildJsonArray {
+                    add(buildJsonObject {
+                        put("id", "dir-outside")
+                        put("name", "Outside work")
+                        put("external", true)
+                        put("machine_id", "work")
+                        put("session_id", "agent")
+                    })
+                    add(buildJsonObject {
+                        put("id", "dir-watching")
+                        put("name", "Watching")
+                        put("external", true)
+                    })
+                }) } }
+            }
+            val repository = RealAssistantRepository(Connection(online), Sessions(), backgroundScope, snapshots)
+            runCurrent()
+            repository.refresh() // also waits for the atomic snapshot write
+            assertEquals(listOf("dir-outside", "dir-watching"), repository.assistant.value.leaders)
+
+            val offline = Transport().apply { read = { throw IOException("offline") } }
+            val restored = RealAssistantRepository(Connection(offline), Sessions(), backgroundScope, snapshots)
+            try {
+                restored.refresh()
+                fail("offline refresh should report failure")
+            } catch (e: IOException) {
+                assertEquals("offline", e.message)
+            }
+            val snapshot = restored.assistant.value
+            assertEquals(listOf("dir-outside", "dir-watching"), snapshot.leaders)
+            assertEquals("Outside work", snapshot.directionNames["dir-outside"])
+            assertEquals("Watching", snapshot.directionNames["dir-watching"])
+            assertEquals(ExternalDirection("work", "agent"), snapshot.externalDirection("dir-outside"))
+            assertEquals(ExternalDirection(), snapshot.externalDirection("dir-watching"))
+            assertNull(snapshot.directionTree) // tree tasks/counts keep their existing uncached behavior
+        } finally {
+            directory.deleteRecursively()
+        }
+    }
+
+    @Test fun aDirectionsPushRereadsOnlyUnknownConversationIds() = runTest {
+        val events = MutableSharedFlow<persona.core.contracts.ServerEvent>()
+        val transport = Transport()
+        transport.tree = { buildJsonObject { put("directions", buildJsonArray {
+            add(buildJsonObject {
+                put("id", "dir-outside")
+                put("name", "Outside work")
+                put("external", true)
+            })
+        }) } }
+        val repository = RealAssistantRepository(Connection(transport), Sessions(), backgroundScope, events = events)
+        runCurrent()
+        assertEquals(1, transport.readOwners.size)
+        events.emit(DirectionsEvent)
+        runCurrent()
+        assertEquals("an outside id is intentionally absent from conversations", 1, transport.readOwners.size)
+
+        transport.tree = { buildJsonObject { put("directions", buildJsonArray {
+            add(buildJsonObject { put("id", "new-conversation"); put("name", "New direction") })
+        }) } }
+        events.emit(DirectionsEvent)
+        runCurrent()
+        assertEquals("an unknown nonexternal id may be a new conversation", 2, transport.readOwners.size)
+        assertEquals(listOf("new-conversation"), repository.assistant.value.leaders)
+    }
+
     private class Connection(transport: InboxAssistantTransport) : InboxAssistantConnection {
         override val current = MutableStateFlow<InboxAssistantTransport?>(transport)
     }
@@ -318,6 +440,8 @@ class AssistantSwitchIsolationTest {
     private class Transport : InboxAssistantTransport {
         override val scope = "scope"
         var read: suspend (String?) -> JsonObject = { config(it, recentTaskChats = recentTaskChats) }
+        var tree: suspend (String?) -> JsonObject = { throw UnsupportedOperationException("Direction tree unavailable") }
+        var leaders: suspend (String?) -> JsonObject = { buildJsonObject { } }
         var recentTaskChats: Boolean? = null
         val creates = mutableListOf<String?>()
         val readOwners = mutableListOf<String?>()
@@ -327,6 +451,8 @@ class AssistantSwitchIsolationTest {
             return read(manager?.takeUnless { it == "assistant" })
         }
         override suspend fun assistant() = read(null)
+        override suspend fun directionsTreeOf(manager: String?) = tree(manager)
+        override suspend fun assistantLeadersOf(manager: String?) = leaders(manager)
         override suspend fun createConversationOf(manager: String?, main: Boolean, launcher: String?): JsonObject {
             createOwners += manager
             val normalized = manager?.takeUnless { it == "assistant" }

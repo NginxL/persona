@@ -32,6 +32,7 @@ import persona.core.domain.inbox.InboxItem
 import persona.core.domain.sort.AgentPreferences
 import java.time.Instant
 import java.time.ZoneOffset
+import persona.core.inbox.*
 
 /** Boundaries that must not be inferred from the long-row happy path alone. */
 @RunWith(AndroidJUnit4::class)
@@ -85,7 +86,7 @@ class InboxReportedAdversarialTest {
         val nodes = rule.onAllNodesWithText(text, useUnmergedTree = true).fetchSemanticsNodes()
         assertEquals("The original must have exactly one exact-text node", 1, nodes.size)
         val layouts = mutableListOf<TextLayoutResult>()
-        nodes.single().config[SemanticsActions.GetTextLayoutResult].action!!(layouts)
+        val _ = nodes.single().config[SemanticsActions.GetTextLayoutResult].action!!(layouts)
         return layouts.single()
     }
 

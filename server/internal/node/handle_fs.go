@@ -2,11 +2,12 @@ package node
 
 // The fs.* methods (Node.handle, #8089); see handle_file.go.
 const (
-	methodFsStat    = "fs.stat"
-	methodFsList    = "fs.list"
-	methodFsFind    = "fs.find"
-	methodFsWatch   = "fs.watch"
-	methodFsChanged = "fs.changed" // the node's notification to the hub when a watched folder changes
+	methodFsStat     = "fs.stat"
+	methodFsList     = "fs.list"
+	methodFsTaskList = "fs.task.list"
+	methodFsFind     = "fs.find"
+	methodFsWatch    = "fs.watch"
+	methodFsChanged  = "fs.changed" // the node's notification to the hub when a watched folder changes
 )
 
 // fsStatParams is fs.stat's request (files_info.go); Detail asks for the Info sheet's fields.

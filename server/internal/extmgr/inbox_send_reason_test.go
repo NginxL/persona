@@ -12,10 +12,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/nwverse/persona/server/internal/cliport"
+	"github.com/nwverse/persona/server/internal/cliwire"
+
 	"github.com/nwverse/persona/server/internal/assistantwire"
 	"github.com/nwverse/persona/server/internal/connector"
-	larkconn "github.com/nwverse/persona/server/internal/connector/larkcli"
-	adapter "github.com/nwverse/persona/server/internal/larkcli"
 	"github.com/nwverse/persona/server/internal/rpc"
 )
 
@@ -52,9 +53,10 @@ func fakeRuns(t *testing.T, runs string) int {
 // sendTestManager is a manager with the lark-cli connector on bin and a send record, whose log is kept.
 func sendTestManager(t *testing.T, bin string, timeout time.Duration) (h *Manager, logs func() string) {
 	t.Helper()
+	needsLarkCLI(t) // its sends go through the lark-cli connector
 	h = newTestManager(t)
 	h.connectors = connector.NewRegistry(nil)
-	if err := h.addConnector(larkconn.New(adapter.Config{Bin: bin, Timeout: timeout})); err != nil {
+	if err := h.addConnector(cliport.NewConnector(cliwire.Config{Bin: bin, Timeout: timeout})); err != nil {
 		t.Fatal(err)
 	}
 	h.store = a2NewSentStore()
@@ -94,6 +96,7 @@ func noSecrets(t *testing.T, what, text string) {
 // nothing of what the CLI printed; the log says the kind, not the words. A refused send went nowhere, so its record is
 // forgotten and the same reply asked again is tried again (#9125).
 func TestInboxReplyFailuresAreCoded(t *testing.T) {
+	needsLarkCLI(t)
 	const chat = "larkcli:chat:oc_example_chat"
 	stderr := func(line string) string { return "echo '" + line + "' >&2\nexit 1" }
 	cases := []struct {
@@ -122,7 +125,7 @@ func TestInboxReplyFailuresAreCoded(t *testing.T) {
 			}
 			h, logs := sendTestManager(t, bin, 5*time.Second)
 			for attempt := 1; attempt <= 2; attempt++ {
-				out, err := sendReply(h, larkconn.ID, c.thread, "send-1")
+				out, err := sendReply(h, cliwire.ConnectorID, c.thread, "send-1")
 				var re *rpc.Error
 				if !errors.As(err, &re) || re.Code != c.code || re.Message == "" || len(out) != 0 {
 					t.Fatalf("attempt %d: %s %#v, want code %s", attempt, out, err, c.code)
@@ -160,7 +163,7 @@ func TestInboxReplyFailuresAreCoded(t *testing.T) {
 		h, _ := sendTestManager(t, bin, time.Second)
 		h.store = failingSendStore{newMemStore()}
 		var re *rpc.Error
-		if _, err := sendReply(h, larkconn.ID, chat, "send-1"); !errors.As(err, &re) || re.Code != assistantwire.CodeInboxSendUnrecorded {
+		if _, err := sendReply(h, cliwire.ConnectorID, chat, "send-1"); !errors.As(err, &re) || re.Code != assistantwire.CodeInboxSendUnrecorded {
 			t.Fatalf("a send whose record could not be written: %#v", err)
 		}
 		noSecrets(t, "the answer", re.Message)
@@ -199,12 +202,13 @@ func TestInboxReplyFailuresAreCoded(t *testing.T) {
 // A send that may have gone out stays in doubt whatever its error says: lark-cli stopped by its own deadline is
 // assistant_in_doubt, never a reason that invites sending again, and the same reply asked again is not sent (#9125).
 func TestInboxReplyCutOffStaysInDoubt(t *testing.T) {
+	needsLarkCLI(t)
 	bin, runs := fakeLarkCLI(t, "exec sleep 5\necho 't-EXAMPLE-SECRET-TOKEN stderr' >&2\nexit 1")
 	h, logs := sendTestManager(t, bin, 200*time.Millisecond)
 	ran := -1
 	for attempt := 1; attempt <= 2; attempt++ {
 		var re *rpc.Error
-		if _, err := sendReply(h, larkconn.ID, "larkcli:chat:oc_example_chat", "send-1"); !errors.As(err, &re) || re.Code != assistantwire.CodeAssistantInDoubt {
+		if _, err := sendReply(h, cliwire.ConnectorID, "larkcli:chat:oc_example_chat", "send-1"); !errors.As(err, &re) || re.Code != assistantwire.CodeAssistantInDoubt {
 			t.Fatalf("attempt %d: %#v, want %s", attempt, err, assistantwire.CodeAssistantInDoubt)
 		}
 		noSecrets(t, "the answer", re.Message)
@@ -225,7 +229,7 @@ func TestInboxReplyCutOffStaysInDoubt(t *testing.T) {
 		noSecrets(t, "the log", l)
 	}
 	// Whatever else wraps them, these are in doubt, not refused.
-	for _, err := range []error{context.DeadlineExceeded, rpc.ErrDropped, &adapter.Error{Kind: adapter.KindTimeout},
+	for _, err := range []error{context.DeadlineExceeded, rpc.ErrDropped, &cliwire.Error{Kind: cliwire.KindTimeout},
 		fmt.Errorf("send: %w", &rpc.Error{Code: assistantwire.CodeAssistantInDoubt, Message: "stderr"})} {
 		if inboxSendOutcome(err) != sendUnknown {
 			t.Errorf("%v is not in doubt", err)

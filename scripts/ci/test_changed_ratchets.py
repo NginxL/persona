@@ -97,10 +97,10 @@ class CheckTests(RepositoryCase):
         self.commit("marked")
         self.assertEqual(self.check(), ([], []))
 
-    def test_sleeps_taken_out_need_the_baseline_lowered_too(self):
+    def test_sleeps_taken_out_merge_with_or_without_the_baseline_lowered(self):
         self.write(GO, go(0))
         self.commit("no more sleeps")
-        self.assertEqual(self.check(), ([sleep_ratchet.under_message(GO, 0, 1)], []))
+        self.assertEqual(self.check(), ([], []))
         self.baselines(sleeps={})
         self.commit("lowered")
         self.assertEqual(self.check(), ([], []))
@@ -112,18 +112,63 @@ class CheckTests(RepositoryCase):
         base = self.git("rev-parse", "main")
         self.assertEqual(self.check(), (sleep_ratchet.raised_against({GO: 2}, {GO: 1}, base[:12]), []))
 
+    def test_a_moved_file_keeps_its_entry_and_a_moved_raise_still_fails(self):
+        moved = "server/internal/modules/demo/demo_test.go"
+        (self.repo / moved).parent.mkdir(parents=True)
+        self.git("mv", GO, moved)
+        self.baselines(sleeps={moved: 1})
+        self.commit("moved")
+        self.assertEqual(self.check(), ([], []))
+        self.write(moved, go(2))
+        self.baselines(sleeps={moved: 2})
+        self.commit("moved and raised")
+        base = self.git("rev-parse", "main")
+        self.assertEqual(self.check(), (sleep_ratchet.raised_against({moved: 2}, {moved: 1}, base[:12]), []))
+
     def test_an_entry_lowered_for_a_file_the_change_does_not_touch_is_checked(self):
         self.baselines(sleeps={})
         self.commit("lowered by hand")
         self.assertEqual(self.check(), ([sleep_ratchet.over_message(GO, 1, 0)], []))
 
-    def test_a_deleted_file_takes_its_baseline_entry_with_it(self):
+    def test_a_deleted_file_merges_with_or_without_its_baseline_entry(self):
         self.git("rm", "-q", GO)
         self.commit("deleted")
-        self.assertEqual(self.check(), ([sleep_ratchet.under_message(GO, 0, 1)], []))
+        self.assertEqual(self.check(), ([], []))
         self.baselines(sleeps={})
         self.commit("entry removed")
         self.assertEqual(self.check(), ([], []))
+
+    def test_a_lowered_count_merges_and_a_raised_one_still_does_not(self):
+        self.write(GO, go(0))
+        self.write(WEB, tsx(1))
+        self.commit("fewer sleeps and sizes, baselines left")
+        self.assertEqual(self.check(), ([], []))
+        self.write(GO, go(2))
+        self.write(WEB, tsx(3))
+        self.commit("more of both")
+        self.assertEqual(self.check(), ([sleep_ratchet.over_message(GO, 2, 1)]
+                                        + web_font_ratchet.violations({WEB: 3}, {WEB: 2}), []))
+
+    def test_a_count_raised_back_into_room_a_fall_left_merges(self):
+        # Merge time holds a file to its baseline only, never to its count at the base: re-adding what main took out
+        # without lowering the baseline merges ("Count ratchets" in docs/operations/testing.md). The checkers' --base
+        # mode refuses it; a merge-time refusal would be a separate change.
+        self.on_main(lambda: (self.write(GO, go(0)), self.write(WEB, tsx(1))))
+        self.git("merge", "-q", "--no-edit", "main")
+        self.write(GO, go(1))
+        self.write(WEB, tsx(2))
+        self.commit("adds back what main took out")
+        self.assertEqual(self.check(), ([], []))
+
+    def test_worse_refuses_only_a_rise_above_what_the_base_has(self):
+        worse = changed_ratchets.worse
+        self.assertFalse(worse(0, 1, 1, 1))  # lowered under the baseline
+        self.assertFalse(worse(1, 1, 1, 1))  # unchanged
+        self.assertTrue(worse(2, 1, 1, 1))  # raised over the baseline
+        self.assertFalse(worse(3, 1, 3, 1))  # the base is already over by as much
+        self.assertTrue(worse(4, 1, 3, 1))  # and the change adds more
+        self.assertFalse(worse(2, 1, 3, 1))  # or takes some of it back
+        self.assertFalse(worse(0, 3, 1, 3))  # the base is under and the change goes further under
 
     def test_a_file_main_already_fails_is_mains_unless_the_change_makes_it_worse(self):
         self.on_main(lambda: self.write(NEW_GO, go(3)))  # merged without a baseline entry: main is red

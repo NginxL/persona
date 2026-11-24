@@ -16,9 +16,9 @@ import (
 
 	"github.com/coder/websocket"
 
+	"github.com/nwverse/persona/server/internal/builtinext"
 	"github.com/nwverse/persona/server/internal/extension"
 	"github.com/nwverse/persona/server/internal/extwire"
-	"github.com/nwverse/persona/server/internal/voice"
 )
 
 // Meeting transcription (#3862 phase 5, docs/assistant/meeting-minutes.md "The `transcription` extension point"): the
@@ -141,11 +141,13 @@ func transcriptionInstallOf(r extension.Record) string {
 	return r.Source + ":" + r.StorageKey() + "@" + strconv.FormatInt(extensionIdentityTimestamp(r.InstalledAt), 10)
 }
 
-// transcriptionRef is the extension and contribution ref names: "" the built-in voice extension's
-// (voice.TranscriptionContribution), else "<extension id>/<contribution id>".
+// transcriptionRef is the extension and contribution ref names: "" the built-in voice extension's (its
+// TranscriptionContribution, internal/builtinext; none in a build without the voice module), else
+// "<extension id>/<contribution id>".
 func (ps *extensions) transcriptionRef(ref string) (id, cid string, ok bool) {
 	if ref == "" {
-		return ps.voiceID, voice.TranscriptionContribution, ps.voiceID != ""
+		voice, has := builtinext.VoiceExtension()
+		return ps.voiceID, voice.TranscriptionContribution, has && ps.voiceID != ""
 	}
 	id, cid, ok = strings.Cut(ref, "/")
 	return id, cid, ok && extension.ValidID(id) && extension.ValidID(cid)

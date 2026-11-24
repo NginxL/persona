@@ -10,8 +10,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/nwverse/persona/server/internal/botcard"
 	"github.com/nwverse/persona/server/internal/channel"
-	"github.com/nwverse/persona/server/internal/feishubot"
 	"github.com/nwverse/persona/server/internal/i18n"
 )
 
@@ -118,13 +118,13 @@ func (s *Service) openFromElsewhere(ctx context.Context, src Source) (Todo, erro
 	topic := &feishuTopic{Chat: home, Thread: thread}
 
 	// The message the topic opened with is the bot's own; the run that answers goes under it, into the topic.
-	var ev feishubot.MessageEvent
+	var ev botcard.MessageEvent
 	ev.Message.MessageID, ev.Message.ChatID, ev.Message.ChatType, ev.Message.ThreadID = posted.MessageID, home, "group", thread
 	ev.Message.MessageType = "text"
 	c, _ := json.Marshal(map[string]string{"text": rootText})
 	ev.Message.Content = string(c)
 	ev.Sender.SenderType, ev.Sender.SenderID.OpenID = "app", ""
-	todo, fail := s.openTodoIn(ctx, ev, st, feishubot.Content{Text: text}, text, quote, topic,
+	todo, fail := s.openTodoIn(ctx, ev, st, botcard.Content{Text: text}, text, quote, topic,
 		&TodoSource{Channel: src.Channel, ChatID: src.ChatID, MessageID: src.MessageID})
 	if fail != "" {
 		s.botNoteTo(ctx, topic.target(), posted.MessageID, fail) // the topic was opened: it says why nothing came of it
@@ -153,12 +153,12 @@ func (s *Service) openInOwnerChat(ctx context.Context, st FeishuStatus, src Sour
 		return Todo{}, errors.New(i18n.T(l, "assistant-feishu.thread_open_failed", i18n.Args{"error": clip(oneLine(err.Error()), 200)}))
 	}
 	// The run that answers goes under the bot's own first message, in the private chat.
-	var ev feishubot.MessageEvent
+	var ev botcard.MessageEvent
 	ev.Message.MessageID, ev.Message.ChatType, ev.Message.MessageType = posted.MessageID, "p2p", "text"
 	c, _ := json.Marshal(map[string]string{"text": rootText})
 	ev.Message.Content = string(c)
 	ev.Sender.SenderType = "app"
-	todo, fail := s.openTodoIn(ctx, ev, st, feishubot.Content{Text: text}, text, quote, nil,
+	todo, fail := s.openTodoIn(ctx, ev, st, botcard.Content{Text: text}, text, quote, nil,
 		&TodoSource{Channel: src.Channel, ChatID: src.ChatID, MessageID: src.MessageID, Anchor: posted.MessageID})
 	if fail != "" {
 		s.botNoteTo(ctx, feishuTarget{}, posted.MessageID, fail) // the first message was posted: it says why nothing came of it
@@ -209,7 +209,7 @@ func (s *Service) topicOfMessage(ctx context.Context, id string) (string, error)
 // or in the owner's private chat when there is none (openFromElsewhere), and puts an emoji on the message so the owner
 // sees it was taken; what keeps it from opening is answered under the message, in that group, and nowhere else. Anything
 // that is not the owner's "/ai" is dropped.
-func (s *Service) feishuElsewhere(ev feishubot.MessageEvent, st FeishuStatus) {
+func (s *Service) feishuElsewhere(ev botcard.MessageEvent, st FeishuStatus) {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()
 	msg := ev.Message
@@ -225,11 +225,11 @@ func (s *Service) feishuElsewhere(ev feishubot.MessageEvent, st FeishuStatus) {
 	if msg.MessageType != "text" && msg.MessageType != "post" {
 		return
 	}
-	content := feishubot.ParseContent(msg.MessageType, msg.Content, msg.Mentions)
+	content := botcard.ParseContent(msg.MessageType, msg.Content, msg.Mentions)
 	if content.Forward {
 		return
 	}
-	rest, asked := aiCommand(openingWords(ev, content))
+	rest, asked := aiCommand(openingCommandWords(ev, content))
 	if !asked {
 		s.logf("bots: a message marked as an /ai from elsewhere was not one: dropped")
 		return
@@ -270,7 +270,7 @@ func (s *Service) elsewhereQuote(ctx context.Context, id string) string {
 	if it.MessageID != id || it.Deleted || it.MsgType != "text" && it.MsgType != "post" {
 		return ""
 	}
-	c := feishubot.ParseContent(it.MsgType, it.Body.Content, it.MentionList())
+	c := botcard.ParseContent(it.MsgType, it.Body.Content, it.MentionList())
 	if c.Forward {
 		return ""
 	}

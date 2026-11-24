@@ -227,9 +227,11 @@ export function columnAt(offsets: number[], x: number): number {
   return lo;
 }
 
+const NUMERIC_RE = /^(?:[-+]?[$¥€£]?\s?\d[\d,]*(\.\d+)?([eE][-+]?\d+)?%?|\([$¥€£]?\s?\d[\d,]*(\.\d+)?([eE][-+]?\d+)?%?\))$/;
+
 /** A cell that reads as a number (right-aligned, like spreadsheets do): 1,234.5 · -3 · 12% · $4 · ¥4 · 1e5. */
 export function looksNumeric(s: string): boolean {
-  return s.length > 0 && s.length < 40 && /^[-+(]?[$¥€£]?\s?\d[\d,]*(\.\d+)?([eE][-+]?\d+)?%?\)?$/.test(s.trim());
+  return s.length > 0 && s.length < 40 && NUMERIC_RE.test(s.trim());
 }
 
 /** A rectangle of cells, normalized so r0 ≤ r1 and c0 ≤ c1. */

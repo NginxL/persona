@@ -11,23 +11,31 @@ func TestStopCauseJSONAndResumeEligibility(t *testing.T) {
 		name     string
 		cause    StopCause
 		eligible bool
+		// supervisor: the assistant may resume it (SupervisorMayResume); user: only the user's Resume will do.
+		supervisor, user bool
 	}{
-		{name: "unknown"},
-		{name: "user", cause: StopUser},
-		{name: "idle", cause: StopIdle, eligible: true},
-		{name: "task completed", cause: StopTaskCompleted, eligible: true},
-		{name: "restart", cause: StopRestart, eligible: true},
-		{name: "resume failed", cause: StopResumeFailed, eligible: true},
-		{name: "compact failed", cause: StopCompactFailed, eligible: true},
-		{name: "gateway quota", cause: StopUsageLimit, eligible: true},
-		{name: "gateway capacity", cause: StopTransientError, eligible: true},
-		{name: "exit", cause: StopExit},
+		{name: "unknown", supervisor: true},
+		{name: "user", cause: StopUser, user: true},
+		{name: "idle", cause: StopIdle, eligible: true, supervisor: true},
+		{name: "task completed", cause: StopTaskCompleted, eligible: true, supervisor: true},
+		{name: "restart", cause: StopRestart, eligible: true, supervisor: true},
+		{name: "resume failed", cause: StopResumeFailed, eligible: true, supervisor: true},
+		{name: "compact failed", cause: StopCompactFailed, eligible: true, supervisor: true},
+		{name: "gateway quota", cause: StopUsageLimit, eligible: true, supervisor: true},
+		{name: "gateway capacity", cause: StopTransientError, eligible: true, supervisor: true},
+		{name: "exit", cause: StopExit, user: true},
 		{name: "future", cause: StopCause("future_cause")},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			if got := tt.cause.AllowsSupervisorResume(); got != tt.eligible {
 				t.Fatalf("AllowsSupervisorResume() = %v, want %v", got, tt.eligible)
+			}
+			if got := tt.cause.SupervisorMayResume(); got != tt.supervisor {
+				t.Fatalf("SupervisorMayResume() = %v, want %v", got, tt.supervisor)
+			}
+			if got := tt.cause.UserStopped(); got != tt.user {
+				t.Fatalf("UserStopped() = %v, want %v", got, tt.user)
 			}
 			if tt.cause == StopUnknown {
 				return

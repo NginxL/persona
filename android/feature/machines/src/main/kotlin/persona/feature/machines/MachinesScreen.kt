@@ -1,5 +1,6 @@
 package persona.feature.machines
 
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -93,6 +94,7 @@ internal fun MachinesScreen(
     val locale = currentLocale
     val healthState = health?.state?.collectAsStateWithLifecycle()?.value ?: MachineHealthState()
     val subscriptionUsage = LocalSidebarUsage.current?.value ?: healthState.usage
+    val (hiddenUsage, showUsage) = rememberHiddenUsageProviders()
     var allChecks by rememberSaveable(machineId) { mutableStateOf(false) }
     var allAgents by rememberSaveable(machineId) { mutableStateOf(false) }
     var confirmFix by remember { mutableStateOf(false) }
@@ -145,7 +147,11 @@ internal fun MachinesScreen(
         state.failure?.let { failure -> item("failure") { JNotice(stringResource(failure.text)) } }
         if (state.sessionsFailure) item("sessions-failure") { JNotice(stringResource(R.string.machines_sessions_failure)) }
         if (machineId == null) {
-            usageWindows(subscriptionUsage, java.time.Instant.ofEpochSecond(state.now))
+            usageWindows(subscriptionUsage, java.time.Instant.ofEpochSecond(state.now), hiddenUsage, showUsage)
+            val tokenShares = entries.mapNotNull { entry ->
+                entry.metrics.usage?.let { (entry.machine?.displayName ?: entry.id) to it }
+            }
+            if (tokenShares.isNotEmpty()) item("today-tokens") { TodayTokensCard(tokenShares) }
             // An offline assistant with no computer the hub still keeps: out of reach, not a first run (no Add).
             if (!state.loading && ids.isEmpty() && assistant.offline != null) item("offline") { JAssistantOffline(assistant) }
             else if (!state.loading && ids.isEmpty()) item("empty") {
@@ -165,6 +171,7 @@ internal fun MachinesScreen(
                     navigator.navigate(MachineDetailRoute(id))
                 }
             }
+            usageWindows(subscriptionUsage, java.time.Instant.ofEpochSecond(state.now))
             if (entries.any { entry ->
                 val cores = (entry.metrics.system ?: entry.machine?.system)?.cores
                 loadPerCore(entry.metrics.current(state.now)?.load, cores) != null
@@ -342,7 +349,17 @@ internal fun MachineCard(
         MachineConcern.Offline -> Status.Offline
         MachineConcern.None -> Status.Unread
     }
-    JCard(modifier.padding(bottom = Tokens.Space.m), onClick = onClick, status = status) {
+    val glass = PersonaTheme.style == AppStyle.Glass
+    val glassAlertBorder = if (glass) when (concern) {
+        MachineConcern.Critical -> PersonaTheme.palette.danger.dot.copy(alpha = 0.6f)
+        MachineConcern.Warning -> PersonaTheme.palette.working.dot.copy(alpha = 0.6f)
+        else -> null
+    } else null
+    val cardModifier = modifier.padding(bottom = Tokens.Space.m).let { base ->
+        if (glassAlertBorder != null) base.border(Tokens.Size.line, glassAlertBorder, PersonaTheme.shapes.cardShape) else base
+    }
+    // On Glass, offline and healthy cards keep a clean neutral surface (matching iOS); only alert cards carry an edge.
+    JCard(cardModifier, onClick = onClick, status = if (glass) null else status) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp.dense)) {
             OsBadge(system)
             Column(Modifier.weight(1f)) {

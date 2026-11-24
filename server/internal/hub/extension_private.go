@@ -2,6 +2,7 @@ package hub
 
 import (
 	"net/http"
+	"slices"
 	"time"
 
 	"github.com/nwverse/persona/server/internal/apierr"
@@ -12,15 +13,15 @@ import (
 )
 
 // What an extension's token never sees of the conversations, whatever scopes it was granted (docs/extensions/extensions.md
-// "Never shown to extensions"): the health space's conversations are not listed (the legacy list, the paged
+// "Never shown to extensions"): a space's conversations (the health space's and any other) are not listed (the legacy list, the paged
 // list, its totals and counts) and their items, images, info and screen are not read. A conversation the hub does not
 // know is not read either: its space cannot be told. The extensions' agent.needs_you and agent.finished are not sent
 // of a card or a session they are not shown (notifyws.go).
 
-// healthSession: s runs in a health space, by its own Space or its directory (identity.InHealthSpace counts a folder
-// inside one, which only hides more).
-func healthSession(s *proto.Session) bool {
-	return s.Space == identity.SpaceHealth || identity.InHealthSpace(s.Cwd)
+// spaceSession: s runs in a space, by its own Space or its directory (identity.InSpace counts a folder inside one,
+// which only hides more). The hub cannot see the manager's registry of spaces, so any space hides.
+func spaceSession(s *proto.Session) bool {
+	return s.Space != "" || identity.InSpace(s.Cwd)
 }
 
 // extensionToken: r carries an extension's token.
@@ -31,20 +32,34 @@ func restrictedAgentData(r *http.Request) bool {
 	return role == roleExtension || role == roleScoped
 }
 
-// withoutHealthSessions drops the health space's conversations from list for an extension's token (list itself
+// ownerExtension: r carries the token of an extension the user marked as their own (#13246,
+// assistantwire.Profile.ExtensionOwners, such as their memory extension), which reads the tracks' conversations too.
+// The hub cannot see the categories: any other extension stays shown none of a track's.
+func (h *Hub) ownerExtension(r *http.Request) bool {
+	p := principalOf(r.Context())
+	return p.Role == roleExtension && p.Extension != "" && slices.Contains(h.assistantProfileOf(p.Manager).ExtensionOwners, p.Extension)
+}
+
+// spacesHidden: r's token is shown none of the tracks' conversations on the read routes: an extension's other than
+// the user's own (ownerExtension), or a scoped device's. Controls stay closed to every extension (extensionControllable).
+func (h *Hub) spacesHidden(r *http.Request) bool {
+	return restrictedAgentData(r) && !h.ownerExtension(r)
+}
+
+// withoutSpaceSessions drops the spaces' conversations from list for an extension's token (list itself
 // otherwise, and when none is dropped). list is never changed.
-func withoutHealthSessions(r *http.Request, list []proto.Session) []proto.Session {
-	if !restrictedAgentData(r) {
+func (h *Hub) withoutSpaceSessions(r *http.Request, list []proto.Session) []proto.Session {
+	if !h.spacesHidden(r) {
 		return list
 	}
 	for i := range list {
-		if !healthSession(&list[i]) {
+		if !spaceSession(&list[i]) {
 			continue
 		}
 		out := make([]proto.Session, i, len(list)-1)
 		copy(out, list[:i])
 		for j := i + 1; j < len(list); j++ {
-			if !healthSession(&list[j]) {
+			if !spaceSession(&list[j]) {
 				out = append(out, list[j])
 			}
 		}
@@ -53,23 +68,23 @@ func withoutHealthSessions(r *http.Request, list []proto.Session) []proto.Sessio
 	return list
 }
 
-// hiddenFromExtensions: an extension's token is not shown card ix: a private one (a Just me turn's), one of the health
-// space (its directory or its conversation's), or one whose space cannot be told (no directory, a conversation the hub
+// hiddenFromExtensions: an extension's token is not shown card ix: a private one (a Just me turn's), one of a space
+// (its directory or its conversation's), or one whose space cannot be told (no directory, a conversation the hub
 // does not list).
 func (h *Hub) hiddenFromExtensions(ix proto.Interaction) bool {
-	if ix.Private || identity.InHealthSpace(ix.Cwd) {
+	if ix.Private || identity.InSpace(ix.Cwd) {
 		return true
 	}
 	if m := h.localMachine(ix.MachineID); m != nil {
 		if s, ok := m.session(ix.SessionID); ok {
-			return healthSession(&s)
+			return spaceSession(&s)
 		}
 	}
 	return ix.Cwd == ""
 }
 
 // pendingCardHiddenFromExtensions says whether pending card id is one an extension's token may not act on (resolve,
-// choose): a private card or one of the health space, by the card's own directory or the session it belongs to. False
+// choose): a private card or one of a space, by the card's own directory or the session it belongs to. False
 // too when the id is not pending (answered, withdrawn or unknown), which the action routes handle with their own rules.
 // Unlike hiddenFromExtensions it does not fail closed on an unlisted session with no directory: that rule protects
 // reads and notifications, where hiding is the safe answer, but actions on such a card keep going to its manager,
@@ -84,22 +99,22 @@ func (h *Hub) pendingCardHiddenFromExtensions(id string) (proto.Interaction, boo
 }
 
 // actionCardHiddenFromExtensions is the definitive "an extension must not act on this card" rule, with no
-// cannot-tell branch: a private card, a card whose directory is in the health space, or one whose listed session is
-// a health-space conversation.
+// cannot-tell branch: a private card, a card whose directory is in a space, or one whose listed session is a space's
+// conversation.
 func (h *Hub) actionCardHiddenFromExtensions(ix proto.Interaction) bool {
-	if ix.Private || identity.InHealthSpace(ix.Cwd) {
+	if ix.Private || identity.InSpace(ix.Cwd) {
 		return true
 	}
 	if m := h.localMachine(ix.MachineID); m != nil {
 		if s, ok := m.session(ix.SessionID); ok {
-			return healthSession(&s)
+			return spaceSession(&s)
 		}
 	}
 	return false
 }
 
 // sessionHiddenFromExtensions: the extensions are not told of session sid of computer machine (agent.finished): one of
-// the health space, or one the hub does not list, whose space cannot be told. A push about no session is the manager's
+// a space, or one the hub does not list, whose space cannot be told. A push about no session is the manager's
 // own.
 func (h *Hub) sessionHiddenFromExtensions(machine, sid string) bool {
 	if sid == "" {
@@ -107,7 +122,7 @@ func (h *Hub) sessionHiddenFromExtensions(machine, sid string) bool {
 	}
 	if m := h.localMachine(machine); m != nil {
 		if s, ok := m.session(sid); ok {
-			return healthSession(&s)
+			return spaceSession(&s)
 		}
 	}
 	return true
@@ -116,7 +131,7 @@ func (h *Hub) sessionHiddenFromExtensions(machine, sid string) bool {
 // extensionResume answers whether an extension's token may resume conversation id on computer m (POST
 // /api/v1/sessions with resume_session_id), and whether only the computer's own check lets it (checked: the start
 // carries resume_outside_health); not ok has written the answer. A conversation the computer lists goes on unless an
-// extension may not control it (publicSessionForControl: the health space's, one in a folder set to Hide, a deleted
+// extension may not control it (publicSessionForControl: a space's, one in a folder set to Hide, a deleted
 // one): 404, as for one that does not exist. One it does not list (quiet for a week, past its 80 newest, a short
 // transcript: a stopped Agent takes no message, so a resume is the only way back to one the extension started) goes,
 // unless the owner deleted it, to a node that announces nodeproto.ResumeOutsideHealth, which resumes it only when it
@@ -156,19 +171,19 @@ func (h *Hub) extensionResume(w http.ResponseWriter, m *Machine, id string) (che
 const codeSessionsNotListed = "sessions_not_listed"
 
 // extensionReadable wraps a route of one conversation ({mid}/{sid}): an extension's token is answered 404, as for a
-// conversation there is not, when it is a health-space conversation or one the hub does not list (unless it was given
+// conversation there is not, when it is a space's conversation or one the hub does not list (unless it was given
 // it as a history row lately, sessions_history.go). Anyone else, and an
 // unknown machine (the route's own 404), go on to next.
 func (h *Hub) extensionReadable(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if restrictedAgentData(r) {
+		if h.spacesHidden(r) {
 			if m := h.localMachine(r.PathValue("mid")); m != nil {
 				s, ok := m.session(r.PathValue("sid"))
 				if !ok && h.historyReads.readable(m.cfg.ID, r.PathValue("sid"), time.Now()) {
-					next(w, r) // a history row it was given (sessions_history.go), never a health-space one
+					next(w, r) // a history row it was given (sessions_history.go), never a space's one
 					return
 				}
-				if !ok || healthSession(&s) {
+				if !ok || spaceSession(&s) {
 					writeErr(w, http.StatusNotFound, errDeleteUnknown) // "No such session"
 					return
 				}
@@ -194,6 +209,6 @@ func (h *Hub) extensionControllable(next http.HandlerFunc) http.HandlerFunc {
 
 func (h *Hub) publicSessionForControl(m *Machine, id string) bool {
 	s, ok := m.session(id)
-	return ok && !healthSession(&s) && !s.HiddenByDirectory() && !s.IsDeleted() &&
+	return ok && !spaceSession(&s) && !s.HiddenByDirectory() && !s.IsDeleted() &&
 		!sessionHiddenByDeletion(s, h.deletedAt(m.cfg.ID))
 }

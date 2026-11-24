@@ -65,8 +65,8 @@ fun JSidebarHistoryRow(
     title: String,
     status: Status,
     selected: Boolean,
-    onClick: () -> Unit,
-    onMenu: () -> Unit,
+    onClick: (() -> Unit)?,
+    onMenu: (() -> Unit)?,
     menuLabel: String,
     /** The line under the title (a leader conversation's open tasks, #4331); null: one line only. */
     hint: String? = null,
@@ -86,6 +86,6 @@ fun JSidebarHistoryRow(
             // A Needs You dot is still, as iOS's `RowStateMark` in a dense list; a lead with work under it spins (#6230), as there.
             if (status == Status.NeedsYou || status == Status.Working || status == Status.Unread || working) JStatusDot(status, spinning = sidebarHistoryRowSpins(status, working), breathes = false)
             trailingAccessory?.invoke()
-            JIconButton(PhIcons.DotsThree, menuLabel, onMenu)
+            onMenu?.let { JIconButton(PhIcons.DotsThree, menuLabel, it) }
         })
 }

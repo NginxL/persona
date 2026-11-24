@@ -29,17 +29,27 @@ import kotlinx.coroutines.withContext
 @Composable
 internal fun FullTextReader(text: String, onDismiss: () -> Unit, title: String = stringResource(R.string.chat_reader_full_text), plain: Boolean = false) {
     val frozen = remember { text }
-    val snapshot by produceState<ReaderSnapshot?>(null) {
-        value = withContext(Dispatchers.Default) { ReaderSnapshot(frozen) }
+    // Small handoffs must not depend on an asynchronous Dialog frame merely to show one short paragraph.
+    // Large documents retain background pagination instead of blocking composition.
+    val snapshot by if (frozen.length <= 8192) {
+        remember(frozen) { mutableStateOf(ReaderSnapshot(frozen)) }
+    } else {
+        remember {
+            kotlinx.coroutines.flow.flow {
+                emit(withContext(Dispatchers.Default) { ReaderSnapshot(frozen) })
+            }
+        }.collectAsState(initial = null)
     }
     val copyText = rememberCopy()
     JFullScreen(onDismiss) {
         Box(Modifier.fillMaxSize().hardwareShortcutDismiss(onDismiss)) {
             val ready = snapshot
             val copy: () -> Unit = { copyText(frozen, null) }
-            if (ready == null) JPage(title, onBack = onDismiss) { padding ->
-                LazyColumn(contentPadding = PaddingValues(start = pagePadding, end = pagePadding,
-                    top = padding.calculateTopPadding(), bottom = padding.calculateBottomPadding())) { item { JLoading() } }
+            if (ready == null) InterfaceContent {
+                JPage(title, onBack = onDismiss) { padding ->
+                    LazyColumn(contentPadding = PaddingValues(start = pagePadding, end = pagePadding,
+                        top = padding.calculateTopPadding(), bottom = padding.calculateBottomPadding())) { item { JLoading() } }
+                }
             } else ReaderPages(ready, Modifier.fillMaxSize().imePadding(), title, onDismiss, copy, plain)
         }
     }
@@ -99,27 +109,31 @@ private fun ReaderPages(snapshot: ReaderSnapshot, modifier: Modifier, title: Str
     }
     JPage(title = title, onBack = onBack, modifier = modifier,
         topBar = {
-            Column {
-                JTopBar(title, onBack = onBack, actions = { JIconButton(PhIcons.Copy, stringResource(R.string.chat_reader_copy_all), onCopy) })
-                JSearchField(query, { query = it; target = null }, stringResource(if (onlyPage) R.string.chat_reader_search_page else R.string.chat_reader_search_all),
-                    Modifier.padding(horizontal = pagePadding))
-                Row(Modifier.fillMaxWidth().padding(horizontal = pagePadding), verticalAlignment = Alignment.CenterVertically) {
-                    JTextButton(stringResource(if (onlyPage) R.string.chat_reader_scope_page else R.string.chat_reader_scope_all), { onlyPage = !onlyPage; target = null })
-                    Text(if (query.isEmpty()) "" else if (matches.isEmpty()) stringResource(R.string.chat_reader_not_found) else "${(selected + 1).coerceAtLeast(0)}/${matches.size}",
-                        Modifier.weight(1f), style = PersonaTheme.type.micro, color = palette.ink2, maxLines = 1)
-                    JIconButton(PhIcons.CaretUp, stringResource(R.string.chat_reader_previous_match), { moveMatch(-1) }, enabled = matches.isNotEmpty())
-                    JIconButton(PhIcons.CaretDown, stringResource(R.string.chat_reader_next_match), { moveMatch(1) }, enabled = matches.isNotEmpty())
+            InterfaceContent {
+                Column {
+                    JTopBar(title, onBack = onBack, actions = { JIconButton(PhIcons.Copy, stringResource(R.string.chat_reader_copy_all), onCopy) })
+                    JSearchField(query, { query = it; target = null }, stringResource(if (onlyPage) R.string.chat_reader_search_page else R.string.chat_reader_search_all),
+                        Modifier.padding(horizontal = pagePadding))
+                    Row(Modifier.fillMaxWidth().padding(horizontal = pagePadding), verticalAlignment = Alignment.CenterVertically) {
+                        JTextButton(stringResource(if (onlyPage) R.string.chat_reader_scope_page else R.string.chat_reader_scope_all), { onlyPage = !onlyPage; target = null })
+                        Text(if (query.isEmpty()) "" else if (matches.isEmpty()) stringResource(R.string.chat_reader_not_found) else "${(selected + 1).coerceAtLeast(0)}/${matches.size}",
+                            Modifier.weight(1f), style = PersonaTheme.type.micro, color = palette.ink2, maxLines = 1)
+                        JIconButton(PhIcons.CaretUp, stringResource(R.string.chat_reader_previous_match), { moveMatch(-1) }, enabled = matches.isNotEmpty())
+                        JIconButton(PhIcons.CaretDown, stringResource(R.string.chat_reader_next_match), { moveMatch(1) }, enabled = matches.isNotEmpty())
+                    }
                 }
             }
         },
         bottomBar = {
-            JBottomBar { Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = Alignment.CenterVertically) {
-                JIconButton(PhIcons.ArrowLeft, stringResource(R.string.chat_reader_first_page), { movePage(0) }, enabled = page > 0)
-                JIconButton(PhIcons.CaretLeft, stringResource(R.string.chat_reader_previous_page), { movePage(page - 1) }, enabled = page > 0)
-                Text("${page + 1}/${snapshot.pages.size}", style = PersonaTheme.type.caption, color = palette.ink, maxLines = 1)
-                JIconButton(PhIcons.CaretRight, stringResource(R.string.chat_reader_next_page), { movePage(page + 1) }, enabled = page < snapshot.pages.lastIndex)
-                JIconButton(PhIcons.ArrowLeft, stringResource(R.string.chat_reader_last_page), { movePage(snapshot.pages.lastIndex) }, modifier = Modifier.rotate(180f), enabled = page < snapshot.pages.lastIndex)
-            } }
+            InterfaceContent {
+                JBottomBar { Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = Alignment.CenterVertically) {
+                    JIconButton(PhIcons.ArrowLeft, stringResource(R.string.chat_reader_first_page), { movePage(0) }, enabled = page > 0)
+                    JIconButton(PhIcons.CaretLeft, stringResource(R.string.chat_reader_previous_page), { movePage(page - 1) }, enabled = page > 0)
+                    Text("${page + 1}/${snapshot.pages.size}", style = PersonaTheme.type.caption, color = palette.ink, maxLines = 1)
+                    JIconButton(PhIcons.CaretRight, stringResource(R.string.chat_reader_next_page), { movePage(page + 1) }, enabled = page < snapshot.pages.lastIndex)
+                    JIconButton(PhIcons.ArrowLeft, stringResource(R.string.chat_reader_last_page), { movePage(snapshot.pages.lastIndex) }, modifier = Modifier.rotate(180f), enabled = page < snapshot.pages.lastIndex)
+                } }
+            }
         }) { padding ->
         LazyColumn(Modifier.fillMaxSize(), state = scroll, contentPadding = PaddingValues(
             start = pagePadding, end = pagePadding, top = padding.calculateTopPadding(),
@@ -140,7 +154,7 @@ private fun ReaderPages(snapshot: ReaderSnapshot, modifier: Modifier, title: Str
 internal fun ReaderEntry(text: String, title: String = stringResource(R.string.chat_reader_full_text), always: Boolean = false) {
     var opened by remember { mutableStateOf<String?>(null) }
     if (always || text.length > 8192 || text.count { it == '\n' } >= 40) {
-        JTextButton(stringResource(R.string.chat_reader_open), { opened = text })
+        InterfaceContent { JTextButton(stringResource(R.string.chat_reader_open), { opened = text }) }
     }
     opened?.let { FullTextReader(it, onDismiss = { opened = null }, title = title) }
 }

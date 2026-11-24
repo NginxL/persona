@@ -55,14 +55,16 @@ func TestBatchCardsOrderedMoveAndMetadata(t *testing.T) {
 
 func TestBatchCardsRejectsWholeOperation(t *testing.T) {
 	cases := map[string]Mutation{
-		"missing changes":            {Action: "batch_cards"},
-		"empty changes":              {Action: "batch_cards", Changes: []CardChange{}},
-		"too many":                   {Action: "batch_cards", Changes: make([]CardChange, MaxBatchCards+1)},
-		"single action with changes": {Action: "update_card", ID: "0", Pinned: flag(true), Changes: []CardChange{}},
-		"batch with single ID":       {Action: "batch_cards", ID: "0", Changes: []CardChange{{ID: "0", Pinned: flag(true)}}},
-		"batch with title":           {Action: "batch_cards", Title: text("new"), Changes: []CardChange{{ID: "0", Pinned: flag(true)}}},
-		"batch with binding":         {Action: "batch_cards", MachineID: "other", Changes: []CardChange{{ID: "0", Pinned: flag(true)}}},
-		"duplicate card":             {Action: "batch_cards", Changes: []CardChange{{ID: "0", Pinned: flag(true)}, {ID: "0", Archived: flag(true)}}},
+		"missing changes":               {Action: "batch_cards"},
+		"empty changes":                 {Action: "batch_cards", Changes: []CardChange{}},
+		"too many":                      {Action: "batch_cards", Changes: make([]CardChange, MaxBatchCards+1)},
+		"single action with changes":    {Action: "update_card", ID: "0", Pinned: flag(true), Changes: []CardChange{}},
+		"batch with single ID":          {Action: "batch_cards", ID: "0", Changes: []CardChange{{ID: "0", Pinned: flag(true)}}},
+		"batch with title":              {Action: "batch_cards", Title: text("new"), Changes: []CardChange{{ID: "0", Pinned: flag(true)}}},
+		"batch with binding":            {Action: "batch_cards", MachineID: "other", Changes: []CardChange{{ID: "0", Pinned: flag(true)}}},
+		"batch with directory creation": {Action: "batch_cards", CreateDirectory: true, Changes: []CardChange{{ID: "0", Pinned: flag(true)}}},
+		"batch with desktop project":    {Action: "batch_cards", DesktopApp: "codex_app", Changes: []CardChange{{ID: "0", Pinned: flag(true)}}},
+		"duplicate card":                {Action: "batch_cards", Changes: []CardChange{{ID: "0", Pinned: flag(true)}, {ID: "0", Archived: flag(true)}}},
 	}
 	for name, change := range map[string]CardChange{
 		"unknown":               {ID: "missing", Pinned: flag(true)},

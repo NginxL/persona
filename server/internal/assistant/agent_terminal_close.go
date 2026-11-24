@@ -117,6 +117,15 @@ func (s *Service) closeEndedAgentTerminals(ctx context.Context, seen endedSeen) 
 			if !endedOnItsOwn(c) {
 				continue
 			}
+			if c.Capabilities.StopCause == proto.StopUnknown {
+				if err := s.ensureTodosLoaded(ctx); err != nil {
+					continue
+				}
+				if _, active := s.openTodoOfAgent(d.ID, c.SessionID); active {
+					s.logf("ended agent %s/%s: kept its terminal for the open task (unknown stop cause)", d.ID, short(c.SessionID))
+					continue
+				}
+			}
 			closed, err := s.closeEndedTerminal(ctx, d.ID, c.SessionID, proto.StopUnknown)
 			switch {
 			case err != nil:

@@ -262,7 +262,7 @@ class ExtensionUIStreamLiveTest {
         val hostFrames = CopyOnWriteArrayList<JsonObject>()
         val observe = connection.phoneMessageHandler
         connection.phoneMessageHandler = { raw ->
-            observe?.invoke(raw)
+            val _ = observe?.invoke(raw)
             if (raw["type"] in setOf(JsonPrimitive("interaction"), JsonPrimitive("interaction_resolved"))) {
                 hostFrames.add(raw)
                 File(evidence, "actual-host-interactions.json").writeText(JsonArray(hostFrames.toList()).toString())
@@ -336,7 +336,7 @@ class ExtensionUIStreamLiveTest {
         val snapshots = CopyOnWriteArrayList<JsonObject>()
         val observe = connection.phoneMessageHandler
         connection.phoneMessageHandler = { raw ->
-            observe?.invoke(raw)
+            val _ = observe?.invoke(raw)
             if (raw["kind"] == JsonPrimitive("snapshot")) {
                 snapshots.add(raw)
                 if (dropped.isEmpty()) { dropped.add(raw); true } else false
@@ -364,7 +364,7 @@ class ExtensionUIStreamLiveTest {
         val snapshots = CopyOnWriteArrayList<JsonObject>()
         val observe = connection.phoneMessageHandler
         connection.phoneMessageHandler = { raw ->
-            observe?.invoke(raw)
+            val _ = observe?.invoke(raw)
             if (raw["kind"] == JsonPrimitive("snapshot")) { snapshots.add(raw); snapshots.size == 1 } else false
         }
         val controller = controller("{\"p\":\"list\"}")

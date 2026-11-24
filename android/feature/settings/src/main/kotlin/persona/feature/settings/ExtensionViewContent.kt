@@ -103,7 +103,7 @@ internal fun rememberExtensionView(model: ExtensionViewModel, appLink: (String) 
     val routes by rememberUpdatedState(appLink)
     val push by rememberUpdatedState(onPush)
     val pop by rememberUpdatedState(onPop)
-    val open: (String) -> Unit = { url -> if (!routes(url) && ExtensionViewText.isHttps(url)) runCatching { uri.openUri(url) } }
+    val open: (String) -> Unit = { url -> if (!routes(url) && ExtensionViewText.isHttps(url)) { val _ = runCatching { uri.openUri(url) } } }
     fun show(outcome: ExtensionActionOutcome) {
         outcome.toast?.let { feedback?.notice(it) }
         outcome.error?.let { feedback?.notice(it.text(res)) }

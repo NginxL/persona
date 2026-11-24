@@ -137,3 +137,28 @@ func TestBuildCapacityEmptyAndSorted(t *testing.T) {
 		}
 	}
 }
+
+// A prepaid balance is money, not rate-limit capacity: a genuine zero, a rejected key and a failed first read must
+// never count as available accounts, which would quiet a saturated provider (#11825).
+func TestBuildCapacityIgnoresBalanceRows(t *testing.T) {
+	now := time.Now()
+	zero := proto.UsageAccount{Provider: "deepseek", Name: "DeepSeek", Ref: "balance:deepseek", Local: true, SampledAt: now,
+		Balance: &proto.UsageBalance{Amount: "0.00", Currency: "CNY"}}
+	failedKey := proto.UsageAccount{Provider: "deepseek", Name: "DeepSeek 2", Ref: "balance:deepseek-2", Local: true, SampledAt: now, Problem: "failed"}
+	firstRead := proto.UsageAccount{Provider: "deepseek", Name: "DeepSeek 3", Ref: "balance:deepseek-3", Local: true, SampledAt: now, Problem: "unreachable"}
+	inv := proto.GatewayAccounts{Accounts: []proto.GatewayAccount{
+		gwAccount("deepseek", "exhausted", false, nil, false, gwWindow("five_hour", fp(1), now.Add(time.Hour))),
+	}}
+	got := buildCapacitySnapshot(inv, []proto.UsageAccount{zero, failedKey, firstRead}, now)
+	if len(got.Providers) != 1 {
+		t.Fatalf("providers: %+v", got.Providers)
+	}
+	p := got.Providers[0]
+	if p.Provider != "deepseek" || p.Accounts != 1 || p.Available != 0 || !p.Saturated() {
+		t.Fatalf("balance rows must not count as capacity: %+v", p)
+	}
+	// Without a gateway inventory they add no provider at all.
+	if bare := buildCapacitySnapshot(proto.GatewayAccounts{}, []proto.UsageAccount{zero, failedKey, firstRead}, now); len(bare.Providers) != 0 {
+		t.Fatalf("a balance-only provider is not scheduler capacity: %+v", bare.Providers)
+	}
+}

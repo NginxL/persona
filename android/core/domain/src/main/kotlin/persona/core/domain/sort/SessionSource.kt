@@ -30,6 +30,10 @@ val Session.canClose: Boolean get() = capabilities?.close ?: canTerminal
 val Session.canRename: Boolean get() = capabilities?.rename ?: canTerminal
 /** Join a Codex app-server thread live: offered until it is attached. */
 val Session.canAttach: Boolean get() = hasSource && capabilities?.attach == true && !attached
+/** Read-only Codex session whose node offers explicit takeover or continuation (`capabilities.takeover`). */
+val Session.canContinueCodex: Boolean get() = isCodex && !canSend && capabilities?.takeover != null
+/** Explicit in-place takeover is available for this read-only Codex session (`capabilities.takeover.canResume`). */
+val Session.canTakeover: Boolean get() = canContinueCodex && capabilities?.takeover?.canResume == true
 
 /** A declared modes capability wins; an older hub that omits it keeps the agent-based rule. */
 val Session.canChangeModes: Boolean get() = isLive && canSend && (capabilities?.modes ?: isClaude)

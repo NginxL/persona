@@ -9,6 +9,7 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.core.app.ApplicationProvider
+import persona.core.inbox.*
 
 /** "AI draft" / "AI edit" and the confirmation an AI draft needs before it goes out in the user's name. */
 @OptIn(ExperimentalCoroutinesApi::class)

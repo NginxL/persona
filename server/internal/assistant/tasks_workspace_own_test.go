@@ -72,7 +72,7 @@ func countCreates(f *fakeHub) int {
 	return n
 }
 
-func TestTaskWorkspaceOwnBranchReusesCleanLeftover(t *testing.T) {
+func TestTaskWorkspaceOwnBranchContinuesWithUntrackedDrafts(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		s, f := workspaceTaskService(t)
 		f.failStart = errors.New("launcher failed")
@@ -87,13 +87,26 @@ func TestTaskWorkspaceOwnBranchReusesCleanLeftover(t *testing.T) {
 			t.Fatalf("fixture: the first start should have made a checkout and failed: %v %+v", f.worktrees, todo)
 		}
 		asked := ""
-		f.nodes[DeviceWorktreePrepare] = ownBranchPrepare(func(b string) (map[string]any, error) {
+		prepare := ownBranchPrepare(func(b string) (map[string]any, error) {
 			asked = b
 			if b != branch {
 				return nil, nil
 			}
 			return map[string]any{"path": path, "branch": b, "in_checkouts": true}, nil
 		})
+		f.nodes[DeviceWorktreePrepare] = func(machine string, raw json.RawMessage) (any, error) {
+			var in struct {
+				Branch         string
+				AllowUntracked bool `json:"allow_untracked"`
+			}
+			if err := json.Unmarshal(raw, &in); err != nil {
+				return nil, err
+			}
+			if in.Branch == branch && !in.AllowUntracked {
+				return nil, &rpc.Error{Code: proto.CodeCheckoutDirty, Message: "Untracked draft blocks strict reuse"}
+			}
+			return prepare(machine, raw)
+		}
 		f.failStart = nil
 		continuePlan(t, s, todo.ID)
 		synctest.Wait()
@@ -127,8 +140,8 @@ func TestTaskWorkspaceOwnBranchRefusals(t *testing.T) {
 	}{
 		{name: "outside the checkouts folder", existing: map[string]any{"path": "/code/app", "in_checkouts": false},
 			want: []string{"/code/app", `{"existing": "/code/app"}`, "outside the folder"}},
-		{name: "dirty", err: coded(proto.CodeCheckoutDirty, map[string]string{"path": "/wt/app/left", "branch": "b"}),
-			want: []string{"/wt/app/left", `{"existing": "/wt/app/left"}`, "uncommitted"}},
+		{name: "dirty", err: coded(proto.CodeCheckoutDirty, map[string]string{"path": "/wt/app/left", "branch": "b", "files": `"app.txt"`}),
+			want: []string{"/wt/app/left", "app.txt", "Commit or stash", "task_retry", "different branch"}},
 		{name: "in use", err: coded(proto.CodeCheckoutInUse, map[string]string{"path": "/wt/app/left", "branch": "b", "owner": "writer"}),
 			want: []string{"/wt/app/left", "writer"}},
 		{name: "unverified", err: coded(proto.CodeCheckoutUnverified, map[string]string{"path": "/wt/app/left", "branch": "b"}),
@@ -177,6 +190,13 @@ func TestTaskWorkspaceOwnBranchRefusals(t *testing.T) {
 				for _, w := range tc.want {
 					if !strings.Contains(msg, w) {
 						t.Errorf("refusal %q lacks %q", msg, w)
+					}
+				}
+				if tc.name == "dirty" {
+					todo := onlyTodo(s)
+					if saved.Tasks[0].ErrorCode != proto.CodeCheckoutDirty || !strings.Contains(todo.StartError, "app.txt") ||
+						!strings.Contains(todo.StartError, "task_retry") || !strings.Contains(todo.StartError, "另选分支") {
+						t.Fatalf("failed card lost its localized recovery info: %q (code %q)", todo.StartError, saved.Tasks[0].ErrorCode)
 					}
 				}
 			})

@@ -15,6 +15,9 @@ fun interface FeedPageReader {
     suspend fun read(since: String?, cursor: String?): FeedResponse
 }
 
+/** The capability disappeared before a launcher-specific Retry; never turn it into a plain Retry. */
+class LauncherRetryUnsupportedException : UnsupportedOperationException("Launcher retry unavailable")
+
 /** Tasks dispatched from an assistant conversation (docs/assistant/unified-entry.md; docs/protocol/protocol.md "Tasks and the chat feed"). */
 interface TasksApi {
     /** Low-distraction mode and today's held pushes; demo/older test hubs keep the entry hidden. */
@@ -58,6 +61,12 @@ interface TasksApi {
      * it reopened, without its error. Refused (409) when the machine is offline or the task did not fail to start.
      */
     suspend fun retryTask(todoId: String): Todo
+    /** Retry on the first suggested launcher (feature `task_retry_launcher`); never silently falls back to plain Retry. */
+    suspend fun retryTaskOnLauncher(todoId: String, launcher: String): Todo =
+        throw LauncherRetryUnsupportedException()
+    /** Answer a failed start's terminal question (feature `todo_start_answer`), returning the reopened to-do. */
+    suspend fun answerTaskStart(todoId: String, choice: String): Todo =
+        throw UnsupportedOperationException("Task start answers unavailable")
     /** Removes a task: its todo goes; its agents and their chats stay. */
     suspend fun removeTask(todoId: String)
     /** Accept only the owner's displayed round, never a newer ask under the same todo id. */

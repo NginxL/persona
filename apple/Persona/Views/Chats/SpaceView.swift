@@ -63,11 +63,6 @@ struct SiblingTabs: View {
             }
             .presentationDetents([.medium, .large])
             .presentationDragIndicator(.visible)
-            #if os(macOS)
-            // A Mac sheet ignores detents and opens at its content's minimum size: the list came up as its header and
-            // one row (#906).
-            .macSheet()
-            #endif
         }
     }
 
@@ -265,10 +260,6 @@ private struct SiblingList: View {
                         .themedButton()
                         .accessibilityLabel("Open a new tab in this space")
                     }
-                    #if os(macOS)
-                    // A Mac sheet has no swipe down or tap outside to close it; Esc presses this.
-                    Button("Done [Extension System Presentation c0b3fb]") { dismiss() }.lineLimit(1).keyboardShortcut(.cancelAction)
-                    #endif
                 }
                 .padding(.horizontal, Theme.Space.l).padding(.top, Theme.Space.l).padding(.bottom, Theme.Space.s)
                 if let failure {

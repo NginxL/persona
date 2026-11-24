@@ -216,7 +216,7 @@ function ChangesPanelView({ mid, sid, opened, onClose, tr }: ChangesPanelProps &
 
 
   useEffect(() => {
-    if (!opened.turn && turnId) openPanel({ ...opened, turn: turnId });
+    if (!opened.turn && turnId) openPanel({ ...opened, turn: turnId }, { replace: true });
   }, [opened.turn, turnId]);
 
   useEffect(() => {
@@ -330,7 +330,7 @@ function ChangesPanelView({ mid, sid, opened, onClose, tr }: ChangesPanelProps &
   function selectFile(path: string) {
     pendingLive.current.clear();
     setPending({ count: 0, path: "" });
-    openPanel({ ...opened, turn: turnId, at: { path } });
+    openPanel({ ...opened, turn: turnId, at: { path } }, { replace: true });
   }
 
   function retryFolds() {

@@ -1,6 +1,7 @@
 package hub
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -11,6 +12,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -618,5 +620,242 @@ func TestARelayStreamWithARequestOnItIsNotPinged(t *testing.T) {
 	close(m.release)
 	if a := <-answered; a.err != nil || a.code != http.StatusOK || a.stream != 1 {
 		t.Fatalf("a request through a stall: %d on stream %d, %v", a.code, a.stream, a.err)
+	}
+}
+
+// Reusing a warm idle relay stream that closed before handling a non-idempotent POST (peer close, NAT/proxy drop, or
+// timeout between pings) must fail the pre-write ping probe and retry on a fresh stream instead of returning 502
+// without reaching the extension.
+func TestRelayedPostRetriesWhenReusedIdleStreamClosed(t *testing.T) {
+	var postCalls atomic.Int64
+	var gotBody atomic.Value
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /api/v1/extensions/callee/echo", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Test-Relay", fmt.Sprint(streamOf(r)))
+		_ = json.NewEncoder(w).Encode(personaHeaders(r))
+	})
+	mux.HandleFunc("POST /api/v1/extensions/callee/-/ui/card", func(w http.ResponseWriter, r *http.Request) {
+		postCalls.Add(1)
+		b, _ := io.ReadAll(r.Body)
+		gotBody.Store(string(b))
+		w.Header().Set("X-Test-Relay", fmt.Sprint(streamOf(r)))
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	})
+
+	var link *slowLink
+	h, x, srv := relayTestHubVia(t, mux, func(hub string) string {
+		link = newSlowLink(t, strings.TrimPrefix(hub, "http://"), 0)
+		return link.url()
+	})
+	h.ext.relays.ping = [2]time.Duration{15 * time.Second, 150 * time.Millisecond}
+	probeFailed := make(chan struct{}, 1)
+	h.ext.relays.probed = func(reused bool, err error) {
+		if reused && err != nil {
+			select {
+			case probeFailed <- struct{}{}:
+			default:
+			}
+		}
+	}
+	x.ended = make(chan int64, 4)
+	var firstWS atomic.Pointer[websocket.Conn]
+	origDial := x.dial
+	x.dial = func(ctx context.Context, query string) (*websocket.Conn, error) {
+		c, err := origDial(ctx, query)
+		if err == nil {
+			firstWS.CompareAndSwap(nil, c)
+		}
+		return c, err
+	}
+	master := h.cfg.Token
+
+	// Warm stream 1 and return it to the pool idle.
+	if code, n, _ := relayGet(t, srv, master, "/api/v1/extensions/callee/echo"); code != http.StatusOK || n != 1 {
+		t.Fatalf("warm GET: %d on stream %d", code, n)
+	}
+
+	// Hold the link so stream 1 stalls silently while still idle in the hub's pool (like a NAT/proxy drop between
+	// 15s ping ticks).
+	link.hold()
+
+	const payload = `{"action":"save","values":{"note":"ok"}}`
+	type postRes struct {
+		code   int
+		stream string
+		body   string
+		err    error
+	}
+	done := make(chan postRes, 1)
+	go func() {
+		// Use a chunked/unknown-length body (io.NopCloser) to also exercise ContentLength == -1.
+		req, _ := http.NewRequest("POST", srv.URL+"/api/v1/extensions/callee/-/ui/card", io.NopCloser(strings.NewReader(payload)))
+		req.Header.Set("Authorization", "Bearer "+master)
+		req.Header.Set("Content-Type", "application/json")
+		res, err := http.DefaultClient.Do(req)
+		if err != nil {
+			done <- postRes{err: err}
+			return
+		}
+		defer res.Body.Close()
+		b, _ := io.ReadAll(res.Body)
+		done <- postRes{code: res.StatusCode, stream: res.Header.Get("X-Test-Relay"), body: string(b)}
+	}()
+
+	// Wait deterministically until POST has picked stream 1 and failed its pre-write ping probe before releasing
+	// the link so the retry can dial stream 2 over the bus.
+	select {
+	case <-probeFailed:
+	case <-time.After(5 * time.Second):
+		link.release()
+		t.Fatal("POST did not hit stream 1 and fail its pre-write probe")
+	}
+	link.release()
+
+	res := <-done
+	if res.err != nil {
+		t.Fatalf("POST error: %v", res.err)
+	}
+	if res.code != http.StatusOK || res.stream != "2" || res.body != `{"ok":true}` {
+		t.Fatalf("POST got %d on stream %q body=%q, want 200 on stream 2", res.code, res.stream, res.body)
+	}
+	if got := postCalls.Load(); got != 1 {
+		t.Fatalf("handler called %d times, want 1", got)
+	}
+	if got := gotBody.Load(); got != payload {
+		t.Fatalf("handler body %q, want %q", got, payload)
+	}
+}
+
+// A non-idempotent POST on a healthy reused stream that was already written to the manager (WroteRequest succeeded)
+// must never be retried if the manager drops before writing response headers.
+func TestRelayedPostDoesNotRetryWhenHandlerDropsBeforeHeaders(t *testing.T) {
+	var postCalls atomic.Int64
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /api/v1/extensions/callee/echo", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Test-Relay", fmt.Sprint(streamOf(r)))
+		_ = json.NewEncoder(w).Encode(personaHeaders(r))
+	})
+	mux.HandleFunc("POST /api/v1/extensions/callee/-/ui/card", func(w http.ResponseWriter, r *http.Request) {
+		postCalls.Add(1)
+		if hj, ok := w.(http.Hijacker); ok {
+			if c, _, err := hj.Hijack(); err == nil {
+				_ = c.Close()
+			}
+		}
+	})
+
+	h, x, srv := relayTestHubVia(t, mux, nil)
+	master := h.cfg.Token
+	if code, n, _ := relayGet(t, srv, master, "/api/v1/extensions/callee/echo"); code != http.StatusOK || n != 1 {
+		t.Fatalf("warm GET: %d on stream %d", code, n)
+	}
+
+	req, _ := http.NewRequest("POST", srv.URL+"/api/v1/extensions/callee/-/ui/card", bytes.NewBufferString(`{"action":"save"}`))
+	req.Header.Set("Authorization", "Bearer "+master)
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+	if res.StatusCode != http.StatusBadGateway {
+		t.Fatalf("status = %d, want 502", res.StatusCode)
+	}
+	if got := postCalls.Load(); got != 1 {
+		t.Fatalf("handler called %d times after delivery, want 1", got)
+	}
+	if got := x.accepted.Load(); got != 1 {
+		t.Fatalf("accepted %d streams, want 1", got)
+	}
+}
+
+// cloneRelayRequest must not mutate the caller's *http.Request and must normalize chunked ContentLength on the clone.
+func TestCloneRelayRequestPreservesCallerRequest(t *testing.T) {
+	const payload = `{"action":"save"}`
+	req, _ := http.NewRequest("POST", "http://manager/api/v1/extensions/callee/-/ui/card", io.NopCloser(strings.NewReader(payload)))
+	req.ContentLength = -1
+
+	base, err := cloneRelayRequest(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if req.GetBody != nil || req.ContentLength != -1 {
+		t.Fatalf("caller request mutated: GetBody=%v ContentLength=%d", req.GetBody != nil, req.ContentLength)
+	}
+	if base.GetBody == nil || base.ContentLength != int64(len(payload)) {
+		t.Fatalf("cloned request: GetBody=%v ContentLength=%d, want %d", base.GetBody != nil, base.ContentLength, len(payload))
+	}
+}
+
+// A non-idempotent POST that already received a response byte from the manager must never be retried, even if the
+// stream drops mid-response.
+func TestRelayedPostDoesNotRetryAfterFirstResponseByte(t *testing.T) {
+	var postCalls atomic.Int64
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /api/v1/extensions/callee/echo", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Test-Relay", fmt.Sprint(streamOf(r)))
+		_ = json.NewEncoder(w).Encode(personaHeaders(r))
+	})
+	mux.HandleFunc("POST /api/v1/extensions/callee/-/ui/card", func(w http.ResponseWriter, r *http.Request) {
+		postCalls.Add(1)
+		w.Header().Set("Content-Length", "100")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("partial"))
+		_ = http.NewResponseController(w).Flush()
+		if hj, ok := w.(http.Hijacker); ok {
+			if c, _, err := hj.Hijack(); err == nil {
+				_ = c.Close()
+			}
+		}
+	})
+
+	h, _, srv := relayTestHubVia(t, mux, nil)
+	master := h.cfg.Token
+	if code, n, _ := relayGet(t, srv, master, "/api/v1/extensions/callee/echo"); code != http.StatusOK || n != 1 {
+		t.Fatalf("warm GET: %d on stream %d", code, n)
+	}
+
+	req, _ := http.NewRequest("POST", srv.URL+"/api/v1/extensions/callee/-/ui/card", bytes.NewBufferString(`{"action":"save"}`))
+	req.Header.Set("Authorization", "Bearer "+master)
+	res, err := http.DefaultClient.Do(req)
+	if err == nil {
+		_, _ = io.ReadAll(res.Body)
+		res.Body.Close()
+	}
+	if got := postCalls.Load(); got != 1 {
+		t.Fatalf("handler called %d times after first response byte, want 1", got)
+	}
+}
+
+// A POST on a freshly dialed stream (not reused from the idle pool) must not be retried if it fails before headers.
+func TestRelayedPostDoesNotRetryOnFreshStreamFailure(t *testing.T) {
+	var postCalls atomic.Int64
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /api/v1/extensions/callee/-/ui/card", func(w http.ResponseWriter, r *http.Request) {
+		postCalls.Add(1)
+		if hj, ok := w.(http.Hijacker); ok {
+			if c, _, err := hj.Hijack(); err == nil {
+				_ = c.Close()
+			}
+		}
+	})
+
+	h, x, srv := relayTestHubVia(t, mux, nil)
+	master := h.cfg.Token
+
+	req, _ := http.NewRequest("POST", srv.URL+"/api/v1/extensions/callee/-/ui/card", bytes.NewBufferString(`{"action":"save"}`))
+	req.Header.Set("Authorization", "Bearer "+master)
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+	if res.StatusCode != http.StatusBadGateway {
+		t.Fatalf("status = %d, want 502", res.StatusCode)
+	}
+	if got := postCalls.Load(); got != 1 {
+		t.Fatalf("handler called %d times, want 1", got)
+	}
+	if got := x.accepted.Load(); got != 1 {
+		t.Fatalf("accepted %d streams, want 1", got)
 	}
 }

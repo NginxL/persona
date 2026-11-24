@@ -24,6 +24,7 @@ import persona.core.navigation.ChatRoute
 import persona.core.navigation.ConversationKind
 import persona.core.navigation.Navigator
 import persona.core.navigation.RouteSource
+import persona.core.inbox.*
 
 /**
  * "Hand to AI" files an item as done only when the user's own switch says so, and the conversation it opens knows the

@@ -146,6 +146,7 @@ internal fun TodoHandOffSheet(
 
             if (mode == HandOffMode.New) {
                 JSectionHeader(stringResource(R.string.agents_handoff_new_session))
+                val densities = currentTextDensities()
                 Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.s)) {
                     Box {
                         JGroupItem(GroupPosition.of(0, 4)) {
@@ -159,14 +160,16 @@ internal fun TodoHandOffSheet(
                             )
                         }
                         DropdownMenu(showMachineMenu, onDismissRequest = { showMachineMenu = false }) {
-                            machines.forEach { m ->
-                                DropdownMenuItem(
-                                    text = { Text(if (m.online) m.displayName else stringResource(R.string.agents_handoff_machine_offline, m.displayName)) },
-                                    onClick = {
-                                        if (m.id != selectedId) pick(m)
-                                        showMachineMenu = false
-                                    }
-                                )
+                            RetainedTextDensity(densities) {
+                                machines.forEach { m ->
+                                    DropdownMenuItem(
+                                        text = { Text(if (m.online) m.displayName else stringResource(R.string.agents_handoff_machine_offline, m.displayName)) },
+                                        onClick = {
+                                            if (m.id != selectedId) pick(m)
+                                            showMachineMenu = false
+                                        }
+                                    )
+                                }
                             }
                         }
                     }
@@ -186,14 +189,16 @@ internal fun TodoHandOffSheet(
                             )
                         }
                         DropdownMenu(showLauncherMenu, onDismissRequest = { showLauncherMenu = false }) {
-                            listOf(remembered.launcher, "claude", "codex").distinct().forEach { l ->
-                                DropdownMenuItem(
-                                    text = { Text(handOffLauncherLabel(l)) },
-                                    onClick = {
-                                        launcher = l
-                                        showLauncherMenu = false
-                                    }
-                                )
+                            RetainedTextDensity(densities) {
+                                listOf(remembered.launcher, "claude", "codex").distinct().forEach { l ->
+                                    DropdownMenuItem(
+                                        text = { Text(handOffLauncherLabel(l)) },
+                                        onClick = {
+                                            launcher = l
+                                            showLauncherMenu = false
+                                        }
+                                    )
+                                }
                             }
                         }
                     }
@@ -209,11 +214,13 @@ internal fun TodoHandOffSheet(
                             )
                         }
                         DropdownMenu(showModeMenu, onDismissRequest = { showModeMenu = false }) {
-                            listOf("default", BYPASS_MODE, remembered.mode).distinct().forEach { m ->
-                                DropdownMenuItem(
-                                    text = { Text(handOffModeLabel(m)) },
-                                    onClick = { permissionMode = m; showModeMenu = false }
-                                )
+                            RetainedTextDensity(densities) {
+                                listOf("default", BYPASS_MODE, remembered.mode).distinct().forEach { m ->
+                                    DropdownMenuItem(
+                                        text = { Text(handOffModeLabel(m)) },
+                                        onClick = { permissionMode = m; showModeMenu = false }
+                                    )
+                                }
                             }
                         }
                     }

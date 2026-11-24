@@ -26,21 +26,63 @@ type writeQuiescer struct {
 	paused   bool
 	inflight int
 	idle     chan struct{} // closed and cleared when inflight reaches 0
+	// testOnPauseDefer, when non-nil in tests, runs inside beginOrDefer after
+	// observing paused==true and before onPaused while holding mu.
+	testOnPauseDefer func()
+}
+
+type quiesceHeldKey struct{}
+
+// withQuiesceHeld marks ctx as already holding a writeQuiescer turn (for
+// example, an HTTP handler admitted through quiesceGate) so inner helpers do
+// not re-enter begin() and fail if a pause started while the request was in
+// flight.
+func withQuiesceHeld(ctx context.Context) context.Context {
+	return context.WithValue(ctx, quiesceHeldKey{}, true)
+}
+
+func quiesceHeld(ctx context.Context) bool {
+	if ctx == nil {
+		return false
+	}
+	held, _ := ctx.Value(quiesceHeldKey{}).(bool)
+	return held
 }
 
 // begin admits one write. False means writes are paused: leave the work
 // pending for the resume.
 func (q *writeQuiescer) begin() bool {
+	return q.beginOrDefer(nil)
+}
+
+// beginOrDefer admits one write, or invokes onPaused while holding q.mu when
+// writes are paused. Because resume takes q.mu before waking deferred workers,
+// pending state published in onPaused is guaranteed to be visible to the wake
+// pass that follows resume.
+func (q *writeQuiescer) beginOrDefer(onPaused func()) bool {
+	if q == nil {
+		return true
+	}
 	q.mu.Lock()
-	defer q.mu.Unlock()
 	if q.paused {
+		if q.testOnPauseDefer != nil {
+			q.testOnPauseDefer()
+		}
+		if onPaused != nil {
+			onPaused()
+		}
+		q.mu.Unlock()
 		return false
 	}
 	q.inflight++
+	q.mu.Unlock()
 	return true
 }
 
 func (q *writeQuiescer) end() {
+	if q == nil {
+		return
+	}
 	q.mu.Lock()
 	q.inflight--
 	if q.inflight == 0 && q.idle != nil {
@@ -99,7 +141,7 @@ func (h *Hub) quiesceGate(next http.Handler) http.Handler {
 			return
 		}
 		defer h.quiesce.end()
-		next.ServeHTTP(w, r)
+		next.ServeHTTP(w, r.WithContext(withQuiesceHeld(r.Context())))
 	})
 }
 
@@ -200,16 +242,14 @@ func (h *Hub) pauseDevelopmentWriters(ctx context.Context) error {
 	ctx, cancel := context.WithTimeout(ctx, developmentQuiesceWait)
 	defer cancel()
 	if err := h.quiesce.pause(ctx); err != nil {
-		h.quiesce.resume()
-		h.flushDeviceSessionFinishes()
+		h.resumeDevelopmentWriters()
 		return err
 	}
 	if err := h.assistantProc.pause(ctx); err != nil {
 		// The child may already be stopping: let the supervisor start it
-		// again rather than leave the gate closed.
-		h.assistantProc.start()
-		h.quiesce.resume()
-		h.flushDeviceSessionFinishes()
+		// again rather than leave the gate closed, and wake every worker that
+		// deferred its write while the pause held.
+		h.resumeDevelopmentWriters()
 		return err
 	}
 	return nil
@@ -224,6 +264,18 @@ func (h *Hub) resumeDevelopmentWriters() {
 	h.resumeExtReportSave()
 	h.wakeHelloWriters()
 	h.wakePhoneWrites()
-	h.flushDeviceSessionFinishes()
+	h.scheduleDeviceSessionFinishes()
+	h.lockTests.wake()
+	h.resumeMachineEntries()
+	h.live.resumeWrites()
+	h.wakeClientOps()
+	h.push.resumeWrites()
+	h.resumePersonaTiers()
+	h.resumeMeshPersist()
+	h.resumeAssistantProfile()
+	h.resumeCodexInventory()
+	h.resumeLooksGone()
+	h.resumeFSWatchEpoch()
+	h.resumeBusSeen()
 	h.assistantProc.start()
 }

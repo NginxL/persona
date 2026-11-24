@@ -19,11 +19,11 @@ final class LiveScreenSettingsTests: XCTestCase {
         return app
     }
 
-    /// The row in This Device opens the page; the switch is on; turned off, it stays off on the next launch.
+    /// The row in Advanced › This Device opens the page; the switch is on; turned off, it stays off on the next launch.
     @MainActor func testTheRouteSwitch() throws {
         let app = try launch(["-showScreenRoutes", "YES", "-AppleLanguages", "(en)", "-AppleLocale", "en_US"])
-        let row = app.buttons["settings-live-screen"].firstMatch
-        for _ in 0..<8 where !row.isHittable { app.swipeUp() }
+        XCTAssertTrue(app.openSettingsAdvancedPage(), "no Settings › Advanced:\n\(app.debugDescription)")
+        let row = app.settingsAdvancedRow("settings-live-screen")
         XCTAssertTrue(row.waitForExistence(timeout: 15), "the row:\n\(app.debugDescription)")
         row.tap()
         let toggle = app.switches["settings-live-screen-routes"].firstMatch
@@ -52,9 +52,8 @@ final class LiveScreenSettingsTests: XCTestCase {
                     let app = try launch(["-showScreenRoutes", "YES", "-ui.scheme", scheme, "-UIPreferredContentSizeCategoryName", size,
                                           "-AppleLanguages", "(\(lang))", "-AppleLocale", locale])
                     dismissIconNotice(app)
-                    let row = app.buttons["settings-live-screen"].firstMatch
-                    XCTAssertTrue(app.searchFields.firstMatch.waitForExistence(timeout: 15), "Settings:\n\(app.debugDescription)")
-                    for _ in 0..<12 where !(row.exists && row.isHittable) { app.swipeUp() }
+                    XCTAssertTrue(app.openSettingsAdvancedPage(), "Settings › Advanced:\n\(app.debugDescription)")
+                    let row = app.settingsAdvancedRow("settings-live-screen")
                     XCTAssertTrue(row.waitForExistence(timeout: 5), "the row:\n\(app.debugDescription)")
                     let short = size.hasSuffix("XXXL") ? "xxxl" : "default"
                     if short == "default" { shot(app, "live-screen-row-\(lang)-\(scheme)") }
@@ -68,11 +67,10 @@ final class LiveScreenSettingsTests: XCTestCase {
         }
     }
 
-    /// The page reached by its row in Settings, as people reach it, then Scroll Speed's choice brought into view.
+    /// The page reached by its row in Settings › Advanced, as people reach it, then Scroll Speed's choice brought into view.
     @MainActor private func scrollSpeed(_ app: XCUIApplication, choice: String) -> XCUIElement {
-        let row = app.buttons["settings-live-screen"].firstMatch
-        XCTAssertTrue(app.searchFields.firstMatch.waitForExistence(timeout: 15), "Settings:\n\(app.debugDescription)")
-        for _ in 0..<12 where !(row.exists && row.isHittable) { app.swipeUp() }
+        XCTAssertTrue(app.openSettingsAdvancedPage(), "Settings › Advanced:\n\(app.debugDescription)")
+        let row = app.settingsAdvancedRow("settings-live-screen")
         XCTAssertTrue(row.waitForExistence(timeout: 5), "the row:\n\(app.debugDescription)")
         row.tap()
         let button = app.buttons[choice].firstMatch

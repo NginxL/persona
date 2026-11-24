@@ -1,8 +1,6 @@
 #if DEBUG && os(iOS)
 import QuartzCore
-#if canImport(UIKit)
 import UIKit
-#endif
 
 /// Simulator profiling for the sidebar's drag (`-showDrawerProbe YES`): every decision `DrawerPan` makes about a touch
 /// (why it did or did not start), and while a drag and its settle run, every frame's interval and the main thread's busy

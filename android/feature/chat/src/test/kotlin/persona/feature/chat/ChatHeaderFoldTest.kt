@@ -229,7 +229,7 @@ class ChatHeaderFoldTest {
         rule.waitForIdle()
         rule.onNode(hasClickAction() and hasText("Weather widget", substring = true)).performClick()
         rule.waitForIdle()
-        rule.onNode(isDialog() and androidx.compose.ui.test.hasAnyDescendant(hasText("Session info"))).assertExists()
+        rule.onNode(isDialog() and androidx.compose.ui.test.hasAnyDescendant(hasText("Session overview"))).assertExists()
     }
 
     @Test fun briefTitleKeepsTheStatusSheet() {

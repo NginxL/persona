@@ -8,6 +8,14 @@ import (
 
 // ---- the todos (the assistant's, docs/assistant/todos.md) ----
 
+// todoRoutes are the to-dos' relayed routes listed since the central Routes literal (bus.go) closed; the hub relays
+// them like Routes.
+var todoRoutes = []string{
+	"GET /api/v1/todos/revision", // the pushed read's cheap validator (todo_revision.go, #13804)
+}
+
+func init() { Routes = append(Routes, todoRoutes...) }
+
 // TodoReport is what the hub shows of the todos: active links, display-only completed ownership and the agents kept
 // quiet (#1731: no pushes, badges or Live
 // Activity; those of quiet tasks open or done in the last week). Small, whole every time.

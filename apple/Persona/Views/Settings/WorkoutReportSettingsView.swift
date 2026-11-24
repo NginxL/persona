@@ -7,6 +7,7 @@ struct WorkoutReportSettingsView: View {
 
     var body: some View {
         SettingsForm {
+            HealthIntakeSyncSettings()
             Section {
                 SettingsSwitchRow(title: String(localized: "Automatic workout reports"),
                                   symbol: Theme.Icon.health, isOn: Binding(

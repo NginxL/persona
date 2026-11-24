@@ -68,6 +68,12 @@ type CommandGate struct {
 	// Auth is how the node's proxy puts the credentials on a request; nil: Env goes into the assistant's process
 	// whole, Secret included (a gate whose script needs its secret itself, or a hub from before #1317).
 	Auth *GateAuth `json:"auth,omitempty"`
+	// Relay: the API is the extension's unix socket on the manager's machine, named by SocketEnv (#12904). The hub
+	// gives such a gate no Auth, so a node from before keeps putting Env (socket and token) into the process; a node
+	// that knows Relay proxies it as a gate with Auth, giving the process its proxy address in BaseEnv and neither
+	// the socket nor Secret, and sends each call to the manager (MethodGateRelay), which adds the credentials.
+	Relay     bool   `json:"relay,omitempty"`
+	SocketEnv string `json:"socket_env,omitempty"`
 }
 
 // GateAuth is a command gate's credentials as its API takes them: the header Header set to Value, each ${NAME} in it

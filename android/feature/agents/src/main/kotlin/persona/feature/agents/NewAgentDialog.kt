@@ -151,7 +151,7 @@ private fun rememberPromptFocus(state: NewAgentState, list: LazyListState): Focu
         handled = state.focusPrompt
         list.animateScrollToItem((list.layoutInfo.totalItemsCount - 1).coerceAtLeast(0))
         withFrameNanos { }
-        runCatching { requester.requestFocus() }
+        val _ = runCatching { requester.requestFocus() }
     }
     return requester
 }

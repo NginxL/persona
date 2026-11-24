@@ -13,6 +13,7 @@ import (
 // A run whose machine left the configuration ends like any other: the owner is told why, the message's reaction
 // turns to DONE, and the run is gone, instead of being dropped with the message left on "OnIt".
 func TestChannelRunOnAMachineGoneIsAnswered(t *testing.T) {
+	needsLarkLayer(t)
 	f, posts := feishuHub("ou_a", time.Unix(100, 0))
 	f.devices = []Device{{ID: "server", Name: "server", Online: true, Reachable: true}} // "box" is not configured any more
 	f.devicesFull = true
@@ -63,6 +64,7 @@ func goneRun(t *testing.T, s *Service) *channel.Run {
 
 // The note of a run whose machine was removed that does not get out the first time is tried again until it does.
 func TestChannelRunOnAMachineGoneTriesAgain(t *testing.T) {
+	needsLarkLayer(t)
 	old := channelGoneRetry
 	channelGoneRetry = 10 * time.Millisecond
 	t.Cleanup(func() { channelGoneRetry = old })

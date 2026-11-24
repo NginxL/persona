@@ -149,7 +149,7 @@ internal fun TerminalPage(
                     canvas = view
                     view.onGrid = model::grid; view.onText = model::type; view.onKey = model::press
                     view.onHardware = model::hardware; view.onMarked = model::marked; view.onWheel = model::wheel; view.onCell = model::click
-                    view.onLink = { url -> runCatching { uriHandler.openUri(url) } }
+                    view.onLink = { url -> val _ = runCatching { uriHandler.openUri(url) } }
                 } }, modifier = Modifier.fillMaxSize().clipToBounds(), update = { view ->
                     view.font(state.fontSize)
                     view.render(state, wrap, palette.terminalText.toArgb(), palette.terminalBackground.toArgb()); view.keyboard(keyboard && typing)

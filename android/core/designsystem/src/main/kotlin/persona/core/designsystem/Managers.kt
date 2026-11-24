@@ -25,6 +25,9 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalResources
@@ -108,6 +111,28 @@ val HubManager.shownName: String get() = name.ifBlank { id }
 fun persona.core.contracts.api.ManagerRoster?.assistantDisplayName(shownId: String, fallback: String): String {
     if (this == null || !isMulti) return fallback
     return manager(shownId)?.shownName?.takeIf { it.isNotBlank() } ?: fallback
+}
+
+/** New manager / Rename: the shared name field and validation, with the caller's localized words and failure. */
+@Composable
+fun JManagerNameDialog(
+    title: String,
+    confirm: String,
+    initial: String,
+    busy: Boolean,
+    failure: String?,
+    placeholder: String,
+    invalidName: String,
+    onDismiss: () -> Unit,
+    onConfirm: (String) -> Unit,
+) {
+    var name by remember { mutableStateOf(initial) }
+    val valid = persona.core.contracts.api.validManagerName(name)
+    JDialog(onDismiss = onDismiss, title = title, confirmEnabled = valid && !busy, confirm = confirm to { onConfirm(name) }) {
+        JTextField(name, { name = it }, Modifier.fillMaxWidth(), placeholder = placeholder,
+            singleLine = true, enabled = !busy, isError = failure != null,
+            supportingText = failure ?: invalidName.takeIf { name.isNotEmpty() && !valid })
+    }
 }
 
 /**

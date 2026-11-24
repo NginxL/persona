@@ -113,6 +113,15 @@ const placement = (page) =>
     };
   });
 
+// This check needs an ordinary unread turn that is not led by an open related to-do. Keep the shared #412 grouping for
+// the other suites, but detach it here; an explicitly closed live delivery is Done under #5732 and cannot stand in.
+const detached = await hub("/todos/tl_push_test", {
+  method: "PATCH",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({ title: "补回归测试" }),
+});
+if (!detached.ok) fail(`could not prepare an ungrouped finished turn: HTTP ${detached.status}`);
+
 const browser = await chromium.launch(executable ? { executablePath: executable } : { channel: "chrome" });
 try {
   for (const [theme, width] of [["light", 1280], ["dark", 1280], ["light", 390], ["dark", 390]]) {

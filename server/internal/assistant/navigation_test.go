@@ -150,7 +150,7 @@ func TestNavigationOnDatabase(t *testing.T) {
 // told only what changed, and an arrangement of another shape changes nothing.
 func TestNavigationSidebarPages(t *testing.T) {
 	s, hub := navigationService(t, newSettingsBoardStore())
-	pages := `{"order":["p:example-today/today","home"],"shown":[],"hidden":["kb"],` +
+	pages := `{"order":["p:example-today/today","home"],"shown":[],"hidden":["kb"],"more":false,` +
 		`"groups":[{"id":"workbench","title":"Work"},{"id":""},{"id":"u:a1b2","title":"生活"}],` +
 		`"assign":{"p:example-today/today":"workbench","routines":"u:a1b2","inbox":""},"removed":["assets"]}`
 	navigationCall(t, s, "PUT", `{"start":"inbox"}`, roleFull)
@@ -168,8 +168,11 @@ func TestNavigationSidebarPages(t *testing.T) {
 	}
 	_, got = navigationCall(t, s, "GET", "", roleFull)
 	p, _ := got["pages"].(map[string]any)
-	if got["start"] != "inbox" || p == nil || len(p["groups"].([]any)) != 3 || p["assign"].(map[string]any)["routines"] != "u:a1b2" {
+	if got["start"] != "inbox" || p == nil || p["more"] != false || len(p["groups"].([]any)) != 3 || p["assign"].(map[string]any)["routines"] != "u:a1b2" {
 		t.Fatalf("GET: %v", got)
+	}
+	if sentPages, _ := sent[0]["pages"].(map[string]any); sentPages["more"] != false {
+		t.Fatalf("the More choice was not told to the apps: %v", sent)
 	}
 	navigationCall(t, s, "PUT", `{"start":"kb"}`, roleFull)
 	if _, got = navigationCall(t, s, "GET", "", roleFull); got["pages"] == nil || got["start"] != "kb" {

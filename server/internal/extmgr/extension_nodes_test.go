@@ -54,12 +54,22 @@ func TestExtensionIdentityChecksConfiguredNodesBeforeCommit(t *testing.T) {
 	}
 	legacy, calls := extensionNodeMachine(t, h, "legacy-node", "linux", "amd64", false, false)
 	modern, _ := extensionNodeMachine(t, h, "modern-node", "linux", "amd64", false)
+	// during holds the legacy node's calls made by the last preflight alone. The config change also syncs the program
+	// to its computers in the background (have, put, start: not the preflight's doing); holding the node's sync lock
+	// around the preflight keeps those calls out of this window.
+	var during []browserCallSeen
 	check := func(computers string) error {
 		t.Helper()
 		if err := reg.SetConfig(t.Context(), "example-helper", json.RawMessage(`{"computers":`+computers+`}`), "test"); err != nil {
 			t.Fatal(err)
 		}
-		return h.checkRenameNodeCapabilities(t.Context(), reg.SnapshotExact("example-helper"))
+		l := h.extensions.nodes.lock("legacy-node")
+		l.Lock()
+		defer l.Unlock()
+		n := len(calls())
+		err := h.checkRenameNodeCapabilities(t.Context(), reg.SnapshotExact("example-helper"))
+		during = calls()[n:]
+		return err
 	}
 	refused := func(err error, key, want string) {
 		t.Helper()
@@ -72,9 +82,12 @@ func TestExtensionIdentityChecksConfiguredNodesBeforeCommit(t *testing.T) {
 		}
 	}
 	refused(check(`["legacy-node"]`), "extension-identity.node_outdated", "Update the node on legacy-node ")
-	for _, call := range calls() {
+	if len(during) == 0 {
+		t.Fatal("the preflight did not probe the legacy node")
+	}
+	for _, call := range during {
 		if call.Method != "plugin.node.identity" {
-			t.Fatal("capability preflight mutated a legacy node")
+			t.Fatalf("capability preflight mutated a legacy node: %s", call.Method)
 		}
 	}
 	legacy.mu.Lock()

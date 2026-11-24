@@ -118,7 +118,7 @@ func TestTransientContinuedWithTriageOff(t *testing.T) {
 		t.Fatal("sent before the backoff")
 	}
 	s.workTick(ctx, time.Now().Add(16*time.Second))
-	if got := f.sentToAgents(); len(got) != 1 || got[0] != "s1: 继续" {
+	if got := f.sentToAgents(); len(got) != 1 || got[0] != "s1: "+autoContinueTextForTest(continueText) {
 		t.Fatalf("sent %v", got)
 	}
 	if len(s.workCards()) != 0 {
@@ -139,7 +139,7 @@ func TestTransientContinueAllowsHerdrIdleOnlyForOpenTaskAgents(t *testing.T) {
 			if tc.openTask {
 				putTodo(s, Todo{ID: "todo-worker", Agents: []TodoAgent{{MachineID: "box", SessionID: "s1"}}})
 			}
-			c := apiErrorTurn("s1", "API Error: 503 no eligible upstream")
+			c := apiErrorTurn("s1", "API Error: 503 Service Unavailable")
 			f.setSessions("box", c)
 			triage(t, s, "s1")
 			if e := entryOf(t, s, "s1"); e.WakeAt == nil || e.Work.On != proto.WaitTransient {
@@ -152,7 +152,7 @@ func TestTransientContinueAllowsHerdrIdleOnlyForOpenTaskAgents(t *testing.T) {
 
 			got := f.sentToAgents()
 			if tc.openTask {
-				if len(got) != 1 || got[0] != "s1: 继续" {
+				if len(got) != 1 || got[0] != "s1: "+autoContinueTextForTest(continueText) {
 					t.Fatalf("open task Agent lost its transient retry: sent %v", got)
 				}
 			} else if len(got) != 0 {
@@ -230,7 +230,7 @@ func TestTransientCapAndReset(t *testing.T) {
 func TestTransientContinueYieldsToTheUser(t *testing.T) {
 	s, f := transientService(t)
 	ctx := context.Background()
-	f.setSessions("box", apiErrorTurn("s1", "API Error: 503 no eligible upstream"))
+	f.setSessions("box", apiErrorTurn("s1", "API Error: 503 Service Unavailable"))
 	triage(t, s, "s1")
 	if entryOf(t, s, "s1").WakeAt == nil {
 		t.Fatal("not scheduled")

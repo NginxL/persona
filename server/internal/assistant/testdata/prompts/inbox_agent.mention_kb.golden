@@ -4,6 +4,7 @@
 类型：飞书群里 @ 了用户
 张三：@我 周五灰度能提前吗
 飞书会话 id：f1
+需要查看图片且 lark_image 可用时，传入消息 ID 或本会话的 chat_id，以及上面指定的 account。
 
 </persona-context>
 

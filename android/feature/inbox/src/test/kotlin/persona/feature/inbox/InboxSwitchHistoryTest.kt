@@ -31,6 +31,7 @@ import persona.core.designsystem.PersonaTheme
 import persona.core.domain.inbox.InboxItem
 import persona.core.navigation.AppTab
 import persona.core.navigation.Navigator
+import persona.core.inbox.*
 
 /** Done open while the current assistant changes: the new assistant's Done (its days and history) is read too (#3374 review). */
 @RunWith(AndroidJUnit4::class)

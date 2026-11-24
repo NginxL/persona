@@ -97,6 +97,36 @@ async function search() {
 
 beforeAll(() => loadPages(), 60_000);
 
+describe("counts as the page shows them", () => {
+  it("draws the chips from holdCounts, given the rows read with the counts (an agent seen here, still Unread there)", async () => {
+    vi.mocked(api).mockImplementation((path) => {
+      const params = new URL(path, "https://example.com").searchParams;
+      return (params.has("counts") ? rootCounts()
+        : Promise.resolve({ sessions: [{ id: "a" }, { id: "b" }], remove: [], has_more: false, total: 2, revision: "rows", counts: counts() })) as ReturnType<typeof api>;
+    });
+    const given: Row[][] = [];
+    const holdCounts = (c: ListCounts, rows: readonly Row[]) => {
+      given.push([...rows]);
+      return rows.some((r) => r.id === "a") ? { ...c, state: { ...c.state, unread: c.state.unread - 1, idle: c.state.idle + 1 } } : c;
+    };
+    list = new SessionList<Row>("/sessions", identity, compare, undefined, undefined, { pageCounts: () => true });
+    await list.load();
+    await act(async () => root.render(<PagedSessionList root={list} path="/sessions" identity={identity} compare={compare}
+      event="sessions_list" renderRow={(row) => <span>{row.id}</span>} holdCounts={holdCounts} />));
+    expect(labels()).toEqual(expected({ ...initialState, unread: 2, idle: 5 }));
+    expect(given.at(-1)?.map((r) => r.id)).toEqual(["a", "b"]);
+  });
+
+  it("leaves counts read apart from the rows as the hub said them (a hub without sessions_page_counts)", async () => {
+    const holdCounts = vi.fn((c: ListCounts) => ({ ...c, state: { ...c.state, unread: 0 } }));
+    await list.load();
+    await act(async () => root.render(<PagedSessionList root={list} path="/sessions" identity={identity} compare={compare}
+      event="sessions_list" renderRow={(row) => <span>{row.id}</span>} holdCounts={holdCounts} />));
+    expect(labels()).toEqual(expected(initialState));
+    expect(holdCounts).not.toHaveBeenCalled();
+  });
+});
+
 describe("paged state chips during count refreshes", () => {
   it("retains every chip and count while a new scope loads, then applies its successful counts", async () => {
     await show();

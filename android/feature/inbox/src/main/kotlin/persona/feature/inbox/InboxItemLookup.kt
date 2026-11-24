@@ -1,6 +1,7 @@
 package persona.feature.inbox
 
 import kotlinx.coroutines.CancellationException
+import persona.core.inbox.*
 
 /** The three outcomes an item page or link can show without confusing a failed read with a missing item. */
 sealed interface InboxItemLookupResult {

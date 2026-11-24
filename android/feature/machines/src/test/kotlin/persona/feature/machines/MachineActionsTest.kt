@@ -70,7 +70,7 @@ class MachineActionsTest {
 
     private fun <T> test(block: suspend TestScope.() -> T) = runTest {
         Dispatchers.setMain(StandardTestDispatcher(testScheduler))
-        try { block() } finally { Dispatchers.resetMain() }
+        try { val _ = block() } finally { Dispatchers.resetMain() }
     }
 
     @Test fun reconnectWaitsForTheMachineToComeOnlineAndSaysSo() = test {

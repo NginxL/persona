@@ -149,7 +149,9 @@ func (s *Service) PrepareBackendWorkspace(ctx context.Context, id, op string) (*
 			}
 		}
 	}
-	result, err := s.backendWorkspaceCall(ctx, "prepare", r.Request())
+	req := r.Request()
+	req.MirrorRepos = s.prepareEnabledMirrorsForWorkspace(ctx, r)
+	result, err := s.backendWorkspaceCall(ctx, "prepare", req)
 	if err != nil {
 		result = *r
 		result.Error = err.(*taskworkspace.Problem)
@@ -479,8 +481,8 @@ func (s *Service) toolTodoWorkspace(ctx context.Context, machine, self string, a
 		return "", db.ErrTodoNotFound
 	}
 	if in.Action != "inspect" {
-		if ok, err := s.confirmOutbound(ctx, machine, self, "todo_workspace", todo.Title, args); err != nil || !ok {
-			return todoNotAllowed(err)
+		if ok, outcome, err := s.confirmOutbound(ctx, machine, self, "todo_workspace", "", todo.Title, args); err != nil || !ok {
+			return todoNotAllowed(outcome, err)
 		}
 		if !workspacenaming.ValidOperationID(in.OperationID) {
 			return "", taskworkspace.Failure("invalid_input", "tool", in.OperationID, "", "")

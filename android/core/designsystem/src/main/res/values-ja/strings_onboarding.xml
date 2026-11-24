@@ -16,6 +16,7 @@
     <string name="designsystem_readiness_action_install_claude">インストール方法</string>
     <string name="designsystem_readiness_action_login_claude">ログイン方法</string>
     <string name="designsystem_readiness_action_connect_model">モデルをつなぐ</string>
+    <string name="designsystem_readiness_action_pick_model">別のモデルを選ぶ</string>
     <string name="designsystem_readiness_action_edit_provider">キーを変更</string>
     <string name="designsystem_readiness_action_test_assistant">試してみる</string>
     <string name="designsystem_readiness_send_add_computer">先にパソコンを追加</string>

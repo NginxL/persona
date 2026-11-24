@@ -97,7 +97,7 @@ class AgentWorkflowRowShotsTest {
         fun textLayout(text: String): TextLayoutResult {
             val node = rule.onNodeWithText(text, useUnmergedTree = true).fetchSemanticsNode()
             val layouts = mutableListOf<TextLayoutResult>()
-            node.config[SemanticsActions.GetTextLayoutResult].action!!(layouts)
+            val _ = node.config[SemanticsActions.GetTextLayoutResult].action!!(layouts)
             return layouts.single()
         }
 

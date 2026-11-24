@@ -87,11 +87,11 @@ func connectMachine(t *testing.T, d *Devices, cfg MachineConfig, n *buildNode) *
 	return m
 }
 
-// hubNodeBinary writes a node for the machine's platform where Redeploy finds it (nodeBinary, deploy.go).
-func hubNodeBinary(t *testing.T, goos, arch string) {
+// hubNodeBinary writes a node of version for the machine's platform where Redeploy finds it (nodeBinary, deploy.go).
+func hubNodeBinary(t *testing.T, goos, arch, version string) {
 	t.Helper()
 	dir := t.TempDir()
-	copyFile(t, updatetest.Program(t, "personad", goos, arch), filepath.Join(dir, "personad-"+goos+"-"+arch))
+	copyFile(t, updatetest.VersionedProgram(t, "personad", goos, arch, version), filepath.Join(dir, "personad-"+goos+"-"+arch))
 	t.Setenv("PERSONA_NODE_BINARIES", dir)
 }
 
@@ -122,7 +122,7 @@ func sshCalls(t *testing.T, calls string) []string {
 // sent again on every reconnect.
 func TestMachineBackOnAnotherBuildGetsTheHubsNode(t *testing.T) {
 	calls := fakeSSH(t)
-	hubNodeBinary(t, "linux", "amd64")
+	hubNodeBinary(t, "linux", "amd64", "hub-build")
 	d := newTestDevices(t)
 	d.cfg.HubVersion = "hub-build"
 	d.cfg.AutoUpdateNodes = true
@@ -152,7 +152,7 @@ func TestMachineBackOnAnotherBuildGetsTheHubsNode(t *testing.T) {
 
 // A linked machine (the update protocol, not ssh) is sent the hub's node too, and the record names the build it is for.
 func TestLinkedMachineBackOnAnotherBuildGetsTheHubsNode(t *testing.T) {
-	hubNodeBinary(t, "linux", "amd64")
+	hubNodeBinary(t, "linux", "amd64", "hub-build")
 	d := newTestDevices(t)
 	d.cfg.HubVersion = "hub-build"
 	d.cfg.AutoUpdateNodes = true
@@ -173,7 +173,7 @@ func TestLinkedMachineBackOnAnotherBuildGetsTheHubsNode(t *testing.T) {
 
 // A node this manager cannot drive still uses the update protocol to become compatible (#7774).
 func TestIncompatibleLinkedMachineGetsUpdateOnConnect(t *testing.T) {
-	hubNodeBinary(t, "linux", "amd64")
+	hubNodeBinary(t, "linux", "amd64", "hub-build")
 	d := newTestDevices(t)
 	d.cfg.HubVersion = "hub-build"
 	d.cfg.AutoUpdateNodes = true

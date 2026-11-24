@@ -11,7 +11,8 @@ import (
 	"testing/synctest"
 	"time"
 
-	"github.com/nwverse/persona/server/internal/feishubot"
+	"github.com/nwverse/persona/server/internal/botcard"
+
 	"github.com/nwverse/persona/server/internal/proto"
 	"github.com/nwverse/persona/server/internal/rpc"
 )
@@ -98,7 +99,7 @@ func TestBriefingMirrorCompletion(t *testing.T) {
 		{name: "temporary status failure during retry", postError: errors.New("HTTP 503"), statusGap: true, wantPosts: 2},
 		{name: "replayed completion", replay: true, wantPosts: 1},
 		{name: "completion while post is pending", inFlight: true, wantPosts: 1},
-		{name: "permanent post refusal", postError: &feishubot.APIError{Op: "send", Code: 230002}, wantPosts: 1},
+		{name: "permanent post refusal", postError: &botcard.APIError{Op: "send", Code: 230002}, wantPosts: 1},
 		{name: "push channel disabled", disabled: true, wantPosts: 0},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

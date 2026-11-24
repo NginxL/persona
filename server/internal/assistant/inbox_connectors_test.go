@@ -534,3 +534,34 @@ func TestAMoveCountsWhatItBringsWhereTheSourceSaysSo(t *testing.T) {
 		}
 	}
 }
+
+// A source's rows are moves, not the list of what exists: a thread a round does not hand keeps its item as it was, open
+// and unchanged (#13637: a switched source hands its connector's latest answer, which a thread can fall out of, and a
+// batch it related no longer comes). Only a row that says it is done closes an item.
+func TestAThreadARoundDoesNotHandKeepsItsItem(t *testing.T) {
+	h := newInboxHub(t)
+	ctx, now := context.Background(), time.Now()
+	row := func(thread, last string) connector.InboxThing {
+		th := thing(last, now.Add(-time.Hour))
+		th.Thread = thread
+		return th
+	}
+	src := assistantwire.InboxSource{ID: "example", Name: "Example", Things: []connector.InboxThing{row("x", "1"), row("y", "1")}}
+	h.collectSource(ctx, src)
+	var y *InboxItem
+	for _, it := range openItems(h) {
+		if it.Connector.Thread == "y" {
+			y = it
+		}
+	}
+	if len(openItems(h)) != 2 || y == nil {
+		t.Fatalf("open items: %+v", openItems(h))
+	}
+	src.Things = []connector.InboxThing{row("x", "2")}
+	h.collectSource(ctx, src)
+	src.Things = nil
+	h.collectSource(ctx, src)
+	if !y.open() || y.Last != "1" || y.Count != 1 || len(openItems(h)) != 2 {
+		t.Fatalf("y after rounds without it: open %v last %s count %d; %d open", y.open(), y.Last, y.Count, len(openItems(h)))
+	}
+}

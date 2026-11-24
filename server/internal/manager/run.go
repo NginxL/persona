@@ -15,6 +15,7 @@ import (
 	"github.com/nwverse/persona/server/internal/bus"
 	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/managerconf"
+	"github.com/nwverse/persona/server/internal/managerupdate"
 	"github.com/nwverse/persona/server/internal/osproc"
 	"github.com/nwverse/persona/server/internal/update"
 )
@@ -98,6 +99,16 @@ func (e *env) runManager(ctx context.Context, build update.Build, dir string) er
 	if _, err := e.ownDatabase(ctx, dir, c); err != nil {
 		return err
 	}
+	dir, err = filepath.Abs(dir)
+	if err != nil {
+		return err
+	}
+	return managerupdate.RunDevelopment(ctx, dir, build, out, func(ctx context.Context) error {
+		return e.runBoundManager(ctx, build, dir, env, out)
+	})
+}
+
+func (e *env) runBoundManager(ctx context.Context, build update.Build, dir string, env []string, out io.Writer) error {
 	for {
 		before, _ := assistant.ReadManagerConfig(dir)
 		err := assistant.RunManager(ctx, build, dir)

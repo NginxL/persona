@@ -90,9 +90,9 @@ func (r Rule) loopbackTarget(port string, connect bool) (string, bool) {
 	return "", false
 }
 
-// Local says whether the rule lets its extension reach LocalHost: its permissions.network lists a loopback address
+// Loopback says whether the rule lets its extension reach LocalHost: its permissions.network lists a loopback address
 // (or LocalHost itself) as it is.
-func (r Rule) Local() bool {
+func (r Rule) Loopback() bool {
 	return slices.ContainsFunc(r.Hosts, func(h string) bool {
 		return slices.Contains(loopbackNames, strings.ToLower(strings.Trim(h, "[]")))
 	})

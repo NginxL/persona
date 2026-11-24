@@ -1,4 +1,3 @@
-#if os(iOS) || os(visionOS)
 import ImageIO
 import QuartzCore
 import SwiftUI
@@ -121,4 +120,3 @@ import UniformTypeIdentifiers
         view.removeFromSuperview()
     }
 }
-#endif

@@ -4,7 +4,7 @@
     <style name="Theme.Persona" parent="android:Theme.Material.NoActionBar">
         <item name="android:statusBarColor">@android:color/transparent</item>
         <item name="android:navigationBarColor">@android:color/transparent</item>
-        <!-- Pages in the link sheet are darkened (algorithmic darkening) only when the theme around them says so. -->
+        <!-- Tells WebView the app theme is dark so pages declaring prefers-color-scheme: dark render in dark mode. -->
         <item name="android:isLightTheme">false</item>
     </style>
 </resources>

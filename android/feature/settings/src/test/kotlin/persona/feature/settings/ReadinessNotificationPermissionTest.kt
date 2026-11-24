@@ -288,7 +288,7 @@ class ReadinessNotificationPermissionTest {
             rule.onNodeWithText(label, useUnmergedTree = true).assertIsDisplayed()
             val node = rule.onNodeWithText(label, useUnmergedTree = true).fetchSemanticsNode()
             val layouts = mutableListOf<TextLayoutResult>()
-            node.config[SemanticsActions.GetTextLayoutResult].action!!(layouts)
+            val _ = node.config[SemanticsActions.GetTextLayoutResult].action!!(layouts)
             val layout = layouts.single()
             assertEquals("$nextStyle must keep the permission action on one line", 1, layout.lineCount)
             assertFalse("$nextStyle must not ellipsize the permission action", layout.isLineEllipsized(0))

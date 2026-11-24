@@ -9,6 +9,7 @@ import persona.core.contracts.DirectionTask
 import persona.core.contracts.DirectionTaskState
 import persona.core.contracts.DirectionTree
 import persona.core.contracts.DirectionsEvent
+import persona.core.contracts.ExternalDirection
 import persona.core.contracts.Hello
 import persona.core.contracts.JsonCodec
 import persona.core.contracts.ServerEvent
@@ -73,7 +74,9 @@ class RealAssistantRepository(
         return AssistantSnapshot(
             if (machine.isNotEmpty() && main.isNotEmpty()) SessionKey(machine, main) else null,
             conversations, request.manager, request.owner,
-            leaders = leadersOf(data),
+            leaders = directionLeaderCacheOf(data) ?: leadersOf(data),
+            directionNames = directionNameCacheOf(data),
+            externalDirections = directionExternalCacheOf(data),
             backgroundSupervisor = backgroundSupervisorOf(data),
             recentTaskChats = (data["recent_task_chats"] as? JsonPrimitive)?.booleanOrNull,
             conversationOrder = (data["conversation_order"] as? JsonArray)
@@ -105,15 +108,21 @@ class RealAssistantRepository(
      * the tree (an older one answers 404) keeps [held] and takes the leaders answer's names, which have no counts.
      */
     private suspend fun directionsOf(request: Request, held: LeaderInfo): LeaderInfo {
-        directionTree(request)?.let { return LeaderInfo(it.ids, it.names, it) }
-        val names = try {
-            directionNamesOf(request.transport.assistantLeadersOf(request.owner))
+        directionTree(request)?.let {
+            return LeaderInfo(it.ids, it.names, it, it.leaders.mapNotNull { d ->
+                d.external?.let { external -> d.id to external }
+            }.toMap())
+        }
+        val leaders = try {
+            request.transport.assistantLeadersOf(request.owner)
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
             return held
         }
-        return LeaderInfo(held.ids, names.ifEmpty { held.names }, held.tree)
+        val names = directionNamesOf(leaders)
+        // Null ids select the fresh assistant answer's leader order in refresh; held ids are only for a failed read.
+        return LeaderInfo(null, names.ifEmpty { held.names }, held.tree, directionExternalOf(leaders))
     }
 
     private fun noteConversation(id: String, request: Request) {
@@ -192,8 +201,8 @@ class RealAssistantRepository(
                     val choice = AssistantManagerChoice.current.value
                     val request = Request(transport, choice)
                     if (restoredScope != request.key || current.value.managerId != request.owner) return@withLock null
-                    // A health chat is the health space's (docs/assistant/health.md): never on the assistant's own list.
-                    val owned = updates.filter { choice.owns(it.manager) && !it.isHealth }
+                    // A space's chat (health or a domain space, docs/assistant/health.md): never on the assistant's own list.
+                    val owned = updates.filter { choice.owns(it.manager) && !it.isSpace }
                     val byKey = owned.associateBy { it.key }
                     val before = current.value
                     // A summary row (paged lists) leaves the launcher, the permission mode, the compaction and the
@@ -243,9 +252,10 @@ class RealAssistantRepository(
             val main = snapshot.mainSession?.sessionId
             val ids = tree.ids.filter { it.isNotEmpty() && it != main }
             val known = snapshot.conversations.mapTo(HashSet()) { it.sessionId }
-            current.value = snapshot.copy(leaders = ids, directionNames = tree.names, directionTree = tree)
+            current.value = snapshot.copy(leaders = ids, directionNames = tree.names, directionTree = tree,
+                externalDirections = tree.leaders.mapNotNull { d -> d.external?.let { d.id to it } }.toMap())
             cached[request.key] = current.value
-            ids.any { it !in known }
+            ids.any { it !in known && tree.direction(it)?.external == null }
         }
         if (missing) refresh(request)
     }
@@ -318,16 +328,19 @@ class RealAssistantRepository(
         // leaders changing, and the tree is also where the order and names come from (#4352).
         val fresh = decode(data, request)
         val held = current.value.takeIf { it.managerId == request.owner }
-        val info = directionsOf(request, held?.let { LeaderInfo(it.leaders, it.directionNames, it.directionTree) } ?: LeaderInfo.EMPTY)
+        val info = directionsOf(request, held?.let {
+            LeaderInfo(it.leaders, it.directionNames, it.directionTree, it.externalDirections)
+        } ?: LeaderInfo.EMPTY)
         val pins = if (preferences != null) preferences.preferences.value.pins.sessions.mapNotNull(::sessionPath).toSet()
             else request.transport.pins().array("sessions").mapNotNull { (it as? JsonPrimitive)?.contentOrNull?.let(::sessionPath) }.toSet()
         lock.withLock {
             if (!selected(request) || version != refreshVersion) return
-            val snapshot = fresh.copy(leaders = info.ids ?: fresh.leaders, directionNames = info.names, directionTree = info.tree)
+            val snapshot = fresh.copy(leaders = info.ids ?: fresh.leaders, directionNames = info.names,
+                directionTree = info.tree, externalDirections = info.external)
             cached[request.key] = snapshot
             current.value = snapshot
             currentPins.value = pins
-            snapshots.save(request.key, data)
+            snapshots.save(request.key, withDirectionCache(data, snapshot))
         }
     }
 
@@ -398,12 +411,12 @@ class RealAssistantRepository(
                 ++refreshVersion
                 current.value = snapshot
             }
-            snapshots.save(request.key, buildJsonObject {
+            snapshots.save(request.key, withDirectionCache(buildJsonObject {
                 put("machine_id", snapshot.mainSession?.machineId ?: session.machineId)
                 put("main", snapshot.mainSession?.sessionId.orEmpty())
                 put("conversations", JsonArray(snapshot.conversations.map { JsonCodec.encodeToJsonElement(it) }))
                 snapshot.backgroundSupervisor?.let { put("background_supervisor", it) }
-            })
+            }, snapshot))
         }
         return session.key
     }
@@ -450,11 +463,54 @@ internal fun mayBeNewBackgroundSupervisor(before: AssistantSnapshot, updates: Li
     }
 }
 
+private const val DIRECTION_CACHE = "_persona_direction_cache"
+
+/** The drawer's direction metadata inside the existing assistant snapshot; absent from older cache files and wire answers. */
+private fun withDirectionCache(data: JsonObject, snapshot: AssistantSnapshot): JsonObject = buildJsonObject {
+    data.forEach { (key, value) -> put(key, value) }
+    put(DIRECTION_CACHE, buildJsonObject {
+        put("order", JsonArray(snapshot.leaders.map(::JsonPrimitive)))
+        put("names", buildJsonObject { snapshot.directionNames.forEach { (id, name) -> put(id, name) } })
+        put("external", JsonArray(snapshot.externalDirections.map { (id, external) -> buildJsonObject {
+            put("id", id)
+            put("machine_id", external.machineId)
+            put("session_id", external.sessionId)
+        } }))
+    })
+}
+
+internal fun directionLeaderCacheOf(data: JsonObject): List<String>? =
+    data.obj(DIRECTION_CACHE)?.array("order")?.mapNotNull { (it as? JsonPrimitive)?.contentOrNull }
+        ?.filter { it.isNotEmpty() }
+
+internal fun directionNameCacheOf(data: JsonObject): Map<String, String> =
+    data.obj(DIRECTION_CACHE)?.obj("names")?.mapNotNull { (id, name) ->
+        (name as? JsonPrimitive)?.contentOrNull?.let { id to it }
+    }?.toMap().orEmpty()
+
+internal fun directionExternalCacheOf(data: JsonObject): Map<String, ExternalDirection> =
+    data.obj(DIRECTION_CACHE)?.array("external")?.mapNotNull { item ->
+        (item as? JsonObject)?.let { external ->
+            external.string("id").takeIf { it.isNotEmpty() }?.let { id ->
+                id to ExternalDirection(external.string("machine_id"), external.string("session_id"))
+            }
+        }
+    }?.toMap().orEmpty()
+
 /** `GET /api/v1/assistant/leaders`'s names by leader conversation id: current directions with a name only. */
 internal fun directionNamesOf(data: JsonObject): Map<String, String> = data.array("leaders").mapNotNull { it as? JsonObject }
     .filter { (it["ended"] as? JsonPrimitive)?.booleanOrNull != true }
     .mapNotNull { l -> l.string("id").takeIf { it.isNotEmpty() }?.let { id -> l.string("name").trim().takeIf { it.isNotEmpty() }?.let { id to it } } }
     .toMap()
+
+/** The leaders fallback's explicit outside directions. Blank names and incomplete targets remain visible. */
+internal fun directionExternalOf(data: JsonObject): Map<String, ExternalDirection> =
+    data.array("leaders").mapNotNull { it as? JsonObject }
+        .filter { (it["ended"] as? JsonPrimitive)?.booleanOrNull != true && it.flag("external") }
+        .mapNotNull { leader -> leader.string("id").takeIf { it.isNotEmpty() }?.let { id ->
+            id to ExternalDirection(leader.string("machine_id"), leader.string("session_id"))
+        } }
+        .toMap()
 
 /**
  * `GET /api/v1/assistant/directions/tree` (#4352) as the app keeps it; null without `directions` (an older hub's empty
@@ -483,7 +539,9 @@ private fun directionOf(data: JsonObject): Direction? {
             }
         },
         // #6626: the hub's; a hub without it (it always sends it, false too) spins on a working task, as before
-        running = (data["running"] as? JsonPrimitive)?.booleanOrNull ?: (count("working") > 0))
+        running = (data["running"] as? JsonPrimitive)?.booleanOrNull ?: (count("working") > 0),
+        external = if (!secretary && data.flag("external"))
+            ExternalDirection(data.string("machine_id"), data.string("session_id")) else null)
 }
 
 private fun directionAgentOf(data: JsonObject): DirectionAgent? {
@@ -500,7 +558,7 @@ private fun directionAgentOf(data: JsonObject): DirectionAgent? {
  */
 private data class LeaderInfo(
     val ids: List<String>? = null, val names: Map<String, String> = emptyMap(),
-    val tree: DirectionTree? = null,
+    val tree: DirectionTree? = null, val external: Map<String, ExternalDirection> = emptyMap(),
 ) {
     companion object { val EMPTY = LeaderInfo() }
 }

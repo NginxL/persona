@@ -13,9 +13,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/nwverse/persona/server/internal/connector"
-	"github.com/nwverse/persona/server/internal/connector/github"
 	"github.com/nwverse/persona/server/internal/extension"
+	"github.com/nwverse/persona/server/internal/githubwire"
 )
 
 // waitOp waits until operation id is in one of states, and returns it.
@@ -229,9 +228,13 @@ func opCall(t *testing.T, h http.Handler, method, path, token, body string) stri
 // environment says (#3277: a package from GitHub stalled for minutes without it).
 func TestMarketClientGitHubProxy(t *testing.T) {
 	h, _, _ := marketHub(t)
-	h.cfg.GitHub = &github.Config{Egress: connector.Egress{Proxy: "http://127.0.0.1:3128"}}
+	h.cfg.GitHub = &githubwire.Config{Proxy: "http://127.0.0.1:3128"}
 	h.extensions.markets.client = nil
-	tr := h.marketClient().Transport.(*http.Transport)
+	client, err := h.marketClient()
+	if err != nil {
+		t.Fatal(err)
+	}
+	tr := client.Transport.(*http.Transport)
 	check := func(env string) {
 		t.Helper()
 		prev := envProxy
@@ -265,7 +268,7 @@ func TestMarketClientHTTPAndSOCKS5Proxy(t *testing.T) {
 	for _, raw := range []string{"http://proxy.example:3128", "socks5://proxy.example:1080"} {
 		t.Run(raw, func(t *testing.T) {
 			h, _, _ := marketHub(t)
-			h.cfg.GitHub = &github.Config{Egress: connector.Egress{Proxy: "http://127.0.0.1:3128"}}
+			h.cfg.GitHub = &githubwire.Config{Proxy: "http://127.0.0.1:3128"}
 			h.cfg.ExtensionMarket.Proxy = raw
 			h.extensions.markets.client = nil
 			prev := envProxy
@@ -274,7 +277,11 @@ func TestMarketClientHTTPAndSOCKS5Proxy(t *testing.T) {
 				t.Error("the explicit marketplace proxy fell back to the environment")
 				return nil, nil
 			}
-			tr := h.marketClient().Transport.(*http.Transport)
+			client, err := h.marketClient()
+			if err != nil {
+				t.Fatal(err)
+			}
+			tr := client.Transport.(*http.Transport)
 			for _, host := range []string{"api.github.com", "objects.githubusercontent.com", "ghcr.io", "market.example.com", "registry-mirror.example.com"} {
 				req, _ := http.NewRequest("GET", "https://"+host+"/x", nil)
 				u, err := tr.Proxy(req)
@@ -298,7 +305,11 @@ func TestMarketClientInvalidProxyDoesNotFallBack(t *testing.T) {
 	h, _, _ := marketHub(t)
 	h.cfg.ExtensionMarket.Proxy = "https://proxy.example:3128"
 	h.extensions.markets.client = nil
-	tr := h.marketClient().Transport.(*http.Transport)
+	client, err := h.marketClient()
+	if err != nil {
+		t.Fatal(err)
+	}
+	tr := client.Transport.(*http.Transport)
 	req, _ := http.NewRequest("GET", "https://api.github.com/x", nil)
 	if u, err := tr.Proxy(req); err == nil || u != nil {
 		t.Fatalf("invalid proxy fell back: %v, %v", u, err)

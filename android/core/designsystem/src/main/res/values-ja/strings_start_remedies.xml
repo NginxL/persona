@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="designsystem_start_code_launcher_terminal">%1$s はこのコンピューターのターミナルで開始できません</string>
+    <string name="designsystem_start_code_worktree_path_taken">前回の試行で作られた作業場所が残っています</string>
+    <string name="designsystem_use_launcher_instead">%1$s で開始</string>
+    <string name="designsystem_retry_launcher_unsupported">このハブはまだ別のランチャーで再試行できません。ハブの Persona を更新するか、そのまま再試行してください。</string>
+
+    <string name="designsystem_shell_question_label">ターミナルの質問に答える</string>
+    <string name="designsystem_shell_question_asking">コンピューターのターミナルが質問しています：「%1$s」</string>
+    <string name="designsystem_shell_question_hint">回答を選ぶと、そのタブでエージェントが起動します。</string>
+    <string name="designsystem_shell_question_hint_secret">パスワードを求めていますが、Persona はここからパスワードを入力しません。ここでキャンセルするか、コンピューターで入力してください。</string>
+    <string name="designsystem_shell_question_hint_ssh">新しいホスト鍵を信頼するかはコンピューターで決めてください。ここからは拒否だけできます。</string>
+    <string name="designsystem_shell_question_kept_until">タブは %1$s まで開いたままです。</string>
+    <string name="designsystem_shell_choice_enter">Enter</string>
+    <string name="designsystem_shell_choice_enter_yes">Enter（はい）</string>
+    <string name="designsystem_shell_choice_enter_no">Enter（いいえ）</string>
+    <string name="designsystem_shell_choice_cancel">キャンセル（Ctrl-C）</string>
+    <string name="designsystem_shell_choice_yes">はい</string>
+    <string name="designsystem_shell_choice_no">いいえ</string>
+    <string name="designsystem_shell_choice_key_yes">はい（%1$s）</string>
+    <string name="designsystem_shell_choice_key_no">いいえ（%1$s）</string>
+    <string name="designsystem_shell_choice_key">%1$s を押す</string>
+    <string name="designsystem_shell_choice_update_yes">更新する（%1$s）</string>
+    <string name="designsystem_shell_choice_update_no">今はしない（%1$s）</string>
+    <string name="designsystem_shell_choice_compinit_yes">このまま続ける（%1$s）</string>
+    <string name="designsystem_shell_choice_compinit_no">compinit を中止（%1$s）</string>
+    <string name="designsystem_shell_choice_newuser_quit">今はしない（%1$s）</string>
+    <string name="designsystem_shell_choice_newuser_empty">空の .zshrc を作る（%1$s）</string>
+    <string name="designsystem_shell_choice_p10k_quit">ウィザードを終了（%1$s）</string>
+    <string name="designsystem_shell_choice_rvm_no">信頼しない（%1$s）</string>
+    <string name="designsystem_shell_choice_rvm_cancel">キャンセル（%1$s）</string>
+</resources>

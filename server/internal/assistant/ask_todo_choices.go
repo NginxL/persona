@@ -12,6 +12,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/nwverse/persona/server/internal/db"
+	"github.com/nwverse/persona/server/internal/larkhost"
 	"github.com/nwverse/persona/server/internal/proto"
 )
 
@@ -233,7 +234,7 @@ func (s *Service) commitExpiredQuestionAnswer(ctx context.Context, st todoStore,
 		s.todoDecisionEvent(row)
 		s.parkDecided(context.WithoutCancel(ctx), row)
 		if postable(row) {
-			s.threadPost(row.TodoID, threadEvent{kind: threadDecision, text: decisionLine(row)})
+			s.chat().ThreadPost(row.TodoID, larkhost.ThreadEvent{Kind: larkhost.ThreadDecision, Text: decisionLine(row)})
 		}
 	}
 	s.todoRowSet(ctx, doneKeys)

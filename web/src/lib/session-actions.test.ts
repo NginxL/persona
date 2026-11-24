@@ -39,7 +39,7 @@ describe("modes", () => {
     expect(modeTitle("plan")).toBe("计划模式");
     expect(modeTitle("weird")).toBe("weird");
     expect(modeTitle(undefined)).toBe("");
-    expect(effortTitle("xhigh")).toBe("很高");
+    expect(effortTitle("xhigh")).toBe("XHigh");
   });
 
   it("never offers 完全访问 on a running session that can't reach it", () => {
@@ -107,8 +107,8 @@ describe("modes", () => {
     expect(hasModes(live)).toBe(false);
     expect(hasEffortOnly(live)).toBe(true);
     expect(effortOptions(live).map((m) => m.id)).toEqual(["low", "high", "ultra"]);
-    expect(effortOptions(live).map((m) => m.title)).toEqual(["低", "高", "极高"]);
-    expect(effortTitle("minimal")).toBe("极低");
+    expect(effortOptions(live).map((m) => m.title)).toEqual(["Low", "High", "Ultra"]);
+    expect(effortTitle("minimal")).toBe("Minimal");
     // A herdr pane joined on the app-server: no source, the node's levels say it.
     expect(hasEffortOnly(s({ agent: "codex", efforts: ["medium"] }))).toBe(true);
     // A level this app does not know yet keeps its id.

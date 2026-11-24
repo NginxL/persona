@@ -16,6 +16,7 @@ import (
 	"testing"
 	"time"
 
+	approvalops "github.com/nwverse/persona/server/internal/approval"
 	"github.com/nwverse/persona/server/internal/assistantwire"
 	"github.com/nwverse/persona/server/internal/devicewire"
 	"github.com/nwverse/persona/server/internal/link"
@@ -1301,10 +1302,55 @@ func TestPermissionCallIsNeverGuessed(t *testing.T) {
 		{ix: proto.Interaction{Kind: proto.IxPermission, ToolUseID: "c", Resumable: true, Agent: "codex"}},
 		{ix: proto.Interaction{Kind: proto.IxPermission, ToolUseID: "c"}},
 		{ix: proto.Interaction{Kind: proto.IxPermission, Resumable: true}},
+		{ix: proto.Interaction{Kind: proto.IxPermission, ToolUseID: "c", Resumable: true}, prepared: &preparedApproval{}},
 	} {
 		if terminalReconciled(p) {
 			t.Fatalf("a permission without a safe Claude Code call identity was reconciled: %+v", p.ix)
 		}
+	}
+}
+
+func TestNonFinalApprovalResultsNeverFinishPermissionCall(t *testing.T) {
+	at := time.Now()
+	input := json.RawMessage(`{"command":"printf example"}`)
+	for _, msg := range []string{
+		"PreToolUse:Bash hook error: " + approvalops.WaitingText + " The command was not executed.",
+		"PreToolUse:Bash hook error: " + approvalops.ClarifyingText,
+	} {
+		items := []proto.Item{
+			{ID: "call#0", Seq: 10, TS: at.Add(-time.Millisecond), Role: "assistant", Kind: proto.KindToolUse,
+				ToolName: "Bash", ToolUseID: "bash-call", ToolInput: input},
+			{ID: "result#0", Seq: 11, TS: at.Add(time.Second), Role: "user", Kind: proto.KindToolResult,
+				ToolUseID: "bash-call", IsError: true, Text: msg},
+			{ID: "text#0", Seq: 12, TS: at.Add(2 * time.Second), Role: "assistant", Kind: proto.KindText,
+				Text: "Please confirm the pending card."},
+		}
+		if planCallFinished(proto.Interaction{Kind: proto.IxPermission, ToolName: "Bash", ToolUseID: "bash-call", ToolInput: input, CreatedAt: at}, items) {
+			t.Fatalf("non-final result finished call with ToolUseID: %q", msg)
+		}
+		if planCallFinished(proto.Interaction{Kind: proto.IxPermission, ToolName: "Bash", ToolInput: input, CreatedAt: at}, items) {
+			t.Fatalf("non-final result finished call matched by ToolInput: %q", msg)
+		}
+		// checkPlanInteraction concatenates pages newest first: newer-page assistant text must not win before the older
+		// page's non-final WaitingText / ClarifyingText result is inspected (#12918).
+		newestFirst := []proto.Item{
+			items[2],
+			items[0],
+			items[1],
+		}
+		if planCallFinished(proto.Interaction{Kind: proto.IxPermission, ToolName: "Bash", ToolInput: input, CreatedAt: at}, newestFirst) {
+			t.Fatalf("newest-page-first assistant text bypassed older non-final result: %q", msg)
+		}
+	}
+	// Genuine terminal command output that merely quotes WaitingText (for example grep over approval.go) still reconciles.
+	grepItems := []proto.Item{
+		{ID: "call#0", Seq: 10, TS: at.Add(-time.Millisecond), Role: "assistant", Kind: proto.KindToolUse,
+			ToolName: "Bash", ToolUseID: "bash-call", ToolInput: input},
+		{ID: "result#0", Seq: 11, TS: at.Add(time.Second), Role: "user", Kind: proto.KindToolResult,
+			ToolUseID: "bash-call", Text: `server/internal/approval/approval.go:51:const WaitingText = "` + approvalops.WaitingText + `"`},
+	}
+	if !planCallFinished(proto.Interaction{Kind: proto.IxPermission, ToolName: "Bash", ToolUseID: "bash-call", ToolInput: input, CreatedAt: at}, grepItems) {
+		t.Fatal("ordinary stdout quoting WaitingText was misclassified as a non-final hook release")
 	}
 }
 
@@ -1402,7 +1448,7 @@ func TestTerminalPermissionWithoutIDClearsBuiltInDenial(t *testing.T) {
 		t.Fatalf("the completed session still needs the owner: %+v", rows)
 	}
 	before := len(ft.toldOf(assistantwire.EventFleetInteraction))
-	s.askTick(at.Add(askOwnerOnlyDeadline))
+	s.askTick(at.Add(askHoldFor))
 	if got := len(ft.toldOf(assistantwire.EventFleetInteraction)); got != before {
 		t.Fatal("the obsolete card escalated after the runtime denied it")
 	}
@@ -1462,7 +1508,7 @@ func TestTerminalPermissionWithoutIDKeepsWaitingCard(t *testing.T) {
 	default:
 	}
 	before := len(ft.toldOf(assistantwire.EventFleetInteraction))
-	ft.s.askTick(at.Add(askOwnerOnlyDeadline))
+	ft.s.askTick(at.Add(askHoldFor))
 	if got := len(ft.toldOf(assistantwire.EventFleetInteraction)); got <= before {
 		t.Fatal("a genuinely waiting permission card did not escalate at its deadline")
 	}

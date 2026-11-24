@@ -110,6 +110,14 @@
       "path_tokens": [],
       "external_refs": []
     },
+    "android/module/voice/src/test/kotlin/persona/module/voice/ProtocolCompatibilityMockServer.kt": {
+      "reason": "Copy of the core:hub fixture for the voice module's tests (test sources are not shared): skips the exact discovery request.",
+      "tokens": [
+        "jarvis-ports"
+      ],
+      "path_tokens": [],
+      "external_refs": []
+    },
     "android/core/hub/src/test/kotlin/persona/core/hub/ProtocolCompatibilityMockServerTest.kt": {
       "reason": "Exact discovery-request regression fixtures; ordinary requests remain visible.",
       "tokens": [
@@ -1203,6 +1211,7 @@
         "JARVIS_GUEST",
         "JARVIS_SESSION_ID",
         "JARVIS_SPACE",
+        "JARVIS_TRACK_KIND",
         "mcp__jarvis__report_to_supervisor",
         "mcp__jarvis__task_plan",
         "mcp__jarvis__task_review",

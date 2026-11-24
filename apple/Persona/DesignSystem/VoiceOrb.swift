@@ -300,7 +300,10 @@ nonisolated struct VoiceOrbPose: Equatable, Sendable {
                                 bars: bars { i in
                                     guard let t else { return 0.7 }
                                     // Each bar on its own beat, as an equalizer: taller as the voice gets louder.
-                                    return (0.3 + 0.7 * abs(sin(.pi * t / Theme.Motion.voiceBeat + Double(i) * 1.1))) * (0.55 + 0.45 * voice)
+                                    // In steps: as one expression the visionOS build gives up type-checking it.
+                                    let angle: Double = .pi * t / Theme.Motion.voiceBeat + Double(i) * 1.1
+                                    let height: Double = 0.3 + 0.7 * abs(sin(angle))
+                                    return height * (0.55 + 0.45 * voice)
                                 },
                                 lap: nil)
         case .paused, .muted:

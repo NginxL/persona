@@ -207,6 +207,21 @@
     <string name="machines_usage_problem_error">网关读这个账号失败，显示的是它存着的数字</string>
     <plurals name="machines_health_summary_attention"><item quantity="other">%d 项功能需要处理</item></plurals>
     <plurals name="machines_health_fixed"><item quantity="other">已重新生成 %d 项</item></plurals>
+    <string name="machines_usage_provider_other">其他</string>
+    <string name="machines_usage_types_title">显示的账号类型</string>
+    <string name="machines_usage_types_hint">只改变这部手机上的显示。</string>
+    <string name="machines_usage_timeline_window">%1$s · %2$s</string>
+    <plurals name="machines_usage_accounts"><item quantity="other">%d 个账号</item></plurals>
+    <string name="machines_usage_days">%1$d天</string>
+    <string name="machines_usage_hours_tenths">%1$s小时</string>
+    <string name="machines_usage_axis_now">现在</string>
+    <string name="machines_usage_chart_title">重置时间线</string>
+    <string name="machines_usage_chart_row">%1$s：%2$s</string>
+    <string name="machines_usage_legend_five">5h 窗口恢复</string>
+    <string name="machines_usage_legend_week">7d 窗口恢复</string>
+    <string name="machines_usage_legend_now">现在</string>
+    <string name="machines_usage_legend_protect">保护线（到此自动暂停调度）</string>
+    <string name="machines_usage_protect">保护 %1$d%%</string>
     <plurals name="machines_usage_age_seconds"><item quantity="other">%d 秒前</item></plurals>
     <plurals name="machines_usage_age_minutes"><item quantity="other">%d 分钟前</item></plurals>
     <plurals name="machines_usage_age_hours"><item quantity="other">%d 小时前</item></plurals>
@@ -269,4 +284,9 @@
     <string name="machines_link_switch_why_unknown">出了点问题。</string>
     <string name="machines_link_switch_why_unavailable">这台电脑暂时不能切换到 Persona Link。</string>
     <string name="machines_manager_offline">它的助手「%1$s」离线，助手回来后这台电脑会恢复在线。</string>
+    <string name="machines_tokens_today_title">今日文本用量</string>
+    <string name="machines_tokens_total">合计</string>
+    <string name="machines_tokens_now">现在</string>
+    <string name="machines_tokens_cache_hit_rate">缓存命中率</string>
+    <string name="machines_tokens_per_minute">%1$s/分</string>
 </resources>

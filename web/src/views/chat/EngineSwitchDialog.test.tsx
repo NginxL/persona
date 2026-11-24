@@ -164,7 +164,7 @@ describe("Switch Agent?", () => {
     await flush();
     expect(pill()!.getAttribute("data-model-pill")).toBe("pending");
     expect(pill()!.querySelector("[data-pill-target]")!.textContent).toBe("cx");
-    expect(pill()!.getAttribute("aria-label")).toBe(t("chat-modelpill.aria_pending_effort", { agent: "cx", model: "5.5 Mini", effort: "低" }));
+    expect(pill()!.getAttribute("aria-label")).toBe(t("chat-modelpill.aria_pending_effort", { agent: "cx", model: "5.5 Mini", effort: "Low" }));
     expect(panel.props!.state.note).toBe(t("chat-modelpanel.engine_note"));
     expect(panel.props!.state.current).toMatchObject({ provider: "gateway", model: "opus" });
   });

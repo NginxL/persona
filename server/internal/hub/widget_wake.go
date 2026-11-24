@@ -3,6 +3,7 @@ package hub
 import (
 	"slices"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -20,8 +21,12 @@ const (
 	widgetHeartbeat = 55 * time.Minute
 )
 
-// widgetCounts is what the widgets count from the fleet: the Live Activity's own numbers (FleetState).
-type widgetCounts struct{ needsYou, working, unread int }
+// widgetCounts combines fleet counts with an intake revision. The revision belongs only to widgets,
+// so recording a drink never changes the fleet or causes a Live Activity update.
+type widgetCounts struct {
+	needsYou, working, unread int
+	intake                    uint64
+}
 
 func widgetCountsOf(st FleetState) widgetCounts {
 	return widgetCounts{needsYou: st.NeedsYou, working: st.Working, unread: st.Unread}
@@ -29,9 +34,36 @@ func widgetCountsOf(st FleetState) widgetCounts {
 
 // widgetWaker remembers, a device, the counts its widgets were last brought up to date with and when.
 type widgetWaker struct {
-	mu   sync.Mutex
-	told map[string]widgetCounts
-	at   map[string]time.Time
+	intake atomic.Uint64
+	mu     sync.Mutex
+	told   map[string]widgetCounts
+	at     map[string]time.Time
+}
+
+func (la *liveActivities) widgetCounts(st FleetState) widgetCounts {
+	c := widgetCountsOf(st)
+	c.intake = la.widgets.intake.Load()
+	return c
+}
+
+// intakeChanged moves the intake revision and wakes only the widget loop, and returns the new revision. Its existing
+// tick retries a revision held by widgetGap; Needs You retains its immediate path and an open phone needs no
+// background wake.
+func (la *liveActivities) intakeChanged() uint64 {
+	rev := la.widgets.intake.Add(1)
+	select {
+	case la.widgetChanges <- struct{}{}:
+	default:
+	}
+	return rev
+}
+
+// intakeSent: the open apps were sent the health_intake event for revision rev. Only from then can an app that leaves
+// have written its widgets with it (phoneLeft); the revision moves before the event goes out.
+func (la *liveActivities) intakeSent(rev uint64) {
+	la.mu.Lock()
+	la.shownIntake = max(la.shownIntake, rev)
+	la.mu.Unlock()
 }
 
 // due: whether the device's widgets need a wake now for counts c (and, when not, nothing to remember).
@@ -95,7 +127,7 @@ func (la *liveActivities) wakeWidgets(st FleetState) {
 	if la.h.isMember() || la.h.push == nil {
 		return
 	}
-	now, c := la.now(), widgetCountsOf(st)
+	now, c := la.now(), la.widgetCounts(st)
 	ids := map[string]bool{}
 	for _, device := range la.h.push.widgetDevices() {
 		if la.h.phoneOpen(device) || !la.widgets.due(device, c, now) {

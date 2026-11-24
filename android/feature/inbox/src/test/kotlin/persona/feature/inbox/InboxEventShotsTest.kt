@@ -46,6 +46,7 @@ import persona.core.navigation.AppTab
 import persona.core.navigation.ChatRoute
 import persona.core.navigation.Navigator
 import java.io.File
+import persona.core.inbox.*
 
 /**
  * Inbox phase 1 on the JVM with Robolectric's native graphics, in every style, light and dark, from the shared fixture

@@ -24,6 +24,7 @@ android {
 }
 
 dependencies {
+    api(project(":core:inbox"))
     implementation(project(":core:chatlist"))
     implementation(project(":core:contracts"))
     implementation(project(":core:hub"))

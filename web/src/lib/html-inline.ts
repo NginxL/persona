@@ -2,7 +2,7 @@
 // read from the machine through the hub and put into the page itself (data: URLs, inline <style> / <script>): the
 // preview frame has no address to load them from and no network (docs/web/web.md "HTML preview", #1413). The page is parsed
 // with DOMParser, whose documents load nothing and run nothing.
-import { cssImports, isRelativeRef, resolveRelative, rewriteCssUrls } from "./html-preview";
+import { isRelativeRef, resolveRelative, rewriteCssUrls } from "./html-preview";
 
 export type ReadFile = (path: string) => Promise<Blob | null>;
 
@@ -14,6 +14,49 @@ const MIME: Record<string, string> = {
 };
 
 const dirOf = (p: string) => p.slice(0, p.lastIndexOf("/")) || "/";
+const escapeStyleText = (css: string) => css.replace(/<\/style/gi, "<\\/style");
+const IMPORT_RULE = /@import\s+(?:url\(\s*(?:(['"])([^'"]+)\1|([^'")\s]+))\s*\)|(['"])([^'"]+)\4)([^;]*);/gi;
+
+function wrapImportConditions(body: string, rawCond: string): string {
+  let rest = rawCond.trim();
+  if (!body || !rest) return body;
+  let hasLayer = false;
+  let layerName = "";
+  const layerFn = /^layer\(\s*([^)]*?)\s*\)\s*/i.exec(rest);
+  if (layerFn) {
+    hasLayer = true;
+    layerName = layerFn[1].trim();
+    rest = rest.slice(layerFn[0].length);
+  } else {
+    const bareLayer = /^layer(?![a-z0-9_-])\s*/i.exec(rest);
+    if (bareLayer) {
+      hasLayer = true;
+      rest = rest.slice(bareLayer[0].length);
+    }
+  }
+  let supportsCond = "";
+  if (/^supports\(/i.test(rest)) {
+    let depth = 0;
+    let close = -1;
+    for (let i = 8; i < rest.length; i++) {
+      if (rest[i] === "(") depth++;
+      else if (rest[i] === ")" && --depth === 0) {
+        close = i;
+        break;
+      }
+    }
+    if (close > 8) {
+      supportsCond = rest.slice(9, close).trim();
+      rest = rest.slice(close + 1).trim();
+    }
+  }
+  const mediaCond = rest.trim();
+  let out = body;
+  if (hasLayer) out = `@layer${layerName ? ` ${layerName}` : ""} {\n${out}\n}`;
+  if (supportsCond) out = `@supports (${supportsCond}) {\n${out}\n}`;
+  if (mediaCond) out = `@media ${mediaCond} {\n${out}\n}`;
+  return out;
+}
 
 function dataURL(blob: Blob, path: string): Promise<string> {
   const ext = path.split(".").pop()?.toLowerCase() ?? "";
@@ -61,12 +104,22 @@ export async function inlineSiblings(html: string, pagePath: string, read: ReadF
   /** A style sheet with its imports pulled in and its url()s inlined, relative to the folder it came from. */
   const sheet = async (css: string, dir: string, depth = 0): Promise<string> => {
     if (depth < 3) {
-      for (const imp of cssImports(css)) {
-        if (!isRelativeRef(imp)) continue;
-        const path = resolveRelative(dir, imp);
-        const text = await asText(path);
-        const body = text === null ? "" : await sheet(text, dirOf(path), depth + 1);
-        css = css.replace(new RegExp(`@import\\s+(?:url\\(\\s*)?['"]?${imp.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}['"]?\\s*\\)?[^;]*;`), () => body); // a function: a string would read $$, $& and $' in the sheet as patterns
+      const matches = [...css.matchAll(IMPORT_RULE)];
+      if (matches.length) {
+        let rebuilt = "";
+        let cursor = 0;
+        for (const m of matches) {
+          const imp = m[2] ?? m[3] ?? m[5] ?? "";
+          if (!isRelativeRef(imp)) continue;
+          rebuilt += css.slice(cursor, m.index!);
+          const path = resolveRelative(dir, imp);
+          const text = await asText(path);
+          const body = text === null ? "" : wrapImportConditions(await sheet(text, dirOf(path), depth + 1), m[6] ?? "");
+          rebuilt += body;
+          cursor = m.index! + m[0].length;
+        }
+        rebuilt += css.slice(cursor);
+        css = rebuilt;
       }
     }
     const urls = [...css.matchAll(/url\(\s*(['"]?)([^'")]+)\1\s*\)/gi)].map((m) => m[2]).filter(isRelativeRef);
@@ -103,12 +156,12 @@ export async function inlineSiblings(html: string, pagePath: string, read: ReadF
         const style = doc.createElement("style");
         const media = link.getAttribute("media"); // the sheet still applies only where the page asked for it
         if (media) style.setAttribute("media", media);
-        style.textContent = await sheet(text, dirOf(path));
+        style.textContent = escapeStyleText(await sheet(text, dirOf(path)));
         link.replaceWith(style);
       }),
     );
   }
-  for (const style of doc.querySelectorAll("style")) jobs.push(sheet(style.textContent ?? "", dir).then((t) => (style.textContent = t)));
+  for (const style of doc.querySelectorAll("style")) jobs.push(sheet(style.textContent ?? "", dir).then((t) => (style.textContent = escapeStyleText(t))));
   for (const el of doc.querySelectorAll("[style*='url(']")) jobs.push(sheet(el.getAttribute("style")!, dir).then((t) => el.setAttribute("style", t)));
   for (const script of doc.querySelectorAll("script[src]")) {
     const src = script.getAttribute("src")!;

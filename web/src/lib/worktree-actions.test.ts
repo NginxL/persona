@@ -160,3 +160,46 @@ it("opens the first direct Agent, including pins, without using descendants or a
   expect(firstDirectWorktreeAgent(target, catalog, ordered.slice(0, 4))).toBeUndefined();
   expect(firstDirectWorktreeAgent({ ...target, owner: "old" }, catalog, ordered)).toBeUndefined();
 });
+
+describe.each(["codex_app", "claude_desktop"])("%s project roots", (source) => {
+  beforeEach(() => {
+    catalog.workspaces = [
+      row("root-a", { source, source_id: "project", cwd: "C:\\Work\\App" }),
+      row("root-b", { source, source_id: "project", cwd: "D:\\Work\\Docs" }),
+      row("other-project", { source, source_id: "other", cwd: "D:\\Work\\Docs" }),
+    ];
+    target = { ...target, host: source, workspaceId: "project", cwd: "d:/work/docs/" };
+    machines[0].engine_hosts = [source];
+  });
+
+  it("resolves the selected root within an explicit project using Windows directory identity", () => {
+    expect(resolve().workspace).toBe(catalog.workspaces[1]);
+    expect(resolve().writable).toBe(true);
+    target.cwd = "D:/Work/Unknown";
+    expect(resolve().workspace).toBeUndefined();
+    target.cwd = "D:/Work/Docs";
+    target.workspaceId = "missing-project";
+    expect(resolve().workspace).toBeUndefined();
+  });
+
+  it("rejects duplicate rows for the selected root and preserves case-sensitive POSIX roots", () => {
+    catalog.workspaces.push({ ...catalog.workspaces[1], id: "duplicate", cwd: "d:/work/DOCS" });
+    expect(resolve().workspace).toBeUndefined();
+    catalog.workspaces = [row("posix", { source, source_id: "project", cwd: "/work/Docs" })];
+    target.cwd = "/work/docs";
+    expect(resolve().workspace).toBeUndefined();
+  });
+
+  it("opens only a session in the selected project root", () => {
+    const agent = (id: string, cwd: string, project = "project"): Session => ({
+      machine_id: "computer", session_id: id, title: id, cwd, status: "idle", space_kind: source, space_id: project,
+    });
+    const ordered = [
+      agent("root-a-agent", "c:/work/app"),
+      agent("other-project-agent", "d:/work/docs", "other"),
+      agent("root-b-agent", "D:\\WORK\\DOCS\\src"),
+    ];
+    expect(firstDirectWorktreeAgent(target, catalog, ordered)?.session_id).toBe("root-b-agent");
+    expect(firstDirectWorktreeAgent(target, catalog, ordered.slice(0, 2))).toBeUndefined();
+  });
+});

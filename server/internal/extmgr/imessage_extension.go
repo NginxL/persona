@@ -5,10 +5,11 @@ import (
 	"encoding/json"
 	"slices"
 
-	"github.com/nwverse/persona/server/internal/connector/imessage"
 	"github.com/nwverse/persona/server/internal/extension"
 	"github.com/nwverse/persona/server/internal/extension/host"
+	"github.com/nwverse/persona/server/internal/extmgr/imessageport"
 	"github.com/nwverse/persona/server/internal/i18n"
+	"github.com/nwverse/persona/server/internal/imessagewire"
 )
 
 // The built-in extension Messages (#1830 step 6, docs/plans/plan-extensions.md "How iMessage uses it"): which Mac's Messages
@@ -37,8 +38,14 @@ const imessageConfig = `{
   }
 }`
 
+// imessageManifest is the built-in Messages extension's manifest; nil in a build without the iMessage module, which
+// has no such extension.
 func imessageManifest(h *Manager) *extension.Manifest {
-	connector, _ := json.Marshal([]extension.ConnectorItem{{ID: imessage.ID, Name: imessage.NewRemote(imessage.Config{}, "", nil).Name(),
+	newRemote := imessageport.Factory()
+	if newRemote == nil {
+		return nil
+	}
+	connector, _ := json.Marshal([]extension.ConnectorItem{{ID: imessagewire.ID, Name: newRemote(imessagewire.Config{}, "", nil).Name(),
 		Capabilities: []string{"status", "tools", "events", "inbox", "archive", "machines"}}})
 	return &extension.Manifest{ManifestVersion: extension.ManifestVersion, ID: imessageExtensionID, Name: "信息（iMessage）", Version: h.version,
 		Description: "读你一台 Mac 上「信息」App 的短信和 iMessage（只读，不发送），交给收件箱、知识库和助手。读哪台在这里选；「交给 Persona」和删除已存的数据在 设置 › 连接器 › 信息。",
@@ -120,12 +127,12 @@ func (h *Manager) applyIMessage() {
 		return
 	}
 	if cur != nil {
-		h.connectors.Remove(imessage.ID)
+		h.connectors.Remove(imessagewire.ID)
 	}
 	if want == "" {
 		return
 	}
-	if err := h.addIMessage(imessage.Config{Machine: want}); err != nil {
+	if err := h.addIMessage(imessagewire.Config{Machine: want}); err != nil {
 		h.logf("imessage connector: %v", err)
 	}
 }

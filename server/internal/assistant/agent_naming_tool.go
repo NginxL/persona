@@ -60,7 +60,7 @@ func (s *Service) toolAgentAutoname(ctx context.Context, machine, self string, a
 		return "", err
 	}
 	if r.Allow == nil || !*r.Allow {
-		return "The user declined on the phone (or did not answer): nothing was renamed.", nil
+		return outboundNotDone(r.Outcome(), "The user declined on the phone: nothing was renamed.", "nothing was renamed"), nil
 	}
 	res, err := s.requestAgentName(ctx, am.ID, c.SessionID)
 	if err != nil {

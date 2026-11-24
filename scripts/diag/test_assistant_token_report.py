@@ -193,6 +193,43 @@ class ReportTests(unittest.TestCase):
         self.assertNotIn("private", json.dumps(s))
         self.assertNotIn("private", json.dumps(self.run_lines([user(source("private secret")), reply("m1", output=1)])))
 
+    def test_malformed_claude_rows_leave_later_valid_usage_and_rounds_intact(self):
+        start, end = user("private question"), reply("m1", output=7)
+        expected = self.run_lines([start, end])
+        for row in (user("unused", message=["private shape"]), user([{"type": "text", "text": None}]),
+                    reply("m1", message={"usage": [23]}), reply("m1", message={"usage": {"output_tokens": "99"}}),
+                    reply("m1", message={"usage": {"output_tokens": True}}),
+                    reply("m1", message={"usage": {"output_tokens": -1}})):
+            with self.subTest(row=row):
+                self.assertEqual(self.run_lines([start, row, end]), expected)
+        self.assertEqual(self.run_lines([start, reply(["bad-id"], output=7)]), expected)
+        self.assertNotIn("private", json.dumps(expected))
+
+    def test_malformed_codex_rows_leave_later_valid_usage_and_rounds_intact(self):
+        def event(**payload):
+            return {"type": "event_msg", "payload": payload}
+
+        start = {"type": "session_meta", "payload": {}}
+        text = source("followup") + "private request"
+        question = event(type="item_completed", item={"type": "UserMessage", "id": "u1",
+                         "content": [{"type": "text", "text": text}]})
+        answer = event(type="token_count", info={"total_token_usage": {"total_tokens": 120},
+                       "last_token_usage": {"input_tokens": 100, "cached_input_tokens": 80, "output_tokens": 20}})
+        expected = self.run_lines([start, question, answer])
+        broken_raw = {"type": "response_item", "payload": {"type": "message", "role": "user",
+                      "content": [{"type": "input_text", "text": False}]}}
+        broken_item = event(type="item_completed", item={"type": "UserMessage", "id": "u1", "content": None})
+        for row in (broken_raw, broken_item, event(type="item_completed", item=[1]),
+                    event(type="token_count", info=[1]), event(type="token_count", info={"total_token_usage": [1]}),
+                    event(type="token_count", info={"total_token_usage": {"total_tokens": True}})):
+            with self.subTest(row=row):
+                self.assertEqual(self.run_lines([start, row, question, answer]), expected)
+        invalid_last = event(type="token_count", info={"total_token_usage": {"total_tokens": 50}, "last_token_usage": [50]})
+        row = self.run_lines([start, invalid_last, question, answer])["by_kind"]
+        self.assertEqual(row["followup"]["output_tokens"], 20)
+        self.assertIsNone(row["before_first_message"]["output_tokens"])
+        self.assertNotIn("private", json.dumps(expected))
+
     def test_codex_rounds_and_duplicate_usage(self):
         def event(payload, ts="2026-11-13T01:00:01Z"):
             return {"type": "event_msg", "timestamp": ts, "payload": payload}
@@ -318,6 +355,7 @@ class ReportTests(unittest.TestCase):
                 return str(p)
             expected = write("rollout-assistant.jsonl", home / ".persona" / "assistant")
             write("rollout-other.jsonl", home / "other")
+            (sessions / "rollout-invalid-cwd.jsonl").write_text('{"type":"session_meta","payload":{"cwd":true}}\n')
             with patch.dict("os.environ", {"HOME": d, "CODEX_HOME": str(codex)}):
                 self.assertEqual(list(report.default_codex_files()), [expected])
 

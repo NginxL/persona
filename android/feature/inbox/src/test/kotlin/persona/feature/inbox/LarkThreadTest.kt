@@ -7,6 +7,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.runCurrent
 import org.junit.Assert.*
 import org.junit.Test
+import persona.core.inbox.*
 
 class LarkThreadTest {
     @OptIn(ExperimentalCoroutinesApi::class)

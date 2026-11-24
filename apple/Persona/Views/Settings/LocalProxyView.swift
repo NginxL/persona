@@ -117,9 +117,6 @@ struct LocalProxyForm<Status: View>: View {
                     .accessibilityIdentifier("proxy.problem")
                 }
             }
-            #if os(macOS)
-            macActions
-            #else
             Section {
                 Button { Task { await testAndSave() } } label: {
                     HStack(spacing: Theme.Space.s) {
@@ -145,12 +142,8 @@ struct LocalProxyForm<Status: View>: View {
                     .bareListRow()
                 }
             }
-            #endif
         }
         .themedPage()
-        #if os(macOS)
-        .formStyle(.grouped)
-        #endif
         .onAppear(perform: load)
         .onChange(of: always) { _, now in alwaysChanged(now) }
         .accessibleConfirmationDialog("Delete Local Proxy?", isPresented: $removing, titleVisibility: .visible) {
@@ -160,44 +153,10 @@ struct LocalProxyForm<Status: View>: View {
         }
     }
 
-    #if os(macOS)
-    // MARK: Mac buttons
-
-    /// The page's own buttons at the end of the form: standard ones at the trailing edge, not full-width tinted
-    /// capsules (#1170).
-    private var macActions: some View {
-        Section {
-            HStack(spacing: Theme.Space.s) {
-                if saved != nil {
-                    Button(role: .destructive) { removing = true } label: { Text("Delete Local Proxy…").lineLimit(1) }
-                        .buttonStyle(.bordered)
-                }
-                Spacer(minLength: 0)
-                Button { Task { await testAndSave() } } label: {
-                    HStack(spacing: Theme.Space.s) {
-                        if checking { ProgressView().controlSize(.small) }
-                        Text(checking ? String(localized: "Testing…") : String(localized: "Test Connection and Save")).lineLimit(1)
-                    }
-                }
-                .buttonStyle(.borderedProminent)
-                .disabled(checking || draft == nil)
-                .accessibilityIdentifier("proxy.save")
-            }
-        } footer: {
-            Text("Connects through the proxy to the hub's address and checks that the hub answers.")
-        }
-    }
-    #endif
-
     // MARK: Fields
 
     @ViewBuilder
     private func field(_ title: String, _ text: Binding<String>, prompt: String, digits: Bool = false, id: String) -> some View {
-        #if os(macOS)
-        TextField(title, text: text, prompt: Text(verbatim: prompt))
-            .autocorrectionDisabled()
-            .accessibilityIdentifier(id)
-        #else
         LabeledContent {
             TextField(title, text: text, prompt: Text(verbatim: prompt))
                 .multilineTextAlignment(.trailing)
@@ -208,24 +167,17 @@ struct LocalProxyForm<Status: View>: View {
         } label: {
             Text(title).lineLimit(1)
         }
-        #endif
     }
 
     /// The proxy's password: a hidden field that is never offered to the system's password manager (beside the
     /// username it would look like a login form, #1512).
     @ViewBuilder private var passwordField: some View {
-        #if os(macOS)
-        SecureField(String(localized: "Password"), text: $password, prompt: Text("Optional"))
-            .secretEntry()
-            .accessibilityIdentifier("proxy.password")
-        #else
         LabeledContent {
             SecretField(String(localized: "Optional"), text: $password, identifier: "proxy.password")
                 .multilineTextAlignment(.trailing)
         } label: {
             Text("Password").lineLimit(1)
         }
-        #endif
     }
 
     /// A port field's number; nil when it is not a port.

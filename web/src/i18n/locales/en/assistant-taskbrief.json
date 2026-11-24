@@ -31,6 +31,8 @@
   "scope_approved": "Approved by you",
   "lineage_title": "Who worked on it",
   "lineage_current": "This task",
+  "lineage_continues": "Continues from: {title}",
+  "lineage_superseded": "Continued by: {title}",
   "lineage_untitled": "Untitled task",
   "lineage_on": "{agent} on {machine}",
   "lineage_period": "{from} to {to}",

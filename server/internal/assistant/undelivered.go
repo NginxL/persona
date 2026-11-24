@@ -611,6 +611,9 @@ var (
 // Delete. True when the conversation's next message may go.
 func (s *Service) undeliveredLook(ctx context.Context, id string, k keptMessage) bool {
 	landed := s.undeliveredLanded(k)
+	if landed {
+		s.relayLaterOwnerOutcome(ctx, id, k.ID, true)
+	}
 	// A transcript read can still settle a prior try when the hub is unreachable.
 	var revoked bool
 	if !landed {
@@ -722,6 +725,7 @@ func (s *Service) dropKeptLocked(sid, mid string) {
 // send, or a refusal, is no doubt.
 func (s *Service) deliverKept(ctx context.Context, k keptMessage) (doubt bool, err error) {
 	if !k.TriedAt.IsZero() && s.undeliveredLanded(k) {
+		s.relayLaterOwnerOutcome(ctx, k.Session, k.ID, true)
 		return false, nil
 	}
 	sctx, cancel := context.WithTimeout(ctx, 5*time.Minute) // a cold start on a busy computer can take minutes
@@ -740,6 +744,10 @@ func (s *Service) deliverKept(ctx context.Context, k keptMessage) (doubt bool, e
 	}
 	params["session_id"] = k.Session
 	params["client_msg_id"] = k.ID
+	laterDone, err := s.withOwnerRelayLater(sctx, k.Machine, k.Session, k.ID, params, k.TriedAt.IsZero())
+	if err != nil {
+		return false, err // nothing was sent
+	}
 	s.undelivered.mu.Lock()
 	revoked = s.undelivered.revoked[k.CredentialID]
 	s.undelivered.mu.Unlock()
@@ -749,10 +757,15 @@ func (s *Service) deliverKept(ctx context.Context, k keptMessage) (doubt bool, e
 	}
 	tried := time.Now()
 	err = s.call(sctx, k.Machine, DeviceSessionSend, params, nil)
-	if err == nil || (!relayInDoubt(err) && sctx.Err() == nil) {
+	if err == nil {
+		laterDone(true)
+		return false, nil
+	}
+	if !relayInDoubt(err) && sctx.Err() == nil {
 		return false, err
 	}
 	if s.undeliveredLandedSince(k, tried) {
+		laterDone(true)
 		return false, nil
 	}
 	return true, err
@@ -880,6 +893,7 @@ func (s *Service) undeliveredRoutes() {
 			apierr.Write(w, http.StatusNotFound, errors.New("no such message"))
 			return
 		}
+		s.forgetOwnerRelayLater(context.WithoutCancel(r.Context()), sid, mid)
 		s.publish(context.WithoutCancel(r.Context()))
 		apierr.WriteJSON(w, map[string]any{"ok": true})
 	})

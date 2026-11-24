@@ -41,6 +41,7 @@
   "link_invalid": "このリポジトリの Issue または PR のリンクを使用してください。",
   "issue": "Issue",
   "pull_request": "プルリクエスト",
+  "pr_conflict": "競合",
   "remove_link": "{link} を削除",
   "options": "{name} のオプション",
   "no_links": "関連付けたリポジトリはありません",

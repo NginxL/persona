@@ -41,8 +41,8 @@ struct HomeWidgetTests {
     }
 
     /// Replays spec/fixtures/needs-you/cases.json: the Agents widget's Needs You rows are the Agents tab's badge, case by
-    /// case (one per session, never the muted agents, a quiet task's or a directory-hidden session's), iOS's known
-    /// differences (`known_differences.ios`) at today's value.
+    /// case (one per session, never the muted agents, a quiet task's, a directory-hidden session's or one whose only
+    /// cards are held), iOS's known differences (`known_differences.ios`) at today's value.
     @Test func needsYouIsTheAgentsBadge() throws {
         let data = try Data(contentsOf: Self.repo.appending(path: "spec/fixtures/needs-you/cases.json"))
         let fixture = try JSON.decoder.decode(Fixture.self, from: data)

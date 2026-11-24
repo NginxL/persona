@@ -242,3 +242,53 @@ holds every answer to it before it reaches the manager:
   typed messages and notification replies carry none. Android currently has no direct voice-assistant, App Action or
   shortcut caller that submits text without opening the composer; such a caller must use `via: "intent"`, while merely
   opening the composer leaves the eventual typed message unmarked.
+
+
+## Phone-approved storage
+
+`personad tool secret_store --from-file <private-manifest.json>` creates an item or updates fields through the configured
+resident 1Password node. The manifest and each field file must be private regular files (0600, no symlinks). A manifest
+can instead be supplied on stdin with `--from-file -`, or as a JSON argument containing **paths only**. Values are UTF-8
+text, 1–16384 bytes per field, up to 16 fields. The caller deletes all source files after the command returns; Persona
+never deletes a user's files automatically.
+
+```json
+{"operation":"create","vault":"Dev","title":"New credential","category":"API_CREDENTIAL",
+ "fields":[{"name":"credential","type":"CONCEALED","file":"/private/path/credential"}]}
+```
+
+For an update, use `operation: "edit"`, the vault and item IDs, and the fields; omit category and title. Field types are
+`STRING` or `CONCEALED` (default in the file manifest). Creation categories are `LOGIN`, `PASSWORD`, `SECURE_NOTE`,
+`API_CREDENTIAL`, `SERVER` and `DATABASE`. Sectioned/ambiguous fields and items with attachments are refused. Login
+updates are refused because 1Password's CLI JSON template updates can overwrite passkeys. No automatic retry follows
+an uncertain write result: inspect metadata before asking for a new approval.
+
+The manager-only `secrets.store` protocol has three phases (types `SecretStore*` in the protocol schema):
+
+1. `describe`: canonical vault/item IDs and public labels, no values; edits require a stable item ID.
+2. A manager `secret_handoff` card with `store_operation` names create/edit, vault, item, every field, Agent and source
+   machine. It uses the existing explicit phone/web approval gate, without Always rules. No value or source path is in it.
+3. `prepare`: after the approving device is vouched for, the resident provider node generates a one-use P-256 key,
+   bound to the exact target, fields and source machine/session, valid for at most two minutes. The manager also
+   bounds that exact approval to two minutes. Expired records are rejected immediately and removed on subsequent
+   preparation/commit attempts; memory cleanup is lazy. Neither survives restart; both pending maps are bounded.
+4. The CLI reads field files **after approval**, seals a JSON array of `{name,value}` (value is base64 bytes) with HPKE
+   DHKEM(P-256, HKDF-SHA256), HKDF-SHA256, AES-256-GCM and info `persona secret store v1\0<key_id>`, then sends `commit`.
+   Only the resident node has the private key. Hub, manager and hub extension carry ciphertext only.
+5. Commit consumes both records, checks actor/target/field equality, decrypts in the resident node, and writes a JSON
+   template to `op item create`/`op item edit` on stdin. No value enters argv or a Persona-created disk file. Existing
+   item JSON stays inside that node. Answers contain only `{references:{field:"op://vault-id/item-id/field-id"}}`.
+
+Source calls require a process identity the resident node can verify (currently macOS/Linux); otherwise they fail
+closed. An attempted commit invalidates the provider's cached launcher values, including references spelled by names,
+so a changed credential is not served from the old ten-minute cache.
+
+Raw provider/op error text is withheld on the write path. Audit rows (`secret_stored`, `secret_store_failed`) contain
+only target metadata, requesting machine/session and approving device, never ciphertext, plaintext, paths or templates.
+Owned byte buffers are cleared when possible; Go and JSON encoders can retain other memory copies until GC.
+
+Desktop authorization remains subject to 1Password's policy: **10 minutes idle, a hard 12-hour limit, and revocation
+when the App locks**. The resident node refreshes an active foreground-authorized session with `op whoami` after five
+minutes without use, discards its output, stops after a failed refresh, and stops before its locally observed 12-hour
+window. A lock or a session authorized earlier than the node observed can still require authorization. Keepalive never
+changes lock settings or approves a prompt. See [1Password's authorization model](https://developer.1password.com/docs/cli/app-integration-security/).

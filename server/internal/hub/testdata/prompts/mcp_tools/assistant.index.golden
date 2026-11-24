@@ -3,6 +3,7 @@ mail_search
 mail_read
 mail_save_attachment
 mail_send
+resource_status
 ask_user
 notify_user
 supervision_finish
@@ -58,6 +59,7 @@ view_show
 view_update
 view_get
 conversations_list
+conversations_switch
 conversation_read
 conversation_rename
 conversation_archive
@@ -88,6 +90,9 @@ todo_delete
 concern_report
 direction_name
 leader_progress
+decision_record
+decisions_query
+health_intake
 subscription_list
 subscription_get
 subscription_sources

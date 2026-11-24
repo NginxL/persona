@@ -8,8 +8,10 @@ before.
 Who it serves: everyday owners who already pay for, or want, a Chinese-first speech service. The form shows one key, a voice and two
 switches; models, voice ids and the old console's App ID are under **Advanced**.
 
-Code: `server/internal/volc` (the program), `server/internal/extmgr/volc_extension.go` (the manifest, the switch), the assistant's
-`meeting_transcription_choice.go`; the stand-in service for tests is `server/internal/volc/volctest`.
+Code: `server/internal/modules/volc` (the program), `server/internal/extmgr/volc_extension.go` (the manifest, the switch), the assistant's
+`meeting_transcription_choice.go`; the stand-in service for tests is `server/internal/modules/volc/volctest`. The program
+is the `volc` module (docs/architecture/core-and-modules.md "Volcengine speech"): a build with `persona_without_volc` or
+`persona_core_only` has neither `personad volc` nor the extension.
 
 ## Setting it up
 
@@ -113,8 +115,8 @@ language it was said in, as the contract wants).
   a hole (`seek` forward), a pause of 3 s (the service ends a session that gets no packet for 8 s) and the job's `end`; it rolls over at
   the first pause after 20 minutes (at the latest after 25: the service documents no limit). The next one starts with the next audio.
   A session that drops is replaced at once, then after 2 and 4 s, from the end of its last sentence, out of the job's last minute of
-  audio (`warning session_dropped`); a fourth failure in a row ends the job (`upstream_failed`, or `upstream_unavailable` before
-  `ready`). A session that drops while it finishes (its audio all sent) is not replaced: its last seconds are left to the
+  audio (`warning session_dropped`); a fourth failure in a row ends the job (its kind's code below; `upstream_failed` before
+  `ready` is `upstream_unavailable`). A session that drops while it finishes (its audio all sent) is not replaced: its last seconds are left to the
   phone's own text and the final pass. Sentences go out in order: a session's wait while an earlier one is still open.
 - **Pace**: audio goes to the service as it comes, a burst (the manager's backlog after `ready`) at most twice real time. `ack` follows
   what the sessions were sent, every 5 s of audio.
@@ -134,8 +136,9 @@ language it was said in, as the contract wants).
   character one, a Latin word one per four letters), leaving out terms over 20 characters; replay takes up to 5000 terms. The glossary
   is spellings only.
 - **Usage**: the sessions' `audio_info.duration`, summed, in `usage` every 30 s and before `done`.
-- **Codes**: a refused key, a model not turned on or a voice not allowed is `upstream_forbidden`; the quota, concurrency, a busy
-  service or no network `upstream_unavailable`; anything else `upstream_failed`. The service documents few of its refusals, so its words
+- **Codes**: a refused key, a model not turned on or a voice not allowed is `upstream_forbidden`; the quota, concurrency or a busy
+  service `upstream_busy`; no network `upstream_unavailable`; anything else `upstream_failed` (#13446: the manager passes the kind
+  on to the phone, which says why and what to do). The service documents few of its refusals, so its words
   are read too (`classify`: "not granted" is a model not turned on, "quota" and "concurrency" busy).
 - **The log**: `transcription <n>:` lines for the job (its mode, language tag, glossary and hotword counts, model), each session (why,
   where, the service's logid), each drop and window, and the end with its counts. Never a sentence, a caption or a glossary term.
@@ -169,7 +172,7 @@ a quota gateway's key reaches the voice extension today, so the owner enters it 
 
 ## Tests
 
-- `server/internal/volc`: the client against `volctest`, a stand-in written from the service's documentation independently of the
+- `server/internal/modules/volc`: the client against `volctest`, a stand-in written from the service's documentation independently of the
   client (its own framing): live jobs (captions, sentences and their recording times, flush, end, usage, the request and its hotwords),
   a dropped session replaced without a sentence said twice or out of order, a hole, a pause, refusals (`upstream_forbidden`,
   `no_upstream`), replay windows (kept ones; a failing window as a gap in an extension's job, a service that goes down, a final pass

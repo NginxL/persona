@@ -79,39 +79,22 @@ struct FeishuBotView: View {
 
     private var credentialsSection: some View {
         Section {
-            #if os(macOS)
-            // A Mac form puts the title on the left and the field on the right: the title stays the field's name, what
-            // to type goes in the prompt (#1221).
-            TextField("App ID", text: $model.appID, prompt: Text("Required")).autocorrectionDisabled()
-            SecureField("App Secret", text: $model.appSecret, prompt: Text(model.status?.hasSecret == true ? String(localized: "Saved. Leave empty to keep") : String(localized: "Required")))
-            #else
             TextField("App ID", text: $model.appID)
                 .textInputAutocapitalization(.never).autocorrectionDisabled()
                 .font(Theme.Font.code)
             SecretField(model.status?.hasSecret == true ? String(localized: "App Secret (saved, leave empty to keep)") : "App Secret", filled: String(localized: "Entered. Tap Verify and Save"),
                         text: $model.appSecret, identifier: "bot.appSecret")
-            #endif
             Picker("Platform", selection: $model.domain) {
                 Text("Lark [Inbox Event Views 7e4419]").tag("feishu")
                 Text("Lark").tag("lark")
                 if model.domain != "feishu" && model.domain != "lark" { Text(model.domain).tag(model.domain) }
             }
-            #if os(macOS)
-            // A standard button at the group's trailing end, not a bar the width of the form (#1221).
-            HStack {
-                Spacer(minLength: 0)
-                Button { Task { await model.saveCredentials() } } label: { Text("Verify and Save").lineLimit(1) }
-                    .formButton(prominent: true)
-                    .disabled(!model.credentialsChanged || model.appID.isEmpty || model.saving)
-            }
-            #else
             Button {
                 Task { await model.saveCredentials() }
             } label: {
                 Text("Verify and Save").lineLimit(1).frame(maxWidth: .infinity)
             }
             .disabled(!model.credentialsChanged || model.appID.isEmpty || model.saving)
-            #endif
         } header: {
             Text("App Credentials")
         } footer: {

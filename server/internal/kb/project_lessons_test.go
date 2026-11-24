@@ -2,6 +2,7 @@ package kb
 
 import (
 	"errors"
+	"maps"
 	"os"
 	"strings"
 	"testing"
@@ -54,6 +55,9 @@ func TestProjectLessonsKeepTheNewestVersion(t *testing.T) {
 	}
 	if len(got.Retired) != 1 || got.Retired[0].Conclusion == "" || got.Retired[0].Kind != LessonWastedStep {
 		t.Fatalf("retired = %+v", got.Retired)
+	}
+	if want := map[string]string{"lesson-b": got.Retired[0].Conclusion, "lesson-b-retired": got.Retired[0].Conclusion}; !maps.Equal(got.RetiredTextByID, want) {
+		t.Fatalf("retired texts = %v, want %v", got.RetiredTextByID, want)
 	}
 	for _, id := range []string{"lesson-a", "lesson-a2", "lesson-b", "lesson-b-retired"} {
 		if !got.IDs[id] {
@@ -163,6 +167,49 @@ func TestProjectLessonsReadABoundedTail(t *testing.T) {
 	appendLessons(t, e, "persona", lessonRecord("lesson-new", LessonImprovement, "A new lesson."))
 	if ids := liveIDs(e.ProjectLessons("persona")); len(ids) != 1 || ids[0] != "lesson-new" {
 		t.Fatalf("live = %v, want only the lesson within the bound", ids)
+	}
+}
+
+func TestProjectLessonsRetiredChainAtTailBoundary(t *testing.T) {
+	oldLimit := projectLessonsScanMost
+	t.Cleanup(func() { projectLessonsScanMost = oldLimit })
+	e := projectMemoryEngine(t, t.TempDir())
+	const slug = "persona"
+	putMemoryProject(t, e, slug)
+	original := lessonRecord("lesson-original", LessonImprovement, "Run the focused test first.")
+	appendLessons(t, e, slug, original)
+	size := func() int64 {
+		t.Helper()
+		info, err := os.Stat(e.Store.Path(KindProject, slug, "memory.jsonl"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return info.Size()
+	}
+	startOfEdit := size()
+	edit := lessonRecord("lesson-edited", LessonImprovement, "Run the focused test before the suite.")
+	edit.SupersedesID = original.ID
+	tombstone := ProjectMemoryRecord{ID: "lesson-deleted", Type: ProjectMemoryLessonRetired,
+		SupersedesID: edit.ID, Kind: edit.Kind, Conclusion: edit.Conclusion}
+	appendLessons(t, e, slug, edit, tombstone)
+	tailSize := size() - startOfEdit
+
+	for _, tc := range []struct {
+		name string
+		size int64
+		want map[string]string
+	}{
+		{"full chain", size(), map[string]string{original.ID: original.Conclusion, edit.ID: edit.Conclusion, tombstone.ID: edit.Conclusion}},
+		{"edit starts at cutoff", tailSize, map[string]string{original.ID: "", edit.ID: edit.Conclusion, tombstone.ID: edit.Conclusion}},
+		{"edit clipped", tailSize - 1, map[string]string{edit.ID: "", tombstone.ID: edit.Conclusion}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			projectLessonsScanMost = tc.size
+			got := e.ProjectLessons(slug)
+			if !maps.Equal(got.RetiredTextByID, tc.want) || len(got.Live) != 0 {
+				t.Fatalf("retired texts = %v, want %v; live = %v, want none", got.RetiredTextByID, tc.want, liveIDs(got))
+			}
+		})
 	}
 }
 

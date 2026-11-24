@@ -8,7 +8,9 @@ type SecurityConfig struct {
 	TrustedCIDRs         []string `json:"trusted_cidrs,omitempty"`
 	AllowPublicPlaintext bool     `json:"allow_public_plaintext,omitempty"`
 	// PlaintextLoopbackOnly refuses plaintext from the LAN too (plaintext_lan.go); it needs public.tls_listen.
-	PlaintextLoopbackOnly  bool `json:"plaintext_loopback_only,omitempty"`
+	PlaintextLoopbackOnly bool `json:"plaintext_loopback_only,omitempty"`
+	// PrivateNetworkOnly is office network mode (private_network.go): nothing of the hub reaches or answers the internet.
+	PrivateNetworkOnly     bool `json:"private_network_only,omitempty"`
 	AuthFailures           int  `json:"auth_failures,omitempty"`
 	AuthWindowSeconds      int  `json:"auth_window_seconds,omitempty"`
 	AuthBlockSeconds       int  `json:"auth_block_seconds,omitempty"`

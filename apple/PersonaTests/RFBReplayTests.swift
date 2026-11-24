@@ -2,7 +2,7 @@ import Foundation
 import Testing
 @testable import Persona
 
-/// What the live screen costs the phone (#3067): a vncbench recording (`go run ./cmd/vncbench record`, VNCREC1)
+/// What the live screen costs the phone (#3067): a vncbench recording (`go run ./internal/modules/screen-share/vncbench record`, VNCREC1)
 /// replayed at its own pace through the app's RFBClient and RFBFrameSink, and the CPU time, updates, bytes copied into
 /// pixel buffers and decode time per update printed. Skipped unless TEST_RUNNER_PERSONA_VNC_REPLAY names a recording
 /// (several: separated by commas).

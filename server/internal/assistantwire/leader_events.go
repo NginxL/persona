@@ -10,10 +10,10 @@ const (
 	EventLeaderReport  = "leader.report"
 )
 
-// LeaderChangedEvent: a leader conversation (one direction) was made, its title or project changed, or it ended (it
-// left assistant.leaders; nothing is deleted). ID is the leader conversation's session id; Title its title as the apps
-// show it; Project the slug of the knowledge-base project its direction is filed under ("" while none); Ended true once
-// it is no longer a leader, left out while it is. Each change is told once: a restart or a replay tells nothing again.
+// LeaderChangedEvent: a direction was made, its title or project changed, or it ended (it left assistant.leaders;
+// nothing is deleted). ID is the stable direction id (a conversation session id only for a conversation-backed
+// direction); Title its title, or its explicit name when there is no conversation; Project the knowledge-base project
+// slug ("" while none); Ended true once it is no longer current, left out while it is. Each change is told once.
 type LeaderChangedEvent struct {
 	ID    string `json:"id"`
 	Title string `json:"title"`
@@ -29,14 +29,14 @@ const (
 	LeaderReached  = "reached"
 	LeaderDecision = "decision"
 	LeaderStuck    = "stuck"
-	// LeaderProgress: the leader's own summary of its direction (leader_progress, #3679): Reached, Doing, NeedsYou
-	// and Links; Todo "".
+	// LeaderProgress: a direction's own summary (leader_progress, or the leaders.write HTTP / node CLI path, #8236):
+	// Reached, Doing, NeedsYou and Links; Todo "".
 	LeaderProgress = "progress"
 )
 
 // LeaderReportEvent: one of a leader's tasks reached its goal, needs the owner's decision, or is stuck; written by the
 // hub from the task's ledger, never by a model. ID names the report (the same report is never sent twice; an extension
-// may still key on it); Leader the leader conversation's id; Todo the task's to-do id; Text at most 300 characters in
+// may still key on it); Leader the stable direction id; Todo the task's to-do id; Text at most 300 characters in
 // the owner's language; Link the task's PR or delivery link when it has one; At when what it reports happened. A plan
 // of the leader's waiting for the owner's Start is a decision too (#3608): Plan is its id, Todo "" (it has none yet).
 type LeaderReportEvent struct {

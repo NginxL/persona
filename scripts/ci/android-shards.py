@@ -6,13 +6,15 @@ import re
 import sys
 
 # Each lane is one Gradle invocation, so the upstream tasks its parts share run once per lane. The parts are
-# balanced by measured task time: lint-build with feature tests shard 0, and core, feature shard 1 and platform/app.
+# balanced by measured task time: lint-build with feature tests shard 0 and the modules (:module:*, #13433), and core,
+# feature shard 1 and platform/app.
 PARTS = {
-    "lint-build-test-0": ("lint-build", "feature-0"),
+    "lint-build-test-0": ("lint-build", "feature-0", "module"),
     "test-1": ("core", "feature-1", "platform-app"),
 }
 LANES = ("full", *PARTS)
 TOKEN = re.compile(r'"(?:\\.|[^"\\])*"|[A-Za-z_][A-Za-z_0-9]*|\S')
+GUARD = ":app:moduleGuard"
 PROJECT = re.compile(r":[A-Za-z0-9_-]+(?::[A-Za-z0-9_-]+)*\Z")
 
 
@@ -94,14 +96,17 @@ def test_part(project):
         return "core"
     if project.startswith(":feature:"):
         return "feature"
+    if project.startswith(":module:"):
+        return "module"
     # App, platform and every new top-level module belong to this fallback part.
     return "platform-app"
 
 
 def part_tasks(projects, part):
     if part == "lint-build":
-        # Unqualified lint covers every module; the debug APK proves the app still assembles.
-        return ["lint", ":app:assembleDebug"]
+        # Unqualified lint covers every module; the debug APK proves the app still assembles; the module guard keeps
+        # core projects off :module:* (docs/android/android.md "Modules").
+        return ["lint", ":app:assembleDebug", GUARD]
     if part.startswith("feature-"):
         # Split the complete sorted feature set, including future modules, once.
         features = [project for project in projects if test_part(project) == "feature"]
@@ -116,7 +121,7 @@ def tasks(source, lane):
         raise ValueError("Unknown Android CI lane: " + lane)
     projects = modules(source)
     if lane == "full":
-        return ["lint", "test", ":app:assembleDebug"]
+        return ["lint", "test", ":app:assembleDebug", GUARD]
     return [task for part in PARTS[lane] for task in part_tasks(projects, part)]
 
 

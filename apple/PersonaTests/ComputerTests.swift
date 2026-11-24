@@ -35,15 +35,15 @@ struct ComputerTests {
         work.group = "work"
         let machines = [mac, work]
         let named: JSONValue = .object(["machine": .string("MacBook")])
-        #expect(ScreenEntry.machine("mcp__persona__computer_run", input: named, chat: MachineRef(id: "server"), machines: machines) == mac.ref,
+        #expect(ComputerSteps.machine("mcp__persona__computer_run", input: named, chat: MachineRef(id: "server"), machines: machines) == mac.ref,
                 "the assistant's: the Mac it names, by name too")
-        #expect(ScreenEntry.machine("mcp__persona__computer_state", input: .object(["machine": .string("macbook")]),
+        #expect(ComputerSteps.machine("mcp__persona__computer_state", input: .object(["machine": .string("macbook")]),
                                     chat: MachineRef(group: "work", id: "server"), machines: machines) == MachineRef(group: "work", id: "macbook"),
                 "in the chat's group of hubs")
-        #expect(ScreenEntry.machine("mcp__cua-driver__click", input: .object([:]), chat: mac.ref, machines: machines) == mac.ref,
+        #expect(ComputerSteps.machine("mcp__cua-driver__click", input: .object([:]), chat: mac.ref, machines: machines) == mac.ref,
                 "an agent's own Cua Driver: its machine")
-        #expect(ScreenEntry.machine("Bash", input: named, chat: mac.ref, machines: machines) == nil)
-        #expect(ScreenEntry.machine("mcp__persona__computer_run", input: .object([:]), chat: mac.ref, machines: machines) == nil)
+        #expect(ComputerSteps.machine("Bash", input: named, chat: mac.ref, machines: machines) == nil)
+        #expect(ComputerSteps.machine("mcp__persona__computer_run", input: .object([:]), chat: mac.ref, machines: machines) == nil)
     }
 
     @Test func theMachineListSaysWhetherItsScreenCanBeShown() throws {

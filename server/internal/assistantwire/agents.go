@@ -31,14 +31,25 @@ type AgentsConfig struct {
 	// Review is manager.json agents.review: the independent reviewer of a supervised task's finished change (#2173,
 	// docs/assistant/unified-entry.md "Independent review").
 	Review ReviewConfig `json:"review,omitzero"`
+	// SortByActivity and ShowFilter are manager.json agents.sort_by_activity / agents.show_filter: the initial values of
+	// the Agents list's display settings (GET /api/v1/agents/display-settings) until someone saves their own choice. Nil
+	// is off.
+	SortByActivity *bool `json:"sort_by_activity,omitempty"`
+	ShowFilter     *bool `json:"show_filter,omitempty"`
 }
 
 // A2AConfig defaults to the manager's confirmed personal computers. A supplied
 // list narrows that scope. PublicURL enables the authenticated HTTP interface.
+// Launch defaults to enabled (nil or true) within the allowed machine scope;
+// set Launch to false to keep A2A messaging while disabling new session launches.
 type A2AConfig struct {
 	Machines  []string `json:"machines,omitzero"`
 	PublicURL string   `json:"public_url,omitempty"`
+	Launch    *bool    `json:"launch,omitempty"`
 }
+
+// LaunchAllowed reports whether A2A may start new subagent sessions in scope (default true).
+func (c A2AConfig) LaunchAllowed() bool { return c.Launch == nil || *c.Launch }
 
 const ScopeA2A = "agents.a2a"
 
@@ -163,6 +174,12 @@ type TriageConfig struct {
 	// RetryBaseSeconds: the first "Continue" after a transient error waits this long, each next one twice as long as
 	// the one before (a rate limit four times as long). Default 15.
 	RetryBaseSeconds int `json:"retry_base_seconds,omitempty"`
+	// AccountExhaustionMaxRetries bounds automatic continuations for coding Agents, including task-leader Agents,
+	// when the provider says no upstream account is available. All Assistant conversations keep their existing
+	// recovery: main, leader and background-supervision chats, side chats, scheduled-task and health chats, and
+	// meeting rooms. Zero (the default) disables these continuations; a positive value compares the shared consecutive
+	// transient retry count with that bound. Ordinary transient failures are not limited by this setting.
+	AccountExhaustionMaxRetries int `json:"account_exhaustion_max_retries,omitempty"`
 	// MaxWakes: wakes for one wait before asking the user. Default 6.
 	MaxWakes int `json:"max_wakes,omitempty"`
 	// SettleSeconds: how long a stopped session stays stopped before its turn is triaged. Default 15.

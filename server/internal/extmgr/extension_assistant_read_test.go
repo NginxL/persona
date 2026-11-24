@@ -10,11 +10,13 @@ import (
 
 	"github.com/nwverse/persona/server/internal/assistantwire"
 	"github.com/nwverse/persona/server/internal/extension"
+	"github.com/nwverse/persona/server/internal/extwire"
 	"github.com/nwverse/persona/server/internal/rpc"
 )
 
 // assistant.conversations / assistant.messages (extension_assistant_read.go, #1288): only with assistant.read as
-// granted (or the legacy full grant, as for kb.read), forwarded to the manager unchanged.
+// granted (or the legacy full grant, as for kb.read), forwarded to the manager in assistant.extension_read, which names
+// the extension.
 func TestExtensionAssistantReadNeedsItsGrant(t *testing.T) {
 	h := newTestManager(t)
 	granted := kbExtensionSpec(t, h, "example-reader", extension.Permissions{Hub: []string{extension.ScopeAssistantRead}})
@@ -49,7 +51,9 @@ func TestExtensionAssistantReadNeedsItsGrant(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if len(asked) != 2 || asked[0] != assistantwire.MethodAssistantMessages || got[0] != string(params) {
+	// The manager is told which extension reads (#13246): what it is shown follows that extension's trust and grants.
+	if len(asked) != 2 || asked[0] != assistantwire.MethodAssistantExtensionRead ||
+		got[0] != `{"extension":"example-reader","method":"assistant.messages","params":{"id":"c1","limit":5}}` {
 		t.Fatalf("the manager got %v %v", asked, got)
 	}
 	h.extensions.reg.Get("example-reader").Record.Enabled = false
@@ -58,7 +62,8 @@ func TestExtensionAssistantReadNeedsItsGrant(t *testing.T) {
 	}
 }
 
-// assistant.memory: only with assistant.memory.read (assistant.read does not include it), forwarded unchanged.
+// assistant.memory: only with assistant.memory.read (assistant.read does not include it), forwarded naming the
+// extension.
 func TestExtensionAssistantMemoryNeedsItsGrant(t *testing.T) {
 	h := newTestManager(t)
 	granted := kbExtensionSpec(t, h, "example-memory", extension.Permissions{Hub: []string{extension.ScopeAssistantMemoryRead}})
@@ -80,11 +85,72 @@ func TestExtensionAssistantMemoryNeedsItsGrant(t *testing.T) {
 	if _, err := granted.Handle(context.Background(), assistantwire.MethodAssistantMemory, params); err != nil {
 		t.Fatal(err)
 	}
-	if len(asked) != 1 || asked[0] != "assistant.memory "+string(params) {
+	if len(asked) != 1 || asked[0] != `assistant.extension_read {"extension":"example-memory","method":"assistant.memory","params":{"include_content":true}}` {
 		t.Fatalf("the manager got %v", asked)
 	}
 	// The memory grant opens no conversation.
 	if _, err := granted.Handle(context.Background(), assistantwire.MethodAssistantMessages, json.RawMessage(`{"id":"c1"}`)); !errors.As(err, &re) || re.Code != extension.CodePermissionDenied {
 		t.Fatalf("assistant.messages with the memory grant: %v", err)
+	}
+}
+
+// An assistant from before assistant.extension_read answers "unknown method": the plain method is asked, as a third
+// party's read with no grant.
+func TestExtensionAssistantReadFallsBackForAnOlderAssistant(t *testing.T) {
+	h := newTestManager(t)
+	granted := kbExtensionSpec(t, h, "example-reader", extension.Permissions{Hub: []string{extension.ScopeAssistantRead}})
+	var asked []string
+	h.opts.Assistant = func(_ context.Context, method string, params json.RawMessage) (json.RawMessage, error) {
+		asked = append(asked, method+" "+string(params))
+		if method == assistantwire.MethodAssistantExtensionRead {
+			return nil, &rpc.Error{Code: extension.CodeUnknownMethod, Message: "unknown method " + method}
+		}
+		return json.RawMessage(`{"items":[],"total":0}`), nil
+	}
+	params := json.RawMessage(`{"since":"2026-01-02T00:00:00Z"}`)
+	if _, err := granted.Handle(context.Background(), assistantwire.MethodAssistantConversations, params); err != nil {
+		t.Fatal(err)
+	}
+	if len(asked) != 2 || asked[1] != "assistant.conversations "+string(params) {
+		t.Fatalf("the manager got %v", asked)
+	}
+}
+
+func TestExtensionEntriesNeedTheirOwnGrant(t *testing.T) {
+	h := newTestManager(t)
+	granted := kbExtensionSpec(t, h, "example-entries", extension.Permissions{Hub: []string{extension.ScopeAssistantEntriesRead}})
+	memory := kbExtensionSpec(t, h, "example-memory", extension.Permissions{Hub: []string{extension.ScopeAssistantMemoryRead, extension.ScopeAssistantRead}})
+	calls := 0
+	h.opts.Assistant = func(_ context.Context, method string, p json.RawMessage) (json.RawMessage, error) {
+		calls++
+		if method != assistantwire.MethodAssistantEntriesList || string(p) != `{"after":"example","by":"user"}` {
+			t.Fatalf("forwarded %s %s", method, p)
+		}
+		return json.RawMessage(`{"entries":[],"after":"example","has_more":false}`), nil
+	}
+	p := json.RawMessage(`{"after":"example","by":"user"}`)
+	_, err := memory.Handle(context.Background(), assistantwire.MethodAssistantEntriesList, p)
+	var re *rpc.Error
+	if !errors.As(err, &re) || re.Code != extension.CodePermissionDenied || !strings.Contains(string(re.Data), `"assistant.entries.read"`) || calls != 0 {
+		t.Fatalf("denied: %v calls=%d", err, calls)
+	}
+	if _, err := granted.Handle(context.Background(), assistantwire.MethodAssistantEntriesList, p); err != nil || calls != 1 {
+		t.Fatalf("granted: %v calls=%d", err, calls)
+	}
+}
+
+func TestEntriesHTTPTokenDoesNotCacheARevokedGrant(t *testing.T) {
+	h := newTestManager(t)
+	kbExtensionSpec(t, h, "example-entries", extension.Permissions{Hub: []string{extension.ScopeAssistantEntriesRead}})
+	tok := h.extTokens.issue("example-entries", "Example", []string{extension.ScopeAssistantEntriesRead})
+	request := extwire.Authorize{Hash: hashToken(tok), Pattern: "GET /api/v1/assistant/entries", Method: "GET", Path: "/api/v1/assistant/entries"}
+	if out := h.authorize(request); !out.OK || out.Extension != "example-entries" {
+		t.Fatalf("approved: %+v", out)
+	}
+	if err := h.extensions.reg.SetEnabled(context.Background(), "example-entries", false, "test"); err != nil {
+		t.Fatal(err)
+	}
+	if out := h.authorize(request); out.OK {
+		t.Fatalf("unchanged credential survived revoke: %+v", out)
 	}
 }

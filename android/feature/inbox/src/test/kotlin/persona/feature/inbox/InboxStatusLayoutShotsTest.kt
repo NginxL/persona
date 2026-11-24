@@ -54,6 +54,7 @@ import persona.core.designsystem.PersonaTheme
 import persona.core.domain.inbox.InboxItem
 import persona.core.navigation.AppTab
 import persona.core.navigation.Navigator
+import persona.core.inbox.*
 
 /** Focused native captures of the shared sc-1 status sentence and its actions at default and large text sizes. */
 @RunWith(AndroidJUnit4::class)
@@ -98,7 +99,7 @@ class InboxStatusLayoutShotsTest {
     private fun assertComplete(text: String, context: String, checkVisualOverflow: Boolean = true) {
         val node = rule.onNodeWithText(text, useUnmergedTree = true).fetchSemanticsNode()
         val layouts = mutableListOf<TextLayoutResult>()
-        node.config[SemanticsActions.GetTextLayoutResult].action!!(layouts)
+        val _ = node.config[SemanticsActions.GetTextLayoutResult].action!!(layouts)
         val layout = layouts.single()
         val lastGlyph = layout.getBoundingBox(text.lastIndex)
         if (checkVisualOverflow) {

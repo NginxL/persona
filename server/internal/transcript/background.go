@@ -65,8 +65,9 @@ func (m *Meta) trackBackground(toolUseID, name string, raw json.RawMessage, ts t
 		if m.loopPending == nil {
 			m.loopPending = map[string]proto.LoopInfo{}
 		}
+		delay := min(time.Duration(in.Delay)*time.Second, time.Hour)
 		m.loopPending[toolUseID] = proto.LoopInfo{Kind: "wakeup", Prompt: in.Prompt, Reason: in.Reason,
-			IntervalSeconds: int(in.Delay), NextAt: ts.Add(time.Duration(in.Delay) * time.Second)}
+			IntervalSeconds: int(in.Delay), NextAt: ts.Add(delay)}
 	case "CronCreate":
 		if (in.Recurring != nil && !*in.Recurring) || onceCron(in.Cron) {
 			return // a one-off reminder, not a loop

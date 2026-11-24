@@ -121,6 +121,23 @@ struct AssistantViewModelTests {
         #expect(model.page == "details")
     }
 
+    @Test func scenePinActionsNavigateInsideTheAssistantCard() async {
+        let push = ExtensionAction(id: "pin-details", push: ExtensionPush(page: "details"))
+        let scene = ExtensionSceneComponent(
+            key: "home",
+            alt: "Two-room home",
+            shapes: [.box(ExtensionSceneBox(center: [0, 0], size: [4, 3], bottom: 0, top: 0.1))],
+            pins: [ExtensionScenePin(id: "lamp", at: [0, 0], height: 2.2, label: "Ceiling lamp", state: "On", action: push)]
+        )
+        let details = ExtensionView(sections: [ExtensionSection(items: [.text(ExtensionTextComponent(text: "Lamp details"))])])
+        let card = ExtensionView(sections: [ExtensionSection(items: [.scene(scene)])], pages: ["details": details])
+        #expect(AssistantViewModel.actions(card).contains(push))
+        let model = AssistantViewModel(key: "view_example", scope: scope, view: card, store: AssistantViewsStore(),
+            deps: .init(send: { _ in Issue.record("a scene pin push sent a reply"); throw CancellationError() }))
+        _ = await model.perform(push)
+        #expect(model.page == "details")
+    }
+
     @Test func navigationStaysInsideTheCardAndDropsRemovedPages() async {
         let push = ExtensionAction(id: "details", push: ExtensionPush(page: "details"))
         let pop = ExtensionAction(id: "back", pop: true)
@@ -207,7 +224,7 @@ struct AssistantViewModelTests {
     @Test func unsupportedGeneratedComponentsUseFallbackRatherThanBlankCards() {
         let future = #"{"fallback":"文字说明","sections":[{"items":[{"type":"hologram","title":"新组件"}]}]}"#
         #expect(AssistantRichMarkdown.decode(future) == nil)
-        // A card is drawn at `ExtensionUIContext.cardVersion` (10, #9727): UI version 4's header is drawn, not left out.
+        // A card is drawn at `ExtensionUIContext.cardVersion` (11, #12544): UI version 4's header is drawn, not left out.
         let header = #"{"fallback":"文字说明","sections":[{"items":[{"type":"header","title":"新组件"}]}]}"#
         #expect(AssistantRichMarkdown.decode(header) != nil)
         var card = view()

@@ -39,7 +39,7 @@ class SwipeActionsAccessibilityTest {
         rule.onNodeWithTag(tag).fetchSemanticsNode().config.getOrNull(SemanticsActions.CustomActions).orEmpty().map { it.label }
 
     private fun run(tag: String, label: String) {
-        rule.onNodeWithTag(tag).fetchSemanticsNode().config.getOrNull(SemanticsActions.CustomActions).orEmpty()
+        val _ = rule.onNodeWithTag(tag).fetchSemanticsNode().config.getOrNull(SemanticsActions.CustomActions).orEmpty()
             .single { it.label == label }.action()
         rule.waitForIdle()
     }

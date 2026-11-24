@@ -151,6 +151,10 @@ own config decides unless a client explicitly selects a supported model override
   `omp`. The extension keeps its host in `__personaOmp` (`integrations/pi` uses `__personaPi`), so an omp and a pi loaded in the
   same process do not collide.
 - **Its own resume command.** `omp --resume <session file>`, where pi uses `pi --approve --session`.
+- **Its own word for a turn that is over.** omp's pi compatibility layer dispatches the loop's `agent_end` but no
+  `agent_settled`, pi's event for a run fully over (its automatic retry, compaction and queued continuation included), so the
+  host takes `agent_end` as the turn's end (`settleEvents` in `integrations/omp/lib/host.js`). Without it every session would
+  list as working forever after its first turn.
 
 Everything else is pi's code under omp's identity: the extension API, the conversation mapping, approval and question handling,
 live text, and the host's record of where a session last ran (`integrations/pi/lib/pi.js`).

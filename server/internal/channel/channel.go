@@ -93,8 +93,11 @@ type Capabilities struct {
 	MaxText int  `json:"max_text,omitempty"`
 	Asks    Asks `json:"asks,omitempty"`
 	// Push: it can send to the owner unprompted (pushes, sync, what is asked).
-	Push   bool `json:"push,omitempty"`
-	Typing bool `json:"typing,omitempty"`
+	Push bool `json:"push,omitempty"`
+	// ReplyOnly: it only replies to incoming messages or triggers and never sends unsolicited proactive messages
+	// (without reply_to); testing checks connectivity instead of calling channel.send.
+	ReplyOnly bool `json:"reply_only,omitempty"`
+	Typing    bool `json:"typing,omitempty"`
 	// Progress: it can post a message and change it (a progress card the answer goes into).
 	Progress bool `json:"progress,omitempty"`
 	// Threads: a reply to one of the bot's messages goes to that message's conversation (the Feishu bot); an
@@ -168,7 +171,7 @@ func PluginFeatures(l i18n.Lang, c Capabilities, on map[string]bool) []Feature {
 		add(FeatureAsks)
 		add(FeatureAllAsks)
 	}
-	if c.Push {
+	if c.Push && !c.ReplyOnly {
 		add(FeaturePushes)
 		add(FeatureSync)
 	}
@@ -312,6 +315,9 @@ func (c Capabilities) Validate() error {
 	}
 	if c.MaxText > 0 && c.MaxText < 200 {
 		return errors.New("capabilities.max_text below 200: an answer would come in too many pieces")
+	}
+	if c.ReplyOnly && c.Push {
+		return errors.New("capabilities.reply_only cannot be combined with capabilities.push")
 	}
 	return nil
 }

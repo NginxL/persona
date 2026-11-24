@@ -46,6 +46,9 @@ var secretRunGrace = 5 * time.Second
 
 const secretRunSweep = 2 * time.Second
 
+// The password card's commands. The handler gets the params themselves, never a decoded copy, so that it can zero them.
+func init() { nodeRPC(proto.MethodSecretRun, (*Node).secretRun) }
+
 // secretRun answers secret.run. It zeroes params: their base64 is the password's, and nothing reads the request after.
 func (n *Node) secretRun(ctx context.Context, params json.RawMessage) (any, error) {
 	var p proto.SecretRunParams

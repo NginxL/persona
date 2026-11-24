@@ -159,7 +159,7 @@ class PersonaStore(context: Context, private val style: AppStyleStore, private v
     private fun tellHub(id: String) {
         if (!synced) return
         val api = packs() ?: return
-        background.launch { runCatching { api.choose(id) } }
+        background.launch { val _ = runCatching { api.choose(id) } }
     }
 
     /** Another device chose [id] (the hub's `look` push): show it here, downloading its package first. */

@@ -2,7 +2,6 @@ package extmgr
 
 import (
 	"bufio"
-	"context"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -19,19 +18,11 @@ import (
 
 	"github.com/nwverse/persona/server/internal/extension"
 	"github.com/nwverse/persona/server/internal/extension/egress"
-	"github.com/nwverse/persona/server/internal/extension/host"
 	"github.com/nwverse/persona/server/internal/extension/sandbox"
 )
 
 // A settings check's own way out through the egress proxy (#8459): the address the proposed settings name is reached
 // with the check's credential only, while the check runs.
-
-// noBwrap is a machine with a sandbox on and none to make it active: the program is pointed at the proxy.
-func noBwrap(t *testing.T) {
-	old := sandboxProbe
-	sandboxProbe = func() sandbox.Support { return sandbox.Support{OS: "linux", Why: "no bwrap here"} }
-	t.Cleanup(func() { sandboxProbe = old })
-}
 
 // connectThrough asks the proxy at addr for a CONNECT to target with password pass, and says the status.
 func connectThrough(t *testing.T, addr, target, pass string) int {
@@ -71,10 +62,8 @@ func loopbackSink(t *testing.T) string {
 }
 
 func TestSettingsCheckProxy(t *testing.T) {
-	noBwrap(t)
 	h, _ := extensionTestHub(t)
 	ps := h.extensions
-	ps.sandboxes.noDefault = false
 	mk := func(id string, network ...string) *extension.Extension {
 		p := &extension.Extension{Record: extension.Record{ID: id, Source: extension.SourceInstalled, Origin: "dir:/x",
 			Granted: extension.Permissions{Network: network}},
@@ -83,21 +72,14 @@ func TestSettingsCheckProxy(t *testing.T) {
 		return p
 	}
 	p := mk("notes", "api.example.com", "config:gateway_url")
-	s := host.Spec{}
-	if err := ps.confine(context.Background(), p, &hubExtension{}, &s); err != nil {
+	// Register the proxy fixture directly: proxy authorization is independent of sandbox availability.
+	// Actual confinement and startup refusal are covered by TestExtensionSandbox and TestExtensionSandboxMissing.
+	px, err := ps.egress()
+	if err != nil {
 		t.Fatal(err)
 	}
-	own := ""
-	for _, kv := range s.StartEnv() { // the program starts: registered with the proxy, its own credential
-		if v, ok := strings.CutPrefix(kv, "HTTPS_PROXY="); ok {
-			u, _ := url.Parse(v)
-			own, _ = u.User.Password()
-		}
-	}
-	px := ps.sandboxes.proxyIfStarted()
-	if px == nil || own == "" {
-		t.Fatal("not behind the proxy")
-	}
+	ownURL, _ := url.Parse(px.Register(p.Record.ID, egress.Rule{Hosts: p.Record.Granted.Network}))
+	own, _ := ownURL.User.Password()
 	sink := loopbackSink(t)
 	config := json.RawMessage(`{"gateway_url": "https://` + sink + `"}`)
 
@@ -177,11 +159,9 @@ func shortSocketDir(t *testing.T) string {
 // Through the routes: the program gets the check's proxy, a refusal that quotes it gives back no credential, and the
 // credential stops working once the check answers, refused or not.
 func TestSettingsCheckProxyRoutes(t *testing.T) {
-	noBwrap(t)
 	setVarFor(t, &settingsCheckTimeout, 2*time.Second)
 	h, _ := extensionTestHub(t)
 	ps := h.extensions
-	ps.sandboxes.noDefault = false
 	mux := h.routes()
 	master := h.cfg.Token
 	dir := settingsCheckPackage(t)
@@ -197,10 +177,14 @@ func TestSettingsCheckProxyRoutes(t *testing.T) {
 		hp := ps.get("example-gateway")
 		return hp != nil && hp.proc != nil && hp.proc.Ready()
 	})
-	px := ps.sandboxes.proxyIfStarted()
-	if px == nil {
-		t.Fatal("the extension is not behind the proxy")
+	// The protocol peer lives outside its package, so the normal test harness leaves its sandbox off.
+	// Seed only its egress registration; no unavailable-sandbox fallback is involved.
+	px, err := ps.egress()
+	if err != nil {
+		t.Fatal(err)
 	}
+	p := ps.reg.Get("example-gateway")
+	px.Register(p.Record.ID, egress.Rule{Hosts: p.Record.Granted.Network})
 	put := func(gateway string) (int, map[string]any) {
 		b, _ := json.Marshal(map[string]any{"config": map[string]string{"gateway_url": gateway}})
 		return call(t, mux, "PUT", "/api/v1/extensions/example-gateway/-/config", master, string(b))

@@ -1,0 +1,5 @@
+<persona-context kind="context" title="記憶 · この作業に関係する項目" url="">
+ユーザーの記憶のうち、この作業に関係する項目です（Persona がタスクの内容から選んだもの。機微な項目は、この作業に必要な場合だけ含めています）。この作業にだけ使い、他の人に伝えたり、コード、ドキュメント、コミットに書いたりしないでください。
+1. qa: the release notes go out on Fridays
+2. qa: 记账按月汇总
+</persona-context>

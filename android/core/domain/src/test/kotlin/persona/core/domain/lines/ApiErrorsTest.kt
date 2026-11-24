@@ -40,6 +40,17 @@ class ApiErrorsTest {
         assertNull(ApiErrorInfo.parse(null))
     }
 
+    @Test fun olderHubsRawToolSearchRefusalKeepsItsDedicatedRemedy() {
+        val edge = "API Error: 400 request is not representable on this edge: ToolSearch is not supported on this endpoint " +
+            "(defer_loading:true, tool_search_*, tool_reference); resend with all tools loaded"
+        assertTrue(ApiErrorInfo.parse(edge)!!.toolSearchUnsupported)
+        assertTrue(ApiErrorInfo.parse("API Error: 400 tools.3.defer_loading: Extra inputs are not permitted")!!.toolSearchUnsupported)
+        assertTrue(ApiErrorInfo.parse("API Error: request is not representable: ToolSearch is unavailable")!!.toolSearchUnsupported)
+        assertEquals(false, ApiErrorInfo.parse("API Error: 400 bad request")!!.toolSearchUnsupported)
+        assertEquals(false, ApiErrorInfo.parse("API Error: 401 defer_loading is not permitted")!!.toolSearchUnsupported)
+        assertEquals(false, ApiErrorInfo.parse("API Error: 500 tool_search failed")!!.toolSearchUnsupported)
+    }
+
     @Test fun readsTheGatewaysIds() {
         val e = ApiErrorInfo.parse("API Error: 502 upstream stream error: rpc error: code = 13 desc = Req 202610302115A1B2C3D4E5F6 " +
             "Session 1ebd0000:7e470000 streamingcall loadbalance failed: no available GPU pod [biz error]. try again in a moment.")!!

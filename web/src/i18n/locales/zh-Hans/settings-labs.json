@@ -25,5 +25,13 @@
   "work_activation": "开始新对话即可完整应用。已打开的对话可能保留原来的指引和工具信息。",
   "work_rollback": "关闭后开启新对话，即可恢复原来的指引和工具加载方式。",
   "work_saved": "已保存。开始新对话即可完整应用此设置。",
-  "work_unsupported": "请更新当前助手以使用此设置。"
+  "work_unsupported": "请更新当前助手以使用此设置。",
+  "area_features": "功能",
+  "features_group": "可选功能",
+  "features_hint": "关掉不用的功能：它会从侧边栏和页面里消失，这个浏览器也不再加载它。你的数据原样保留。",
+  "features_not_offered": "你的 hub 没有提供这个功能。",
+  "features_activation": "立即生效，这个浏览器的所有标签页都会跟着变。",
+  "features_rollback": "重新打开即可。没有删除任何东西，一切都还在原处。",
+  "module_voice": "语音对话",
+  "module_voice_hint": "在对话的输入框里和 Persona 或 Agent 语音对话，带实时字幕。打字和发送不受影响。"
 }

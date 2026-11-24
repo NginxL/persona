@@ -56,7 +56,7 @@ class CapsuleKeeperService : AccessibilityService() {
     }
 
     private fun release() {
-        if (registered) { runCatching { unregisterReceiver(unlocked) }; registered = false }
+        if (registered) { val _ = runCatching { unregisterReceiver(unlocked) }; registered = false }
         CapsuleKeeper.connected(false)
     }
 }
@@ -122,7 +122,7 @@ object CapsuleKeeperReminder {
             .setContentText(context.getString(persona.android.R.string.app_capsule_keeper_off_text))
             .setStyle(androidx.core.app.NotificationCompat.BigTextStyle().bigText(context.getString(persona.android.R.string.app_capsule_keeper_off_text)))
             .setContentIntent(open).setAutoCancel(true).build()
-        runCatching { manager.notify(ID, notification) }
+        val _ = runCatching { manager.notify(ID, notification) }
     }
 
     fun clear(context: Context) { context.getSystemService(android.app.NotificationManager::class.java).cancel(ID) }

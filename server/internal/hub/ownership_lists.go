@@ -210,6 +210,12 @@ func writeTaggedList(w http.ResponseWriter, r *http.Request, key string, answers
 		hd[k] = slices.Clone(v)
 	}
 	if status == http.StatusOK {
+		if key == "todos" {
+			hd.Del(assistantwire.TodoRevisionHeader) // the base answer's manager token is not a hub-wide one
+			if revision, complete := todoRevisionOfAnswers(answers); complete {
+				hd.Set(assistantwire.TodoRevisionHeader, revision)
+			}
+		}
 		sum := sha256.Sum256(out.body.Bytes())
 		tag := `W/"t1-` + hex.EncodeToString(sum[:16]) + `"`
 		hd.Set("ETag", tag)

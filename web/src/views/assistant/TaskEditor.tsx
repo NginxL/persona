@@ -21,6 +21,7 @@ import { Field, inputClass, Segmented, SectionTitle, Switch, textareaClass } fro
 import { lazyPage } from "../../lib/lazy-page";
 import { formatDate, t } from "../../i18n";
 
+const TaskPromptEditor = lazyPage(() => import("./TaskPromptEditor").then((m) => m.TaskPromptEditor));
 const TaskExecutionFields = lazyPage(() => import("./TaskExecutionFields").then((m) => m.TaskExecutionFields));
 
 /** Brings an inline confirmation into view once, when it appears (stable, so not on every render). */
@@ -58,6 +59,7 @@ export function TaskEditor({
   const hasPush = useStore((s) => hubHas(s.features, TASK_PUSH_FEATURE)) || task.push === "asked";
   /** "When done, put it in the Inbox" shows when the hub takes it (task_inbox), or the task already has it. */
   const hasInbox = useStore((s) => hubHas(s.features, TASK_INBOX_FEATURE)) || !!task.inbox;
+  const hasInput = useStore((s) => hubHas(s.features, "task_input"));
   const hasExecution = useStore((s) => hubHas(s.features, "task_execution")) || !!task.execution || !!task.cwd || !!task.launcher || !!task.model;
   /** "Cron" shows when the hub runs cron tasks (task_cron), or the task already is one. */
   const hasCron = useStore((s) => hubHas(s.features, TASK_CRON_FEATURE)) || task.repeat === "cron";
@@ -293,14 +295,14 @@ export function TaskEditor({
 
           <section>
             <SectionTitle>{t("assistant-taskeditor.section_prompt")}</SectionTitle>
-            <textarea
+            {hasInput ? <Suspense fallback={<Spinner />}><TaskPromptEditor draft={draft} saved={saved} disabled={working} onChange={(prompt, prompt_selections) => set({ prompt, prompt_selections })} /></Suspense> : <textarea
               className={textareaClass}
               rows={6}
               value={draft.prompt}
               placeholder={t("assistant-taskeditor.prompt_placeholder")}
               aria-label={t("assistant-taskeditor.prompt_placeholder")}
               onChange={(e) => set({ prompt: e.target.value })}
-            />
+            />}
             <p className={HINT}>{t("assistant-taskeditor.prompt_hint")}</p>
           </section>
 

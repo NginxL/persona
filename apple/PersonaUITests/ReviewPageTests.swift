@@ -118,6 +118,7 @@ final class ReviewPageTests: XCTestCase {
         if !(more.exists && more.isHittable) { compact.tap() }
         XCTAssertTrue(more.waitForExistence(timeout: 10), "no ⋯:\n\(app.debugDescription)")
         more.tap()
+        app.openAgentMenuMore() // Review Changes is More's (#13396)
         let item = app.buttons["评审改动"].firstMatch
         XCTAssertTrue(item.waitForExistence(timeout: 5), "no Review Changes in ⋯:\n\(app.debugDescription)")
         item.tap()

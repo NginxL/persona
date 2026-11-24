@@ -91,8 +91,11 @@ func TestAgentsSwitchEachByItsState(t *testing.T) {
 		t.Errorf("limited: %v", got)
 	}
 	for _, c := range nodeCalls(ft.f) {
-		if p := callParams(t, c); c.Method == DeviceSessionSend && (p["switch_now"] != true || !strings.Contains(p["text"].(string), prompts.RenderAgentLimitContinue(""))) {
-			t.Errorf("continuation: %v", p)
+		if p := callParams(t, c); c.Method == DeviceSessionSend {
+			if p["switch_now"] != true || !strings.Contains(p["text"].(string), prompts.RenderAgentLimitContinue("")) {
+				t.Errorf("continuation: %v", p)
+			}
+			requireAutoContinueSource(t, p)
 		}
 	}
 	if got := callsFor(ft.f, "s2idle0001"); strings.Join(got, ",") != "session.modes,session.switch" {
@@ -209,6 +212,11 @@ func TestAgentsSwitchQueueSurvivesARestart(t *testing.T) {
 	again.sessions("mac", limited)
 	if got := waitCallsFor(t, again.f, "s1busy0001", 2); strings.Join(got, ",") != "session.modes,session.send" {
 		t.Fatalf("after the restart: %v", got)
+	}
+	for _, c := range nodeCalls(again.f) {
+		if c.Method == DeviceSessionSend {
+			requireAutoContinueSource(t, callParams(t, c))
+		}
 	}
 }
 

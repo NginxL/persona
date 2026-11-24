@@ -11,9 +11,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/nwverse/persona/server/internal/botcard"
 	"github.com/nwverse/persona/server/internal/channel"
 	"github.com/nwverse/persona/server/internal/db"
-	"github.com/nwverse/persona/server/internal/feishubot"
 	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/proto"
 	"github.com/nwverse/persona/server/internal/rpc"
@@ -117,18 +117,18 @@ func (e *askEnv) readableText(id, text string) {
 }
 
 // ownerAsk is the owner's message in the group that is not opted in: "@bot <text>".
-func ownerAsk(id, text string) feishubot.MessageEvent {
-	var ev feishubot.MessageEvent
+func ownerAsk(id, text string) botcard.MessageEvent {
+	var ev botcard.MessageEvent
 	ev.Message.MessageID, ev.Message.ChatID, ev.Message.ChatType, ev.Message.MessageType = id, askSrc, "group", "text"
 	c, _ := json.Marshal(map[string]string{"text": "@_user_1 " + text})
 	ev.Message.Content = string(c)
-	ev.Message.Mentions = []feishubot.Mention{{Key: "@_user_1", Name: "Persona", ID: feishubot.UserID{OpenID: "ou_bot"}}}
+	ev.Message.Mentions = []botcard.Mention{{Key: "@_user_1", Name: "Persona", ID: botcard.UserID{OpenID: "ou_bot"}}}
 	ev.Sender.SenderType, ev.Sender.SenderID.OpenID = "user", "ou_owner"
 	return ev
 }
 
 // ask hands ev to the assistant the way the hub does for such a message (FeishuFromElsewhere).
-func (e *askEnv) ask(ev feishubot.MessageEvent) {
+func (e *askEnv) ask(ev botcard.MessageEvent) {
 	e.t.Helper()
 	st, err := e.s.feishuStatus(context.Background())
 	if err != nil {
@@ -302,25 +302,25 @@ func TestElsewhereThroughTheHubsCall(t *testing.T) {
 // a merged forward.
 func TestElsewhereAnythingElseDoesNothing(t *testing.T) {
 	e := newAskEnv(t, nil)
-	other := func(f func(*feishubot.MessageEvent)) feishubot.MessageEvent {
+	other := func(f func(*botcard.MessageEvent)) botcard.MessageEvent {
 		ev := ownerAsk("om_x", "/ai 查一下")
 		f(&ev)
 		return ev
 	}
-	for name, ev := range map[string]feishubot.MessageEvent{
-		"someone else":        other(func(ev *feishubot.MessageEvent) { ev.Sender.SenderID.OpenID = "ou_stranger" }),
-		"an app":              other(func(ev *feishubot.MessageEvent) { ev.Sender.SenderType = "app" }),
-		"the private chat":    other(func(ev *feishubot.MessageEvent) { ev.Message.ChatType, ev.Message.ChatID = "p2p", "oc_private" }),
-		"a group on the list": other(func(ev *feishubot.MessageEvent) { ev.Message.ChatID = askHome }),
+	for name, ev := range map[string]botcard.MessageEvent{
+		"someone else":        other(func(ev *botcard.MessageEvent) { ev.Sender.SenderID.OpenID = "ou_stranger" }),
+		"an app":              other(func(ev *botcard.MessageEvent) { ev.Sender.SenderType = "app" }),
+		"the private chat":    other(func(ev *botcard.MessageEvent) { ev.Message.ChatType, ev.Message.ChatID = "p2p", "oc_private" }),
+		"a group on the list": other(func(ev *botcard.MessageEvent) { ev.Message.ChatID = askHome }),
 		"no /ai":              ownerAsk("om_x", "帮我看看"),
 		"/aim":                ownerAsk("om_x", "/aim 查一下"),
 		"/ai as a word":       ownerAsk("om_x", "请 /ai 查一下"),
-		"a merged forward":    other(func(ev *feishubot.MessageEvent) { ev.Message.MessageType = "merge_forward" }),
-		"a picture": other(func(ev *feishubot.MessageEvent) {
+		"a merged forward":    other(func(ev *botcard.MessageEvent) { ev.Message.MessageType = "merge_forward" }),
+		"a picture": other(func(ev *botcard.MessageEvent) {
 			ev.Message.MessageType, ev.Message.Content = "image", `{"image_key":"k"}`
 		}),
-		"no chat":       other(func(ev *feishubot.MessageEvent) { ev.Message.ChatID = "" }),
-		"no message id": other(func(ev *feishubot.MessageEvent) { ev.Message.MessageID = "" }),
+		"no chat":       other(func(ev *botcard.MessageEvent) { ev.Message.ChatID = "" }),
+		"no message id": other(func(ev *botcard.MessageEvent) { ev.Message.MessageID = "" }),
 	} {
 		e.ask(ev)
 		if todoCount(e.s) != 0 || len(e.f.appParams(AppFeishu, FeishuText)) != 0 || len(reactions(e.f)) != 0 || len(handoffs(e.f)) != 0 {
@@ -670,6 +670,7 @@ func (e *askEnv) closeDone(id string) {
 // 4. A to-do that is done shows its topic what will be told and when, as soon as its outcome is recorded, and tells the
 // original message once, as one short line, when the time has come; a second closing says nothing more.
 func TestSourceReportWhenDone(t *testing.T) {
+	needsLarkLayer(t)
 	forStores(t, func(t *testing.T, e *askEnv, database *db.DB) {
 		e.ask(ownerAsk("om_r1", "/ai 修登录崩溃"))
 		id := onlyTodo(e.s).ID
@@ -714,6 +715,7 @@ func TestSourceReportWhenDone(t *testing.T) {
 }
 
 func TestSourceReportWithConfiguredDelay(t *testing.T) {
+	needsLarkLayer(t)
 	for _, minutes := range []int{0, 1} {
 		t.Run(fmt.Sprintf("%d_minutes", minutes), func(t *testing.T) {
 			forStores(t, func(t *testing.T, e *askEnv, database *db.DB) {
@@ -762,6 +764,7 @@ func TestSourceReportWithConfiguredDelay(t *testing.T) {
 // A start that failed has no outcome to wait for: the notice comes after a moment, and what is told is only that it could
 // not be done, never why.
 func TestSourceReportWhenTheStartFailed(t *testing.T) {
+	needsLarkLayer(t)
 	e := newAskEnv(t, nil)
 	e.ask(ownerAsk("om_sf1", "/ai 修登录崩溃"))
 	id := onlyTodo(e.s).ID
@@ -795,6 +798,7 @@ func TestSourceReportWhenTheStartFailed(t *testing.T) {
 // What the report says: the first line of the latest outcome note, never its links; else only that it is done, or that it
 // could not be done. Not the todo's decisions, the topic's words, the judge's reason or the error of a start.
 func TestSourceReportText(t *testing.T) {
+	needsLarkLayer(t)
 	database := todoTestDB(t)
 	add := func(e *askEnv, id string, rows ...db.TodoDecisionRow) {
 		for i, r := range rows {
@@ -864,6 +868,7 @@ func TestSourceReportText(t *testing.T) {
 
 // What the judge writes as its reason is not told (it is the todo's own record).
 func TestSourceReportFallsBackToTheWait(t *testing.T) {
+	needsLarkLayer(t)
 	e := newAskEnv(t, nil)
 	e.ask(ownerAsk("om_fb1", "/ai 修登录崩溃"))
 	id := onlyTodo(e.s).ID
@@ -900,6 +905,7 @@ func TestSourceReportFallsBackToTheWait(t *testing.T) {
 // 4. Accepting the to-do ("Please verify" card) plans the report too (after the wait for the outcome: it is not known to be
 // there), and the later closing does not make a second.
 func TestSourceReportWhenAccepted(t *testing.T) {
+	needsLarkLayer(t)
 	forStores(t, func(t *testing.T, e *askEnv, database *db.DB) {
 		ctx := context.Background()
 		e.ask(ownerAsk("om_a1", "/ai 修登录崩溃"))
@@ -958,6 +964,7 @@ func TestSourceReportWhenAccepted(t *testing.T) {
 // sends what @s the bot starts every message with) turns it off, is recorded as the user's decision from the topic, goes to
 // no Agent, and the closing then says nothing to the original message. Other text is a word.
 func TestSourceNoReply(t *testing.T) {
+	needsLarkLayer(t)
 	for _, cmd := range []string{"/noreply", "／NoReply", "  /noreply  ", "@_user_1 /noreply", "@_user_1   ／noreply"} {
 		t.Run(cmd, func(t *testing.T) {
 			database := todoTestDB(t)
@@ -966,7 +973,7 @@ func TestSourceNoReply(t *testing.T) {
 			id := onlyTodo(e.s).ID
 			handed := len(handoffs(e.f))
 			ev := topicEventIn("om_nr_cmd", askHome, "omt_home", cmd)
-			ev.Message.Mentions = []feishubot.Mention{{Key: "@_user_1", Name: "Persona", ID: feishubot.UserID{OpenID: "ou_bot"}}}
+			ev.Message.Mentions = []botcard.Mention{{Key: "@_user_1", Name: "Persona", ID: botcard.UserID{OpenID: "ou_bot"}}}
 			e.deliver(ev)
 			if got := lastNote(t, e.f); got != e.said("source_noreply_done") {
 				t.Fatalf("note %q", got)
@@ -1006,6 +1013,7 @@ func TestSourceNoReply(t *testing.T) {
 
 // Stopped in the window between the notice and the time, it is not told; after it was told, it says so.
 func TestSourceNoReplyInTheWindowAndAfter(t *testing.T) {
+	needsLarkLayer(t)
 	e := newAskEnv(t, nil)
 	e.ask(ownerAsk("om_nr2", "/ai 修登录崩溃"))
 	id := onlyTodo(e.s).ID
@@ -1036,6 +1044,7 @@ func TestSourceNoReplyInTheWindowAndAfter(t *testing.T) {
 // In the topic of a to-do that did not come from elsewhere, "/noreply" has nothing to stop: said so, and it is not sent
 // on as words. With extra words it is a word like any other.
 func TestNoReplyOnATodoWithNoSource(t *testing.T) {
+	needsLarkLayer(t)
 	e := newThreadEnv(t, nil)
 	e.topicTodo("发版")
 	e.deliver(topicEvent("om_n1", "/noreply"))
@@ -1057,7 +1066,7 @@ func TestNoReplyOnATodoWithNoSource(t *testing.T) {
 }
 
 // topicEventIn is a reply in the topic of chat.
-func topicEventIn(id, chat, thread, text string) feishubot.MessageEvent {
+func topicEventIn(id, chat, thread, text string) botcard.MessageEvent {
 	ev := topicEvent(id, text)
 	ev.Message.ChatID, ev.Message.ThreadID = chat, thread
 	return ev
@@ -1066,6 +1075,7 @@ func topicEventIn(id, chat, thread, text string) feishubot.MessageEvent {
 // The plan is kept with the todo: a restart in the window keeps the time (not shortened, not forgotten), shows no second
 // notice, and tells once when it comes.
 func TestSourceReportPlanSurvivesARestart(t *testing.T) {
+	needsLarkLayer(t)
 	database := todoTestDB(t)
 	e := newAskEnv(t, database)
 	e.ask(ownerAsk("om_pr1", "/ai 修登录崩溃"))
@@ -1104,6 +1114,7 @@ func TestSourceReportPlanSurvivesARestart(t *testing.T) {
 // 4. The report is made once however the assistant restarts: told before, it is not told again; closed while the assistant
 // was away, it is shown and told once after.
 func TestSourceReportOnceAcrossRestarts(t *testing.T) {
+	needsLarkLayer(t)
 	database := todoTestDB(t)
 	e := newAskEnv(t, database)
 	e.ask(ownerAsk("om_rs1", "/ai 修登录崩溃"))
@@ -1168,6 +1179,7 @@ func TestSourceReportIsClaimedOnce(t *testing.T) {
 // A report whose send fails for a reason that may pass is given back and tried again by the next sweep, once more at most
 // (the hub allows a source two replies); the second failure is told to the topic and it is let go.
 func TestSourceReportRetriesWhatMayPass(t *testing.T) {
+	needsLarkLayer(t)
 	e := newAskEnv(t, nil)
 	e.ask(ownerAsk("om_rt1", "/ai 修登录崩溃"))
 	id := onlyTodo(e.s).ID
@@ -1211,6 +1223,7 @@ func TestSourceReportRetriesWhatMayPass(t *testing.T) {
 
 // A first try that succeeds after a failure is told once.
 func TestSourceReportRetrySucceeds(t *testing.T) {
+	needsLarkLayer(t)
 	e := newAskEnv(t, nil)
 	e.ask(ownerAsk("om_rt2", "/ai 修登录崩溃"))
 	id := onlyTodo(e.s).ID
@@ -1240,9 +1253,10 @@ func TestSourceReportRetrySucceeds(t *testing.T) {
 
 // A report the chat refuses, or whose original is gone, is never tried again: the claim stays and the topic is told why.
 func TestSourceReportThatCanNeverGoIsLetGo(t *testing.T) {
+	needsLarkLayer(t)
 	for name, err := range map[string]error{
 		"the hub refuses the chat":   &rpc.Error{Code: CodeChatDenied, Message: "chat denied"},
-		"the original was withdrawn": &feishubot.APIError{Code: 230011, Msg: "withdrawn"},
+		"the original was withdrawn": &botcard.APIError{Code: 230011, Msg: "withdrawn"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			e := newAskEnv(t, nil)
@@ -1318,6 +1332,7 @@ func TestSourceReportNeedsATopicToShowTheNotice(t *testing.T) {
 // The loop looks at the reports on its own: a planned report whose timer was lost (a restart that did not load the todos
 // again, a timer that never fired) is found and armed again.
 func TestSourceReportLoopFindsALostTimer(t *testing.T) {
+	needsLarkLayer(t)
 	e := newAskEnv(t, nil)
 	e.ask(ownerAsk("om_lp1", "/ai 修登录崩溃"))
 	id := onlyTodo(e.s).ID
@@ -1353,6 +1368,7 @@ func TestSourceReportLoopFindsALostTimer(t *testing.T) {
 
 // What is told is what the topic was shown: an outcome that is written between the notice and the time does not change it.
 func TestSourceReportSendsWhatTheTopicWasShown(t *testing.T) {
+	needsLarkLayer(t)
 	database := todoTestDB(t)
 	e := newAskEnv(t, database)
 	e.ask(ownerAsk("om_sh1", "/ai 修登录崩溃"))
@@ -1457,6 +1473,7 @@ func TestElsewhereRichTextCommand(t *testing.T) {
 // A to-do reopened in the window between the notice and the time cancels what was planned (text and time gone); closed
 // again, it is planned afresh: the new text, a new notice, a new wait. What goes out is the last text the topic was shown.
 func TestSourceReportIsPlannedAgainAfterAReopen(t *testing.T) {
+	needsLarkLayer(t)
 	database := todoTestDB(t)
 	e := newAskEnv(t, database)
 	e.ask(ownerAsk("om_ro1", "/ai 修登录崩溃"))
@@ -1541,6 +1558,7 @@ func TestCleanReport(t *testing.T) {
 // What leaves for the original chat has no link, path, command or mention of the outcome note's sentence, whoever wrote the
 // note, and the topic's notice and the text told are the same words; a sentence with nothing else in it is just "Done.".
 func TestSourceReportIsCleanedAndTheNoticeIsTheText(t *testing.T) {
+	needsLarkLayer(t)
 	database := todoTestDB(t)
 	for name, c := range map[string]struct{ note, want string }{
 		"all kinds":   {"已修好 https://example.com/pr/1 命令 `rm -rf /tmp/x` 路径 /Users/someone/proj/a.go 通知 <at user_id=\"all\"></at> @张三 完成。\nhttps://example.com/pr/2", "已修好 命令 路径 通知 完成。"},
@@ -1579,6 +1597,7 @@ func TestSourceReportIsCleanedAndTheNoticeIsTheText(t *testing.T) {
 
 // A to-do unbound from its topic since the notice tells nothing: "/noreply" has nowhere to be said any more.
 func TestSourceReportIsCancelledWhenTheTopicIsUnbound(t *testing.T) {
+	needsLarkLayer(t)
 	e := newAskEnv(t, nil)
 	e.ask(ownerAsk("om_ub1", "/ai 修登录崩溃"))
 	id := onlyTodo(e.s).ID
@@ -1599,6 +1618,7 @@ func TestSourceReportIsCancelledWhenTheTopicIsUnbound(t *testing.T) {
 // The store has the say on when and what: a plan that another assistant made afresh since (a later time, another text) is
 // not told early by a timer of this one's, and when its time comes what goes out is the store's text.
 func TestSourceReportClaimFollowsThePlanInTheStore(t *testing.T) {
+	needsLarkLayer(t)
 	database := todoTestDB(t)
 	e := newAskEnv(t, database)
 	e.ask(ownerAsk("om_pl1", "/ai 修登录崩溃"))
@@ -1650,6 +1670,7 @@ func (e *askEnv) dmNotices(under string) []string {
 // first message, what will be told and when (the text the store keeps), and tells the original message once when the
 // time has come, as it does for a to-do with a topic.
 func TestNoHomeReportIsShownInThePrivateChatThenTold(t *testing.T) {
+	needsLarkLayer(t)
 	forStores(t, func(t *testing.T, e *askEnv, database *db.DB) {
 		e.home = ""
 		e.ask(ownerAsk("om_nr1", "/ai 修登录崩溃"))
@@ -1697,8 +1718,8 @@ func TestNoHomeReportIsShownInThePrivateChatThenTold(t *testing.T) {
 
 // dmReply is the owner's message in the private chat, a reply: root is the message the chain started with, parent the one it
 // answers.
-func dmReply(id, text, root, parent string) feishubot.MessageEvent {
-	var ev feishubot.MessageEvent
+func dmReply(id, text, root, parent string) botcard.MessageEvent {
+	var ev botcard.MessageEvent
 	ev.Message.MessageID, ev.Message.ChatType, ev.Message.MessageType = id, "p2p", "text"
 	ev.Message.RootID, ev.Message.ParentID = root, parent
 	c, _ := json.Marshal(map[string]string{"text": text})
@@ -1711,7 +1732,8 @@ func dmReply(id, text, root, parent string) feishubot.MessageEvent {
 // or to something under them. It turns the report off, is recorded as the user's decision, goes to no Agent, and is
 // answered under the message.
 func TestNoHomeNoReplyInThePrivateChat(t *testing.T) {
-	for name, ev := range map[string]feishubot.MessageEvent{
+	needsLarkLayer(t)
+	for name, ev := range map[string]botcard.MessageEvent{
 		"a reply to the first message":     dmReply("om_c1", "/noreply", "om_dm1", "om_dm1"),
 		"a reply to the notice":            dmReply("om_c1", "／NoReply", "om_dm1", "om_notice"),
 		"a reply under an answer":          dmReply("om_c1", "  /noreply  ", "om_dm1", "om_answer"),
@@ -1763,12 +1785,13 @@ func TestNoHomeNoReplyInThePrivateChat(t *testing.T) {
 // A "/noreply" that is no reply to a to-do's first message, or a reply to some other message, is nobody's "don't report
 // back": it goes on as any message of the chat, and the report is left as it was.
 func TestNoHomeNoReplyNeedsAReplyToTheTodo(t *testing.T) {
+	needsLarkLayer(t)
 	e := newAskEnv(t, nil)
 	e.home = ""
 	e.ask(ownerAsk("om_nn2", "/ai 修登录崩溃"))
 	id := onlyTodo(e.s).ID
 	e.closeDone(id)
-	for i, ev := range []feishubot.MessageEvent{
+	for i, ev := range []botcard.MessageEvent{
 		dmReply("om_c2", "/noreply", "", ""),
 		dmReply("om_c3", "/noreply", "om_other", "om_other"),
 	} {
@@ -1790,6 +1813,7 @@ func TestNoHomeNoReplyNeedsAReplyToTheTodo(t *testing.T) {
 // The notice is the owner's way to stop the report: where it cannot be shown (the first message in the private chat is gone,
 // so the line would land as a message of its own that nothing can be replied to), nothing is planned and nothing is told.
 func TestNoHomeNoticeThatCannotBeShownPlansNothing(t *testing.T) {
+	needsLarkLayer(t)
 	e := newAskEnv(t, nil)
 	e.home = ""
 	e.ask(ownerAsk("om_ng1", "/ai 修登录崩溃"))
@@ -1798,7 +1822,7 @@ func TestNoHomeNoticeThatCannotBeShownPlansNothing(t *testing.T) {
 		var m map[string]any
 		_ = json.Unmarshal(p, &m)
 		if m["chat_id"] == nil && m["no_detour"] == true { // the first message was withdrawn
-			return nil, &feishubot.APIError{Code: 230011, Msg: "withdrawn"}
+			return nil, &botcard.APIError{Code: 230011, Msg: "withdrawn"}
 		}
 		return map[string]any{}, nil
 	})
@@ -1815,6 +1839,7 @@ func TestNoHomeNoticeThatCannotBeShownPlansNothing(t *testing.T) {
 // A planned report of a to-do with no topic survives a restart (the anchor is read back from the store), is told once, and
 // "/noreply" still works afterwards.
 func TestNoHomePlanSurvivesARestart(t *testing.T) {
+	needsLarkLayer(t)
 	database := todoTestDB(t)
 	e := newAskEnv(t, database)
 	e.home = ""
@@ -1849,6 +1874,7 @@ func TestNoHomePlanSurvivesARestart(t *testing.T) {
 
 // A report that can never go is told to the owner where the notice was shown: for a to-do with no topic, the private chat.
 func TestNoHomeUnreachableReportIsToldInThePrivateChat(t *testing.T) {
+	needsLarkLayer(t)
 	e := newAskEnv(t, nil)
 	e.home = ""
 	e.ask(ownerAsk("om_nu1", "/ai 修登录崩溃"))

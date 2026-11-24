@@ -79,7 +79,7 @@ internal fun AudioFile(file: SessionFileContent, download: suspend (path: String
             // another page is still writing are left alone.
             dir.listFiles()?.forEach { if (it != into && !it.name.contains(".part")) it.delete() }
             try {
-                download(file.path, into)
+                val _ = download(file.path, into)
                 AudioLoad.Ready(into)
             } catch (e: kotlinx.coroutines.CancellationException) {
                 throw e
@@ -149,7 +149,7 @@ internal fun AudioPlayer(name: String, file: File) {
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     DisposableEffect(lifecycle, player) {
         val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_STOP && playing) { runCatching { player?.pause() }; playing = false }
+            if (event == Lifecycle.Event.ON_STOP && playing) { val _ = runCatching { player?.pause() }; playing = false }
         }
         lifecycle.addObserver(observer)
         onDispose { lifecycle.removeObserver(observer) }

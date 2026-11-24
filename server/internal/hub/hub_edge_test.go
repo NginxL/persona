@@ -67,7 +67,7 @@ func TestUpdateTheEdgeCouldNotStart(t *testing.T) {
 	if err := h.upd.begin(ctx, false); err != nil {
 		t.Fatal(err)
 	}
-	waitFor(t, "the failure", func() bool { return h.upd.view().State == "failed" })
+	waitForUpdate(t, h.upd, "the failure", func() bool { return h.upd.view().State == "failed" })
 	if b, _ := os.ReadFile(target); string(b) != "#!/bin/sh\necho old\n" {
 		t.Fatal("the old binary was not put back")
 	}

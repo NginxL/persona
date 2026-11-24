@@ -147,6 +147,78 @@ func TestSignedCommitConfirmsTheSignedFile(t *testing.T) {
 	}
 }
 
+func TestAdoptionFollowsSigningPolicy(t *testing.T) {
+	unavailable := errors.New("signing unavailable")
+	for _, tc := range []struct {
+		name, installed                  string
+		signer                           fakeSigner
+		legacy, uploadSigned, superseded bool
+	}{
+		{name: "matching certificate", installed: "cert"},
+		{name: "upload already meets configured signer", installed: "cert", uploadSigned: true},
+		{name: "matching ad hoc fallback", signer: fakeSigner{certErr: unavailable}, installed: "adhoc"},
+		{name: "as uploaded after both signing attempts fail", signer: fakeSigner{certErr: unavailable, adhocErr: unavailable}},
+		{name: "unsigned despite available certificate", superseded: true},
+		{name: "legacy could re-sign fallback", signer: fakeSigner{certErr: unavailable}, installed: "adhoc", legacy: true, superseded: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if tc.legacy {
+				t.Setenv("FIXTURE_LEGACY_ADOPTION", "1")
+			}
+			m, data, _ := signingManager(t, &tc.signer)
+			refuseWatch(t, m)
+			installed := data
+			if tc.installed != "" {
+				installed = append(bytes.Clone(data), trailer(tc.installed)...)
+			}
+			if tc.uploadSigned {
+				data = installed
+			}
+			onDisk := installExternally(t, m, installed)
+			wantHash := hash(t, m.exe)
+			id := receive(t, m, data, spec(data, "next"))
+			result, err := m.Commit(t.Context(), id, nil)
+			if tc.superseded {
+				if !errors.Is(err, errSuperseded) {
+					t.Fatalf("commit error = %v, want errSuperseded", err)
+				}
+				if left := stages(t, m); len(left) != 1 || left[0] != m.upload.Path {
+					t.Fatalf("refused commit left extra signed stages: %v", left)
+				}
+				assertInstalledUntouched(t, m.exe, onDisk, wantHash)
+				return
+			}
+			if err != nil || !result.Accepted {
+				t.Fatalf("commit result = %+v, %v", result, err)
+			}
+			p, err := loadPending(markerPath(m.exe))
+			if err != nil || p.NewHash != wantHash {
+				t.Fatalf("confirmation does not track installed hash %s: %+v, %v", wantHash, p, err)
+			}
+			if left := stages(t, m); len(left) != 0 {
+				t.Fatalf("adoption left staged files: %v", left)
+			}
+			// Signing may now succeed, including after an earlier fallback. The
+			// normal reload and startup signing calls must leave the file alone.
+			m.signer = &fakeSigner{}
+			if m.SignInstalled(t.Context()) {
+				t.Fatal("reload signed over the adopted executable")
+			}
+			fresh := &Manager{exe: m.exe, version: "next", signer: m.signer, startWatch: m.startWatch}
+			if err := fresh.recover(); err != nil || fresh.RestartRequired() {
+				t.Fatalf("adopted target should recover without another restart: %v", err)
+			}
+			if fresh.SignInstalled(t.Context()) {
+				t.Fatal("startup signed over the adopted executable")
+			}
+			if err := fresh.Confirm("next"); err != nil {
+				t.Fatal(err)
+			}
+			assertInstalledUntouched(t, m.exe, onDisk, wantHash)
+		})
+	}
+}
+
 // A signed update that never confirms is still rolled back: the rollback recognizes its own (signed) file. With the
 // upload's sha256 in the marker it would take the file for another deployment's and keep the broken build.
 func TestSignedCommitRollsBackUnconfirmed(t *testing.T) {

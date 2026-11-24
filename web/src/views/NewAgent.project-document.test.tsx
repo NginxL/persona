@@ -33,7 +33,11 @@ const preview = () => document.querySelector("pre");
 const textarea = () => document.querySelector("textarea")!;
 const start = () => button(t("newagent.start"))!;
 const click = (text: string) => act(async () => button(text)!.click());
-const tick = () => act(async () => { await vi.advanceTimersByTimeAsync(1); });
+const tick = () => act(async () => {
+  await vi.advanceTimersByTimeAsync(0);
+  await vi.dynamicImportSettled();
+  await vi.advanceTimersByTimeAsync(1);
+});
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
 const draft = () => localStorage.getItem("draft:new-agent");
 const stored = () => JSON.stringify([Object.entries(localStorage), Object.entries(sessionStorage)]);

@@ -254,12 +254,17 @@ func decisionText(s string) string { return clip(strings.TrimSpace(s), decisionT
 // answered question is a decision of that todo. Only Claude Code's option questions (AskUserQuestion) count: approvals
 // and permissions are not decisions about the work, and a dismissed or failed card answered nothing.
 func (s *Service) cardDecisions(ctx context.Context, ix proto.Interaction, r proto.Resolution, status string) {
+	if err := s.ledgerCardDecisions(ctx, ix, r, status); err != nil {
+		s.logf("entries: card answer could not be recorded: %v", err)
+	}
 	st := s.todoDB()
 	if st == nil || status != "resolved" || r.Dismiss || ix.Kind != proto.IxQuestion || len(r.Answers) == 0 {
 		return
 	}
-	if r.AnsweredBy == proto.AnsweredByAssistant {
-		return // the assistant's call for the user (delegate.go), not one the user made; "Change answer" is
+	if r.AnsweredBy != "" || r.Late {
+		// Not one the user made on the card: the assistant's call for them (delegate.go; "Change answer" is theirs), a
+		// recommendation taken at a deadline, the terminal's, or an answer that came after the card expired.
+		return
 	}
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()

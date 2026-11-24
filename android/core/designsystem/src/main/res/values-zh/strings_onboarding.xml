@@ -16,6 +16,7 @@
     <string name="designsystem_readiness_action_install_claude">怎么安装</string>
     <string name="designsystem_readiness_action_login_claude">怎么登录</string>
     <string name="designsystem_readiness_action_connect_model">接上模型</string>
+    <string name="designsystem_readiness_action_pick_model">换个模型</string>
     <string name="designsystem_readiness_action_edit_provider">换 Key</string>
     <string name="designsystem_readiness_action_test_assistant">试一句</string>
     <string name="designsystem_readiness_send_add_computer">先添加电脑</string>

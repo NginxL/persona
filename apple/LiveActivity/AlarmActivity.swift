@@ -14,7 +14,79 @@ import AlarmKit
 @available(iOS 26.0, *)
 nonisolated struct PersonaAlarmData: AlarmMetadata {
     var label: String?
+    #if DEBUG
+    /// Marks the DEBUG ActivityKit-only timer sample (`AlarmsTool.drawSample`) so its buttons update or end only the
+    /// sample activity instead of calling `AlarmManager` with an unscheduled UUID (#13269). Nil for real timers.
+    var isSample: Bool? = nil
+    #endif
 }
+
+/// The operation a timer Live Activity button asks the app to perform.
+nonisolated enum AlarmIntentAction: Equatable, Sendable {
+    case pause, resume, stop
+}
+
+#if !WIDGET_EXTENSION
+/// Routes timer Live Activity button taps. Real timer IDs go directly to `AlarmManager.shared`; in DEBUG builds, IDs
+/// belonging to the ActivityKit-only timer sample (`AlarmsTool.drawSample`) are handled on the sample activity and
+/// never reach `AlarmManager` (#13269).
+@available(iOS 26.0, *)
+nonisolated enum AlarmIntentRouter {
+    nonisolated struct Deps: Sendable {
+        var pauseAlarm: @Sendable (UUID) throws -> Void
+        var resumeAlarm: @Sendable (UUID) throws -> Void
+        var stopAlarm: @Sendable (UUID) throws -> Void
+        #if DEBUG
+        /// Handles an action for the DEBUG ActivityKit-only sample, returning `true` when `alarmID` belongs to the
+        /// sample so `AlarmManager` is never called with an unscheduled UUID.
+        var handleSample: @Sendable (AlarmIntentAction, UUID) async -> Bool
+        #endif
+
+        static var live: Self {
+            #if DEBUG
+            Self(
+                pauseAlarm: { try AlarmManager.shared.pause(id: $0) },
+                resumeAlarm: { try AlarmManager.shared.resume(id: $0) },
+                stopAlarm: { try AlarmManager.shared.stop(id: $0) },
+                handleSample: { action, id in await AlarmsTool.handleSampleAction(action, alarmID: id) }
+            )
+            #else
+            Self(
+                pauseAlarm: { try AlarmManager.shared.pause(id: $0) },
+                resumeAlarm: { try AlarmManager.shared.resume(id: $0) },
+                stopAlarm: { try AlarmManager.shared.stop(id: $0) }
+            )
+            #endif
+        }
+    }
+
+    #if DEBUG
+    @TaskLocal private static var scopedDeps: Deps?
+
+    /// Runs `operation` with overridden dependencies so tests can exercise `PauseAlarmIntent`, `ResumeAlarmIntent` and
+    /// `StopAlarmIntent` end-to-end without touching the system `AlarmManager`.
+    static func withDeps<T>(_ deps: Deps, operation: () async throws -> T) async rethrows -> T {
+        try await $scopedDeps.withValue(deps, operation: operation)
+    }
+    #endif
+
+    static func perform(_ action: AlarmIntentAction, alarmID raw: String, deps: Deps? = nil) async throws {
+        guard let id = UUID(uuidString: raw) else { return }
+        let active: Deps
+        #if DEBUG
+        active = deps ?? scopedDeps ?? .live
+        if await active.handleSample(action, id) { return }
+        #else
+        active = deps ?? .live
+        #endif
+        switch action {
+        case .pause: try active.pauseAlarm(id)
+        case .resume: try active.resumeAlarm(id)
+        case .stop: try active.stopAlarm(id)
+        }
+    }
+}
+#endif
 
 /// The activity's Pause: stops a timer's countdown until Resume.
 struct PauseAlarmIntent: LiveActivityIntent {
@@ -28,7 +100,9 @@ struct PauseAlarmIntent: LiveActivityIntent {
     nonisolated init(alarmID: UUID) { self.alarmID = alarmID.uuidString }
 
     nonisolated func perform() async throws -> some IntentResult {
-        if #available(iOS 26.0, *), let id = UUID(uuidString: alarmID) { try AlarmManager.shared.pause(id: id) }
+        #if !WIDGET_EXTENSION
+        if #available(iOS 26.0, *) { try await AlarmIntentRouter.perform(.pause, alarmID: alarmID) }
+        #endif
         return .result()
     }
 }
@@ -45,7 +119,9 @@ struct ResumeAlarmIntent: LiveActivityIntent {
     nonisolated init(alarmID: UUID) { self.alarmID = alarmID.uuidString }
 
     nonisolated func perform() async throws -> some IntentResult {
-        if #available(iOS 26.0, *), let id = UUID(uuidString: alarmID) { try AlarmManager.shared.resume(id: id) }
+        #if !WIDGET_EXTENSION
+        if #available(iOS 26.0, *) { try await AlarmIntentRouter.perform(.resume, alarmID: alarmID) }
+        #endif
         return .result()
     }
 }
@@ -62,7 +138,9 @@ struct StopAlarmIntent: LiveActivityIntent {
     nonisolated init(alarmID: UUID) { self.alarmID = alarmID.uuidString }
 
     nonisolated func perform() async throws -> some IntentResult {
-        if #available(iOS 26.0, *), let id = UUID(uuidString: alarmID) { try AlarmManager.shared.stop(id: id) }
+        #if !WIDGET_EXTENSION
+        if #available(iOS 26.0, *) { try await AlarmIntentRouter.perform(.stop, alarmID: alarmID) }
+        #endif
         return .result()
     }
 }

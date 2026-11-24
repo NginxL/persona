@@ -5,8 +5,8 @@
 //
 //   node scripts/installed-deps.mjs   (npm run check:deps)   exits 1 and lists what differs
 //   Vitest's globalSetup (vite.config.ts)                     stops the run before any test
-import { existsSync, readFileSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { existsSync, readFileSync, realpathSync } from "node:fs";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const read = (path) => JSON.parse(readFileSync(path, "utf8"));
@@ -49,7 +49,16 @@ export default function setup() {
   if (stale.length) throw new Error(staleMessage(stale));
 }
 
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+// Node loads the entry module by its real path; compare real paths so a symlinked directory still runs it (#12848).
+function isEntry() {
+  try {
+    return !!process.argv[1] && realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url));
+  } catch {
+    return false; // no file behind argv[1]
+  }
+}
+
+if (isEntry()) {
   const stale = staleDependencies(web);
   if (stale.length) {
     console.error(staleMessage(stale));

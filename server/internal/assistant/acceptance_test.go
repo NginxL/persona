@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/nwverse/persona/server/internal/botcard"
 	"github.com/nwverse/persona/server/internal/db"
-	"github.com/nwverse/persona/server/internal/feishubot"
 	"github.com/nwverse/persona/server/internal/proto"
 )
 
@@ -66,6 +66,7 @@ func waitAcceptCard(t *testing.T, s *Service, id string, posts func() []string) 
 // A turn that says the work is deployed gets a "Please verify" card: what changed, a link straight to the page (one from the
 // reply, never made up), how to check, and "Pass". "Pass" marks the task verified.
 func TestDeployedTaskAsksForAcceptance(t *testing.T) {
+	needsLarkLayer(t)
 	s, f, posts := acceptService(t)
 	todo := startedTask(t, s, f)
 	agentTurn(s, f, proto.StatusWorking, "", 0)
@@ -102,6 +103,7 @@ func TestDeployedTaskAsksForAcceptance(t *testing.T) {
 // Anything else said to the card goes to the task's agent (and the todo's decisions with a store); the next deploy
 // asks again. A model that makes up a link is not believed.
 func TestAcceptanceFeedbackGoesToTheAgent(t *testing.T) {
+	needsLarkLayer(t)
 	s, f, posts := acceptService(t)
 	f.judge = `{"changed":"改了","link":"https://evil.example.com/x","how":"看看"}`
 	todo := startedTask(t, s, f)
@@ -132,6 +134,7 @@ func TestAcceptanceFeedbackGoesToTheAgent(t *testing.T) {
 
 // One not accepted by the next morning is asked again, once.
 func TestAcceptanceReminderNextMorning(t *testing.T) {
+	needsLarkLayer(t)
 	s, f, posts := acceptService(t)
 	todo := startedTask(t, s, f)
 	agentTurn(s, f, proto.StatusWorking, "", 0)
@@ -143,6 +146,7 @@ func TestAcceptanceReminderNextMorning(t *testing.T) {
 	s.accept.mu.Unlock()
 	now := time.Now().In(loc)
 	morning := time.Date(now.Year(), now.Month(), now.Day(), 10, 0, 0, 0, loc)
+	waitReportQueue(t, s) // report cards go out on their own timer: count only after them (#14138)
 	n := len(posts())
 	s.remindAcceptance(morning)
 	s.remindAcceptance(morning.Add(time.Hour))
@@ -154,6 +158,7 @@ func TestAcceptanceReminderNextMorning(t *testing.T) {
 // A card not passed yet is in the snapshot the morning briefing reads, with what changed and where to look; the
 // reminder waits for the briefing's own time (08:30 here), not a fixed 9:00.
 func TestUnacceptedInTheMorningBriefing(t *testing.T) {
+	needsLarkLayer(t)
 	s, f, posts := acceptService(t)
 	todo := startedTask(t, s, f)
 	agentTurn(s, f, proto.StatusWorking, "", 0)
@@ -183,6 +188,7 @@ func TestUnacceptedInTheMorningBriefing(t *testing.T) {
 	s.accept.asks[todo.ID].AskedAt = time.Now().Add(-30 * time.Hour)
 	s.accept.mu.Unlock()
 	now := time.Now().In(loc)
+	waitReportQueue(t, s) // report cards go out on their own timer: count only after them (#14138)
 	n := len(posts())
 	s.remindAcceptance(time.Date(now.Year(), now.Month(), now.Day(), 8, 20, 0, 0, loc))
 	if len(posts()) != n {
@@ -201,6 +207,7 @@ func TestUnacceptedInTheMorningBriefing(t *testing.T) {
 // A change asked for on the card of a task the hub closed meanwhile reopens it: while its agent works on the change
 // the task is open, and the agent's next turn is followed again — the next deploy gets a new "Please verify" card (#3457).
 func TestAcceptanceFeedbackReopensTheClosedTask(t *testing.T) {
+	needsLarkLayer(t)
 	s, f, posts := acceptService(t)
 	todo := startedTask(t, s, f)
 	agentTurn(s, f, proto.StatusWorking, "", 0)
@@ -281,6 +288,7 @@ func TestPassWordsParticles(t *testing.T) {
 // A "Please verify" card whose task ends without the hub's auto-judge — the owner closes it in the todos, or a supervision
 // review does — can never be passed: it is neither reminded nor counted in the morning briefing, and is dropped.
 func TestAcceptanceAskEndedElsewhere(t *testing.T) {
+	needsLarkLayer(t)
 	cases := []struct {
 		name string
 		end  func(ctx context.Context, s *Service, id string)
@@ -324,6 +332,7 @@ func TestAcceptanceAskEndedElsewhere(t *testing.T) {
 			s.accept.asks[id].AskedAt = time.Now().Add(-30 * time.Hour)
 			s.accept.mu.Unlock()
 			now := time.Now().In(s.location(ctx))
+			waitReportQueue(t, s) // report cards go out on their own timer: count only after them (#14138)
 			n := len(posts())
 			s.remindAcceptance(time.Date(now.Year(), now.Month(), now.Day(), 10, 0, 0, 0, s.location(ctx)))
 			got := posts()[n:]
@@ -373,6 +382,7 @@ func askedToAccept(t *testing.T) (s *Service, f *fakeHub, posts, notes func() []
 // A reply to the card that carries a picture or a file is told that only words go on (#5107): a picture alone is answered
 // with just that and the card still waits; a picture with words sends the words to the agent as words alone do.
 func TestAcceptanceReplyWithMedia(t *testing.T) {
+	needsLarkLayer(t)
 	for _, c := range []struct {
 		name, msgType, content string
 		routed, dropped        bool
@@ -411,6 +421,7 @@ func TestAcceptanceReplyWithMedia(t *testing.T) {
 // taken as an answer (it is not sent on to the Agent either), so one that gets nothing back reads as the bot ignoring
 // the owner while the same press on the card says "already handled" (feishu_card_actions.go).
 func TestAcceptancePassReplyWhenAlreadyHandled(t *testing.T) {
+	needsLarkLayer(t)
 	ctx := context.Background()
 	s, f, _, notes, id := askedToAccept(t)
 	mid := askOf(s, id).MessageID
@@ -431,6 +442,7 @@ func TestAcceptancePassReplyWhenAlreadyHandled(t *testing.T) {
 }
 
 func TestAcceptanceReopenRound(t *testing.T) {
+	needsLarkLayer(t)
 	ctx := context.Background()
 	setup := askedToAccept
 	closeReopen := func(s *Service, id string) {
@@ -468,8 +480,8 @@ func TestAcceptanceReopenRound(t *testing.T) {
 		agentTurn(s, f, proto.StatusWorking, "", 0)
 		agentTurn(s, f, proto.StatusDone, deployedReply, 0)
 		waitFor(t, "the second round's card", func() bool { a := askOf(s, id); return a != nil && a.MessageID == "om_round2" })
-		press := func(mid string) *feishubot.CardAction {
-			var a feishubot.CardAction
+		press := func(mid string) *botcard.CardAction {
+			var a botcard.CardAction
 			a.Action.Value = map[string]any{"a": "accept", "id": id}
 			a.Context.MessageID = mid
 			return &a
@@ -532,6 +544,7 @@ func TestAcceptanceReopenRound(t *testing.T) {
 			s.accept.asks[id].AskedAt = time.Now().Add(-30 * time.Hour)
 			s.accept.mu.Unlock()
 			now := time.Now().In(s.location(ctx))
+			waitReportQueue(t, s) // report cards go out on their own timer: count only after them (#14138)
 			n := len(posts())
 			s.remindAcceptance(time.Date(now.Year(), now.Month(), now.Day(), 10, 0, 0, 0, s.location(ctx)))
 			if got := posts()[n:]; len(got) != 0 || askOf(s, id) != nil {
@@ -589,6 +602,7 @@ func TestAcceptanceReopenRound(t *testing.T) {
 // A sweep reads each todo with the book unlocked; a new round's card that lands in that window (the task reopened and
 // deployed again) is not the card the sweep judged, so it stays (#4649).
 func TestAcceptanceSweepKeepsANewRound(t *testing.T) {
+	needsLarkLayer(t)
 	ctx := context.Background()
 	// setup deploys a task until its "Please verify" card is out and returns a hook that, the first time it runs, asks the next
 	// round's card the way the next deploy does (after reopen, when given).

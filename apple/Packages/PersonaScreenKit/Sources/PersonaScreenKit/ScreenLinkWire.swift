@@ -1,7 +1,7 @@
 import Foundation
 
 // The live screen's session wire (#6398, docs/extensions/computer-use.md "Live screen routes (#6398)"): what the phone
-// and the node's internal/screenlink say on every transport of a screen session, the hub's relays and the direct
+// and the node's internal/modules/screen-share/screenlink say on every transport of a screen session, the hub's relays and the direct
 // routes alike. The same framing as the video wire (u32 big-endian length, u8 type, body), so `ScreenVideoParser`
 // splits it too; the channels' own bytes (RFB, the video wire) travel inside `data`. spec/fixtures/screen-link holds
 // byte-exact cases both sides check.

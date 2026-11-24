@@ -127,7 +127,7 @@ func TestWaitKeepsItsDeadlineUnlessTheHubRecovers(t *testing.T) {
 				var probes int
 				o := Options{Logf: t.Logf}
 				start := time.Now()
-				o.waitWithProbe(t.Context(), tc.wait, time.Time{}, func(context.Context) bool {
+				o.waitWithProbe(t.Context(), tc.wait, fileStamp{}, func(context.Context) bool {
 					probes++
 					return tc.answer(probes)
 				})

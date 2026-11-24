@@ -9,6 +9,13 @@ import persona.core.designsystem.JChip
 import persona.core.designsystem.icons.PersonaIcons
 import kotlinx.coroutines.CancellationException
 
+/** A saved id names its canonical row first, then a folded alias or the model that row resolves to. */
+internal fun listedAgentModel(models: List<AgentModel>, id: String): AgentModel? {
+    if (id.isEmpty()) return null
+    return models.firstOrNull { it.id.equals(id, ignoreCase = true) }
+        ?: models.firstOrNull { persona.core.domain.models.ModelPanel.isCurrentModel(it.id, it.resolved, id, it.aliases) }
+}
+
 /** An existing Persona conversation's launcher/model pick, sent with each following message. */
 @Composable
 internal fun ConversationLauncherChip(
@@ -18,9 +25,14 @@ internal fun ConversationLauncherChip(
     sessionLauncher: String?,
     pickedLauncher: String?,
     pickedModel: String?,
+    openRequested: Boolean = false,
+    onOpenHandled: () -> Unit = {},
     onPick: (launcher: String?, model: String?) -> Unit,
 ) {
     var open by remember { mutableStateOf(false) }
+    LaunchedEffect(openRequested) {
+        if (openRequested) { open = true; onOpenHandled() }
+    }
     var config by remember(api) { mutableStateOf<AssistantConfig?>(null) }
     var launchers by remember(api, machineId) { mutableStateOf<List<AgentLauncher>?>(null) }
     var launchersFailed by remember(api, machineId) { mutableStateOf(false) }
@@ -53,14 +65,14 @@ internal fun ConversationLauncherChip(
         modelsLoading = false
     }
 
-    // Only the main conversation has a per-conversation model pick (#6911): another assistant conversation draws no
-    // chip and follows the default or what it started with. All state and reads above stay declared unconditionally.
-    if (!main) return
+    // Only the main conversation draws a chip (#6911). A model-route remedy may open this chat's sheet; dismissing it
+    // returns the non-main conversation to its usual no-chip presentation. All state and reads stay declared unconditionally.
+    if (!main && !open) return
 
     val defaultLabel = stringResource(R.string.chat_conversation_launcher_default_named, effective)
     val overridden = pickedLauncher != null || pickedModel != null
     val pickedModelLabel = pickedModel?.let { id ->
-        models?.models?.firstOrNull { it.id == id }?.label
+        listedAgentModel(models?.models.orEmpty(), id)?.label
             ?: stringResource(R.string.chat_conversation_model_selected)
     }
     val label = if (overridden) listOfNotNull(effective, pickedModelLabel).joinToString(" · ") else defaultLabel
@@ -93,7 +105,7 @@ internal fun ConversationLauncherChip(
             modelsFailed -> add(JAction(modelsFailedLabel, enabled = false) {})
             models == null -> add(JAction(modelsUnavailable, enabled = false) {})
             else -> models?.models?.filterNot(AgentModel::isDefault).orEmpty().forEach { model ->
-                add(JAction(model.label, checked = model.id == pickedModel) { onPick(pickedLauncher, model.id) })
+                add(JAction(model.label, checked = listedAgentModel(models?.models.orEmpty(), pickedModel.orEmpty()) == model) { onPick(pickedLauncher, model.id) })
             }
         }
     }

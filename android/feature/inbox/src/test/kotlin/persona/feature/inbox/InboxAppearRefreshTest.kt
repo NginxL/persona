@@ -28,6 +28,7 @@ import persona.core.domain.inbox.InboxItem
 import persona.core.navigation.AppTab
 import persona.core.navigation.Navigator
 import java.util.concurrent.atomic.AtomicInteger
+import persona.core.inbox.*
 
 /**
  * The Inbox host stays composed, so a one-shot effect would not run when it returns to the front.

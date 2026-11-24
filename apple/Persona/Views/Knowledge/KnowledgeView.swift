@@ -39,12 +39,8 @@ struct KnowledgeView: View {
     #if DEBUG
     @State private var debugEntry: KBEntry?
     @State private var debugAsked = false
-    #if os(iOS) || os(visionOS)
     @State private var debugRecording: UUID?
     #endif
-    #endif
-    /// Where entries open beside the list instead of pushing (the Mac's Knowledge section).
-    @Environment(\.kbOpenEntry) private var opener
 
     private var list: KBList? { lists[kind] }
     /// Searching only once there is text besides spaces: `search()` trims the same way and asks for nothing when that
@@ -67,12 +63,8 @@ struct KnowledgeView: View {
         List {
             // Search covers every kind: the chips (one of them lit) would say otherwise.
             if !searching {
-                #if os(macOS)
-                kindBar // not in a section: the Mac's inset list gave it an empty header band and a rule (#830)
-                #else
                 Section { kindBar }
                     .listSectionSpacing(.compact)
-                #endif
             }
             if searching {
                 searchResults
@@ -89,19 +81,11 @@ struct KnowledgeView: View {
         .alert("Couldn't Finish", isPresented: Binding(get: { recordingFailure != nil }, set: { if !$0 { recordingFailure = nil } })) {
             Button("OK [Recordings Section de32e2]") { recordingFailure = nil }.lineLimit(1)
         } message: { Text(recordingFailure ?? "") }
-        #if os(iOS) || os(visionOS)
         .recordingRename($renamingRecording)
-        #endif
-        #if os(macOS)
-        .modifier(MacBelowTitleRowIfAsked()) // under Knowledge's title in the window: the list starts below it (#1243)
-        #endif
         .themedPage()
-        .detailTitle(String(localized: "Knowledge")) // pushed in Persona's page: ‹ Knowledge in the title row on the Mac
+        .detailTitle(String(localized: "Knowledge"))
         .navigationBarTitleDisplayMode(.inline)
         .pageToolbar {
-            #if os(macOS)
-            MacToolbarMiddle() // the menu by the search field, clear of the title row's Knowledge (#830)
-            #endif
             #if os(iOS)
             if shell != nil {
                 ToolbarItem(placement: .topBarTrailing) {
@@ -128,9 +112,6 @@ struct KnowledgeView: View {
         .environment(\.knowledgeSettingsAPI, listContext)
         .onChange(of: kind) { showIgnored = false }
         .refreshable { await load() }
-        #if os(macOS)
-        .macRefreshes { await load() } // ⌘R: no pull to refresh on the Mac
-        #endif
         // Entries open with view-based links, not `navigationDestination(for:)`: this page is itself pushed with
         // `navigationDestination(isPresented:)`, and a value-pushed page on top of that lands *under* it (docs/lessons/ios.md):
         // a hit seemed not to open, and back showed the entry's ⚠️ placeholder (2026-10-31).
@@ -141,14 +122,10 @@ struct KnowledgeView: View {
         .navigationDestination(item: $debugEntry) { e in
             KnowledgeDetailView(entry: e, query: UserDefaults.standard.string(forKey: "showKnowledgeSearch"))
         }
-        #if os(iOS) || os(visionOS)
         // `-showRecordingSample YES`: a made-up recording (no microphone); with `-openRecording YES` its page.
         .navigationDestination(item: $debugRecording) { RecordingDetailView(id: $0) }
-        #endif
         .onAppear {
-            #if os(iOS) || os(visionOS)
             if let id = RecordingSamples.installIfAsked(), UserDefaults.standard.bool(forKey: "openRecording") { debugRecording = id }
-            #endif
             if let q = UserDefaults.standard.string(forKey: "showKnowledgeSearch") { query = q }
             // `-showKnowledgeMap YES`: the knowledge map pushed (screenshots).
             // A moment later: pushed while this page is still being pushed, the map was dropped now and then.
@@ -159,11 +136,7 @@ struct KnowledgeView: View {
             if let ref = UserDefaults.standard.string(forKey: "showKnowledgeEntry"), let slash = ref.firstIndex(of: "/") {
                 let id = String(ref[ref.index(after: slash)...])
                 let e = KBEntry(kind: String(ref[..<slash]), id: id, name: id, relevance: 0)
-                if let opener {
-                    opener.open = .init(entry: e, query: UserDefaults.standard.string(forKey: "showKnowledgeSearch"))
-                } else {
-                    debugEntry = e
-                }
+                debugEntry = e
             }
         }
         #endif
@@ -291,15 +264,11 @@ struct KnowledgeView: View {
             if e.kind == KBKind.projects.rawValue {
                 projectRow(e)
             } else {
-                #if os(iOS) || os(visionOS)
-                if let id = e.localRecording, opener == nil, RecordingLibrary.shared.entry(id) != nil {
+                if let id = e.localRecording, RecordingLibrary.shared.entry(id) != nil {
                     recordingRow(e, id: id)
                 } else {
                     KBEntryLink(entry: e) { KBRow(entry: e) }
                 }
-                #else
-                KBEntryLink(entry: e) { KBRow(entry: e) }
-                #endif
             }
         }
     }
@@ -307,15 +276,10 @@ struct KnowledgeView: View {
     /// A recording deleted on this phone (here or on its page) leaves the list at once; the hub's copy goes once the
     /// deletion syncs. The rows read the library's entries, so a deletion redraws them.
     private func deletedHere(_ e: KBEntry) -> Bool {
-        #if os(iOS) || os(visionOS)
         guard let id = e.localRecording else { return false }
         return RecordingLibrary.shared.isDeleted(id)
-        #else
-        false
-        #endif
     }
 
-    #if os(iOS) || os(visionOS)
     /// A recording this phone made, in the meetings list (#8731): its own page opens (minutes, transcript, the meeting's
     /// conversation), and a swipe deletes it as the Meetings page's rows do (#4938), asked first.
     private func recordingRow(_ e: KBEntry, id: UUID) -> some View {
@@ -346,7 +310,6 @@ struct KnowledgeView: View {
                 }
             }
     }
-    #endif
 
     /// A project row: Delete in its swipe actions and context menu, asked first as on the web (#4412), then undoable.
     private func projectRow(_ e: KBEntry) -> some View {
@@ -373,7 +336,6 @@ struct KnowledgeView: View {
     private func deleteProject(_ e: KBEntry) async {
         guard let api = scopedAPI() else { return }
         hiddenProjects.insert(e.id)
-        if opener?.isOpen(e) == true { opener?.open = nil }
         let trash: KBTrashEntry
         do {
             trash = try await api.kbDeleteProject(e.id)
@@ -482,7 +444,6 @@ struct KnowledgeView: View {
             resultsFor = ""
             error = nil
             searchError = nil
-            opener?.open = nil
         }
         listContext = api
         return api
@@ -540,51 +501,18 @@ struct KnowledgeView: View {
         }
     }
 }
-/// The entry open beside Knowledge's list, where entries open there rather than push: the Mac's Knowledge section puts the
-/// list and the open entry side by side (#2318) and sets one on the list. Elsewhere (the phone, Knowledge pushed in
-/// Persona's page) there is none and the rows push their entry. A reference, so opening one redraws the rows that
-/// change and the detail, not the list's page.
-@Observable final class KBOpenEntry {
-    struct Open: Hashable {
-        var entry: KBEntry
-        /// Opened from a search: the places it was found come first.
-        var query: String?
-    }
-
-    var open: Open?
-
-    func isOpen(_ e: KBEntry) -> Bool { open?.entry.kind == e.kind && open?.entry.id == e.id }
-}
-
 extension EnvironmentValues {
-    /// Entries open beside the list (`KBOpenEntry`); nil: they push.
-    @Entry var kbOpenEntry: KBOpenEntry?
     @Entry var knowledgeSettingsAPI: APIClient?
 }
 
-/// A row that opens its entry: beside the list where there is a `KBOpenEntry` (the open one selected, in the shell's
-/// selected shade), pushed otherwise.
+/// A row that opens its entry: pushed on the page's stack.
 struct KBEntryLink<Label: View>: View {
     var entry: KBEntry
     var query: String? = nil
     @ViewBuilder var label: Label
-    @Environment(\.kbOpenEntry) private var opener
 
     var body: some View {
-        if let opener {
-            // Read here, not by the list: opening another entry redraws two rows, not the whole list.
-            let selected = opener.isOpen(entry)
-            let shape = RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous)
-            Button { opener.open = .init(entry: entry, query: query) } label: {
-                label.frame(maxWidth: .infinity, alignment: .leading).contentShape(.rect)
-            }
-            .buttonStyle(.plain)
-            .macListRow(selected: selected, in: shape, outset: Theme.Space.s)
-            .macHoverShade(in: shape, outset: Theme.Space.s)
-            .accessibilityAddTraits(selected ? .isSelected : [])
-        } else {
-            NavigationLink { KnowledgeDetailView(entry: entry, query: query) } label: { label }
-        }
+        NavigationLink { KnowledgeDetailView(entry: entry, query: query) } label: { label }
     }
 }
 
@@ -959,13 +887,9 @@ struct KnowledgeDetailView: View {
                     .accessibilityLabel("Tag")
             }
         }
-        #if os(macOS)
-        .macLinkPanel($link) // the Mac's panel at the trailing edge; picks go to Persona
-        #else
         .sheet(item: $link) { t in
             if let key = model.assistantMain ?? model.assistantCurrent { LinkSheet(target: t, key: key) }
         }
-        #endif
         .sheet(isPresented: $editing) {
             KBTagEditor(entry: shown) { await load() }
                 .environment(\.knowledgeSettingsAPI, capturedAPI)
@@ -987,10 +911,6 @@ struct KnowledgeDetailView: View {
                 Task { await deleteFacts() }
             }
         }
-        #if DEBUG && os(macOS)
-        // `-showKBEditor YES` with `-showKnowledgeEntry <kind>/<id>`: the tag editor open (Mac screenshots).
-        .onAppear { if UserDefaults.standard.bool(forKey: "showKBEditor") { editing = true } }
-        #endif
         #if DEBUG
         // `-showKnowledgeDay YES` with `-showKnowledgeEntry chats/<id> -showKnowledgeSearch <text>`: the day of the
         // first message found, opened at it (screenshots).
@@ -1011,9 +931,6 @@ struct KnowledgeDetailView: View {
         .task { await load() }
         .environment(\.knowledgeSettingsAPI, capturedAPI)
         .refreshable { await load() }
-        #if os(macOS)
-        .macRefreshes { await load() }
-        #endif
     }
 
     // MARK: Header
@@ -1061,15 +978,9 @@ struct KnowledgeDetailView: View {
         }
     }
 
-    // The phone's two buttons share the row; the Mac's are the regular size, side by side at the leading edge
-    // (docs/apple/mac-design.md: no buttons the width of the page, #2318).
-    #if os(macOS)
-    private static let buttonsFill: CGFloat? = nil
-    private static let buttonsSize = ControlSize.regular
-    #else
+    // The two buttons share the row, at the large size.
     private static let buttonsFill: CGFloat? = .infinity
     private static let buttonsSize = ControlSize.large
-    #endif
 
     /// A project's status when it is not the usual Active.
     private var projectStatus: String? {
@@ -1692,10 +1603,6 @@ struct KBDayView: View {
             .listStyle(.insetGrouped)
             .themedPage()
             .navigationBarTitleDisplayMode(.inline)
-            #if os(macOS)
-            // The day and its chat in the title bar's row (#855); a principal item would say the day twice.
-            .pageTitle(Self.title(day), subtitle: chatName)
-            #else
             .navigationTitle(Self.title(day))
             .pageToolbar {
                 ToolbarItem(placement: .principal) {
@@ -1705,7 +1612,6 @@ struct KBDayView: View {
                     }
                 }
             }
-            #endif
             .task(id: day) {
                 await load()
                 // Laid out first, then to the found message (a few rows above it stay in sight).
@@ -1847,17 +1753,9 @@ struct KBTagEditor: View {
                 }
                 Section {
                     Slider(value: $relevance, in: 0...100, step: 5)
-                    #if os(macOS)
-                        .labelsHidden() // its empty label column took the left half of the row
-                    #endif
                 } header: { Text("Relevance to Me \(Int(relevance))") }
                 Section {
-                    #if os(macOS)
-                    // A grouped Mac form shows a titled field as label + trailing value: the hint read as a label.
-                    TextField(String(localized: "Separate with spaces"), text: $tags, prompt: Text("Separate with spaces")).labelsHidden()
-                    #else
                     TextField(String(localized: "Separate with spaces"), text: $tags)
-                    #endif
                 } header: { Text("Tags") }
                 if entry.kind == KBKind.projects.rawValue {
                     Section("Project") {
@@ -1896,10 +1794,6 @@ struct KBTagEditor: View {
             }
         }
         .presentationDetents([.medium, .large])
-        #if os(macOS)
-        // This sheet did not pick up macLook's grouped form (cause unknown): the two-column one cut rows off.
-        .macSheet()
-        #endif
     }
 
     private func save() async {

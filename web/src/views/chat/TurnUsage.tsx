@@ -32,11 +32,13 @@ const EDGE = 8;
  *  the icons; on the touch row it follows the row's own gap. */
 const TEXT = "relative top-[0.5px] inline-flex h-6 cursor-default items-center whitespace-nowrap text-[12px] text-ink-3";
 
-export function TurnUsage({ usage: key, ms, persona, touch, onOpen }: {
+export function TurnUsage({ usage: key, ms, ttftMs, persona, touch, onOpen }: {
   /** lib/turn-usage.ts usageKey. */
   usage: string;
   /** The exchange's work time, the work summary's "Worked for" (absent when it has none, or several). */
   ms?: number;
+  /** First observed streaming TTFT in ms for this exchange (proto.Item.TTFTMS, #12542). */
+  ttftMs?: number;
   /** A Persona conversation: the cost in plain words, or nothing. */
   persona?: boolean;
   /** The touch screen's row: a tap opens the card. */
@@ -55,7 +57,7 @@ export function TurnUsage({ usage: key, ms, persona, touch, onOpen }: {
   const total = usageTotals(usage.models).total;
   if (!priced && total <= 0) return null;
   const label = priced ? t(persona ? "chat-replybar.approx" : "chat-replybar.worth", { cost: formatCost(priced.total) }) : t("chat-replybar.tokens", { tokens: compactTokens(total) });
-  const lines = persona && priced ? personaLines(priced) : usageLines(usage, priced, ms);
+  const lines = persona && priced ? personaLines(priced) : usageLines(usage, priced, ms, ttftMs);
   const title = persona ? t("chat-replybar.persona_title") : t("chat-replybar.details_title");
   return <UsageTrigger label={label} lines={lines} title={title} tip={!priced} touch={touch} onOpen={onOpen} />;
 }

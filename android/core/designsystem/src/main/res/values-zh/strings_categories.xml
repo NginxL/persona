@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The information categories (#13500), shared by the assistant and settings. -->
+<resources>
+    <string name="designsystem_info_category_health">健康</string>
+    <string name="designsystem_info_category_finance">钱</string>
+    <string name="designsystem_info_category_relationships">人际关系</string>
+    <string name="designsystem_info_category_emotion">情绪</string>
+    <string name="designsystem_info_category_legal_id">证件和法律</string>
+</resources>

@@ -19,49 +19,79 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.res.stringResource
 import persona.core.designsystem.ErrorCard
 import persona.core.designsystem.JButton
+import persona.core.designsystem.JButtonKind
 import persona.core.designsystem.JButtonSize
+import persona.core.designsystem.JTextButton
 import persona.core.designsystem.PersonaTheme
 import persona.core.designsystem.ReadinessActionId
 import persona.core.designsystem.Tokens
+import persona.core.designsystem.icons.PersonaIcons
 
 /**
  * A turn of Persona's conversation that ended on a model error the user has to fix, as the hub names it (the session's
  * `turn_error_code`, docs/assistant/onboarding.md 4.4): the card's words and where Fix It goes (iOS `TurnErrorFix`).
  */
-internal enum class TurnErrorFix(val code: String, @StringRes val title: Int, @StringRes val detail: Int, val action: ReadinessActionId) {
+internal enum class TurnErrorFix(val code: String, @StringRes val title: Int, @StringRes val detail: Int, val action: ReadinessActionId?) {
     NotLoggedIn("not_logged_in", R.string.chat_turn_fix_not_logged_in, R.string.chat_turn_fix_not_logged_in_detail, ReadinessActionId.ConnectModel),
     AuthFailed("auth_failed", R.string.chat_turn_fix_auth_failed, R.string.chat_turn_fix_auth_failed_detail, ReadinessActionId.EditProvider),
-    ModelRoute("model_route", R.string.chat_turn_fix_model_route, R.string.chat_turn_fix_model_route_detail, ReadinessActionId.ConnectModel);
+    ModelRoute("model_route", R.string.chat_turn_fix_model_route, R.string.chat_turn_fix_model_route_detail, null),
+    ToolSearchUnsupported("tool_search_unsupported", R.string.chat_turn_fix_tool_search_unsupported,
+        R.string.chat_turn_fix_tool_search_unsupported_detail, null);
 
     companion object {
         fun of(code: String?): TurnErrorFix? = entries.firstOrNull { it.code == code }
     }
 
-    /** The same title with the affected launcher's ID, when the session names one. */
-    @get:StringRes val launcherTitle: Int get() = when (this) {
+    /** The same title with the affected launcher's ID, when this remedy names one. */
+    @get:StringRes val launcherTitle: Int? get() = when (this) {
         NotLoggedIn -> R.string.chat_turn_fix_not_logged_in_launcher
         AuthFailed -> R.string.chat_turn_fix_auth_failed_launcher
         ModelRoute -> R.string.chat_turn_fix_model_route_launcher
+        ToolSearchUnsupported -> null
     }
 }
 
-/** Where a turn error's Fix It goes: the model's set-up, or the launcher's provider; null where the app cannot open it. */
+/** The chat's own model picker and, when it keeps a pick, the way back to its default. */
+internal data class TurnErrorModelActions(
+    val openPicker: () -> Unit,
+    val clearPick: (() -> Unit)? = null,
+    @StringRes val clearLabel: Int = R.string.chat_modelpill_follow_default,
+)
+
+/** Where a turn error's Fix It goes for account and provider failures; null where the app cannot open it. */
 val LocalTurnErrorFixAction = staticCompositionLocalOf<((ReadinessActionId) -> Unit)?> { null }
+
+/** The model remedy stays in this chat instead of opening the general model-purpose page. */
+internal val LocalTurnErrorModelActions = staticCompositionLocalOf<TurnErrorModelActions?> { null }
 
 /**
  * The card in the place of the turn's error line (an answer, a notice or an API error), as iOS's "Model Not Connected":
  * the error card's frame with what is wrong, what to do and Fix It; [raw], the agent's own words, folded under it.
  */
 @Composable
-internal fun TurnErrorFixCard(fix: TurnErrorFix, raw: String?, launcher: String? = null) {
+internal fun TurnErrorFixCard(fix: TurnErrorFix, raw: String?, launcher: String? = null, onRetry: (() -> Unit)? = null) {
     val onFix = LocalTurnErrorFixAction.current
+    val modelActions = LocalTurnErrorModelActions.current
     val palette = PersonaTheme.palette
     var open by rememberSaveable(fix) { mutableStateOf(false) }
-    val title = if (launcher.isNullOrBlank()) stringResource(fix.title) else stringResource(fix.launcherTitle, launcher)
+    val launcherTitle = fix.launcherTitle
+    val title = if (launcher.isNullOrBlank() || launcherTitle == null) stringResource(fix.title) else stringResource(launcherTitle, launcher)
     ErrorCard(title, emptyList(), open, { open = !open }, action = {
         Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.s)) {
             Text(stringResource(fix.detail), style = PersonaTheme.type.callout, color = palette.ink2)
-            onFix?.let { JButton(stringResource(R.string.chat_turn_fix_action), { it(fix.action) }, size = JButtonSize.Medium) }
+            when (fix) {
+                TurnErrorFix.ToolSearchUnsupported -> onRetry?.let {
+                    JButton(stringResource(R.string.chat_api_error_retry), it, kind = JButtonKind.Secondary,
+                        size = JButtonSize.Medium, icon = PersonaIcons.retry)
+                }
+                TurnErrorFix.ModelRoute -> modelActions?.let { actions ->
+                    JButton(stringResource(R.string.chat_turn_fix_action), actions.openPicker, size = JButtonSize.Medium)
+                    actions.clearPick?.let { clear -> JTextButton(stringResource(actions.clearLabel), clear) }
+                }
+                else -> onFix?.let { callback -> fix.action?.let { action ->
+                    JButton(stringResource(R.string.chat_turn_fix_action), { callback(action) }, size = JButtonSize.Medium)
+                } }
+            }
         }
     }) {
         raw?.takeIf(String::isNotBlank)?.let {

@@ -870,8 +870,9 @@ func TestReadinessAuthStatusRetry(t *testing.T) {
 		defer f.mu.Unlock()
 		return len(f.authAsked)
 	}
-	// The second ask is not waited for (TestReadinessUnknownStatusNotWaitedFor): it lands a moment later.
-	waitFor(t, "the timeout asked again", func() bool { return authAsked(f) == 2 })
+	// The second ask is not waited for (TestReadinessUnknownStatusNotWaitedFor): it lands a moment later. Prefetch and
+	// the two readiness reads can legitimately start a third first, so require the retry rather than an exact total.
+	waitFor(t, "the timeout asked again", func() bool { return authAsked(f) >= 2 })
 	f2, s2, _ := readyMachine(t) // f2.auth nil: unknown method
 	getReadiness(t, s2, "", "")
 	getReadiness(t, s2, "", "")

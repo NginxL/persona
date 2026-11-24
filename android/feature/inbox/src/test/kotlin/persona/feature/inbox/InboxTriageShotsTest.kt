@@ -41,6 +41,7 @@ import persona.core.domain.inbox.InboxItem
 import persona.core.navigation.AppTab
 import persona.core.navigation.Navigator
 import java.io.File
+import persona.core.inbox.*
 
 /**
  * The inbox while new items wait for triage (#1773), on the JVM with Robolectric's native graphics (no emulator), in

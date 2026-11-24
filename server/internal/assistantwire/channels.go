@@ -25,7 +25,7 @@ const (
 	MethodChannelUnbound = "channels.unbound"
 	// MethodFeishuMessage: FeishuMessage → {}: the owner's message in the Feishu bot's private chat, taken.
 	MethodFeishuMessage = "feishu.message"
-	// MethodFeishuAction: FeishuAction → the card callback's answer (feishubot.CardResponse): the owner pressed one
+	// MethodFeishuAction: FeishuAction → the card callback's answer (botcard.CardResponse): the owner pressed one
 	// of the bot's cards. Feishu waits 3 seconds for it.
 	MethodFeishuAction = "feishu.card_action"
 	// MethodFeishuView: {} → FeishuView, what GET /api/v1/bots/feishu shows of the bot's chat.
@@ -78,7 +78,7 @@ const (
 	// for a send that may be made again (a retried morning brief): the same key lands once, and a reply under it is
 	// not dropped as a repeat of another with the same words. It may be made of letters, digits, ":", "_" and "-" only
 	// (anything else is ignored, as if none was given) and is cut to 46 characters; without one a reply's key is made
-	// of its parent and content. no_detour? makes a reply whose parent was withdrawn or deleted fail (feishubot.MessageGone
+	// of its parent and content. no_detour? makes a reply whose parent was withdrawn or deleted fail (botcard.MessageGone
 	// tells why) in place of going into the chat as a message of its own.
 	// chat_id? names another chat to send into (and to fall back to when the parent was withdrawn) and in_thread? puts
 	// a reply in the parent's thread; the hub refuses any chat but the owner's private chat and the group chats the
@@ -95,7 +95,7 @@ const (
 	// FeishuUpdateCard: {message_id, card} → {}.
 	FeishuUpdateCard = "feishu.update_card"
 	// FeishuCardCreate: {card} → {card_id}: a card entity (CardKit) made of the card (JSON 2.0); FeishuPost sends it with
-	// feishubot.CardEntityContent(card_id) as its card, and FeishuUpdateCard still updates that message whole.
+	// botcard.CardEntityContent(card_id) as its card, and FeishuUpdateCard still updates that message whole.
 	FeishuCardCreate = "feishu.card_create"
 	// FeishuCardUpdate: {card_id, card, sequence} → {}: the whole card written into an entity. FeishuCardStream:
 	// {card_id, element, text, sequence} → {}: an element's whole text streamed into it (feishubot.StreamClosed tells
@@ -113,7 +113,7 @@ const (
 	// FeishuCotCreate: {reply_to?, chat_id?, in_thread?} → {cot_id, message_id}: an agent message (the open
 	// platform's message_cot, a collapsible process) under the message replied to, in its topic when in_thread is set.
 	FeishuCotCreate = "feishu.cot_create"
-	// FeishuCotAppend: {cot_id, message_id, events: [feishubot.CotEvent]} → {}.
+	// FeishuCotAppend: {cot_id, message_id, events: [botcard.CotEvent]} → {}.
 	FeishuCotAppend = "feishu.cot_append"
 	// FeishuCotComplete: {cot_id, message_id, reason: done | error} → {}: one that will not get its RUN_FINISHED.
 	FeishuCotComplete = "feishu.cot_complete"
@@ -123,7 +123,9 @@ const (
 	// FeishuMessages: {message_id} → {items: [feishubot.Item]}: a message read back (a quote; a merged forward with
 	// the messages in it).
 	FeishuMessages = "feishu.messages"
-	// FeishuResource: {message_id, key, kind} → {data, mime}: an image of a message the bot received (at most 3 MB).
+	// FeishuResource: {message_id, key, kind, machine_id, as_file?} → {data, mime} for an image at most 3 MiB,
+	// or {path, mime, name} saved on the machine from the same download (over 3 MiB or as_file),
+	// or {too_large: true, name} above the 50 MiB file limit. Save failures carry CodeFeishuSave.
 	FeishuResource = "feishu.resource"
 	// FeishuSave: {message_id, key, kind, name, machine_id} → {path}: a file (or a large image) of a message saved on
 	// a machine (its temp directory, like the apps' uploads), at most 50 MB.

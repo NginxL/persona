@@ -1,0 +1,54 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "memory.schema.json",
+  "title": "Memory source protocol",
+  "description": "The memory_sources extension point's call (version 1, #13532; docs/extensions/extensions.md \"Memory sources\"): the manager reads a memory extension's entries one by one, read-only, so the hub's memory assembler lets each through by the scene it goes to (docs/assistant/health.md \"Memory by scene\"). Scene grading is the hub's alone: the program answers with every entry it would otherwise render into its own text outlets, never filtered by scene. Only the manager calls, each call bounded in time and size; every answer is re-checked: the page itself (entries, tagged, has_more, after) must hold to the schema or the whole answer counts as failed, while an entry that breaks a rule (an unknown status included) is dropped alone. Errors are the base ErrorCode or MemoryErrorCode, with a one-line message for people. Plugin-side: only the hub and the program speak it.",
+  "x-side": "plugin",
+  "x-methods": {
+    "memory.entries": {"from": "hub", "params": "MemoryEntriesParams", "result": "MemoryEntriesResult"}
+  },
+  "$defs": {
+    "MemoryErrorCode": {
+      "description": "error.code a memory source answers besides the base ErrorCode: not_ready (its entries are not loaded yet; the manager uses none of them this time and asks again at the next assembly), failed (anything else, say why in message).",
+      "type": "string",
+      "enum": ["not_ready", "failed"]
+    },
+    "MemoryEntriesParams": {
+      "description": "memory.entries: one page of the contribution's entries, most important first (standing ones first, then by rank, then newest). Read-only: answering changes nothing in the program's state.",
+      "type": "object",
+      "properties": {
+        "contribution": {"$ref": "manifest.schema.json#/$defs/ID", "description": "The memory_sources item's id."},
+        "limit": {"type": "integer", "minimum": 1, "maximum": 500, "description": "At most this many entries on the page (the manager asks 200). Only a cap: the program ends a page early, with has_more and after, so the answer stays within 1 MB."},
+        "after": {"type": "string", "maxLength": 512, "description": "The previous page's after, to read on; empty for the first page."}
+      },
+      "required": ["contribution", "limit"]
+    },
+    "MemoryEntriesResult": {
+      "description": "One page of entries. tagged is the program's promise for the whole page: it writes origin_space and categories on every entry and leaves them out only when empty, so a missing origin_space means the main space and missing categories mean general. A program that cannot promise that answers tagged false, and the manager then takes none of its entries for its own track (each is in no track, not known, so the strictest rule holds).",
+      "type": "object",
+      "properties": {
+        "entries": {"type": "array", "maxItems": 500, "items": {"$ref": "#/$defs/MemoryEntry"}},
+        "tagged": {"type": "boolean"},
+        "has_more": {"type": "boolean", "description": "Another page follows; ask again with after. When true, after must be set: true with an empty after counts as the end of the entries."},
+        "after": {"type": "string", "maxLength": 512, "description": "Opaque: what to send as after for the next page; required in practice whenever has_more is true."}
+      },
+      "required": ["entries", "tagged", "has_more"]
+    },
+    "MemoryEntry": {
+      "description": "One entry as the program keeps it. Only an active entry is carried; the others may be answered (so a page's order stays the program's) and are skipped. An entry that breaks a rule here is dropped alone, never the page.",
+      "type": "object",
+      "properties": {
+        "id": {"type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$", "description": "Stable across pages and answers: a to-do's brief names the entries it carried by it (prefixed memory-extension:)."},
+        "text": {"type": "string", "minLength": 1, "maxLength": 4096, "description": "What the entry says, as the program would render it, on one or a few lines."},
+        "facet": {"type": "string", "maxLength": 32, "pattern": "^[a-z][a-z0-9_]{0,31}$", "description": "The program's own grouping (preferences, workflow, people…). Informational: the hub neither filters nor orders by it."},
+        "status": {"type": "string", "enum": ["active", "candidate", "dormant", "retired"], "description": "active: the program would use it today, whatever it calls that state itself (a program with its own stable or shifting states answers active for both); candidate: not borne out yet; dormant: not seen lately; retired: no longer true. Only active entries are carried; an entry with any other value is dropped."},
+        "origin_space": {"type": "string", "maxLength": 64, "pattern": "^[a-z0-9][a-z0-9-]{0,63}$", "description": "The slug of the space the entry was first said in; left out for the main space."},
+        "categories": {"type": "array", "maxItems": 8, "items": {"type": "string", "maxLength": 32, "pattern": "^[a-z][a-z0-9_]{0,31}$"}, "description": "Its information categories (health, finance, relationships, emotion, legal_id); left out for a general entry. A category the hub does not know makes the entry not known."},
+        "standing": {"type": "boolean", "description": "The program kept it in every conversation (always in context). Only a standing entry goes to a standing channel (usage still decides); the others come in only by relevance (their subjects or text) in a recall, a hand-off or the Inbox."},
+        "rank": {"type": "integer", "minimum": 0, "maximum": 1000, "description": "The program's order among entries alike in standing: higher first. Left out: 0."},
+        "subjects": {"type": "array", "maxItems": 16, "items": {"type": "string", "minLength": 1, "maxLength": 80}, "description": "The names whose mention brings the entry in (a person, a project, a place): what a task's or a message's words are matched with, besides its text."}
+      },
+      "required": ["id", "text", "status"]
+    }
+  }
+}

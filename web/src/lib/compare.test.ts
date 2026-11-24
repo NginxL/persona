@@ -41,6 +41,48 @@ describe("hunks", () => {
   it("shows an added page's header as its name", () => {
     expect(shownText(flatten([{ label: "第 3 页", lines: [] }])[0])).toBe("—— 第 3 页 ——");
   });
+
+  it("does not bleed context from an unchanged earlier page or count unit headers as skipped lines", () => {
+    const before = flatten([
+      { label: "Page 1", lines: ["title", "last of p1"] },
+      { label: "Page 2", lines: ["first of p2", "body"] },
+    ]);
+    const after = flatten([
+      { label: "Page 1", lines: ["title", "last of p1"] },
+      { label: "Page 2", lines: ["first of p2 (edited)", "body"] },
+    ]);
+    const hs = hunks(diffLines(before, after)!, 2);
+    expect(hs).toHaveLength(1);
+    expect(hs[0].unit).toBe("Page 2");
+    expect(hs[0].ops.map((o) => `${o.kind[0]}${o.text}`)).toEqual(["dfirst of p2", "afirst of p2 (edited)", "sbody"]);
+    expect(hs[0].skippedBefore).toBe(2);
+  });
+
+  it("keeps changes at the boundary of two pages in separate hunks under each page's heading", () => {
+    const before = flatten([
+      { label: "Page 1", lines: ["intro", "end of p1"] },
+      { label: "Page 2", lines: ["start of p2", "outro"] },
+    ]);
+    const after = flatten([
+      { label: "Page 1", lines: ["intro", "end of p1 (edited)"] },
+      { label: "Page 2", lines: ["start of p2 (edited)", "outro"] },
+    ]);
+    const hs = hunks(diffLines(before, after)!, 2);
+    expect(hs.map((h) => h.unit)).toEqual(["Page 1", "Page 2"]);
+    expect(hs[0].ops.map((o) => `${o.kind[0]}${o.text}`)).toEqual(["sintro", "dend of p1", "aend of p1 (edited)"]);
+    expect(hs[0].skippedBefore).toBe(0);
+    expect(hs[1].ops.map((o) => `${o.kind[0]}${o.text}`)).toEqual(["dstart of p2", "astart of p2 (edited)", "soutro"]);
+    expect(hs[1].skippedBefore).toBe(0);
+
+    const onlyP1 = flatten([
+      { label: "Page 1", lines: ["intro", "end of p1 (edited)"] },
+      { label: "Page 2", lines: ["start of p2", "outro"] },
+    ]);
+    const hsTail = hunks(diffLines(before, onlyP1)!, 2);
+    expect(hsTail).toHaveLength(1);
+    expect(hsTail[0].unit).toBe("Page 1");
+    expect(hsTail[0].ops.map((o) => `${o.kind[0]}${o.text}`)).toEqual(["sintro", "dend of p1", "aend of p1 (edited)"]);
+  });
 });
 
 describe("readers", () => {

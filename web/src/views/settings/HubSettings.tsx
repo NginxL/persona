@@ -3,13 +3,15 @@
 // hub's commands, auto-update, the personad on each computer, and the history. Follows the hub's `hub_update` pushes.
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ApiError, errorText } from "../../lib/api";
-import { ago } from "../../lib/format";
-import { t } from "../../i18n";
+import { ago, bytes, duration } from "../../lib/format";
+import { formatNumber, t } from "../../i18n";
+import { hubUpdate, setHubUpdateSettings, startHubUpdate, type HubDevelopmentProgress, type HubUpdateBackup, type HubUpdateRecord, type HubUpdateStatus } from "../../lib/hub-update";
 import {
-  applyHubUpdateBackup, checkHubUpdate, hubUpdate, hubUpdateBackups, hubUpdateHistory, setHubUpdateSettings, startHubUpdate,
-  updateFinished, updateStateTitle, updateWorking, type HubUpdateBackup, type HubUpdateRecord, type HubUpdateStatus,
-} from "../../lib/hub-update";
-import { channelTitle, dockerSteps, latestWarning, recordTitle, recordTone, sourceBehindWarning, updateView } from "../../lib/hub-update-settings";
+  applyHubUpdateBackup, channelTitle, checkHubUpdate, dockerSteps, hubUpdateBackups, hubUpdateHistory, latestWarning,
+  recordTitle, recordTone, sourceBehindWarning, updateFinished, updateStateTitle, updateView, updateWorking,
+} from "../../lib/hub-update-settings";
+import { machineDeployment } from "../../lib/machine-deploy";
+import { managerOf, multiManager, useRoster } from "../../lib/managers";
 import { navigate } from "../../lib/router";
 import { isResumed } from "../../lib/reconnect";
 import { onHubEvent, useStore } from "../../lib/store";
@@ -38,8 +40,10 @@ function HubUpdates() {
   const [selectedVersion, setSelectedVersion] = useState("");
   const [confirmBackup, setConfirmBackup] = useState(false);
   const last = useRef<string | undefined>(undefined);
+  const revision = useRef(0);
 
   const apply = useCallback((s: HubUpdateStatus) => {
+    revision.current++;
     const finished = updateFinished(last.current, s.state);
     last.current = s.state;
     setStatus(s);
@@ -47,14 +51,19 @@ function HubUpdates() {
   }, []);
 
   const load = useCallback(() => {
+    const before = revision.current;
     setError("");
     return hubUpdate()
       .then((s) => {
-        apply(s);
+        if (revision.current === before) apply(s);
         setError("");
         hubUpdateHistory().then(setHistory, () => {});
       })
-      .catch((e) => (e instanceof ApiError && e.status === 404 ? setUnsupported(true) : setError(errorText(e))));
+      .catch((e) => {
+        if (revision.current !== before) return;
+        if (e instanceof ApiError && e.status === 404) setUnsupported(true);
+        else setError(errorText(e));
+      });
   }, [apply]);
 
   const loadBackups = useCallback(async () => {
@@ -88,6 +97,31 @@ function HubUpdates() {
       offHello();
     };
   }, [apply, load]);
+
+  const phase = status?.state;
+  const streaming = phase === "building" || phase === "backing_up" || phase === "applying_backup";
+  useEffect(() => {
+    if (!streaming) return;
+    let stopped = false;
+    let timer: number;
+    // Phase transitions arrive by push. Read the counters between pushes and
+    // ignore any reply overtaken by a newer state or an unmount.
+    async function poll() {
+      const before = revision.current;
+      try {
+        const next = await hubUpdate();
+        if (!stopped && before === revision.current) apply(next);
+      } catch {
+        // Keep the last confirmed progress during a brief connection loss.
+      }
+      if (!stopped) timer = window.setTimeout(poll, 1000);
+    }
+    timer = window.setTimeout(poll, 1000);
+    return () => {
+      stopped = true;
+      window.clearTimeout(timer);
+    };
+  }, [apply, streaming]);
 
   const check = async () => {
     setChecking(true);
@@ -265,7 +299,7 @@ function HubUpdates() {
             )}
           </>
         )}
-        {(view.kind === "working" || (selectedBackup && working)) && <Progress s={status} onNow={() => setConfirmNow(true)} />}
+        {(view.kind === "working" || (selectedBackup && working) || (streaming && view.kind === "cannot")) && <Progress s={status} onNow={() => setConfirmNow(true)} />}
         {!selectedBackup && view.kind === "current" && (status.source !== "web-dev" || status.last_check) && (behind ? (
           <p className="flex items-start gap-1.5 px-4 py-3 text-meta leading-snug break-words text-orange">
             <Icon name="info" size={13} className="mt-0.5 shrink-0" />
@@ -296,7 +330,7 @@ function HubUpdates() {
         </Row>
       </Group>}
 
-      <Nodes />
+      <Nodes development={status.source === "web-dev"} />
 
       {history.length > 0 && (
         <Group title={t("settings-hubsettings.history")}>
@@ -351,17 +385,26 @@ function DevelopmentBackup({ s, onSaved }: { s: HubUpdateStatus; onSaved: (s: Hu
   const d = s.development!;
   const recommended = d.backup_default_directory ?? "";
   const effective = d.backup_directory ?? recommended;
-  const [dir, setDir] = useState("");
+  const isDefault = d.backup_directory_is_default ?? (!effective || effective === recommended);
+  const initialDir = isDefault ? "" : effective;
+  const [dir, setDir] = useState(initialDir);
   const [retain, setRetain] = useState(String(d.backup_retain ?? 3));
   const [saving, setSaving] = useState(false);
   useEffect(() => {
-    setDir(effective && effective !== recommended ? effective : "");
+    setDir(initialDir);
     setRetain(String(d.backup_retain ?? 3));
-  }, [effective, recommended, d.backup_retain]);
+  }, [initialDir, d.backup_retain]);
   const save = async () => {
     setSaving(true);
     try {
-      onSaved(await setHubUpdateSettings({ development_backup_directory: dir.trim(), development_backup_retain: Number(retain) }));
+      const trimmed = dir.trim();
+      const payload: { development_backup_directory?: string; development_backup_retain: number } = {
+        development_backup_retain: Number(retain),
+      };
+      if (trimmed !== initialDir) {
+        payload.development_backup_directory = trimmed;
+      }
+      onSaved(await setHubUpdateSettings(payload));
       toast(t("settings-hubsettings.backup_saved"), "ok");
     } catch (e) {
       toast(t("settings-hubsettings.save_failed", { error: errorText(e) }), "error");
@@ -392,6 +435,12 @@ function DevelopmentBackup({ s, onSaved }: { s: HubUpdateStatus; onSaved: (s: Hu
 
 /** The update under way, and while it waits for idle what it waits for, with "Update now". */
 function Progress({ s, onNow }: { s: HubUpdateStatus; onNow: () => void }) {
+  const progress = s.development_progress;
+  if (progress?.phase === s.state) {
+    const key = `settings-hubsettings.progress_step_${progress.step}`;
+    const step = t(key);
+    if (step !== key) return <DevelopmentProgress title={updateStateTitle(s)} step={step} p={progress} />;
+  }
   return (
     <>
       <div className="flex items-center gap-2 px-4 py-3 text-[13px] text-ink">
@@ -417,6 +466,39 @@ function Progress({ s, onNow }: { s: HubUpdateStatus; onNow: () => void }) {
   );
 }
 
+function DevelopmentProgress({ title, step, p }: { title: string; step: string; p: HubDevelopmentProgress }) {
+  const stepNumber = `${formatNumber(p.step_index)}/${formatNumber(p.step_total)}`;
+  const size = p.bytes_done === undefined ? undefined :
+    p.bytes_total === undefined ? bytes(p.bytes_done) : `${bytes(p.bytes_done)} / ${bytes(p.bytes_total)}`;
+  const speed = p.bytes_per_second === undefined ? undefined : t("settings-hubsettings.progress_speed", {
+    speed: formatNumber(p.bytes_per_second / (1024 * 1024), { maximumFractionDigits: 2 }),
+  });
+  const countKey = p.step === "archive_files" ? "settings-hubsettings.progress_files" :
+    p.step === "database_dump" ? "settings-hubsettings.progress_databases" : "settings-hubsettings.progress_items";
+  const items = p.item_done === undefined || p.item_total === undefined ? undefined :
+    t(countKey, { done: formatNumber(p.item_done), total: formatNumber(p.item_total) });
+  const elapsed = t("settings-hubsettings.progress_elapsed", { time: duration(p.elapsed_seconds * 1000) });
+  return (
+    <div className="flex flex-col gap-1.5 px-4 py-3">
+      <div className="flex items-center gap-2 text-meta text-ink">
+        {p.percent === undefined && <Spinner />}
+        <span>{title}</span>
+      </div>
+      <div className="flex items-baseline gap-2 text-label text-ink-2 tabular-nums">
+        <span role="status" className="min-w-0 flex-1">{stepNumber} · {step}</span>
+        {p.percent !== undefined && <span className="shrink-0">{formatNumber(p.percent / 100, { style: "percent" })}</span>}
+      </div>
+      {p.percent !== undefined && (
+        <div role="progressbar" aria-label={step} aria-valuenow={p.percent} aria-valuemin={0} aria-valuemax={100}
+          className="h-1 overflow-hidden rounded-full bg-inset">
+          <div className="h-full rounded-full bg-accent" style={{ width: `${p.percent}%` }} />
+        </div>
+      )}
+      <p className="text-label text-ink-3 tabular-nums">{[p.item_label, size, speed, items, elapsed].filter(Boolean).join(" · ")}</p>
+    </div>
+  );
+}
+
 function DockerRows({ s }: { s: HubUpdateStatus }) {
   const { headline, steps } = dockerSteps(s);
   return (
@@ -435,18 +517,40 @@ function DockerRows({ s }: { s: HubUpdateStatus }) {
   );
 }
 
-/** Each computer's personad: it keeps its version after the hub updates unless auto_update_nodes is on; Redeploy updates one. */
-function Nodes() {
+function Nodes({ development }: { development: boolean }) {
   const machines = useStore((s) => s.machines);
+  const roster = useRoster();
   if (!machines.length) return null;
+  const showOwners = multiManager(roster);
   return (
-    <Group title={t("settings-hubsettings.nodes")} footer={t("settings-hubsettings.nodes_footer")}>
-      {machines.map((m) => (
-        <Row key={m.id} label={m.name} onClick={() => navigate({ name: "machine", mid: m.id })}>
-          {m.node_mismatch && <Pill tone="orange">{t("settings-hubsettings.version_differs")}</Pill>}
-          <span className="max-w-[220px] truncate font-mono text-ink-3">{m.node_version || (m.online ? t("settings-hubsettings.unknown") : t("settings-hubsettings.offline"))}</span>
-        </Row>
-      ))}
+    <Group title={t("settings-hubsettings.nodes")} anchor="hub-nodes"
+      footer={t(development ? "settings-hubsettings.dev_nodes_footer" : "settings-hubsettings.nodes_footer")}>
+      {machines.map((m) => {
+        const deployment = machineDeployment(m);
+        const owner = showOwners && m.manager ? managerOf(roster, m.manager) : null;
+        const source = m.deploy_source === "hub_package" ? t("settings-hubsettings.hub_package")
+          : m.deploy_source === "local_build" ? t("settings-hubsettings.local_build") : "";
+        const detail = [owner && t("settings-hubsettings.managed_by", { name: owner.name }), source].filter(Boolean).join(" · ");
+        const reason = !deployment.busy && m.can_deploy !== true && m.deploy_reason !== m.deploy_error ? m.deploy_reason : undefined;
+        const offline = !m.online && t("settings-hubsettings.offline");
+        const version = m.node_version || offline || t("settings-hubsettings.unknown");
+        const badge = deployment.busy ? <Pill tone="accent">{deployment.label}</Pill>
+          : m.node_mismatch ? <Pill tone="orange">{t("settings-hubsettings.version_differs")}</Pill>
+          : m.node_version && offline && <Pill>{offline}</Pill>;
+        return (
+          <Row key={m.id} onClick={() => navigate({ name: "machine", mid: m.id })} wrapHint
+            label={<span className="flex flex-wrap items-center gap-x-2 gap-y-1" aria-live="polite">
+              <span className="min-w-0 truncate">{m.name}</span>
+              {badge}
+              <span className="min-w-0 truncate font-mono text-meta text-ink-3 sm:ml-auto" title={m.node_version}>{version}</span>
+            </span>}
+            hint={(detail || deployment.error || reason) && <span className="block whitespace-normal break-words">
+              {detail && <span className="block">{detail}</span>}
+              {deployment.error && <span className="block text-red">{deployment.error}</span>}
+              {reason && <span className="block">{reason}</span>}
+            </span>} />
+        );
+      })}
     </Group>
   );
 }

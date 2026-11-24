@@ -1,4 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="agents_row_children_running">子 Agent %1$d 个在跑</string>
+    <string name="agents_row_children_running">子智能体 · %1$d 个运行中</string>
+    <string name="agents_row_subagents_running">子智能体 · %1$d 个运行中</string>
+    <string name="agents_row_subagents_need_you">子智能体 · %1$d 个等你确认</string>
 </resources>

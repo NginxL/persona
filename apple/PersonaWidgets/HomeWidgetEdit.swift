@@ -60,6 +60,28 @@ struct UsageWidgetEdit: HomeWidgetEdit {
     func apply(to entry: inout HomeEntry) { entry.account = HomeChoices.filter(account?.id) }
 }
 
+struct HealthTodayWidgetEdit: HomeWidgetEdit {
+    nonisolated static let title: LocalizedStringResource = "Today's Health [Home Widgets]"
+    nonisolated static let description = IntentDescription("Four health items you choose, at a glance. [Home Widgets]")
+
+    @Parameter(title: "First Item [Home Widgets]", default: .water) var first: HomeHealthItem
+    @Parameter(title: "Second Item [Home Widgets]", default: .protein) var second: HomeHealthItem
+    @Parameter(title: "Third Item [Home Widgets]", default: .activity) var third: HomeHealthItem
+    @Parameter(title: "Fourth Item [Home Widgets]", default: .sleep) var fourth: HomeHealthItem
+
+    nonisolated init() {}
+
+    func apply(to entry: inout HomeEntry) { entry.healthItems = [first, second, third, fourth] }
+}
+
+nonisolated extension HomeHealthItem: AppEnum {
+    static let typeDisplayRepresentation: TypeDisplayRepresentation = "Health Item [Home Widgets]"
+    static let caseDisplayRepresentations: [HomeHealthItem: DisplayRepresentation] = [
+        .water: "Water [Home Widgets]", .protein: "Protein [Home Widgets]", .activity: "Activity [Home Widgets]",
+        .steps: "Steps [Home Widgets]", .sleep: "Asleep [Home Widgets]",
+    ]
+}
+
 nonisolated extension HomeAgentsShow: AppEnum {
     nonisolated static let typeDisplayRepresentation: TypeDisplayRepresentation = "Show [Home Widgets]"
     nonisolated static let caseDisplayRepresentations: [HomeAgentsShow: DisplayRepresentation] = [

@@ -851,6 +851,43 @@ func TestGateProxyAuth(t *testing.T) {
 	}
 }
 
+// A relayed gate (#12904): socket_env among env, with base_env and one secret (or an auth saying how it goes); the
+// manager puts the token on the call as RelayAuth says, and the node's proxy gets no Auth from the file for it.
+func TestParseGateSocketEnv(t *testing.T) {
+	const head = `{"command": "f", "script": "f/x.sh", "title": "x", `
+	g, err := ParseGate([]byte(head + `"env": ["B", "S", "T"], "base_env": "B", "socket_env": "S", "secret": ["T"]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := g.RelayAuth(), (&proto.GateAuth{Header: "Authorization", Value: "Bearer ${T}"}); !reflect.DeepEqual(got, want) {
+		t.Errorf("relay auth %+v, want %+v", got, want)
+	}
+	g, err = ParseGate([]byte(head + `"env": ["B", "S", "K"], "base_env": "B", "socket_env": "S", "secret": ["K"], "auth": {"header": "X-Key", "value": "${K}"}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := g.RelayAuth(), (&proto.GateAuth{Header: "X-Key", Value: "${K}"}); !reflect.DeepEqual(got, want) {
+		t.Errorf("declared relay auth %+v, want %+v", got, want)
+	}
+	g, err = ParseGate([]byte(head + `"env": ["B", "T"], "base_env": "B", "secret": ["T"]}`))
+	if err != nil || g.RelayAuth() != nil {
+		t.Errorf("a gate without socket_env is not relayed: %v %+v", err, g)
+	}
+	for name, bad := range map[string]string{
+		"not in env":  `"env": ["B", "T"], "base_env": "B", "socket_env": "S", "secret": ["T"]}`,
+		"no base":     `"env": ["S", "T"], "socket_env": "S", "secret": ["T"]}`,
+		"is the base": `"env": ["S", "T"], "base_env": "S", "socket_env": "S", "secret": ["T"]}`,
+		"is a secret": `"env": ["B", "S"], "base_env": "B", "socket_env": "S", "secret": ["S"]}`,
+		"two secrets": `"env": ["B", "S", "K", "T"], "base_env": "B", "socket_env": "S", "secret": ["K", "T"]}`,
+		"no secret":   `"env": ["B", "S"], "base_env": "B", "socket_env": "S"}`,
+		"auth env":    `"env": ["B", "S", "T"], "base_env": "B", "socket_env": "S", "secret": ["T"], "auth": {"env": true}}`,
+	} {
+		if _, err := ParseGate([]byte(head + bad)); err == nil {
+			t.Errorf("%s: parsed", name)
+		}
+	}
+}
+
 // withNode is the example manifest with a program on computers: macOS ones, picked in the field machines.
 func withNode(t *testing.T, change func(node, machines map[string]any)) []byte {
 	t.Helper()

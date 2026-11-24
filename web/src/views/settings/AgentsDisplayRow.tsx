@@ -17,6 +17,12 @@ export function AgentsDisplayRow() {
     {value?.use_herdr_tab_name !== undefined && <Row label={t("settings.use_herdr_tab_name")} hint={t("settings.use_herdr_tab_name_hint")} wrapHint anchor="herdr-tab-session-name">
       <Switch on={value.use_herdr_tab_name} disabled={saving} onChange={(on) => void saveAgentsDisplay({ use_herdr_tab_name: on })} label={t("settings.use_herdr_tab_name")} />
     </Row>}
+    {value?.sort_by_activity !== undefined && <Row label={t("settings.sort_by_activity")} hint={t("settings.sort_by_activity_hint")} wrapHint anchor="agents-sort-by-activity">
+      <Switch on={value.sort_by_activity} disabled={saving} onChange={(on) => void saveAgentsDisplay({ sort_by_activity: on })} label={t("settings.sort_by_activity")} />
+    </Row>}
+    {value?.show_filter !== undefined && <Row label={t("settings.show_agents_filter")} hint={t("settings.show_agents_filter_hint")} wrapHint anchor="agents-show-filter">
+      <Switch on={value.show_filter} disabled={saving} onChange={(on) => void saveAgentsDisplay({ show_filter: on })} label={t("settings.show_agents_filter")} />
+    </Row>}
     {saving && <SettingsHint><span role="status">{change && "use_herdr_tab_name" in change ? t("settings.herdr_tab_name_saving") : t("settings.botmux_saving")}</span></SettingsHint>}
     {error !== undefined && <RowFailed text={errorText(error)} retry={t("app.retry")} onRetry={() => void retryAgentsDisplay()} />}
   </>;

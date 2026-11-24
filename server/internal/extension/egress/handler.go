@@ -77,7 +77,7 @@ func (p *Proxy) handler(fixed string) http.Handler {
 		case hub:
 			allowed = rule.Hub
 		case local:
-			if rule.Local() && !p.ownPort(port) {
+			if rule.Loopback() && !p.ownPort(port) {
 				allowed = true
 			} else if lip, ok := rule.loopbackTarget(port, connect); ok && !p.ownPort(port) && !p.hubPort(port) {
 				allowed, loopbackDial = true, lip
@@ -104,7 +104,7 @@ func (p *Proxy) handler(fixed string) http.Handler {
 		}
 		p.count(ext, host, allowed)
 		if !allowed {
-			if local && rule.Local() {
+			if local && rule.Loopback() {
 				p.logf("extension %s: refused %s:%s (the proxy itself)", ext, host, port)
 				http.Error(w, fmt.Sprintf("persona: %s:%s is this proxy", host, port), http.StatusForbidden)
 				return

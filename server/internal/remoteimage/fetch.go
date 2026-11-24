@@ -167,7 +167,10 @@ func (f *Fetcher) fetch(ctx context.Context, u *url.URL) ([]byte, error) {
 		case ctx.Err() != nil || isTimeout(err):
 			return nil, fail(CodeTimeout, http.StatusGatewayTimeout, "%s took longer than %s", u.Hostname(), f.o.timeout)
 		}
-		return nil, fail(CodeFetchFailed, http.StatusBadGateway, "%s: %v", u.Hostname(), errors.Unwrap(err))
+		if inner := errors.Unwrap(err); inner != nil {
+			err = inner
+		}
+		return nil, fail(CodeFetchFailed, http.StatusBadGateway, "%s: %v", u.Hostname(), err)
 	}
 	if status != http.StatusOK {
 		return nil, fail(CodeFetchFailed, http.StatusBadGateway, "%s answered %d", u.Hostname(), status)

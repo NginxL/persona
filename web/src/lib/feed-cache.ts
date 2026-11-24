@@ -10,6 +10,10 @@ import { taskCalls } from "./task-association";
 const PREFIX = "persona.feedCache.v1:";
 export const FEED_CACHE_MAX_BYTES = 256 * 1024;
 export const FEED_CACHE_MAX_ITEMS = 200;
+const DATA_IMAGE_URI = /data:image\/[^\s;,]+;base64,[^\s"'<>)]*/gi;
+const DATA_IMAGE_TEST = /data:image\/[^\s;,]+;base64,/i;
+const DATA_IMAGE_PREFIX = /data:image\//i;
+const encoder = new TextEncoder();
 
 export interface FeedCache {
   machineID: string;
@@ -25,7 +29,7 @@ export interface FeedCache {
 // all cached feeds when the hub or account identity changes, so cache partitioning needs no cryptographic hash.
 export function fingerprint(value: string): string {
   let hash = 0xcbf29ce484222325n;
-  for (const byte of new TextEncoder().encode(value)) hash = BigInt.asUintN(64, (hash ^ BigInt(byte)) * 0x100000001b3n);
+  for (const byte of encoder.encode(value)) hash = BigInt.asUintN(64, (hash ^ BigInt(byte)) * 0x100000001b3n);
   return hash.toString(16).padStart(16, "0");
 }
 
@@ -36,9 +40,20 @@ export function feedCacheKey(hub: string, token: string, deviceID = "", epoch = 
   return `${PREFIX}${fingerprint(hub)}:${fingerprint(JSON.stringify(epoch ? [deviceID, token, epoch] : [deviceID, token]))}`;
 }
 
+interface OversizedMemo {
+  scope: string;
+  machineID: string;
+  sessionID: string;
+  manager: string | undefined;
+  history: string | undefined;
+  hasMore: boolean;
+  items: Item[];
+}
+
 let generation = 0;
 let identity = "";
 let key: string | null = null;
+let oversized: OversizedMemo | null = null;
 
 /** Capture before starting a read. Its in-memory generation also fences logout followed by the same login. */
 export function feedCacheScope(): string | null {
@@ -50,6 +65,7 @@ export function feedCacheScope(): string | null {
     const now = JSON.stringify([hub, token, deviceID, epoch]);
     if (identity !== now) {
       if (identity) clearFeedCache();
+      oversized = null;
       identity = now;
       key = feedCacheKey(hub, token, deviceID, epoch);
     }
@@ -62,6 +78,7 @@ export function feedCacheScope(): string | null {
 /** Sign-out and credential replacement remove every cached feed of this origin, including other proxy prefixes. */
 export function clearFeedCache(): void {
   generation++;
+  oversized = null;
   clearMemoryPages();
   try {
     for (let i = localStorage.length - 1; i >= 0; i--) {
@@ -79,7 +96,42 @@ export const scopedKey = (scope: string | null, name: string) => (scope && scope
 
 export function discardFeedCache(scope: string | null): void {
   if (!scope || scope !== feedCacheScope()) return;
+  oversized = null;
   try { localStorage.removeItem(storageKey(scope)); } catch { /* Best effort. */ }
+}
+
+function discardStaleCache(scope: string): void {
+  const k = storageKey(scope);
+  try {
+    if (localStorage.getItem(k) === null) return;
+    localStorage.removeItem(k);
+  } catch { /* Best effort. */ }
+}
+
+function exceedsMaxBytes(raw: string): boolean {
+  if (raw.length > FEED_CACHE_MAX_BYTES) return true;
+  if (raw.length * 3 <= FEED_CACHE_MAX_BYTES) return false;
+  return encoder.encode(raw).length > FEED_CACHE_MAX_BYTES;
+}
+
+function exceedsTextFloor(items: Item[]): boolean {
+  let minBytes = 0;
+  for (const it of items) {
+    const text = it.text;
+    if (typeof text === "string" && text.length > 0 && !DATA_IMAGE_PREFIX.test(text)) {
+      minBytes += text.length;
+      if (minBytes > FEED_CACHE_MAX_BYTES) return true;
+    }
+  }
+  return false;
+}
+
+function matchesOversized(scope: string, value: FeedCache, hasMore: boolean, rawItems: Item[]): boolean {
+  if (!oversized || oversized.scope !== scope || oversized.machineID !== value.machineID || oversized.sessionID !== value.sessionID
+    || oversized.manager !== value.manager || oversized.history !== value.history || oversized.hasMore !== hasMore
+    || rawItems.length < oversized.items.length) return false;
+  for (let i = 0; i < oversized.items.length; i++) if (rawItems[i] !== oversized.items[i]) return false;
+  return true;
 }
 
 const object = (value: unknown): value is Record<string, unknown> => !!value && typeof value === "object" && !Array.isArray(value);
@@ -132,18 +184,29 @@ function withoutImageBodies(this: Record<string, unknown>, name: string, value: 
     return { ...metadata, lazy: true };
   }
   if (name === "data" && (this.type === "base64" || String(this.mime ?? this.media_type ?? "").startsWith("image/"))) return undefined;
-  if (typeof value === "string") return value.replace(/data:image\/[^\s;,]+;base64,[^\s"'<>)]*/gi, "[image omitted]");
+  if (typeof value === "string") return value.length >= 19 && DATA_IMAGE_TEST.test(value) ? value.replace(DATA_IMAGE_URI, "[image omitted]") : value;
   return value;
 }
 
 export function readFeedCache(scope: string | null = feedCacheScope()): FeedCache | null {
   if (!scope || scope !== feedCacheScope()) return null;
+  let raw: string | null;
   try {
-    const raw = localStorage.getItem(storageKey(scope));
-    if (!raw) return null;
-    if (new TextEncoder().encode(raw).length > FEED_CACHE_MAX_BYTES) return null;
+    raw = localStorage.getItem(storageKey(scope));
+  } catch {
+    return null;
+  }
+  if (raw === null) return null;
+  try {
+    if (!raw || exceedsMaxBytes(raw)) {
+      discardFeedCache(scope);
+      return null;
+    }
     const parsed: unknown = JSON.parse(raw);
-    if (!validFeed(parsed) || conversationDeleted(parsed.machineID, parsed.sessionID)) return null;
+    if (!validFeed(parsed) || conversationDeleted(parsed.machineID, parsed.sessionID)) {
+      discardFeedCache(scope);
+      return null;
+    }
     // A record with embedded image bytes was not written by this version. Never hydrate an unsanitized record.
     // Nor one an older version wrote with a refusal record's whole line in it (#2528): it is never shown again.
     if (JSON.stringify(parsed, withoutImageBodies) !== JSON.stringify(parsed) || containsCredential(raw) || parsed.items.some(hasPrivateRefusal)) {
@@ -152,6 +215,7 @@ export function readFeedCache(scope: string | null = feedCacheScope()): FeedCach
     }
     return parsed;
   } catch {
+    discardFeedCache(scope);
     return null;
   }
 }
@@ -161,32 +225,37 @@ export function containsCredential(raw: string): boolean {
   return !!token && [token, encodeURIComponent(token), JSON.stringify(token).slice(1, -1)].some((value) => raw.includes(value));
 }
 
-/** Only the newest two user-question turns, matching GET items?turns=2; injected prompts do not consume the budget. */
-function newestTurns(value: FeedCache): FeedCache {
+function newestTurnsSlice(items: Item[]): { start: number; items: Item[] } {
   const userQuestion = (item: Item) => item.role === "user" && item.kind === "text" && !item.queued && !item.wake && !injectedOf(item);
-  let start = value.items.length, turns = 0;
+  let start = items.length, turns = 0;
   while (start > 0 && turns < 2) {
-    if (userQuestion(value.items[--start])) turns++;
+    if (userQuestion(items[--start])) turns++;
   }
   // A retained report must not lose the earlier launch it belongs under. Extend the contiguous prefix, including
   // that call's user turn, rather than caching a detached call that would break paging coverage.
-  const calls = taskCalls(value.items);
+  let calls: Map<string, string> | undefined;
   const needed = new Set<string>();
-  for (let at = value.items.length - 1; at >= 0 && (at >= start || needed.size); at--) {
-    const item = value.items[at];
+  for (let at = items.length - 1; at >= 0 && (at >= start || needed.size); at--) {
+    const item = items[at];
     if (item.task?.kind === "agent") {
-      const call = item.tool_use_id || calls.get(item.id);
+      const call = item.tool_use_id || (calls ??= taskCalls(items)).get(item.id);
       if (call) needed.add(call);
     }
     if (item.kind === "tool_use" && (item.tool_name === "Agent" || item.tool_name === "Task") && needed.delete(item.tool_use_id ?? "") && at < start) {
       start = at;
-      while (start > 0 && !userQuestion(value.items[start])) start--;
+      while (start > 0 && !userQuestion(items[start])) start--;
     }
   }
-  while (start > 0 && value.items[start].seq === value.items[start - 1].seq) start--;
+  while (start > 0 && items[start].seq === items[start - 1].seq) start--;
+  return { start, items: items.slice(start) };
+}
+
+/** Only the newest two user-question turns, matching GET items?turns=2; injected prompts do not consume the budget. */
+function newestTurns(value: FeedCache): FeedCache {
+  const { start, items } = newestTurnsSlice(value.items);
   return {
     machineID: value.machineID, sessionID: value.sessionID, manager: value.manager,
-    items: value.items.slice(start).map(publicRefusalItem), hasMore: value.hasMore || start > 0, history: value.history,
+    items: items.map(publicRefusalItem), hasMore: value.hasMore || start > 0, history: value.history,
   };
 }
 
@@ -194,16 +263,42 @@ export function writeFeedCache(scope: string | null, value: FeedCache): boolean 
   if (conversationDeleted(value.machineID, value.sessionID)) return false;
   if (!scope || scope !== feedCacheScope()) return false;
   try {
-    const page = newestTurns(value);
+    const { start, items: rawItems } = newestTurnsSlice(value.items);
+    const hasMore = value.hasMore || start > 0;
+    if (rawItems.length > FEED_CACHE_MAX_ITEMS) {
+      oversized = null;
+      discardStaleCache(scope);
+      return false;
+    }
+    if (matchesOversized(scope, value, hasMore, rawItems)) {
+      discardStaleCache(scope);
+      return false;
+    }
+    const page: FeedCache = {
+      machineID: value.machineID, sessionID: value.sessionID, manager: value.manager,
+      items: rawItems.map(publicRefusalItem), hasMore, history: value.history,
+    };
+    if (exceedsTextFloor(page.items)) {
+      discardStaleCache(scope);
+      oversized = { scope, machineID: value.machineID, sessionID: value.sessionID, manager: value.manager, history: value.history, hasMore, items: rawItems };
+      return false;
+    }
     const raw = JSON.stringify(page, withoutImageBodies);
-    if (!validFeed(page) || new TextEncoder().encode(raw).length > FEED_CACHE_MAX_BYTES || containsCredential(raw)) {
-      discardFeedCache(scope);
+    if (exceedsMaxBytes(raw)) {
+      discardStaleCache(scope);
+      oversized = { scope, machineID: value.machineID, sessionID: value.sessionID, manager: value.manager, history: value.history, hasMore, items: rawItems };
+      return false;
+    }
+    oversized = null;
+    if (!validFeed(page) || containsCredential(raw)) {
+      discardStaleCache(scope);
       return false;
     }
     localStorage.setItem(storageKey(scope), raw);
     return true;
   } catch {
-    discardFeedCache(scope);
+    oversized = null;
+    discardStaleCache(scope);
     return false;
   }
 }

@@ -4,7 +4,9 @@
   "skip_next_invalid": "Enter a valid occurrence time.",
   "skip_next_owner": "Skipped by you",
   "execution_context_unavailable": "Cannot verify the task conversation’s execution context. Reconnect its agent and try again.",
+  "task_execution_wait_timeout": "task_execution_wait_timeout: The selected computer did not support this task’s execution options before the wait expired. Nothing was sent.",
   "followup": "Follow-up",
+  "task_label": "Scheduled task",
   "morning": "Morning brief",
   "evening": "Evening review",
   "unavailable": "Can’t read scheduled tasks right now (the database isn’t responding). Try again in a bit.",
@@ -75,5 +77,12 @@
   "todo_wait_cost": "Another scheduled window may pass without advancing the task.",
   "todo_change_result": "Ask the supervisor to propose another approach within the existing permissions.",
   "todo_wait_result": "Keep the approved approach and wait for the next scheduled check.",
-  "execution_antigravity_unavailable": "Antigravity is disconnected or unavailable on {machine}. Restore Antigravity on that computer, then run this task again to continue its existing conversation."
+  "selected_file_unavailable": "The selected file is unavailable or its execution context changed. Remove it and choose it again.",
+  "file_runtime_unsupported": "This agent does not support file selection. Use text or choose another agent.",
+  "input_context_unavailable": "The task or its original conversation is unavailable. Reopen the task and try again.",
+  "execution_antigravity_unavailable": "Antigravity is disconnected or unavailable on {machine}. Restore Antigravity on that computer, then run this task again to continue its existing conversation.",
+  "execution_space_directory": "Tasks in a space use the space's folder. Clear the working directory to continue.",
+  "unknown_space": "That space is not available for tasks. Choose another space or none.",
+  "bad_topic_policy": "Choose whether each run starts a new conversation or continues the same one.",
+  "space_owner_only": "Only you can move a task into or out of a space, from the app."
 }

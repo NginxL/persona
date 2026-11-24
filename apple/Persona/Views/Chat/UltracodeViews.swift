@@ -54,11 +54,7 @@ struct UltracodeMenuSection: View {
 
     /// Declared before the effort it goes under: the menus that list their items the other way round (iOS, visionOS).
     static var leadsEffort: Bool {
-        #if os(macOS)
-        false
-        #else
         true
-        #endif
     }
 
     /// The menu draws a header line by line and cuts a subtitle (iOS, visionOS), or wraps a subtitle and draws a header

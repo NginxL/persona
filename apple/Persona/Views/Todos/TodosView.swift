@@ -1,12 +1,15 @@
 import BeautifulUI
 import SwiftUI
 
-public struct TodoDetailRoute: Hashable, Sendable, Identifiable {
+public struct TodoDetailRoute: Codable, Hashable, Sendable, Identifiable {
     public var id: String
     public init(id: String) { self.id = id }
 }
 
 struct TodosView: View {
+    /// Programmatic opens share the stack's value-based path with rows and lineage links; a view-based destination
+    /// would sit above values pushed from its detail (docs/lessons/ios.md).
+    var openDetail: (TodoDetailRoute) -> Void
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
     @State private var store = TodoStore.shared
@@ -18,15 +21,13 @@ struct TodosView: View {
     @State private var creatingNotes = ""
     /// The New To-Do sheet's notes mic (#2188).
     @State private var dictation = Dictation()
-    /// Folded sections the user opened (Shelved and Done start folded), and merged rows opened to their members.
+    /// Folded sections the user opened (Shelved, Done and Cancelled start folded), and merged rows opened to their members.
     @State private var unfolded: Set<TodoSection> = []
     @State private var openedGroups: Set<String> = []
     /// Restores from Shelved kept on this device (`TodoRestores`), and the moment the sections are read at: a minute's
     /// tick moves to-dos across the 24 h / 48 h lines while the page stays open.
     @State private var restored = TodoRestores.load()
     @State private var clock = Date.now
-    /// A to-do opened from the calendar (and, in DEBUG screenshots, `-openTodoTitled <text>`: the first whose title has it).
-    @State private var pushed: TodoDetailRoute?
     /// List or calendar, and the calendar's day / week / month (#2029): each device keeps its own.
     @StoredValue("todos.view") private var viewMode = TodosViewMode.list
     @StoredValue("todos.calendar.mode") private var calendarMode = TodoCalendarMode.day
@@ -65,7 +66,7 @@ struct TodosView: View {
             }
             if viewMode == .calendar {
                 TodoCalendarView(todos: store.scopedTodos, mode: $calendarMode, anchor: $calendarAnchor,
-                                 open: { pushed = TodoDetailRoute(id: $0) }, showList: { viewMode = .list })
+                                 open: { openDetail(TodoDetailRoute(id: $0)) }, showList: { viewMode = .list })
             } else {
                 list
             }
@@ -102,18 +103,16 @@ struct TodosView: View {
             if UserDefaults.standard.bool(forKey: "showDoneTodos") { unfolded = [.other, .shelved, .done] }
             if let match = UserDefaults.standard.string(forKey: "openTodoTitled"),
                let todo = store.scopedTodos.first(where: { $0.title.contains(match) }) {
-                pushed = TodoDetailRoute(id: todo.id)
+                openDetail(TodoDetailRoute(id: todo.id))
             }
             #endif
         }
-        // Another assistant is current: the list is its to-dos now, and one opened or being written is the one before's.
+        // Another assistant is current: the list is its to-dos now, and one being written is the one before's.
         .onChange(of: model.assistantSwitches) {
-            pushed = nil
             showCreate = false
             quickAdd = nil
             openedGroups = []
         }
-        .navigationDestination(item: $pushed) { r in TodoDetailView(todoID: r.id) }
         // read when the page opens, and for the assistant made current (a project made meanwhile shows up)
         .task(id: model.assistantSwitches) { await projects.load(model.api?.currentAssistantSettings()) }
     }
@@ -258,11 +257,17 @@ struct TodosView: View {
             sectionView(.done, groups: done, count: done.reduce(0) { $0 + $1.members.count }, folded: folded)
                 .listSectionSpacing(folded ? .custom(Theme.Space.flush) : .compact)
         }
+        let cancelled = TodoListLogic.sorted(result.groups(.cancelled), by: listSort, calendar: calendar)
+        if !cancelled.isEmpty {
+            let folded = TodoSection.cancelled.startsFolded && !isUnfolded(.cancelled)
+            sectionView(.cancelled, groups: cancelled, count: cancelled.reduce(0) { $0 + $1.members.count }, folded: folded)
+                .listSectionSpacing(folded ? .custom(Theme.Space.flush) : .compact)
+        }
     }
 
     /// By project (#7077, the web's grouping by project): a section per knowledge-base project with open to-dos, where its
-    /// most pressing one comes in the list, then Unsorted; then Done, folded, as by status. The search and the filter
-    /// narrow them as they narrow the sections.
+    /// most pressing one comes in the list, then Unsorted; then Done and Cancelled, folded, as by status. The search and
+    /// the filter narrow them as they narrow the sections.
     @ViewBuilder private func projectSections(_ result: TodoTriageResult) -> some View {
         let calendar = TodoCalendar.userCalendar
         let open = TodoSection.allCases.filter { $0 != .done }.flatMap { section in
@@ -290,14 +295,21 @@ struct TodosView: View {
             sectionView(.done, groups: done, count: done.reduce(0) { $0 + $1.members.count }, folded: folded)
                 .listSectionSpacing(folded ? .custom(Theme.Space.flush) : .compact)
         }
+        let cancelled = TodoListLogic.sorted(result.groups(.cancelled), by: listSort, calendar: calendar)
+        if !cancelled.isEmpty {
+            let folded = TodoSection.cancelled.startsFolded && !isUnfolded(.cancelled)
+            sectionView(.cancelled, groups: cancelled, count: cancelled.reduce(0) { $0 + $1.members.count }, folded: folded)
+                .listSectionSpacing(folded ? .custom(Theme.Space.flush) : .compact)
+        }
     }
 
-    /// A folded section (Shelved, Done) is open when the user opened it, or while searching.
+    /// A folded section (Shelved, Done, Cancelled) is open when the user opened it, or while searching.
     private func isUnfolded(_ section: TodoSection) -> Bool {
         unfolded.contains(section) || !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
     @ViewBuilder private func sectionView(_ section: TodoSection, groups: [TodoTriageGroup], count: Int, folded: Bool) -> some View {
+        let title = section.title(rules: groups.flatMap { $0.triage.values.map(\.rule) })
         Section {
             if !folded {
                 if section == .shelved {
@@ -313,18 +325,18 @@ struct TodosView: View {
             // The Agents list's state header (#3712): the name, and the count in the state's color. Folding ones are a
             // FoldButton, spoken as "name, expanded / collapsed, N to-dos".
             if section.startsFolded {
-                FoldButton(title: section.title, folded: folded, detail: String(localized: "\(count) to-dos")) {
+                FoldButton(title: title, folded: folded, detail: String(localized: "\(count) to-dos")) {
                     withAnimation(Theme.Motion.state) {
                         if unfolded.contains(section) { unfolded.remove(section) } else { unfolded.insert(section) }
                     }
                 } label: {
-                    SectionHeader(title: section.title, count: count, tone: section.tone)
+                    SectionHeader(title: title, count: count, tone: section.tone)
                 }
                 .font(Theme.Font.sectionHeader)
                 .textCase(nil)
                 .accessibilityIdentifier("todos.section.\(section.rawValue)")
             } else {
-                SectionHeader(title: section.title, count: count, tone: section.tone)
+                SectionHeader(title: title, count: count, tone: section.tone)
                     .font(Theme.Font.sectionHeader)
                     .textCase(nil)
                     .accessibilityElement(children: .combine)
@@ -356,8 +368,8 @@ struct TodosView: View {
     private func todoRow(_ todo: TodoItem, triage: TodoTriage?, related: TodoRelatedToggle? = nil) -> some View {
         // a failed start waiting on the owner reads open: its checkbox and swipe close it (#3713)
         let open = TodoTriageLogic.checksAsOpen(todo, triage)
-        // Got It on a Just finished row (#5707), while the hub keeps seen marks
-        let seen: (() -> Void)? = triage?.section == .justDone && model.hubFeatures.contains(TodoSeen.feature)
+        // Got It only when Seen really files the row; acceptance is a separate action (#5707, #5732).
+        let seen: (() -> Void)? = triage?.section == .justDone && TodoTriageLogic.seenCanFile(todo) && model.hubFeatures.contains(TodoSeen.feature)
             ? { markSeen(todo, after: triage?.last ?? .distantPast) } : nil
         return NavigationLink(value: TodoDetailRoute(id: todo.id)) {
             TodoRow(todo: todo, triage: triage, onToggleDone: { store.toggleDone(todo, done: open) },
@@ -545,7 +557,7 @@ private extension TodoSection {
         case .working: StatusPalette.working
         case .justDone: StatusPalette.unread
         case .pr: StatusTone(dot: Theme.accent, text: Theme.accent)
-        case .other, .shelved, .done: StatusPalette.idle
+        case .other, .shelved, .done, .cancelled: StatusPalette.idle
         }
     }
 }
@@ -604,6 +616,7 @@ struct TodoRow: View {
         let status = TodosLogic.todoStatus(todo, lookup: lookup)
         let urgent = TodosLogic.mostUrgentAgent(todo, lookup: lookup)
         let activeAgents = todo.agents.filter { $0.releasedAt == nil }
+        let lead = TodosLogic.taskLeadAgent(todo, lookup: lookup)
         let ultracode = Ultracode.todoShown(todo, lookup: lookup)
         // a failed start waiting on the owner reads open, not done, and says why in red (#3713, DESIGN_SYSTEM 5.6)
         let shownDone = !TodoTriageLogic.checksAsOpen(todo, triage)
@@ -652,7 +665,9 @@ struct TodoRow: View {
                     }
                 }
 
-                statusLine(status: status, urgent: urgent, activeAgents: activeAgents, onSeen: onSeen)
+                statusLine(status: status, urgent: urgent,
+                           activeAgents: triage?.section == .pr ? [] : activeAgents,
+                           lead: triage?.section == .pr ? nil : lead, onSeen: onSeen)
 
                 // Nobody is working on it (#3618): under its state, where its supervision shows.
                 OrphanedLine(todo: todo, state: status)
@@ -677,6 +692,10 @@ struct TodoRow: View {
                                 .lineLimit(1)
                         }
                     }
+                }
+                // A held delivery stays before the Agent it names (#10904); every other row keeps the original order.
+                if triage?.section == .pr {
+                    HStack(spacing: Theme.Space.sm) { agentWords(activeAgents: activeAgents, lead: lead) }
                 }
 
                 if let onRestore {
@@ -742,9 +761,9 @@ struct TodoRow: View {
     /// Got It ends the status line when the words and chip fit whole. Otherwise only Got It moves to the trailing end
     /// of the next line; the status keeps the wrapping it has without the button. MeasuredOnce avoids remeasuring the
     /// candidates whenever the row moves on screen (#7148, docs/apple/performance.md P7).
-    @ViewBuilder private func statusLine(status: TaskState, urgent: TodoMostUrgent?, activeAgents: [TodoItem.Agent],
+    @ViewBuilder private func statusLine(status: TaskState, urgent: TodoMostUrgent?, activeAgents: [TodoItem.Agent], lead: Session?,
                                         onSeen: (() -> Void)?) -> some View {
-        let words = statusWords(status: status, urgent: urgent, activeAgents: activeAgents)
+        let words = statusWords(status: status, urgent: urgent, activeAgents: activeAgents, lead: lead)
         if let onSeen {
             ViewThatFits(in: .horizontal) {
                 MeasuredOnce {
@@ -769,20 +788,49 @@ struct TodoRow: View {
         }
     }
 
-    /// The status line's words: the state, its agents, the review.
-    @ViewBuilder private func statusWords(status: TaskState, urgent: TodoMostUrgent?, activeAgents: [TodoItem.Agent]) -> some View {
+    /// The status line's words: the state, its lead Agent, the review. Unknown rows keep the Agent count (#10904).
+    @ViewBuilder private func statusWords(status: TaskState, urgent: TodoMostUrgent?, activeAgents: [TodoItem.Agent], lead: Session?) -> some View {
         StatusDot(state: urgent?.status ?? (status == .done ? .idle : .unknown), size: Theme.Size.dotS)
         Text(todo.statusLabel(status))
             .font(Theme.Font.labelStrong)
             .foregroundStyle(todo.shownState(status).todoTone.text)
-        if !activeAgents.isEmpty {
+        agentWords(activeAgents: activeAgents, lead: lead)
+        // An accepted open concern waits for its report in its open state, without an Accepted tag (#3582).
+        if !todo.isDone && !(todo.isConcern && todo.reviewState == .accepted) { ReviewChip(todo: todo, compact: true) }
+    }
+
+    @ViewBuilder private func agentWords(activeAgents: [TodoItem.Agent], lead: Session?) -> some View {
+        if let lead {
+            Text(verbatim: "· \(agentMetadata(lead))")
+                .font(Theme.Font.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+            if activeAgents.count > 1 {
+                Text(String(localized: "+\(activeAgents.count - 1)"))
+                    .font(Theme.Font.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .fixedSize()
+            }
+        } else if !activeAgents.isEmpty {
             Text("· \(activeAgents.count) agents")
                 .font(Theme.Font.caption)
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
         }
-        // An accepted open concern waits for its report in its open state, without an Accepted tag (#3582).
-        if !todo.isDone && !(todo.isConcern && todo.reviewState == .accepted) { ReviewChip(todo: todo, compact: true) }
+    }
+
+    /// The lead Agent's computer and model as the existing machine and model pickers name them; no list read is started.
+    private func agentMetadata(_ lead: Session) -> String {
+        let computer = model.namedMachine(lead.machineRef)?.name ?? lead.machineID
+        var modelName: String?
+        if lead.model?.isEmpty == false, let list = RunningModelLists.shared.models(lead.key, lead), !list.isEmpty {
+            let id = PromptItems.runningModelID(lead.model, list: list)
+            modelName = list.first { $0.id == id }.map(PromptItems.menuName)
+        }
+        modelName = modelName ?? SessionModes.modelName(lead.model)
+        let effort = SessionModes.effortLabel(lead.effort).flatMap { $0.isEmpty ? nil : $0 }
+        return [computer, modelName, effort].compactMap { $0 }.joined(separator: " · ")
     }
 
     /// Got It (#5707) at the end of the status line, under the time (#6578): a compact accent chip, as the minutes' time

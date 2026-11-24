@@ -75,14 +75,8 @@ struct PersonaPicker: View {
     /// any avatar lifted the grid and offered Photos and Files.
     private var newCard: some View {
         Group {
-            #if os(macOS)
-            Button { choosingFile = true } label: { newCardLabel }
-                .buttonStyle(.plain)
-                .macBoundedContextMenu { newCardMenu }
-            #else
             Menu { newCardMenu } label: { newCardLabel } primaryAction: { choosingPhoto = true }
                 .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden)
-            #endif
         }
         .disabled(uploads.loading)
         .accessibilityLabel(String(localized: "New from Photo"))

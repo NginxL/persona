@@ -417,6 +417,7 @@ data class ExtensionContributes(
     @SerialName("auth_relay") val authRelay: List<ExtensionAuthRelayItem>? = null,
     @SerialName("secret_providers") val secretProviders: List<ExtensionSecretProviderItem>? = null,
     @SerialName("repository_providers") val repositoryProviders: List<ExtensionRepositoryProviderItem>? = null,
+    @SerialName("memory_sources") val memorySources: List<ExtensionMemorySourceItem>? = null,
     val messaging: List<ExtensionMessagingItem>? = null,
     /** Extra keys stay at this object's level on the wire; declared fields always win. */
     val additionalProperties: Map<String, JsonElement> = emptyMap(),
@@ -453,12 +454,13 @@ private data class ExtensionContributesKnown(
     @SerialName("auth_relay") val authRelay: List<ExtensionAuthRelayItem>? = null,
     @SerialName("secret_providers") val secretProviders: List<ExtensionSecretProviderItem>? = null,
     @SerialName("repository_providers") val repositoryProviders: List<ExtensionRepositoryProviderItem>? = null,
+    @SerialName("memory_sources") val memorySources: List<ExtensionMemorySourceItem>? = null,
     val messaging: List<ExtensionMessagingItem>? = null,
 )
 
 object ExtensionContributesSerializer : KSerializer<ExtensionContributes> {
     private val known = ExtensionContributesKnown.serializer()
-    private val keys = setOf<String>("connectors", "voice", "transcription", "speech", "computer", "browser", "iphone", "quota", "usage", "providers", "api", "assistant", "mcp_servers", "ui", "agent_sources", "channel", "events", "shortcuts", "skills", "prompts", "themes", "looks", "triage_templates", "agent_filters", "tunnels", "error_reports", "auth_relay", "secret_providers", "repository_providers", "messaging")
+    private val keys = setOf<String>("connectors", "voice", "transcription", "speech", "computer", "browser", "iphone", "quota", "usage", "providers", "api", "assistant", "mcp_servers", "ui", "agent_sources", "channel", "events", "shortcuts", "skills", "prompts", "themes", "looks", "triage_templates", "agent_filters", "tunnels", "error_reports", "auth_relay", "secret_providers", "repository_providers", "memory_sources", "messaging")
     override val descriptor: SerialDescriptor = known.descriptor
 
     override fun deserialize(decoder: Decoder): ExtensionContributes {
@@ -496,6 +498,7 @@ object ExtensionContributesSerializer : KSerializer<ExtensionContributes> {
             authRelay = fields.authRelay,
             secretProviders = fields.secretProviders,
             repositoryProviders = fields.repositoryProviders,
+            memorySources = fields.memorySources,
             messaging = fields.messaging,
             additionalProperties = obj.filterKeys { it !in keys },
         )
@@ -533,6 +536,7 @@ object ExtensionContributesSerializer : KSerializer<ExtensionContributes> {
             authRelay = value.authRelay,
             secretProviders = value.secretProviders,
             repositoryProviders = value.repositoryProviders,
+            memorySources = value.memorySources,
             messaging = value.messaging,
         )
         val obj = output.json.encodeToJsonElement(known, fields) as JsonObject
@@ -865,6 +869,22 @@ data class ExtensionRepositoryProviderItem(
 )
 
 /**
+ * The extension's memory, read by the manager one entry at a time (memory.entries; memory.schema.json) so the hub
+ * decides which entries reach which scene (a conversation's standing context, a recall, a dispatched task, the
+ * Inbox's helper). Needs the program to speak the protocol; one per extension. Once declared, the hub stops
+ * delivering the extension's own text outlets (its assistant instructions, project context, Inbox context and its
+ * connectors' read tools in the assistant's conversations) directly.
+ */
+@Serializable
+data class ExtensionMemorySourceItem(
+    val id: String = "",
+    /**
+     * What settings call the source (My memory). Not only spaces, no control characters.
+     */
+    val name: String = "",
+)
+
+/**
  * A repository provider's optional answer: pr_status (repo.pr_status).
  */
 object ExtensionRepositoryCapability {
@@ -1167,6 +1187,11 @@ data class ExtensionChannelCapabilities(
     @SerialName("max_text") val maxText: Int? = null,
     val asks: String? = null,
     val push: Boolean? = null,
+    /**
+     * It only replies to incoming messages or triggers and cannot send unsolicited proactive messages without
+     * reply_to; testing checks connectivity instead of calling channel.send.
+     */
+    @SerialName("reply_only") val replyOnly: Boolean? = null,
     val typing: Boolean? = null,
     val progress: Boolean? = null,
     val threads: Boolean? = null,
@@ -2001,6 +2026,55 @@ data class ExtensionSecretsResolveParams(
 @Serializable
 data class ExtensionSecretsResolveResult(
     val value: String = "",
+)
+
+/**
+ * A public field name/type; never a value or source path.
+ */
+@Serializable
+data class ExtensionSecretStoreField(
+    val name: String = "",
+    val type: String = "",
+)
+
+/**
+ * The canonical public target approved on the secret storage card.
+ */
+@Serializable
+data class ExtensionSecretStoreTarget(
+    val operation: String = "",
+    val vault: String = "",
+    val item: String? = null,
+    val title: String? = null,
+    val category: String? = null,
+    val fields: List<ExtensionSecretStoreField> = emptyList(),
+)
+
+/**
+ * secrets.store: describe metadata, prepare an expiring node HPKE key after explicit approval, commit one encrypted
+ * payload.
+ */
+@Serializable
+data class ExtensionSecretStoreParams(
+    val contribution: String? = null,
+    val phase: String = "",
+    val target: ExtensionSecretStoreTarget = ExtensionSecretStoreTarget(),
+    val machine: String = "",
+    val session: String = "",
+    @SerialName("key_id") val keyId: String? = null,
+    val sealed: String? = null,
+)
+
+/**
+ * Metadata and a recipient key, or references of written fields. Never values.
+ */
+@Serializable
+data class ExtensionSecretStoreResult(
+    val target: ExtensionSecretStoreTarget = ExtensionSecretStoreTarget(),
+    @SerialName("vault_name") val vaultName: String? = null,
+    val key: String? = null,
+    @SerialName("key_id") val keyId: String? = null,
+    val references: Map<String, String>? = null,
 )
 
 /**
@@ -3092,7 +3166,10 @@ object ExtensionSceneShapeSerializer : KSerializer<ExtensionSceneShape> {
 
 /**
  * A box (UI version 11): at yaw 0, size[0] along +x and size[1] along +y. round rounds its corners seen from above
- * (at most half the smaller size); the app bevels its upright edges no more than half its height.
+ * (at most half the smaller size); the app bevels its upright edges no more than half its height. wall says the box
+ * is a wall, for an app's cutaway (#13036): the outer walls between the camera and the rooms are drawn low (a wall
+ * with a floor on the camera's side, between two rooms, keeps its height), what stands in one is cut to that height,
+ * and what stands tall in front of one is drawn see-through; an app without a cutaway draws it as any box.
  */
 @Serializable
 data class ExtensionSceneBox(
@@ -3105,6 +3182,7 @@ data class ExtensionSceneBox(
     val top: Double = 0.0,
     val color: String? = null,
     val material: String? = null,
+    val wall: Boolean? = null,
 ) : ExtensionSceneShape
 
 /**

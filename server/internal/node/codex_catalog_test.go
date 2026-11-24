@@ -17,6 +17,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/nwverse/persona/server/internal/modelhttp"
 	"github.com/nwverse/persona/server/internal/proto"
 )
 
@@ -61,9 +62,7 @@ func fakeCodex(t *testing.T, version string) {
 	t.Setenv("PATH", bin)
 	t.Setenv("HOME", t.TempDir()) // agentExecutable's fallbacks look under the home and in the system's places
 	t.Setenv("PERSONA_NODEJS", "")
-	systemDirs, distroDir := agentSystemDirs, distroNodeDir
-	agentSystemDirs, distroNodeDir = []string{t.TempDir()}, t.TempDir()
-	t.Cleanup(func() { agentSystemDirs, distroNodeDir = systemDirs, distroDir })
+	hideMachineAgents(t) // and under NVM_DIR: a codex installed with nvm would answer for the fake
 	for _, k := range []string{"HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy", "NO_PROXY", "no_proxy"} {
 		t.Setenv(k, "")
 	}
@@ -741,5 +740,23 @@ func TestCodexCatalogLogNamesOnlyThePath(t *testing.T) {
 	host := strings.TrimPrefix(g.URL, "http://")
 	if out := logged.String(); !strings.Contains(out, "/codex/models below its base URL") || strings.Contains(out, "t0ps3cret") || strings.Contains(out, host) {
 		t.Fatalf("logged %q", out)
+	}
+}
+
+// launcher.env gives personad launch the node's source allowlist for a Codex provider, which a pane need not have.
+func TestLauncherEnvCarriesSourceHostsForCodex(t *testing.T) {
+	fakeCodex(t, "0.167.0")
+	g := newCatalogGateway(t, func(w http.ResponseWriter, r *http.Request) { io.WriteString(w, openAIModelsBody) })
+	n := quietNode()
+	l := codexProvider(g.URL + "/v1")
+	l.Name = "gw"
+	n.setManaged([]proto.ManagedLauncher{l})
+	t.Setenv(modelhttp.SourceHostsEnv, "*.example.com")
+	if got := n.launcherEnv("gw")["model_source_hosts"]; got != "*.example.com" {
+		t.Fatalf("with an allowlist: %v", got)
+	}
+	t.Setenv(modelhttp.SourceHostsEnv, "")
+	if got, ok := n.launcherEnv("gw")["model_source_hosts"]; ok {
+		t.Fatalf("without one: %v", got)
 	}
 }

@@ -1,121 +1,668 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "assistant.schema.json",
-  "title": "Assistant conversations",
-  "description": "Reading the user's conversations with the Persona assistant (docs/extensions/extensions.md \"Assistant conversations\", #1288): assistant.conversations and assistant.messages, with the permission assistant.read in the manifest's permissions.hub, checked against what the user granted (as kb.read is). Read-only. Only the assistant's own space: health-space and guest conversations are never listed or read. Only words: the user's messages and the assistant's replies, without tools, thinking, notices, images, the messages Persona typed in for the model, other sessions' messages and slash commands, and with context blocks stripped from the user's text. Params are strict: an unknown field is invalid_params. Plugin-side: only the hub and the program speak it.",
+  "title": "Assistant conversations and unified entries",
+  "description": "Reading the user's conversations with the Persona assistant (docs/extensions/extensions.md \"Assistant conversations\", #1288): assistant.conversations and assistant.messages, with the permission assistant.read in the manifest's permissions.hub, checked against what the user granted (as kb.read is). Read-only. Only the assistant's own space: health-space and guest conversations are never listed or read. Only words: the user's messages and the assistant's replies, without tools, thinking, notices, images, the messages Persona typed in for the model, other sessions' messages and slash commands, and with context blocks stripped from the user's text. Params are strict: an unknown field is invalid_params. Plugin-side: only the hub and the program speak it. The unified ledger is separate: assistant.entries.list and event.assistant.entries.changed require assistant.entries.read; an explicitly approved extension can read personal entries across all source spaces. origin_space and category are metadata for later labeling and context-dependent use policy.",
   "x-side": "plugin",
   "x-methods": {
-    "assistant.conversations": {"from": "program", "params": "AssistantConversationsParams", "result": "AssistantConversationsResult"},
-    "assistant.messages": {"from": "program", "params": "AssistantMessagesParams", "result": "AssistantMessagesResult"},
-    "assistant.memory": {"from": "program", "params": "AssistantMemoryParams", "result": "AssistantMemoryResult"}
+    "assistant.conversations": {
+      "from": "program",
+      "params": "AssistantConversationsParams",
+      "result": "AssistantConversationsResult"
+    },
+    "assistant.messages": {
+      "from": "program",
+      "params": "AssistantMessagesParams",
+      "result": "AssistantMessagesResult"
+    },
+    "assistant.memory": {
+      "from": "program",
+      "params": "AssistantMemoryParams",
+      "result": "AssistantMemoryResult"
+    },
+    "assistant.entries.list": {
+      "from": "program",
+      "params": "AssistantEntriesParams",
+      "result": "AssistantEntriesResult"
+    }
   },
   "$defs": {
     "AssistantErrorCode": {
-      "description": "error.code of the assistant calls besides permission_denied (data {scope: \"assistant.read\"}, or \"assistant.memory.read\" for assistant.memory): invalid_params; not_found (assistant.messages: no such conversation in the assistant's own space); assistant_offline (the manager is away: try again); machine_offline (the assistant's computer is not connected or not set up: try again).",
+      "description": "error.code of the assistant calls besides permission_denied (data {scope: \"assistant.read\"}, or \"assistant.memory.read\" for assistant.memory, or \"assistant.entries.read\" for assistant.entries.list): invalid_params; not_found (assistant.messages: no such conversation in the assistant's own space); assistant_offline (the manager is away: try again); machine_offline (the assistant's computer is not connected or not set up: try again).",
       "type": "string",
-      "enum": ["invalid_params", "not_found", "assistant_offline", "machine_offline"]
+      "enum": [
+        "invalid_params",
+        "not_found",
+        "assistant_offline",
+        "machine_offline"
+      ]
     },
     "AssistantConversationsParams": {
       "description": "assistant.conversations (assistant.read): the conversations last active at or after since, newest first.",
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "since": {"type": "string", "description": "An RFC 3339 time: last active at or after it."},
-        "until": {"type": "string", "description": "An RFC 3339 time: those known to have started at or after it are left out."},
-        "include_archived": {"type": "boolean"},
-        "limit": {"type": "integer", "minimum": 0, "maximum": 200, "description": "0 is 50."},
-        "offset": {"type": "integer", "minimum": 0}
+        "since": {
+          "type": "string",
+          "description": "An RFC 3339 time: last active at or after it."
+        },
+        "until": {
+          "type": "string",
+          "description": "An RFC 3339 time: those known to have started at or after it are left out."
+        },
+        "include_archived": {
+          "type": "boolean"
+        },
+        "limit": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 200,
+          "description": "0 is 50."
+        },
+        "offset": {
+          "type": "integer",
+          "minimum": 0
+        }
       },
-      "required": ["since"]
+      "required": [
+        "since"
+      ]
     },
     "AssistantConversation": {
       "type": "object",
       "properties": {
-        "id": {"type": "string"},
-        "title": {"type": "string", "description": "Empty while it has none."},
-        "main": {"type": "boolean", "description": "The main conversation."},
-        "archived": {"type": "boolean"},
-        "origin": {"type": "string", "description": "Who opened it: user, channel, inbox, task, spawned, lark_agent or extension."},
-        "started": {"type": "string", "format": "date-time", "x-go-pointer": true, "description": "When it began, when known."},
-        "updated": {"type": "string", "format": "date-time", "description": "Its last activity."}
+        "id": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string",
+          "description": "Empty while it has none."
+        },
+        "main": {
+          "type": "boolean",
+          "description": "The main conversation."
+        },
+        "archived": {
+          "type": "boolean"
+        },
+        "origin": {
+          "type": "string",
+          "description": "Who opened it: user, channel, inbox, task, spawned, lark_agent or extension."
+        },
+        "started": {
+          "type": "string",
+          "format": "date-time",
+          "x-go-pointer": true,
+          "description": "When it began, when known."
+        },
+        "updated": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Its last activity."
+        }
       },
-      "required": ["id", "title", "origin", "updated"]
+      "required": [
+        "id",
+        "title",
+        "origin",
+        "updated"
+      ]
     },
     "AssistantConversationsResult": {
       "type": "object",
       "properties": {
-        "items": {"type": "array", "items": {"$ref": "#/$defs/AssistantConversation"}},
-        "total": {"type": "integer"},
-        "next_offset": {"type": "integer", "x-go-pointer": true}
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/AssistantConversation"
+          }
+        },
+        "total": {
+          "type": "integer"
+        },
+        "next_offset": {
+          "type": "integer",
+          "x-go-pointer": true
+        }
       },
-      "required": ["items", "total"]
+      "required": [
+        "items",
+        "total"
+      ]
     },
     "AssistantMessagesParams": {
       "description": "assistant.messages (assistant.read): one conversation's words in time order, paged by seq.",
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "id": {"type": "string", "minLength": 1, "description": "The conversation (assistant.conversations' id)."},
-        "since": {"type": "string", "description": "An RFC 3339 time: messages at or after it."},
-        "until": {"type": "string", "description": "An RFC 3339 time: messages before it."},
-        "after_seq": {"type": "integer", "minimum": 0, "x-go-pointer": true, "description": "Continue after this seq (the last page's next_seq)."},
-        "limit": {"type": "integer", "minimum": 0, "maximum": 500, "description": "0 is 200."}
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The conversation (assistant.conversations' id)."
+        },
+        "since": {
+          "type": "string",
+          "description": "An RFC 3339 time: messages at or after it."
+        },
+        "until": {
+          "type": "string",
+          "description": "An RFC 3339 time: messages before it."
+        },
+        "after_seq": {
+          "type": "integer",
+          "minimum": 0,
+          "x-go-pointer": true,
+          "description": "Continue after this seq (the last page's next_seq)."
+        },
+        "limit": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 500,
+          "description": "0 is 200."
+        }
       },
-      "required": ["id"]
+      "required": [
+        "id"
+      ]
     },
     "AssistantMessage": {
       "type": "object",
       "properties": {
-        "seq": {"type": "integer"},
-        "at": {"type": "string", "format": "date-time"},
-        "role": {"$ref": "#/$defs/AssistantRole"},
-        "text": {"type": "string"},
-        "truncated": {"type": "boolean", "description": "The text was cut for pages (a very long message)."}
+        "seq": {
+          "type": "integer"
+        },
+        "at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "role": {
+          "$ref": "#/$defs/AssistantRole"
+        },
+        "text": {
+          "type": "string"
+        },
+        "truncated": {
+          "type": "boolean",
+          "description": "The text was cut for pages (a very long message)."
+        }
       },
-      "required": ["seq", "at", "role", "text"]
+      "required": [
+        "seq",
+        "at",
+        "role",
+        "text"
+      ]
     },
     "AssistantRole": {
       "type": "string",
-      "enum": ["user", "assistant"]
+      "enum": [
+        "user",
+        "assistant"
+      ]
     },
     "AssistantMemoryParams": {
       "description": "assistant.memory (assistant.memory.read): the assistant's memory entries of its own space (never the health space's), by name. Read-only.",
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "include_content": {"type": "boolean", "description": "Return each entry's text too: cut at 16 KB each, and left out once a page holds 512 KB of text (truncated says so)."}
+        "include_content": {
+          "type": "boolean",
+          "description": "Return each entry's text too: cut at 16 KB each, and left out once a page holds 512 KB of text (truncated says so)."
+        }
       }
     },
     "AssistantMemoryEntry": {
       "type": "object",
       "properties": {
-        "name": {"type": "string", "description": "The entry's file name."},
-        "description": {"type": "string", "description": "The frontmatter's description; empty without one."},
-        "type": {"type": "string", "description": "The frontmatter's type (or metadata.type); empty without one."},
-        "size": {"type": "integer", "description": "The file's size in bytes."},
-        "created": {"type": "string", "format": "date-time", "x-go-pointer": true, "description": "When the file was made, where the computer's file system keeps it."},
-        "modified": {"type": "string", "format": "date-time"},
-        "content": {"type": "string", "description": "With include_content: the text, perhaps cut."},
-        "truncated": {"type": "boolean", "description": "content was cut or left out for its size."}
+        "name": {
+          "type": "string",
+          "description": "The entry's file name."
+        },
+        "description": {
+          "type": "string",
+          "description": "The frontmatter's description; empty without one."
+        },
+        "type": {
+          "type": "string",
+          "description": "The frontmatter's type (or metadata.type); empty without one."
+        },
+        "size": {
+          "type": "integer",
+          "description": "The file's size in bytes."
+        },
+        "created": {
+          "type": "string",
+          "format": "date-time",
+          "x-go-pointer": true,
+          "description": "When the file was made, where the computer's file system keeps it."
+        },
+        "modified": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "content": {
+          "type": "string",
+          "description": "With include_content: the text, perhaps cut."
+        },
+        "truncated": {
+          "type": "boolean",
+          "description": "content was cut or left out for its size."
+        },
+        "track": {
+          "type": "string",
+          "description": "The track whose memory it is; absent for the main track's. Another track's is shown only to an extension that may read what comes from it: the user's own, or one granted every default category of the track."
+        }
       },
-      "required": ["name", "size", "modified"]
+      "required": [
+        "name",
+        "size",
+        "modified"
+      ]
     },
     "AssistantMemoryResult": {
       "description": "An assistant without memory (none written yet, or the feature off) has no entries.",
       "type": "object",
       "properties": {
-        "entries": {"type": "array", "items": {"$ref": "#/$defs/AssistantMemoryEntry"}}
+        "entries": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/AssistantMemoryEntry"
+          }
+        }
       },
-      "required": ["entries"]
+      "required": [
+        "entries"
+      ]
     },
     "AssistantMessagesResult": {
       "description": "next_seq is set while there is more to read (pass it as after_seq), even when this page has no messages.",
       "type": "object",
       "properties": {
-        "messages": {"type": "array", "items": {"$ref": "#/$defs/AssistantMessage"}},
-        "next_seq": {"type": "integer", "x-go-pointer": true}
+        "messages": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/AssistantMessage"
+          }
+        },
+        "next_seq": {
+          "type": "integer",
+          "x-go-pointer": true
+        }
       },
-      "required": ["messages"]
+      "required": [
+        "messages"
+      ]
+    },
+    "AssistantEntryNullableTime": {
+      "x-untagged": true,
+      "description": "An RFC 3339 expiry timestamp, or null when absent.",
+      "oneOf": [
+        {
+          "type": "string",
+          "format": "date-time"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "AssistantEntryNullableBool": {
+      "x-untagged": true,
+      "description": "Whether the choice is reversible; null means unknown.",
+      "oneOf": [
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "AssistantEntrySource": {
+      "type": "object",
+      "properties": {
+        "machine": {
+          "type": "string"
+        },
+        "session": {
+          "type": "string"
+        },
+        "msg_uuid": {
+          "type": "string"
+        },
+        "card_id": {
+          "type": "string"
+        },
+        "file": {
+          "type": "string"
+        },
+        "line": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "machine",
+        "session"
+      ]
+    },
+    "AssistantEntryScope": {
+      "type": "object",
+      "properties": {
+        "executor": {
+          "type": "string",
+          "enum": [
+            "system",
+            "assistant",
+            "any"
+          ]
+        },
+        "machine": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "project": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "personal": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "executor",
+        "machine",
+        "project",
+        "personal"
+      ]
+    },
+    "AssistantEntryScopeFilter": {
+      "type": "object",
+      "properties": {
+        "executor": {
+          "type": "string",
+          "enum": [
+            "system",
+            "assistant",
+            "any"
+          ]
+        },
+        "machine": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "project": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "personal": {
+          "type": "boolean",
+          "x-go-pointer": true
+        }
+      },
+      "additionalProperties": false
+    },
+    "AssistantEntryDecision": {
+      "type": "object",
+      "properties": {
+        "options": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "selected": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "rejected": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "reason": {
+          "type": "string"
+        },
+        "reversible": {
+          "$ref": "#/$defs/AssistantEntryNullableBool"
+        }
+      },
+      "required": [
+        "options",
+        "selected",
+        "rejected",
+        "reason",
+        "reversible"
+      ]
+    },
+    "AssistantLedgerEntry": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "fact",
+            "preference",
+            "rule",
+            "decision"
+          ]
+        },
+        "text": {
+          "type": "string"
+        },
+        "quote": {
+          "type": "string"
+        },
+        "source": {
+          "$ref": "#/$defs/AssistantEntrySource"
+        },
+        "relayed_via": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "scope": {
+          "$ref": "#/$defs/AssistantEntryScope"
+        },
+        "at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "expires_at": {
+          "$ref": "#/$defs/AssistantEntryNullableTime"
+        },
+        "supersedes": {
+          "type": "string"
+        },
+        "trust": {
+          "type": "string",
+          "enum": [
+            "user_verbatim",
+            "user_relayed",
+            "repo",
+            "agent",
+            "inferred"
+          ]
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "active",
+            "superseded",
+            "expired",
+            "wrong"
+          ]
+        },
+        "by": {
+          "type": "string",
+          "enum": [
+            "user",
+            "agent",
+            "enkeep",
+            "import"
+          ]
+        },
+        "tag": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "decision": {
+          "$ref": "#/$defs/AssistantEntryDecision"
+        },
+        "ext_id": {
+          "type": "string"
+        },
+        "origin_space": {
+          "type": "string"
+        },
+        "category": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "id",
+        "type",
+        "text",
+        "quote",
+        "source",
+        "relayed_via",
+        "scope",
+        "at",
+        "expires_at",
+        "supersedes",
+        "trust",
+        "status",
+        "by",
+        "tag",
+        "origin_space",
+        "category"
+      ]
+    },
+    "AssistantEntriesParams": {
+      "type": "object",
+      "properties": {
+        "after": {
+          "type": "string"
+        },
+        "limit": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 200
+        },
+        "by": {
+          "type": "string",
+          "enum": [
+            "user",
+            "agent",
+            "enkeep",
+            "import"
+          ]
+        },
+        "trust": {
+          "type": "string",
+          "enum": [
+            "user_verbatim",
+            "user_relayed",
+            "repo",
+            "agent",
+            "inferred"
+          ]
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "active",
+            "superseded",
+            "expired",
+            "wrong",
+            "all"
+          ]
+        },
+        "scope": {
+          "$ref": "#/$defs/AssistantEntryScopeFilter"
+        },
+        "tag": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "fact",
+            "preference",
+            "rule",
+            "decision"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "AssistantEntriesResult": {
+      "type": "object",
+      "properties": {
+        "entries": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/AssistantLedgerEntry"
+          }
+        },
+        "after": {
+          "type": "string"
+        },
+        "has_more": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "entries",
+        "after",
+        "has_more"
+      ]
+    },
+    "AssistantEntriesChangedEvent": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "record_id": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string",
+          "const": "wrong"
+        }
+      },
+      "required": [
+        "id",
+        "record_id",
+        "status"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "x-events": {
+    "event.assistant.entries.changed": {
+      "from": "hub",
+      "params": "AssistantEntriesChangedEvent"
     }
   }
 }

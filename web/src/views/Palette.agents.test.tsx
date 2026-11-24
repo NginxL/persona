@@ -6,6 +6,7 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { seedAgentsDisplay } from "../lib/agents-display";
 import type { Machine, Session } from "../lib/types";
 
 vi.hoisted(() => {
@@ -18,7 +19,7 @@ vi.hoisted(() => {
 const { getState, reset } = await import("../lib/store");
 const { closePalette, getPalette, openPalette, setPaletteQuery } = await import("../lib/palette");
 const { t } = await import("../i18n");
-const { getAgentListFilters, resetAgentListFilters } = await import("../lib/agent-list-filters");
+const { filterAgentList, getAgentListFilters, resetAgentListFilters } = await import("../lib/agent-list-filters");
 const { Palette } = await import("./Palette");
 // the palette imports lib/agent-search.ts with the first query typed, and the Filter's menu with its first click: loaded
 // here first, so those imports are answered from the module cache however busy the test run is
@@ -47,6 +48,8 @@ let root: Root;
 let closed = 0;
 beforeEach(() => {
   reset();
+  // Settings › Agents: the Filter is on for these tests (it is off until the hub says so)
+  seedAgentsDisplay({ show_botmux: true, configured: true, show_filter: true });
   resetAgentListFilters();
   localStorage.clear();
   closed = 0;
@@ -116,6 +119,14 @@ describe("⌘K as the Agents list's search", () => {
   it("never turns plain words into filters (#4397)", async () => {
     await search("pinned notes");
     expect(titles()).toEqual(["write pinned notes doc"]);
+  });
+
+  it("offers no Filter Agents list while the list's Filter is off (Settings › Agents), and puts nothing on the list", async () => {
+    seedAgentsDisplay({ show_botmux: true, configured: true, show_filter: false });
+    await search("machine:box");
+    expect(document.body.querySelector("[data-testid=palette-filter-list]")).toBeNull();
+    filterAgentList("machine:box");
+    expect(getAgentListFilters().query).toBe("");
   });
 
   it("Filter Agents list puts the query on the list, and opens the Agents page where the sidebar is not shown", async () => {

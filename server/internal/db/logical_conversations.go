@@ -391,6 +391,41 @@ func (d *DB) ActivateConversationSegment(ctx context.Context, machine, session, 
 	})
 }
 
+// AcceptIdleConversationSwitch accepts an activated batch operation only while
+// no real input needs the first-turn delivery/rollback protocol. The input
+// check and outcome share the logical row lock, so an input arriving at the
+// boundary is either preserved for that protocol or queued after acceptance.
+func (d *DB) AcceptIdleConversationSwitch(ctx context.Context, machine, session, operation string, expectedEpoch int64) (accepted bool, err error) {
+	err = conversationTransaction(ctx, d, func(tx pgx.Tx) error {
+		var epoch int64
+		if err := tx.QueryRow(ctx, `SELECT epoch FROM logical_conversations WHERE machine_id=$1 AND session_id=$2 AND deleted_at IS NULL FOR UPDATE NOWAIT`, machine, session).Scan(&epoch); err != nil {
+			return err
+		}
+		var phase string
+		var recordedExpected int64
+		if err := tx.QueryRow(ctx, `SELECT phase,expected_epoch FROM conversation_switches WHERE logical_machine=$1 AND logical_session=$2 AND operation_id=$3`, machine, session, operation).Scan(&phase, &recordedExpected); err != nil {
+			return err
+		}
+		if phase == "accepted" {
+			accepted = true
+			return nil
+		}
+		if phase != "active" || recordedExpected != expectedEpoch || epoch != expectedEpoch+1 {
+			return ErrConversationEpoch
+		}
+		pending, err := conversationInputPending(ctx, tx, machine, session)
+		if err != nil || pending {
+			return err
+		}
+		if err := resolveConversationSwitchTx(ctx, tx, machine, session, operation, "accepted", ""); err != nil {
+			return err
+		}
+		accepted = true
+		return nil
+	})
+	return accepted, err
+}
+
 // ResolveConversationSwitch is a forward-only outcome. The source is marked for
 // closure only after acceptance; a definite rejection restores it at a new epoch.
 func (d *DB) ResolveConversationSwitch(ctx context.Context, machine, session, operation, outcome, reason string) error {
@@ -419,6 +454,11 @@ func resolveConversationSwitchTx(ctx context.Context, tx pgx.Tx, machine, sessio
 		return ErrConversationEpoch
 	}
 	activated := phase == "active" || epoch == expected+1
+	if activated && outcome == "in_doubt" {
+		// A late preparation failure cannot undo activation. The reconciler
+		// will observe the activated operation and finish or drain its input.
+		return ErrConversationEpoch
+	}
 	if outcome == "accepted" {
 		if !activated || epoch != expected+1 {
 			return ErrConversationEpoch

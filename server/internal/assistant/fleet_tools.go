@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/nwverse/persona/server/internal/assistantwire"
+	"github.com/nwverse/persona/server/internal/connector"
 	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/prompts"
 	"github.com/nwverse/persona/server/internal/proto"
@@ -34,6 +35,9 @@ func (s *Service) mcpTools(ctx context.Context, assistant bool) []proto.Tool {
 		agents, assistantOnly = s.ext.AgentTools(ctx, assistant)
 	}
 	tools := append(s.phoneTools(ctx), agents...)
+	if !assistant {
+		tools = append(tools, toolsNamed(resourceToolNames)...)
+	}
 	if !assistant {
 		tools = append(tools, s.knowledgeFolderTools(ctx)...)
 		tools = append(tools, s.AgentTools()...)       // report_to_supervisor, todo_decisions, todo_decision_add, todo_bind_thread (agentToolNames)
@@ -121,7 +125,11 @@ func (s *Service) sessionMCPTools(ctx context.Context, machine, session string, 
 // state read. Otherwise the failed list is cached until an unrelated link changes.
 func (s *Service) sessionMCPToolsChecked(ctx context.Context, machine, session string, assistant, guestHint bool) (result []proto.Tool, resultErr error) {
 	defer func() { result = localizedMCPTools(result, s.toolLanguage(ctx)) }()
-	assistant = assistant && s.assistantDiscovery(ctx, machine, session)
+	if assistant && !s.assistantDiscovery(ctx, machine, session) {
+		s.logf("mcp tools: assistant discovery denied for machine %s session %s (tool_set=%q); falling back to agent tools", machine, short(session), toolSetOf(ctx))
+		s.noteAssistantDenied(ctx, machine, session, "mcp.tools")
+		assistant = false
+	}
 	allowed, guest, err := s.guestOf(ctx, machine, session)
 	if err != nil {
 		return nil, err
@@ -130,7 +138,7 @@ func (s *Service) sessionMCPToolsChecked(ctx context.Context, machine, session s
 		if s.isWorkMachine(machine) {
 			return []proto.Tool{}, nil
 		}
-		return guestTools(meetingRoomTools(), allowed), nil
+		return guestTools(s.meetingRoomTools(), allowed), nil
 	}
 	if !guest {
 		if guestHint {
@@ -147,6 +155,7 @@ func (s *Service) sessionMCPToolsChecked(ctx context.Context, machine, session s
 		tools := s.mcpTools(ctx, assistant)
 		if assistant {
 			tools = s.guardTools(ctx, machine, session, tools)
+			tools = append(tools, s.spaceTools(ctx, machine, session)...) // space_state_update (track_space_md.go)
 		}
 		if !assistant {
 			tools = append(tools, s.leaderTools(ctx, machine, session)...)
@@ -155,7 +164,7 @@ func (s *Service) sessionMCPToolsChecked(ctx context.Context, machine, session s
 		cfg := s.a2aConfig(ctx)
 		_, hasA2A := s.a2aStore()
 		if hasA2A == nil && (session == "" && s.a2aMachineAllowed(ctx, cfg, s.canonical(machine)) ||
-			s.a2aAllowed(ctx, cfg, a2aRef{s.canonical(machine), session})) {
+			s.a2aToolAllowed(ctx, cfg, a2aRef{s.canonical(machine), session})) {
 			tools = append(tools, toolsNamed(assistantwire.A2AToolNames)...)
 		}
 		if assistant && toolSetOf(ctx) == toolSetSupervise {
@@ -205,10 +214,17 @@ func (s *Service) mcpCallWithOrigin(ctx context.Context, machine, session, name 
 		return proto.TextResult(i18n.T(s.lang(ctx), "assistant-privacy.tool_denied"), true)
 	}
 	if assistant && !s.assistantCaller(ctx, machine, session) {
+		s.noteAssistantDenied(ctx, machine, session, name)
 		return proto.TextResult(i18n.T(s.lang(ctx), "assistant-privacy.assistant_denied"), true)
 	}
 	if res, refused := s.inboxModelRefusal(ctx, machine, session, origin, name); refused {
 		return res
+	}
+	if slices.Contains(resourceToolNames, name) {
+		return s.resourceTool(ctx, machine, session, name, args)
+	}
+	if name == "secret_store" {
+		return s.toolSecretStore(ctx, machine, session, args)
 	}
 	if assistantwire.IsA2ATool(name) {
 		return s.a2aTool(ctx, a2aRef{s.canonical(machine), session}, name, args)
@@ -217,6 +233,9 @@ func (s *Service) mcpCallWithOrigin(ctx context.Context, machine, session, name 
 		return s.Tool(ctx, ToolCall{Name: name, Arguments: args, MachineID: machine, SessionID: session})
 	}
 	if s.ext != nil { // the connectors', Cua's, ego's: ctx is the node's call (its caller going away withdraws a card)
+		if s.ext.ConnectorTool(name) { // a connector is told where the call comes from (connector_context.go)
+			ctx = connector.WithCallContext(ctx, s.connectorCallContext(ctx, session))
+		}
 		if res, ok := s.ext.CallTool(ctx, machine, session, name, args, assistant); ok {
 			return res
 		}
@@ -240,6 +259,9 @@ func (s *Service) mcpCallWithOrigin(ctx context.Context, machine, session, name 
 	if !assistant && isDispatchTool(name) {
 		return s.dispatchTool(ctx, machine, session, name, args)
 	}
+	if assistant && name == spaceStateTool { // listed per conversation (spaceTools), so not in Tools: its handler checks
+		return s.Tool(ctx, ToolCall{Name: name, Arguments: args, MachineID: machine, SessionID: session})
+	}
 	if assistant && s.isOwnTool(ctx, name) {
 		return s.Tool(ctx, ToolCall{Name: name, Arguments: args, MachineID: machine, SessionID: session})
 	}
@@ -252,15 +274,20 @@ func (s *Service) mcpCallWithOrigin(ctx context.Context, machine, session, name 
 			// notify_user's: nothing goes out, the text stays in the conversation, which the meeting page shows.
 			return proto.TextResult(justMeNotice(s.lang(ctx)), false)
 		}
-		if name == "phone_notify" && s.inHealth(ctx, session) {
+		if name == "phone_notify" {
+			// Local phone notifications follow the same privacy rule as notify_user: what they say decides.
 			var a map[string]any
-			if err := json.Unmarshal(args, &a); err != nil {
-				return proto.TextResult(err.Error(), true)
-			}
-			if a != nil {
-				// Local phone notifications follow the same privacy rule as notify_user.
-				a["title"], a["body"] = healthNotice(s.lang(ctx))
-				args, _ = json.Marshal(a)
+			decodeErr := json.Unmarshal(args, &a)
+			title, _ := a["title"].(string)
+			body, _ := a["body"].(string)
+			if space, _ := s.selfSpace(ctx, session); s.exitPolicy(ctx, title+"\n"+body, session, space).Redact {
+				if decodeErr != nil {
+					return proto.TextResult(decodeErr.Error(), true)
+				}
+				if a != nil {
+					a["title"], a["body"] = s.redactedNotice(ctx, s.lang(ctx), space)
+					args, _ = json.Marshal(a)
+				}
 			}
 		}
 		var res proto.ToolResult

@@ -23,6 +23,7 @@ const (
 	pushRelayFailed = "relay_failed" // the phone's relay registration failed (Detail: its words)
 	pushNoRelay     = "no_relay"     // no apns.json, and the phone names no relay (a build without one, or an older app)
 	pushFailed      = "push_failed"  // the way is there, but the last push did not go (Detail: APNs' or the relay's words)
+	pushNoKey       = "no_push_key"  // office network mode: the phone registered no push key, so nothing it can open is sent
 )
 
 // relayErrorMax bounds what a phone may say about its relay registration.
@@ -53,7 +54,11 @@ func (p *Pusher) routeOf(d Device) pushRoute {
 	case p.relayed(d):
 		r.Route = pushRelay
 	case d.RelayError != "":
-		return pushRoute{Route: pushNone, Reason: pushRelayFailed, Detail: d.RelayError}
+		detail := d.RelayError
+		if d.RelayURL != "" {
+			detail += " (relay " + d.RelayURL + ")"
+		}
+		return pushRoute{Route: pushNone, Reason: pushRelayFailed, Detail: detail}
 	case d.RelayURL != "" && d.RelayGrant != "":
 		return pushRoute{Route: pushNone, Reason: pushRelayFailed, Detail: "no push key"}
 	default:

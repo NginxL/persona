@@ -18,9 +18,10 @@ import (
 // Text the hub writes for people (API errors, statuses, pushes, notify, server-rendered pages) comes from the
 // catalogs, not from Chinese written into the code (docs/protocol/i18n.md). This is a ratchet while the strings move: per
 // file, the number of string literals with CJK text may only go down (hardcoded-baseline.json; a file at zero leaves
-// it), the same as the web's src/i18n/hardcoded-baseline.json. Comments and tests don't count; a line that has to
-// keep its Chinese (it is matched by its original, it goes to a model, it is stored) says `i18n-ignore` in a comment
-// on that line or the line above.
+// it), the same as the web's src/i18n/hardcoded-baseline.json. Only a rise fails: a file under its record is noted, and
+// lowering the record is tidying anyone can do (docs/operations/testing.md, "Count ratchets"). Comments and tests
+// don't count; a line that has to keep its Chinese (it is matched by its original, it goes to a model, it is stored)
+// says `i18n-ignore` in a comment on that line or the line above.
 const hardcodedBaseline = "hardcoded-baseline.json"
 
 // hardcodedDirs are the packages (with their subpackages) whose text can reach a client, relative to server/.
@@ -36,12 +37,17 @@ var hardcodedDirs = []string{
 	"internal/devices",
 	"internal/extension",
 	"internal/extmgr",
-	"internal/feishubot",
+	"internal/botcard",
+	"internal/modules/lark",
 	"internal/hub",
-	"internal/mail",
+	"internal/githubwire",
+	"internal/modules/github",
+	"internal/modules/imessage",
+	"internal/modules/mail",
+	"internal/mailwire",
 	"internal/quota",
 	"internal/update",
-	"internal/voice",
+	"internal/modules/voice",
 	"internal/workspaceboard",
 	"plugins",
 }
@@ -280,8 +286,8 @@ func TestHardcodedTerminalBaseline(t *testing.T) {
 		"move it into locales/ and print it with i18n.T(i18n.Terminal(), …) (or mark text that must stay with // i18n-ignore: <why>)")
 }
 
-// checkHardcodedBaseline fails when a file has more literals than the baseline file name records, and asks for a new
-// record when one has fewer; UPDATE_I18N_BASELINE=1 writes it (never higher).
+// checkHardcodedBaseline fails when a file has more literals than the baseline file name records, and notes the files
+// that have fewer, which pass; UPDATE_I18N_BASELINE=1 writes the lower record (never higher).
 func checkHardcodedBaseline(t *testing.T, name string, counts map[string]int, hits map[string][]hardcodedHit, test, fix string) {
 	t.Helper()
 	raw, err := os.ReadFile(name)
@@ -321,7 +327,8 @@ func checkHardcodedBaseline(t *testing.T, name string, counts map[string]int, hi
 		return
 	}
 	if len(stale) > 0 {
-		t.Errorf("fewer hard-coded strings now: run UPDATE_I18N_BASELINE=1 go test ./internal/i18n/ -run %s\n%s",
-			test, strings.Join(stale, "\n"))
+		t.Logf("fewer hard-coded strings now; lowering %s is tidying anyone can do, not this change's job: "+
+			"python3 scripts/ci/lower_baselines.py, or UPDATE_I18N_BASELINE=1 go test ./internal/i18n/ -run %s\n%s",
+			name, test, strings.Join(stale, "\n"))
 	}
 }

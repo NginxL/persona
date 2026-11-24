@@ -5,11 +5,12 @@ import (
 	"fmt"
 	"path/filepath"
 
+	"github.com/nwverse/persona/server/internal/cliport"
 	"github.com/nwverse/persona/server/internal/connector"
-	"github.com/nwverse/persona/server/internal/connector/github"
-	"github.com/nwverse/persona/server/internal/connector/imessage"
 	"github.com/nwverse/persona/server/internal/extension/denohost"
+	"github.com/nwverse/persona/server/internal/githubwire"
 	"github.com/nwverse/persona/server/internal/identity"
+	"github.com/nwverse/persona/server/internal/imessagewire"
 	"github.com/nwverse/persona/server/internal/lark"
 	"github.com/nwverse/persona/server/internal/managerconf"
 	"github.com/nwverse/persona/server/internal/proto"
@@ -26,10 +27,10 @@ type Config struct {
 	Lark lark.Config `json:"lark"`
 	// LarkGate and ConnectorGate: the rules for the assistant's Feishu writes and the connectors' writes
 	// (internal/connector/gate.go).
-	LarkGate      []proto.LarkRule `json:"lark_gate,omitempty"`
-	ConnectorGate []connector.Rule `json:"connector_gate,omitempty"`
-	GitHub        *github.Config   `json:"github,omitempty"`
-	IMessage      *imessage.Config `json:"imessage,omitempty"`
+	LarkGate      []proto.LarkRule     `json:"lark_gate,omitempty"`
+	ConnectorGate []connector.Rule     `json:"connector_gate,omitempty"`
+	GitHub        *githubwire.Config   `json:"github,omitempty"`
+	IMessage      *imessagewire.Config `json:"imessage,omitempty"`
 	// Google and Microsoft: mail's sign-ins (docs/extensions/mail.md).
 	Google                  GoogleConfig      `json:"google"`
 	Microsoft               MicrosoftConfig   `json:"microsoft,omitempty"`
@@ -64,6 +65,8 @@ type Config struct {
 type ExtensionMarketConfig struct {
 	// Proxy is an http:// or socks5:// URL used for catalog reads, package downloads and HTTPS git clones.
 	Proxy string `json:"proxy,omitempty"`
+	// CAFile is the path to a PEM bundle appended to the system roots for the marketplace HTTP client only.
+	CAFile string `json:"ca_file,omitempty"`
 }
 
 // RemoteImagesConfig is manager.json's remote_images: DoH is the DNS-over-HTTPS JSON API asked for a host's real
@@ -134,6 +137,10 @@ func loadConfig(dir, file string) (*Config, error) {
 	if err := cfg.Lark.Validate(); err != nil { // was the hub's check at start; now the manager's, which uses it
 		cfg.warnings = append(cfg.warnings, err.Error()+": lark is not read")
 		cfg.Lark = lark.Config{}
+	}
+	if cfg.Lark.CLI != nil && !cliport.Available() { // a build without the lark module (persona_without_lark)
+		cfg.warnings = append(cfg.warnings, "lark.cli is not read: "+cliport.ErrUnavailable.Error())
+		cfg.Lark.CLI = nil
 	}
 	if cfg.Lark.LegacyGatewayConfigured() {
 		cfg.warnings = append(cfg.warnings, "lark.container / token / base_url are not read any more: Feishu through a Lark "+

@@ -7,7 +7,7 @@ import persona.feature.agents.AgentsDraftSource
 import persona.feature.agents.AgentsOperationsBindings
 import persona.feature.agents.AgentsWiringState
 import persona.feature.chat.ChatAppBindings
-import persona.feature.inbox.InboxSnapshot
+import persona.core.inbox.InboxSnapshot
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.*
 import kotlinx.serialization.json.JsonElement
@@ -30,12 +30,23 @@ internal class GroupNames(val namespace: String?) {
     fun owns(machineId: String) = GroupKeys.namespaceOf(machineId) == namespace
 
     fun machine(value: Machine) = if (plain) value else value.copy(id = machineId(value.id), name = value.name.ifEmpty { value.id })
-    fun session(value: Session) = if (plain) value else value.copy(machineId = machineId(value.machineId))
+    fun session(value: Session) = if (plain) value else value.copy(
+        machineId = machineId(value.machineId),
+        parentMachineId = value.parentMachineId?.takeIf(String::isNotBlank)?.let(::machineId),
+        foldedUnderMachineId = value.foldedUnderMachineId?.takeIf(String::isNotBlank)?.let(::machineId),
+    )
     /** Interaction ids are the hub's own and two hubs can use the same one: other groups' carry the suffix too. */
     fun interactionId(raw: String) = GroupKeys.machine(raw, namespace)
-    fun interaction(value: Interaction) = if (plain) value else value.copy(id = interactionId(value.id), machineId = machineId(value.machineId))
-    fun rawInteraction(value: Interaction) = if (plain) value else
-        value.copy(id = GroupKeys.raw(value.id), machineId = rawMachine(value.machineId))
+    fun interaction(value: Interaction) = if (plain) value else value.copy(
+        id = interactionId(value.id),
+        machineId = machineId(value.machineId),
+        foldedUnderMachineId = value.foldedUnderMachineId?.takeIf(String::isNotBlank)?.let(::machineId),
+    )
+    fun rawInteraction(value: Interaction) = if (plain) value else value.copy(
+        id = GroupKeys.raw(value.id),
+        machineId = rawMachine(value.machineId),
+        foldedUnderMachineId = value.foldedUnderMachineId?.takeIf(String::isNotBlank)?.let(::rawMachine),
+    )
     fun fleet(value: FleetState) = if (plain) value else value.copy(items = value.items.map { item ->
         // The id is "machine/session": FleetSummary.key opens and answers by its machine part.
         item.copy(id = path(item.id), interaction = item.interaction?.let(::interactionId))
@@ -78,7 +89,11 @@ internal class GroupNames(val namespace: String?) {
     // Plain values for the group's own services. Ids of another group never reach them (the facades route by suffix).
     fun raw(key: SessionKey) = GroupKeys.rawKey(key)
     fun rawMachine(machineId: String) = GroupKeys.raw(machineId)
-    fun rawSession(value: Session) = if (plain) value else value.copy(machineId = GroupKeys.raw(value.machineId))
+    fun rawSession(value: Session) = if (plain) value else value.copy(
+        machineId = GroupKeys.raw(value.machineId),
+        parentMachineId = value.parentMachineId?.takeIf(String::isNotBlank)?.let(::rawMachine),
+        foldedUnderMachineId = value.foldedUnderMachineId?.takeIf(String::isNotBlank)?.let(::rawMachine),
+    )
     fun rawDraftKey(value: DraftKey) = if (plain || value !is DraftKey.Chat) value else DraftKey.Chat(raw(value.session))
     fun rawDraft(value: DraftSnapshot) = if (plain) value else value.copy(key = rawDraftKey(value.key))
     fun rawOperationPreferences(value: AgentOperationPreferences) = if (plain) value else
@@ -176,6 +191,8 @@ internal fun ChatActions.inGroup(names: GroupNames): ChatActions {
         override suspend fun isMuted(session: Session) = source.isMuted(names.rawSession(session))
         override suspend fun execute(session: Session, action: ChatAction) = source.execute(names.rawSession(session), action)
         override suspend fun verify(session: Session, action: ChatAction) = source.verify(names.rawSession(session), action)
+        override suspend fun continueStart(session: Session, choice: String) =
+            names.session(source.continueStart(names.rawSession(session), choice))
         override suspend fun editQueue(session: Session, keep: List<Int>) = source.editQueue(names.rawSession(session), keep)
         override suspend fun sendQueuedNow(session: Session) = source.sendQueuedNow(names.rawSession(session))
         override suspend fun retryUndelivered(session: Session, messageId: String) =
@@ -199,6 +216,19 @@ internal fun ChatActions.inGroup(names: GroupNames): ChatActions {
         override suspend fun catalogPrices(ids: List<String>) = source.catalogPrices(ids)
         override suspend fun fork(session: Session, atItemId: String) = source.fork(names.rawSession(session), atItemId)
         override suspend fun rewind(session: Session, target: RewindTarget, restore: RewindRestore) = source.rewind(names.rawSession(session), target, restore)
+        override suspend fun codexTakeoverInfo(session: Session) = source.codexTakeoverInfo(names.rawSession(session))
+        override suspend fun codexTakeover(session: Session, token: String, confirmStop: Boolean) =
+            names.session(source.codexTakeover(names.rawSession(session), token, confirmStop))
+        override suspend fun startCodexContinuation(session: Session, info: CodexTakeoverInfo, operationId: String) =
+            when (val r = source.startCodexContinuation(names.rawSession(session), info, operationId)) {
+                is AgentStartResult.Created -> AgentStartResult.Created(names.session(r.session))
+                else -> r
+            }
+        override suspend fun codexContinuationOperation(session: Session, operationId: String) =
+            when (val r = source.codexContinuationOperation(names.rawSession(session), operationId)) {
+                is AgentStartResult.Created -> AgentStartResult.Created(names.session(r.session))
+                else -> r
+            }
     }
 }
 
@@ -342,6 +372,17 @@ internal fun AssistantManagement.inGroup(names: GroupNames): AssistantManagement
             })
         }
         override suspend fun revokeStandingAuthorization(id: String) = source.revokeStandingAuthorization(id)
+        override suspend fun tracks() = source.tracks()
+        override suspend fun trackKinds() = source.trackKinds()
+        override suspend fun createTrack(track: persona.core.contracts.api.TrackCreate) = source.createTrack(track)
+        override suspend fun changeTrack(slug: String, change: persona.core.contracts.api.TrackChange) = source.changeTrack(slug, change)
+        override suspend fun spaceMd(slug: String) = source.spaceMd(slug)
+        override suspend fun writeSpaceMd(slug: String, content: String, baseDigest: String) = source.writeSpaceMd(slug, content, baseDigest)
+        override suspend fun conversationCategories(session: SessionKey) = source.conversationCategories(names.raw(session))
+        override suspend fun changeConversationCategories(session: SessionKey, add: List<String>, remove: List<String>) =
+            source.changeConversationCategories(names.raw(session), add, remove)
+        override suspend fun extensionTrust() = source.extensionTrust()
+        override suspend fun setExtensionTrust(id: String, trust: persona.core.contracts.api.ExtensionTrust) = source.setExtensionTrust(id, trust)
     }
 }
 
@@ -368,7 +409,8 @@ internal fun AssistantConversations.inGroup(names: GroupNames, scope: CoroutineS
             AssistantSnapshot(snapshot.mainSession?.let(names::key), snapshot.conversations.map(names::session), snapshot.manager, snapshot.managerId,
                 snapshot.leaders, snapshot.directionNames,
                 directionTree = snapshot.directionTree?.mapMachines(names::machineId),
-                backgroundSupervisor = snapshot.backgroundSupervisor, recentTaskChats = snapshot.recentTaskChats)
+                backgroundSupervisor = snapshot.backgroundSupervisor, recentTaskChats = snapshot.recentTaskChats,
+                externalDirections = snapshot.externalDirections.mapValues { it.value.mapMachine(names::machineId) })
         }
         override val pinned = source.pinned.mapIn(scope) { keys -> keys.mapTo(LinkedHashSet(), names::key) }
         override suspend fun refresh() = source.refresh()
@@ -401,6 +443,20 @@ internal fun AgentOperations.inGroup(names: GroupNames): AgentOperations {
         override suspend fun attachSession(key: SessionKey) = source.attachSession(names.raw(key))
         override suspend fun interruptSession(key: SessionKey) = source.interruptSession(names.raw(key))
         override suspend fun deleteSession(key: SessionKey) = source.deleteSession(names.raw(key))
+        override suspend fun forkSession(key: SessionKey) = source.forkSession(names.raw(key))
+        override suspend fun codexTakeoverInfo(key: SessionKey) = source.codexTakeoverInfo(names.raw(key))
+        override suspend fun codexTakeover(key: SessionKey, token: String, confirmStop: Boolean) =
+            names.session(source.codexTakeover(names.raw(key), token, confirmStop))
+        override suspend fun startCodexContinuation(key: SessionKey, info: CodexTakeoverInfo, operationId: String, todoId: String?) =
+            when (val r = source.startCodexContinuation(names.raw(key), info, operationId, todoId)) {
+                is AgentStartResult.Created -> AgentStartResult.Created(names.session(r.session))
+                else -> r
+            }
+        override suspend fun codexContinuationOperation(key: SessionKey, operationId: String) =
+            when (val r = source.codexContinuationOperation(names.raw(key), operationId)) {
+                is AgentStartResult.Created -> AgentStartResult.Created(names.session(r.session))
+                else -> r
+            }
     }
 }
 

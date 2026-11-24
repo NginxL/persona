@@ -215,6 +215,13 @@ func (r *reading) failedStart() placement {
 		}
 		return r.rest()
 	}
+	if f.Supervision != nil && f.Supervision.Supervisor != "" {
+		// A supervised task's failed start is its supervisor's to retry, remedy or give up on (the start remedies and
+		// the failed signal go there): Persona works on it, and only the supervisor's needs_user brings it to the owner.
+		p := r.at(assistantwire.TodoPhaseWorking, assistantwire.TodoListSectionWorking, assistantwire.TodoReasonPersonaWorking)
+		p.Line, p.Since = line(assistantwire.TodoLineKeyFailedStart, "error", f.StartError), utc(failed)
+		return p
+	}
 	p := r.at(assistantwire.TodoPhaseNeedsYou, assistantwire.TodoListSectionNeedsYou, assistantwire.TodoReasonFailedStart)
 	p.Line, p.Since = line(assistantwire.TodoLineKeyFailedStart, "error", f.StartError), utc(failed)
 	if f.Origin != "" {

@@ -3,6 +3,8 @@
   "assistant_chats_only": "只能选助手的对话",
   "no_feature": "{name} 没有「{feature}」这个功能",
   "not_connected": "{name} 还没连上",
+  "cannot_send": "{name} 暂时无法主动发送测试消息（请先在渠道里发一条消息，或该渠道仅支持回复触发消息）。",
+  "reply_only_test_ok": "{name} 已连接并就绪。该渠道仅回复收到的消息，未主动发送测试消息。",
   "test_message": "这是来自 Persona 的测试消息：这个渠道能联系到你。",
   "ended": "已结束"
 }

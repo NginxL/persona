@@ -132,9 +132,11 @@ func TestOwnersDecisionEndsAParkingThatWaitsForThem(t *testing.T) {
 // decision ended the park and nobody was told, so the signal is raised again. A park's time that was waiting is moot.
 func TestDecisionThatEndedAParkingIsToldAfterARestart(t *testing.T) {
 	s, _, todo := newSupervisedServiceOn(t, todoTestDB(t))
+	// Both signals are immediate. Keep delivery stopped while the decision
+	// replaces parked_due and while the watch recovers park_decided.
+	stopSupervisionTimers(s)
 	ctx := context.Background()
 	parkFor(t, s, todo.ID, "Ada has to say which region goes first", "someone_else", "2h")
-	holdDigest(s)
 	s.superviseWatch(ctx, time.Now().Add(3*time.Hour))
 	if got := pendingKinds(s, todo.ID); !slices.Equal(got, []string{sigParkedDue}) {
 		t.Fatalf("signals at its time: %v", got)
@@ -153,7 +155,6 @@ func TestDecisionThatEndedAParkingIsToldAfterARestart(t *testing.T) {
 		t.Fatalf("marked told before a message carried it: %+v", r)
 	}
 	forgetUntold(s)
-	holdDigest(s)
 	s.superviseWatch(ctx, time.Now())
 	if got := pendingKinds(s, todo.ID); !slices.Equal(got, []string{sigParkDecided}) {
 		t.Fatalf("signals after the restart: %v", got)
@@ -301,9 +302,9 @@ func TestDecisionStoredWhileTheLedgerFailsStillEndsTheParking(t *testing.T) {
 // the decision still reaches it, saying the task was parked again, and the new park is not ended by the old decision.
 func TestDecisionReachesTheSupervisorThatParkedAgainBeforeItWasTold(t *testing.T) {
 	s, f, todo := newSupervisedServiceOn(t, todoTestDB(t))
+	stopSupervisionTimers(s)
 	ctx := context.Background()
 	parkFor(t, s, todo.ID, "Whether this goes ahead of the billing work", "owner_priority", "3d")
-	holdDigest(s)
 	writeDecision(t, s, todo.ID, "Do this now or after the billing work?", "After the billing work")
 	if got := pendingKinds(s, todo.ID); !slices.Equal(got, []string{sigParkDecided}) {
 		t.Fatalf("signals after the decision: %v", got)
@@ -314,7 +315,6 @@ func TestDecisionReachesTheSupervisorThatParkedAgainBeforeItWasTold(t *testing.T
 		t.Fatalf("signals after parking again: %v", got)
 	}
 	forgetUntold(s) // a restart in between: the ledger still knows nobody was told
-	holdDigest(s)
 	s.superviseWatch(ctx, time.Now())
 	if got := pendingKinds(s, todo.ID); !slices.Equal(got, []string{sigParkDecided}) {
 		t.Fatalf("signals after a restart: %v", got)
@@ -324,19 +324,21 @@ func TestDecisionReachesTheSupervisorThatParkedAgainBeforeItWasTold(t *testing.T
 	}
 
 	before := len(f.notices())
-	releaseDigest(s)
-	waitFor(t, "the supervisor's message", func() bool { return len(f.notices()) > before })
-	n := f.notices()[before]
+	s.sendDigest(ctx)
+	notices := f.notices()[before:]
+	if len(notices) != 1 {
+		t.Fatalf("notices after digest = %v, want one", notices)
+	}
+	n := notices[0]
 	for _, want := range []string{"搁置期间用户在任务上记下了新的决定", "这条消息到之前你又搁置了它", "The billing work lands first",
 		"Do this now or after the billing work?", "After the billing work"} {
 		if !strings.Contains(n, want) {
 			t.Errorf("the message lacks %q:\n%s", want, n)
 		}
 	}
-	waitFor(t, "the mark on the review", func() bool {
-		r := todoNow(s, todo.ID).Supervision.decidedPark()
-		return r != nil && !r.DecidedTold.IsZero()
-	})
+	if r := todoNow(s, todo.ID).Supervision.decidedPark(); r == nil || r.DecidedTold.IsZero() {
+		t.Fatalf("decision delivery left no receipt: %+v", r)
+	}
 	forgetSignals(t, s)
 	s.superviseWatch(ctx, time.Now())
 	if got := pendingKinds(s, todo.ID); len(got) != 0 {

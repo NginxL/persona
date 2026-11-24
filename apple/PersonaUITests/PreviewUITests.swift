@@ -52,6 +52,7 @@ final class PreviewUITests: XCTestCase {
         }
         see(more, "no ⋯", app)
         more.tap()
+        app.openAgentMenuMore() // Preview is More's (#13396)
         let item = app.buttons["预览"].firstMatch
         see(item, "no 预览 in the chat's menu", timeout: 5, app)
         if shoot { sleep(1); shot(app, "menu") }

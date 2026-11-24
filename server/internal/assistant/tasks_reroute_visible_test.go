@@ -63,6 +63,7 @@ func TestRerouteRecordedWithDisplayNames(t *testing.T) {
 	failWorkLauncherCheck(s, "server") // leave box as the single healthy alternative.
 
 	task := planFirstTask(t, s, "l4")
+	checkPlacementGolden(t, task.Placement, "v1 enforce l4 -> box (healthy_launcher) | l4 launcher_unhealthy | server launcher_unhealthy | box health=1")
 	if task.Machine != "box" {
 		t.Fatalf("task was not rerouted to box: %+v", task)
 	}

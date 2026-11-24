@@ -42,17 +42,11 @@ struct HubAddressesPage: View {
             }
             Section {
                 VStack(alignment: .leading, spacing: Theme.Space.xxs) {
-                    #if os(macOS)
-                    TextField(String(localized: "Address"), text: $url, prompt: Text(verbatim: "https://hub.example.com"))
-                        .autocorrectionDisabled()
-                        .accessibilityIdentifier("addresses.url")
-                    #else
                     TextField(String(localized: "Address"), text: $url, prompt: Text(verbatim: "https://hub.example.com"))
                         .keyboardType(.URL)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
                         .accessibilityIdentifier("addresses.url")
-                    #endif
                     hint(input(hub))
                 }
                 // Closed until needed, as in the pairing sheet: most addresses have no token.
@@ -90,11 +84,7 @@ struct HubAddressesPage: View {
             if let s = UserDefaults.standard.string(forKey: "showHubAddressDraft") { url = s }
         }
         #endif
-        #if os(macOS)
-        .formStyle(.grouped)
-        #else
         .pageToolbar { if added.count > 1 { ToolbarItem(placement: .topBarTrailing) { EditButton() } } }
-        #endif
     }
 
     private func row(_ url: URL, access: Bool, inUse: Bool, paired: Bool) -> some View {

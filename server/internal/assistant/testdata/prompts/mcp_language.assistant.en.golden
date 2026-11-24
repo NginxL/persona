@@ -1,5 +1,19 @@
 [
   {
+    "name": "resource_status",
+    "description": "Read registered shared runners, queue tickets, duplicate markers and mirror freshness. An unknown or stale mirror is not a successful result.",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "resource": {
+          "type": "string"
+        }
+      },
+      "required": []
+    },
+    "defer_loading": true
+  },
+  {
     "name": "ask_user",
     "description": "Ask the user one or more multiple-choice questions on their iPhone (a card in this conversation plus a push notification) and wait for the answers. Use it to confirm anything risky (sending messages / email for them, deleting, changing live systems) or to let them pick between options. AskUserQuestion does not work here; use this. They can also type a free-form answer. Waits up to 2 hours; if the user writes in this conversation instead of picking an option, the question is withdrawn and the tool returns at once, with their message following. If nobody answers in time, the question becomes a to-do that waits for the user's call (in their to-do list and the next briefing), and their answer comes to this conversation later as a new message. With a deadline (each question then recommends one of its options): if nobody answers by it and you marked it reversible, the recommended options are taken by default and recorded on the question's to-do; one that cannot be undone is only reminded again and keeps waiting. With wait false the card goes up the same way but the call returns at once: end the turn without guessing the answer; it comes later as a new message quoting the question and the answer (or saying the card was closed unanswered, or expired and became a to-do). Use wait false only where your instructions say to; a confirmation this same turn needs (approving a message before it is sent) keeps the default. A waiting call holds this turn, so anything else sent to this conversation waits behind it: once such a message waits and the question has been up for a couple of minutes, the call returns without the answer and the card stays up as with wait false; end the turn then.\n\nWrite newly generated user-facing arguments, such as titles, reasons, criteria and messages, in English unless the user requests another language or the field requires source wording. Preserve quoted source text, identifiers, tool and parameter names, enum values and command prefixes exactly. Language does not change approval requirements or permission boundaries.",
     "input_schema": {
@@ -520,7 +534,7 @@
   },
   {
     "name": "agent_send",
-    "description": "Send what the user asked for to an Agent. A busy Agent may queue it. A stopped Agent needs resume and resume_why when its context is needed. Recorded non-user stops (including quota/capacity errors) allow resume. User, exit or unknown stops need the user's Resume. It must be supervised (give task unless on an open task of yours). A nearly full Agent is compacted first. For unrelated work use agent_start. Unsure: ask_user. An unstarted branch starts on its first message. Only /exit or /quit stops a running Agent and keeps the tab. The owner's controls close another conversation's Agent.\n\nFor dialog_open, retry with dismiss_notice only when Enter alone closes the notice. For permissions and pickers, tell the user or use interaction_answer.\n\nFrom the main conversation, give task to supervise new work, including done_when in text. More on your existing task keeps its title and updates its criteria. A different title, the user's own to-do or another conversation's task is refused. A failed send creates no task. Omit task for a reply, nudge or decision.\n\nUse `handoff` for an already-stopped to-do you supervise. A node acknowledgement starts its wait for the receiving Agent's result.\n\n`wait_seconds` observes up to 50 seconds after dispatch, appending `Inline observation` JSON: `completed`(this input's `reply`), `question`(pending `interaction_id`), `timeout`/`cancelled`/`unavailable`/`interrupted`/`failed`, with known input/session ids. Observation never answers questions, accepts tasks, resends or cancels work; normal supervision/`task_review` applies. Older nodes may time out rather than return an unrelated reply.\n\nWrite newly generated user-facing arguments, such as titles, reasons, criteria and messages, in English unless the user requests another language or the field requires source wording. Preserve quoted source text, identifiers, tool and parameter names, enum values and command prefixes exactly. Language does not change approval requirements or permission boundaries.",
+    "description": "Send what the user asked for to an Agent. A busy Agent may queue it. A stopped Agent needs resume and resume_why when its context is needed. Any stop but the user's allows resume, an unknown one too. User or exit stops need the user's Resume. It must be supervised (give task unless on an open task of yours). A nearly full Agent is compacted first. For unrelated work use agent_start. Unsure: ask_user. An unstarted branch starts on its first message. Only /exit or /quit stops a running Agent and keeps the tab. The owner's controls close another conversation's Agent.\n\nFor dialog_open, retry with dismiss_notice only when Enter alone closes the notice. For permissions and pickers, tell the user or use interaction_answer.\n\nGive task to supervise new work, including done_when in text. More on your existing task keeps its title and updates its criteria. A different title, the user's own to-do or another conversation's task is refused. A failed send creates no task. Omit task for a reply, nudge or decision.\n\nUse `handoff` for an already-stopped to-do you supervise. A node acknowledgement starts its wait for the receiving Agent's result.\n\n`wait_seconds` observes up to 50 seconds after dispatch, appending `Inline observation` JSON: `completed`(this input's `reply`), `question`(pending `interaction_id`), `timeout`/`cancelled`/`unavailable`/`interrupted`/`failed`, with known input/session ids. Observation never answers questions, accepts tasks, resends or cancels work; normal supervision/`task_review` applies. Older nodes may time out rather than return an unrelated reply.\n\nWrite newly generated user-facing arguments, such as titles, reasons, criteria and messages, in English unless the user requests another language or the field requires source wording. Preserve quoted source text, identifiers, tool and parameter names, enum values and command prefixes exactly. Language does not change approval requirements or permission boundaries.",
     "input_schema": {
       "type": "object",
       "required": [
@@ -598,7 +612,7 @@
             "object",
             "null"
           ],
-          "description": "new work: make it your supervised task first (main conversation only); null for a reply",
+          "description": "new work: make it your supervised task first (main or a lead); null for a reply",
           "additionalProperties": false,
           "properties": {
             "title": {
@@ -663,7 +677,7 @@
   },
   {
     "name": "agents_switch",
-    "description": "Move many Claude Code agents to another launcher on their computers in one call. Use it when the user asks to move agents to another launcher (\"move everything on the default launcher to X\", \"switch these to X\"), for example because they watch their subscription quota; never on your own. Name the agents in `agents`, or leave it out to take every Claude Code agent (running ones, and stopped ones Persona started), narrowed by `machine` and `from_launcher` (`claude` is the default launcher). First call it with `preview` true and tell the user what it will do with each agent, then call it again without `preview` once they agree; when the user already named exactly which agents and where, one call is enough. Each agent goes as its state allows: one its usage limit stopped is switched now and goes on with what it was doing; an idle one is switched now and nothing is sent (it waits on the new launcher for the next message); one that is working, waits for the user (a question, a permission, a plan), is starting or has background work is queued and switched when its turn ends (with the usage-limit continuation if that turn ended on a limit); a stopped one Persona started has the launcher it resumes on changed, so its next Resume, or the message that resumes it, comes up on the new launcher; one the checks refuse (another CLI, a runtime's session, an assistant conversation, a launcher that does not run there, a model the launcher's default cannot be read for: give model) is reported and left as it is, and so is one whose switch failed on its computer (it is back on its launcher; not tried again: tell the user why). The answer has one line per agent: switched and continued, switched, switched (takes effect when resumed), queued, or refused with why. A queued switch is dropped if the agent moves to another launcher meanwhile or after a day; if it stops meanwhile, its Resume is pointed at the new launcher instead; agents_list shows queued ones as switch_queued=. The switch is the same as the user's from the agent's chat: same conversation, same terminal.\n\nWrite newly generated user-facing arguments, such as titles, reasons, criteria and messages, in English unless the user requests another language or the field requires source wording. Preserve quoted source text, identifiers, tool and parameter names, enum values and command prefixes exactly. Language does not change approval requirements or permission boundaries.",
+    "description": "Move Claude Code agents to another launcher only when the user asks. Name `agents`, or select all running and Persona-started stopped agents, filtered by `machine` and `from_launcher` (default `claude`). Preview and explain first unless the user named agents and target. Usage-limited agents switch and continue; idle agents switch without sending; working/waiting/starting/background-work agents queue until their turn ends, retaining any due limit continuation. Stopped agents change the launcher used by Resume or a resuming message. Unsupported sessions, unavailable launchers, or unreadable default models (supply `model`) are refused unchanged. Failures roll back without retry; explain why. Results are per agent: switched/continued, switched, switch-on-resume, queued, or refused. Queues expire after a day or independent launcher change; stopped agents' Resume uses the target. `agents_list` marks queues `switch_queued=`. Conversation and terminal stay unchanged.\n\nWrite newly generated user-facing arguments, such as titles, reasons, criteria and messages, in English unless the user requests another language or the field requires source wording. Preserve quoted source text, identifiers, tool and parameter names, enum values and command prefixes exactly. Language does not change approval requirements or permission boundaries.",
     "input_schema": {
       "type": "object",
       "required": [
@@ -672,19 +686,19 @@
       "properties": {
         "launcher": {
           "type": "string",
-          "description": "the launcher to move them to, by its name on their computers"
+          "description": "target launcher name on each agent's computer"
         },
         "model": {
           "type": "string",
-          "description": "a model of that launcher; empty: the launcher's default"
+          "description": "target model; empty uses the launcher default"
         },
         "effort": {
           "type": "string",
-          "description": "the reasoning effort on the new launcher; empty: as each has it"
+          "description": "target effort; empty preserves each agent's setting"
         },
         "agents": {
           "type": "array",
-          "description": "the agents to move; empty: every Claude Code agent (running, or stopped and started by Persona) that machine and from_launcher keep",
+          "description": "agents to move; empty selects eligible agents after machine/from_launcher filters",
           "items": {
             "type": "object",
             "required": [
@@ -693,26 +707,26 @@
             "properties": {
               "machine": {
                 "type": "string",
-                "description": "the machine's id or name, as agents_list shows it"
+                "description": "machine ID or name from agents_list"
               },
               "session_id": {
                 "type": "string",
-                "description": "the agent's session id, or its first 8 characters"
+                "description": "session ID or its first 8 characters"
               }
             }
           }
         },
         "machine": {
           "type": "string",
-          "description": "without agents: only this computer's agents"
+          "description": "without agents, limit to this computer"
         },
         "from_launcher": {
           "type": "string",
-          "description": "without agents: only the agents running on this launcher (claude: the default)"
+          "description": "without agents, source launcher (default claude)"
         },
         "preview": {
           "type": "boolean",
-          "description": "true: only say what it would do with each agent; nothing is switched or queued"
+          "description": "read-only; switches and queues nothing"
         }
       }
     },
@@ -745,7 +759,7 @@
   },
   {
     "name": "agent_start",
-    "description": "Start a new agent in the terminal engine (herdr or Orca) of one of the user's computers, in a project directory, with a first prompt. Use for real development work instead of doing it here. Check machines_list before choosing a machine. Returns the new session id. When the launcher failed its last health check on that machine, the agent starts on a machine where it works (a directory under the home moves to that home) and the answer says so. Claude-family launchers and Paseo providers with Auto Accept always start in bypassPermissions. TRAE CLI and omp take no effort setting.\n\nThe launcher decides the agent. A Claude Code launcher starts Claude Code. A launcher named pi, cursor or agy (or one the machine lists as that agent) starts that agent in a herdr pane with the model you give: pi, the Cursor CLI (cursor-agent) or the Antigravity CLI (agy). pi's first message goes through its Persona extension; cursor's and agy's go through herdr once it recognises the agent. Those three take no permission mode and no ultracode, and their effort is their own.\n\nWhen the work needs a branch and checkout of its own (work in parallel with what is already open in that repository), give `worktree.branch`: Persona makes the worktree through the machine's engine first (herdr's or Orca's own, so it is listed there and in the app, under the workspace `cwd` is in) and starts the agent in it. Do not tell the agent to run `git worktree add` itself: a worktree made that way is invisible to Orca and to the app. An existing local branch is checked out; a new one starts at the HEAD of the workspace `cwd` is in. A branch already checked out elsewhere is refused.\n\nWhen the agent needs credentials the user keeps in a secret provider (a token in 1Password, say), give `secret_env`: each environment variable it should have, with the reference its value comes from (such as `op://vault/item/field`), never the secret itself. The user approves the hand-off on a card on iPhone or the web before anything starts, and the values reach only that agent's environment, for this run: you never see them, and the answer lists each variable as granted, declined, expired or failed. Only Claude Code agents on a computer this manager connects take them. Tell the agent the variables exist; never ask it to print them.\n\nGive `ultracode: true` for a large task: one that spans many files or needs checking from several angles (design, tests, review). Claude Code then runs every substantial step as a multi-agent workflow: slower and costlier: off for small work. Do not write the word \"ultracode\" into the prompt instead. Claude Code agents only (2.1.284 or later): any other agent, an older Claude Code or a node too old for it starts without it, and the answer says so. Once Claude Code confirms it, agents_list shows `ultracode=on`. An organization policy may keep some conversations read-only: a call from such a conversation is refused with the policy's reason. Do not retry; follow the refusal.\n\nWrite newly generated user-facing arguments, such as titles, reasons, criteria and messages, in English unless the user requests another language or the field requires source wording. Preserve quoted source text, identifiers, tool and parameter names, enum values and command prefixes exactly. Language does not change approval requirements or permission boundaries.\n\n`wait_seconds` observes up to 50 seconds after dispatch, appending `Inline observation` JSON: `completed`(this input's `reply`), `question`(pending `interaction_id`), `timeout`/`cancelled`/`unavailable`/`interrupted`/`failed`, with known input/session ids. Observation never answers questions, accepts tasks, resends or cancels work; normal supervision/`task_review` applies. Older nodes may time out rather than return an unrelated reply.",
+    "description": "Start a new agent in the terminal engine (herdr or Orca) of one of the user's computers, in a project directory, with a first prompt. Use for real development work instead of doing it here. Check machines_list before choosing a machine. Returns the new session id. When the launcher failed its last health check on that machine, the agent starts on a machine where it works (a directory under the home moves to that home) and the answer says so. Claude-family launchers and Paseo providers with Auto Accept always start in bypassPermissions. TRAE CLI and omp take no effort setting.\n\nThe launcher decides the agent. A Claude Code launcher starts Claude Code. A launcher named pi, cursor or agy (or one the machine lists as that agent) starts that agent in a herdr pane with the model you give: pi, the Cursor CLI (cursor-agent) or the Antigravity CLI (agy). pi's first message goes through its Persona extension; cursor's and agy's go through herdr once it recognises the agent. Those three take no permission mode and no ultracode, and their effort is their own.\n\nFor parallel work needing its own checkout, give `worktree.branch`: Persona uses the machine's engine (herdr or Orca) to create and list it under the workspace containing `cwd`, then starts the agent there. Never tell the agent to run `git worktree add`: that hides it from Orca and the app. Existing branches are checked out; new ones start at that workspace's HEAD. A branch checked out elsewhere is refused.\n\nWhen the agent needs credentials the user keeps in a secret provider (a token in 1Password, say), give `secret_env`: each environment variable it should have, with the reference its value comes from (such as `op://vault/item/field`), never the secret itself. The user approves the hand-off on a card on iPhone or the web before anything starts, and the values reach only that agent's environment, for this run: you never see them, and the answer lists each variable as granted, declined, expired or failed. Only Claude Code agents on a computer this manager connects take them. Tell the agent the variables exist; never ask it to print them.\n\nGive `ultracode: true` for a large task: one that spans many files or needs checking from several angles (design, tests, review). Claude Code then runs every substantial step as a multi-agent workflow: slower and costlier: off for small work. Do not write the word \"ultracode\" into the prompt instead. Claude Code agents only (2.1.284 or later): any other agent, an older Claude Code or a node too old for it starts without it, and the answer says so. Once Claude Code confirms it, agents_list shows `ultracode=on`. An organization policy may keep some conversations read-only: a call from such a conversation is refused with the policy's reason. Do not retry; follow the refusal.\n\nWrite newly generated user-facing arguments, such as titles, reasons, criteria and messages, in English unless the user requests another language or the field requires source wording. Preserve quoted source text, identifiers, tool and parameter names, enum values and command prefixes exactly. Language does not change approval requirements or permission boundaries.\n\n`wait_seconds` observes up to 50 seconds after dispatch, appending `Inline observation` JSON: `completed`(this input's `reply`), `question`(pending `interaction_id`), `timeout`/`cancelled`/`unavailable`/`interrupted`/`failed`, with known input/session ids. Observation never answers questions, accepts tasks, resends or cancels work; normal supervision/`task_review` applies. Older nodes may time out rather than return an unrelated reply.",
     "input_schema": {
       "type": "object",
       "required": [
@@ -769,6 +783,10 @@
         "prompt": {
           "type": "string"
         },
+        "skip_project_memory": {
+          "type": "boolean",
+          "description": "default false; true skips project/direction memory; prompt unchanged"
+        },
         "attachments": {
           "type": "array",
           "maxItems": 8,
@@ -791,7 +809,7 @@
         },
         "ultracode": {
           "type": "boolean",
-          "description": "Claude Code multi-agent workflows for substantial steps; default false"
+          "description": "multi-agent workflows; default false"
         },
         "worktree": {
           "type": "object",
@@ -832,7 +850,7 @@
   },
   {
     "name": "agent_supervise",
-    "description": "Main only: adopt an Agent opened manually or by agent_start without a task. Creates a to-do/card, supervision signals and task_review closeout, as task_plan does. The background supervisor reviews it unless assistant.main_supervises_own_tasks is on; the answer names the supervisor, and main can still review. Already your task: done_when/expect_minutes change its brief scope (prefer task_scope). Another conversation's task stays theirs; use agent_transfer to move it.\n\nWrite newly generated user-facing arguments, such as titles, reasons, criteria and messages, in English unless the user requests another language or the field requires source wording. Preserve quoted source text, identifiers, tool and parameter names, enum values and command prefixes exactly. Language does not change approval requirements or permission boundaries.",
+    "description": "Main or a direction’s lead can adopt an Agent on no open task for supervision and task_review. Omit role for a worker. A leader needs done_when and a non-work-trust computer. It gets instructions to plan and review direct workers, who cannot delegate. On your open task, use task_scope for done_when/expect_minutes. Use agent_transfer to move another conversation's task.\n\nWrite newly generated user-facing arguments, such as titles, reasons, criteria and messages, in English unless the user requests another language or the field requires source wording. Preserve quoted source text, identifiers, tool and parameter names, enum values and command prefixes exactly. Language does not change approval requirements or permission boundaries.",
     "input_schema": {
       "type": "object",
       "required": [
@@ -852,6 +870,12 @@
           "type": "string",
           "description": "the task in a short line (English, under 20 characters); empty: the agent's title"
         },
+        "role": {
+          "type": "string",
+          "enum": [
+            "leader"
+          ]
+        },
         "done_when": {
           "type": "array",
           "maxItems": 6,
@@ -869,7 +893,7 @@
   },
   {
     "name": "agent_transfer",
-    "description": "Main only: move an open Agent task to a current direction or main (App Move to). Keep task, brief, criteria, estimate, origin and Agent; no message, interruption or restart. Transfer back to undo. Refuses user-owned to-dos, assistant sessions and untracked work (adopt with agent_supervise).\n\nWrite newly generated user-facing arguments, such as titles, reasons, criteria and messages, in English unless the user requests another language or the field requires source wording. Preserve quoted source text, identifiers, tool and parameter names, enum values and command prefixes exactly. Language does not change approval requirements or permission boundaries.",
+    "description": "Move an open Agent task to a current direction or main: main moves any; a lead hands off only its own. Keep task, brief, criteria, estimate, origin and Agent; no message, interruption or restart. Refuses user-owned to-dos, assistant sessions and untracked work (adopt with agent_supervise).\n\nWrite newly generated user-facing arguments, such as titles, reasons, criteria and messages, in English unless the user requests another language or the field requires source wording. Preserve quoted source text, identifiers, tool and parameter names, enum values and command prefixes exactly. Language does not change approval requirements or permission boundaries.",
     "input_schema": {
       "type": "object",
       "required": [
@@ -1003,14 +1027,13 @@
   },
   {
     "name": "interaction_answer",
-    "description": "Answer another agent's question for the user, in their place, when they said what to answer or told you to decide. Only a question can be answered this way: a tool permission, a plan and a terminal dialog are theirs to decide in the app, and the assistant's own question is never answered by itself. Every question must be answered by its own wording, with the option labels it offers; free text is not accepted (the user answers that in the app, or you use agent_send). A multi-select takes an array of labels. A card a 督办 message handed you before the user (a task you supervise) is yours to answer when it is the agent's own call: give reason, and the answer is kept as the task's decision; what the user must decide goes to them with ask_escalate.\n\nWrite newly generated user-facing arguments, such as titles, reasons, criteria and messages, in English unless the user requests another language or the field requires source wording. Preserve quoted source text, identifiers, tool and parameter names, enum values and command prefixes exactly. Language does not change approval requirements or permission boundaries.",
+    "description": "Answer another agent's card for the user when they said what to answer or told you to decide: each question by its own wording with an option label it offers (multi-select: an array); no free text (use agent_send). A card a 督办 message handed you is yours: answer a question or terminal dialog (an option's label or number), or allow/deny a permission, plan or dialog's Yes/No with allow, giving reason; kept as the task's decision, not the user's. Forms, secrets, approvals that send or reply in the user's name, spend money or delete, and folder-trust or Bypass Permissions dialogs are the user's: ask_escalate them. Never other approvals or the assistant's own questions.\n\nWrite newly generated user-facing arguments, such as titles, reasons, criteria and messages, in English unless the user requests another language or the field requires source wording. Preserve quoted source text, identifiers, tool and parameter names, enum values and command prefixes exactly. Language does not change approval requirements or permission boundaries.",
     "input_schema": {
       "type": "object",
       "required": [
         "machine",
         "session_id",
-        "interaction_id",
-        "answers"
+        "interaction_id"
       ],
       "properties": {
         "machine": {
@@ -1042,16 +1065,20 @@
             ]
           }
         },
+        "allow": {
+          "type": "boolean",
+          "description": "a permission or plan card: true allows (approves), false denies"
+        },
         "reason": {
           "type": "string",
-          "description": "optional: in a sentence, why this answer (kept with the task's decision when a 督办 message handed you the card)"
+          "description": "in a sentence, why this answer (kept with the task's decision)"
         }
       }
     }
   },
   {
     "name": "ask_escalate",
-    "description": "Hand the cards a task's agents wait on to the user, when a 督办 message gave them to you first and the user must decide: a tool permission or a plan (no conversation approves those), or a question that is irreversible, seen by other people, changes the goal or goes against a decision already made on the task. Every card of the task the user has not been told of goes to them at once, as one reminder (in the user's push grading it pushes only when why_owner or p0 says it is theirs alone), with your reason and recommendation on it; their answers go straight to the agents and are kept as the task's decisions. Only the task's supervisor and the main conversation can. A leader's escalation is told to the main conversation too, so don't ask the user the same thing again yourself.\n\nWrite newly generated user-facing arguments, such as titles, reasons, criteria and messages, in English unless the user requests another language or the field requires source wording. Preserve quoted source text, identifiers, tool and parameter names, enum values and command prefixes exactly. Language does not change approval requirements or permission boundaries.",
+    "description": "Hand the cards a task's agents wait on to the user, when a 督办 message gave them to you first and only the user can decide: a form or secret; an approval that sends or replies in their name, spends money or deletes; a question that is irreversible, seen by others, changes the goal or contradicts a decision made on the task. Other permissions and plans are yours (interaction_answer); no card reaches the user on a timeout. Every card of the task the user has not been told of goes to them at once, as one reminder (with push grading on it pushes only for why_owner or p0), with your reason and recommendation; their answers go to the agents and are kept as the task's decisions. Only the task's supervisor and main can; main is told of a leader's escalation, so don't ask the user again.\n\nWrite newly generated user-facing arguments, such as titles, reasons, criteria and messages, in English unless the user requests another language or the field requires source wording. Preserve quoted source text, identifiers, tool and parameter names, enum values and command prefixes exactly. Language does not change approval requirements or permission boundaries.",
     "input_schema": {
       "type": "object",
       "required": [
@@ -2052,6 +2079,58 @@
     }
   },
   {
+    "name": "conversations_switch",
+    "description": "Switch Assistant conversations to another launcher/model; preview first unless confirmed. Busy items queue until turn end without interruption or synthetic messages. Execution saves original settings and returns a batch ID. `restore_batch_id` restores completed items exactly; `batch_id` reads status. Independent changes are refused.\n\nWrite newly generated user-facing arguments, such as titles, reasons, criteria and messages, in English unless the user requests another language or the field requires source wording. Preserve quoted source text, identifiers, tool and parameter names, enum values and command prefixes exactly. Language does not change approval requirements or permission boundaries.",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "conversation_ids": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "maxItems": 50,
+          "uniqueItems": true,
+          "description": "IDs from conversations_list"
+        },
+        "machine_id": {
+          "type": "string",
+          "description": "Assistant machine; defaults to current"
+        },
+        "launcher": {
+          "type": "string",
+          "description": "target launcher"
+        },
+        "model": {
+          "type": "string",
+          "description": "target model; empty uses launcher default"
+        },
+        "effort": {
+          "type": "string",
+          "description": "target effort; empty uses launcher default"
+        },
+        "permission_mode": {
+          "type": "string",
+          "description": "target mode; empty preserves each conversation's mode"
+        },
+        "preview": {
+          "type": "boolean",
+          "description": "read-only; no batch, queue, or confirmation"
+        },
+        "restore_batch_id": {
+          "type": "string",
+          "description": "batch to restore; excludes forward fields"
+        },
+        "batch_id": {
+          "type": "string",
+          "description": "batch status; use alone"
+        }
+      }
+    },
+    "defer_loading": true
+  },
+  {
     "name": "conversation_read",
     "description": "Read the recent part of another Persona conversation (an id from conversations_list): the user's messages, what was answered, tool calls in short form, cut like agent_read. `turns` = how many recent exchanges (default 2, max 10).\n\nWrite newly generated user-facing arguments, such as titles, reasons, criteria and messages, in English unless the user requests another language or the field requires source wording. Preserve quoted source text, identifiers, tool and parameter names, enum values and command prefixes exactly. Language does not change approval requirements or permission boundaries.",
     "input_schema": {
@@ -2177,7 +2256,7 @@
   },
   {
     "name": "conversation_new",
-    "description": "Open a Persona conversation with a first message; returns its id. For threads the user asks for. Marked as from this one; named after its first turn and told to report with conversation_send. Failure or no report leaves one notice. A read-only policy may refuse: follow it, do not retry. Add `tags` only if asked.\n\nWrite newly generated user-facing arguments, such as titles, reasons, criteria and messages, in English unless the user requests another language or the field requires source wording. Preserve quoted source text, identifiers, tool and parameter names, enum values and command prefixes exactly. Language does not change approval requirements or permission boundaries.",
+    "description": "Open a chat the owner requested. Returns its ID and preset configuration. It reports via conversation_send; failure or silence leaves one notice. Respect read-only refusals.\n\nWrite newly generated user-facing arguments, such as titles, reasons, criteria and messages, in English unless the user requests another language or the field requires source wording. Preserve quoted source text, identifiers, tool and parameter names, enum values and command prefixes exactly. Language does not change approval requirements or permission boundaries.",
     "input_schema": {
       "type": "object",
       "required": [
@@ -2186,18 +2265,26 @@
       "properties": {
         "text": {
           "type": "string",
-          "description": "everything the new conversation needs; it does not see this one"
+          "description": "Self-contained first message"
         },
         "tags": {
           "type": "array",
           "items": {
             "type": "string"
           },
-          "description": "initial tags; trimmed and de-duplicated, at most 10 of 32 characters each"
+          "description": "Only if asked; up to 10 tags, 32 characters each"
+        },
+        "tier": {
+          "type": "string",
+          "description": "Active profile preset; unknown or assistant-incompatible presets are refused"
+        },
+        "pin": {
+          "type": "boolean",
+          "description": "Ask for approval to pin after the first turn"
         },
         "quote": {
           "type": "string",
-          "description": "\"latest\" (this turn), a message id or the user's exact words"
+          "description": "“latest”, a message ID or the owner’s exact words"
         }
       }
     },
@@ -2233,7 +2320,7 @@
   },
   {
     "name": "task_plan",
-    "description": "Use task_plan for code, repository research and work beyond a few tool calls. Make one task per independent piece. Check machines_list, then use the knowledge base, agents_list and user preferences to fill the editable choices and their one-line reasons. Read-only, user_requested and preapproved kinds start at once; other tasks wait for the owner's 开始. A queued receipt is dispatch, so check the to-do outcome and reach its Agent via agent_send. Tool-owned reminders and events are separate.\n\nDefault machine_policy=fixed keeps the machine on retries and refuses an unavailable launcher there. Use flexible only for portable work: a failed health check can move it and the reply explains why. A side conversation supervises its work, receives 督办 and closes with task_review. Main delegates a whole plan with supervisor (one of assistant.leaders) or leaves it out. With no leader, the background supervisor handles 督办 and task_review unless assistant.main_supervises_own_tasks puts main in charge. If the caller cannot receive 督办, the same follow-up handles it and sends the caller a short notice and link at the end. Check the returned supervisor and similar running work. Pass todo_id for the caller's existing unassigned to-do, including a Lark topic, task split or failed start.\n\nStarted tasks keep a brief (owner request or started_why). Give goal, done_when, out_of_bounds. Writable work needs done_when (PR/Issue defaults to PR merged + issue closed unless owner asks for PR-only/draft-only); read-only needs goal. Omit expect_minutes for automatic estimation; positive overrides. Manual Agents have no estimate_due. Continue via continues+continues_why; use task_retry for failed starts and task_scope+scope_revision for scope changes.\n\nFile changes need readonly=false and explicitly authorized write permission. Replace a read-only Codex process with a writable one for fixes. Use agent_send for live follow-up when permissions stay the same. readonly=true adds the read-only constraint to the assignment. Claude-family uses bypassPermissions for both. Codex uses plan unless assistant.readonly_mode=prompt (normal runtime permissions). pi, cursor and agy refuse readonly in either setting. Set role=worker, or leader to start and review direct workers through restricted task_plan/task_review. Workers cannot delegate.\n\nWhen repository identity needs resolving, consult repositories_list, and repository_get only when useful. The user's explicit repository URL or path takes precedence. A saved binding is a reference, not authorization or an allowlist; never infer a machine or checkout path from it. Non-repository tasks need no lookup; retrieval is not a mandatory dispatch preflight. Closing the terminal on acceptance is the owner's Start choice; this tool cannot set it.\n\nFor an existing todo with a saved workspace naming plan, explicitly select {\"backend\":{\"operation_id\":\"\u003csaved operation ID\u003e\"}}. Its selected repositories must all be ready before the session starts at the saved root on its owning computer. An optional backend.host selects a supported engine on that computer.\n\nWorkspace policy: \"new\" makes an isolated checkout; {\"new\":{\"branch\":\"task/my-change\"}} names its branch; {\"existing\":\"\u003ccwd or workspace_id\u003e\"} selects one; \"none\" creates nothing. Omitted: readonly uses none; writable Git follows assistant.task_workspace_preference (prefer-existing by default, prefer-new for isolation), and an occupied cwd uses new. Explicit existing never switches silently; refusal names its task owner. For an explicit new branch already checked out, reuse requires a clean checkout, no live Agent and no unfinished-task owner; otherwise refuse with its path and known owner. The machine's engine owns creation, location and registration; never run git worktree add. The card previews the path and is editable before Start. Default branch: task/\u003ctodo id\u003e. Creation failure starts no Agent. Workspaces remain after acceptance. Organization read-only policy refusals include their reason: follow it, never retry unchanged.\n\n`wait_seconds` observes up to 50 seconds after dispatch, appending `Inline observation` JSON: `completed`(this input's `reply`), `question`(pending `interaction_id`), `timeout`/`cancelled`/`unavailable`/`interrupted`/`failed`, with known input/session ids. Observation never answers questions, accepts tasks, resends or cancels work; normal supervision/`task_review` applies. Older nodes may time out rather than return an unrelated reply. Only an immediately dispatchable single-task plan waits; approval cards and multi-task plans return immediately.\n\nWrite newly generated user-facing arguments, such as titles, reasons, criteria and messages, in English unless the user requests another language or the field requires source wording. Preserve quoted source text, identifiers, tool and parameter names, enum values and command prefixes exactly. Language does not change approval requirements or permission boundaries.",
+    "description": "Use task_plan for code, repo research and multi-step work (one task per independent piece). Check machines_list, KB, agents_list and preferences for editable choices and one-line reasons. Main/lead plans start at once; elsewhere read-only, user_requested and preapproved kinds do; others and owner_step wait for 开始. Queued receipt means dispatched; check the to-do outcome and use agent_send.\n\nFixed machine_policy stays on that machine and refuses unavailable launchers; flexible moves portable work on failed health checks (explain why). Planning leads own their tasks: signals, cards, start remedies, review and cancellation. Main owns its tasks and receives needs_user escalations. Main may select a lead; agent_transfer persists ownership. An incompatible lead must gain supervision_policy before starting work. Check returned supervisor and similar work. Pass todo_id for caller's unassigned to-do (Lark topic, split, failed start).\n\nStarted tasks keep a hub brief (owner request or started_why). Give goal, done_when, out_of_bounds: writable needs done_when (PR/Issue defaults to merged+closed unless PR/draft-only); read-only needs goal. Omit expect_minutes for auto estimate; positive overrides (manual Agents lack estimate_due). Use continues+continues_why to continue, task_retry for failed starts, task_scope+scope_revision for approved changes.\n\nEdits need readonly=false and authorized write permission; replace read-only Codex with writable for fixes, or use agent_send when permissions match. readonly=true adds the read-only constraint. Claude-family uses bypassPermissions for both; Codex uses plan unless assistant.readonly_mode=prompt; pi/cursor/agy refuse readonly. Set role=worker, or leader for direct workers via restricted task_plan/task_review (workers cannot delegate).\n\nResolve repository identity via repositories_list (repository_get only when useful). The user's explicit repository URL or path takes precedence. A saved binding is a reference, not authorization; never infer a machine or checkout path from it. Non-repository tasks need no lookup; retrieval is not a mandatory dispatch preflight. Closing the terminal on acceptance is the owner's choice; this tool cannot set it.\n\nFor a saved workspace naming plan on an existing todo, select {\"backend\":{\"operation_id\":\"\u003cid\u003e\"}}. For a multi-repo container workspace, select {\"container\":{\"selected_repo_ids\":[\"\u003crepo_id\u003e\",...]}} (or {\"container\":{\"operation_id\":\"\u003cid\u003e\"}} with todo_id for a prepared container). Optional host picks an enabled engine. All selected repos must be ready before start.\n\nWorkspace policy: \"new\" isolates a checkout; {\"new\":{\"branch\":\"task/my-change\"}} names its branch; {\"existing\":\"\u003ccwd or workspace_id\u003e\",\"queue\":true} picks one (queue:true or owner in after queues FIFO and auto-starts when free; else busy refuses with owner); \"none\" creates nothing. Omitted: readonly uses none; writable Git follows assistant.task_workspace_preference (prefer-existing default, prefer-new to isolate), busy cwd uses new. Explicit existing never switches silently. Reusing explicit new branch needs clean checkout, no live Agent and no open owner, else refuse with path/owner. Engine owns creation/registration; never run git worktree add. Default branch: task/\u003ctodo id\u003e. Failed creation starts no Agent; workspaces stay after acceptance. Follow org read-only refusals; never retry unchanged.\n\n`wait_seconds` observes up to 50 seconds after dispatch, appending `Inline observation` JSON: `completed`(this input's `reply`), `question`(pending `interaction_id`), `timeout`/`cancelled`/`unavailable`/`interrupted`/`failed`, with known input/session ids. Observation never answers questions, accepts tasks, resends or cancels work; normal supervision/`task_review` applies. Older nodes may time out rather than return an unrelated reply. Only an immediately dispatchable single-task plan waits; approval cards and multi-task plans return immediately.\n\nWrite newly generated user-facing arguments, such as titles, reasons, criteria and messages, in English unless the user requests another language or the field requires source wording. Preserve quoted source text, identifiers, tool and parameter names, enum values and command prefixes exactly. Language does not change approval requirements or permission boundaries.",
     "input_schema": {
       "type": "object",
       "required": [
@@ -2247,7 +2334,7 @@
         },
         "supervisor": {
           "type": "string",
-          "description": "main only: leader conversation id (assistant.leaders); it supervises; omit for no direction or your own work"
+          "description": "optional current leader id (assistant.leaders), selected by main; omitted: the planning lead, otherwise main"
         },
         "tasks": {
           "type": "array",
@@ -2284,6 +2371,20 @@
                     ]
                   }
                 }
+              },
+              {
+                "type": "object",
+                "required": [
+                  "workspace"
+                ],
+                "properties": {
+                  "workspace": {
+                    "type": "object",
+                    "required": [
+                      "container"
+                    ]
+                  }
+                }
               }
             ],
             "properties": {
@@ -2293,11 +2394,15 @@
               },
               "context": {
                 "type": "string",
-                "description": "facts the manager cannot resolve; omit project background"
+                "description": "extra facts; no project background"
               },
               "prompt": {
                 "type": "string",
-                "description": "goal, authorization bounds and new facts; the manager adds project context, criteria and framework rules once"
+                "description": "goal, bounds and facts; manager adds context, criteria and rules"
+              },
+              "skip_project_memory": {
+                "type": "boolean",
+                "description": "default false; true skips project/direction memory; prompt unchanged"
               },
               "machine": {
                 "type": "string",
@@ -2313,14 +2418,14 @@
               },
               "cwd": {
                 "type": "string",
-                "description": "Absolute or ~/ project directory, unless workspace.backend supplies it."
+                "description": "Absolute or ~/ project dir, unless workspace.backend or workspace.container supplies it."
               },
               "workspace": {
                 "type": [
                   "string",
                   "object"
                 ],
-                "description": "workspace policy; omit for default; existing: absolute/~/path or workspace id on that machine; no custom root",
+                "description": "workspace policy; omit for default; existing: abs/~/path or workspace id on that machine; no custom root",
                 "oneOf": [
                   {
                     "type": "string",
@@ -2357,6 +2462,36 @@
                   {
                     "type": "object",
                     "required": [
+                      "container"
+                    ],
+                    "additionalProperties": false,
+                    "properties": {
+                      "container": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "properties": {
+                          "selected_repo_ids": {
+                            "type": "array",
+                            "minItems": 1,
+                            "items": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "operation_id": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "host": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "type": "object",
+                    "required": [
                       "existing"
                     ],
                     "additionalProperties": false,
@@ -2364,6 +2499,9 @@
                       "existing": {
                         "type": "string",
                         "minLength": 1
+                      },
+                      "queue": {
+                        "type": "boolean"
                       }
                     }
                   },
@@ -2416,7 +2554,7 @@
               },
               "ultracode": {
                 "type": "boolean",
-                "description": "large tasks (many files, multi-angle checks): Claude Code multi-agent workflows for substantial steps, slower/costlier; small tasks: false; Claude Code 2.1.284+ only, otherwise starts without it; never put it in prompt/title"
+                "description": "large tasks (many files, multi-angle checks): Claude Code multi-agent workflows, slower/costlier; small tasks: false; Claude Code 2.1.284+ only; never put in prompt/title"
               },
               "readonly": {
                 "type": "boolean",
@@ -2424,7 +2562,16 @@
               },
               "user_requested": {
                 "type": "boolean",
-                "description": "True only for this task/start requested in the user's latest message; false for inferred work/your own idea."
+                "description": "True only if the user's latest message asked for it; else false."
+              },
+              "owner_step": {
+                "type": "string",
+                "enum": [
+                  "money",
+                  "outward",
+                  "irreversible"
+                ],
+                "description": "money, speaking as the user, or an unagreed irreversible step"
               },
               "why": {
                 "type": "string",
@@ -2472,7 +2619,7 @@
                 "items": {
                   "type": "string"
                 },
-                "description": "absolute paths of pictures/files the user gave in this conversation (Claude Code path or app attachment); copied to the agent, appended to its message with mentions updated; others refused"
+                "description": "abs paths of pictures/files user gave in this chat (Claude Code path or app attachment); copied to agent with updated mentions; others refused"
               },
               "expect_minutes": {
                 "type": "integer",
@@ -2549,7 +2696,7 @@
   },
   {
     "name": "task_review",
-    "description": "accepted closes work after the delivery gate (default delivery_gate=merged: park verified open PRs; linked issues must close). user_check keeps the task and Agent open until owner Pass and routes feedback to that Agent. If opted in at Start, accepted done cleans up the idle tab unless user_check. Report closed/skipped/pending; never close the tab yourself. rework caps stalled/low-ROI churn at 2 rounds (external_input/substantive_new cap at 10 total); accept with a brief note instead of bouncing for low-ROI edge cases or style nitpicks. Replace stopped Agents via agent_start. Use parked with evidence for external waits and needs_user for owner decisions.\n\naccepted (outcome=done) with done_when needs every criterion once in checks (met=true + nonblank evidence); user_check cannot bypass. outcome=cannot, cancelled and no-criteria tasks are unchanged. Other verdicts may omit checks without losing progress. Report each criterion met/not_met/dropped, then also_done. Judge the scoped brief, not a handover or Agent claims.\n\nGive accepted's outcome/reason/link. The hub handles conclusion cards and passes “Please verify” on acceptance unless user_check. needs_user can default to recommend at 24h/deadline; irreversible or visible_to_others only reminds. Recheck at 24h. can_wait needs low cost, nobody blocked today and no deadline within 12h. “You decide”, “This isn't what I asked for” and “Tell me the background first” return to supervision. Clarify without repeating or taking irreversible/external action.\n\nA non-main conversation reviewing another supervisor's task may only accept/cancel; send gaps with agent_send. A leader's needs_user reaches main too. Cancel only duplicates/unwanted tasks; their Agents close/archive and waiting cards end.\n\nWrite newly generated user-facing arguments, such as titles, reasons, criteria and messages, in English unless the user requests another language or the field requires source wording. Preserve quoted source text, identifiers, tool and parameter names, enum values and command prefixes exactly. Language does not change approval requirements or permission boundaries.",
+    "description": "accepted closes work after the delivery gate (default delivery_gate=merged: park verified open PRs; linked issues must close). user_check keeps the task and Agent open until owner Pass and routes feedback to that Agent. If opted in at Start, accepted done cleans up the idle tab unless user_check. Report closed/skipped/pending; never close the tab yourself. rework caps stalled/low-ROI churn at 2 rounds (external_input/substantive_new cap at 10 total); accept with a brief note instead of bouncing for low-ROI edge cases or style nitpicks. Replace stopped Agents via agent_start. Use parked with evidence for external waits and needs_user if only the owner can contact, approve, or trigger work.\n\nFor accepted (outcome=done), include each done_when criterion once in checks (met=true, nonblank evidence), even with user_check. outcome=cannot, cancelled and no-criteria tasks are unchanged. Other verdicts can omit checks and keep progress. Report each criterion met/not_met/dropped, then also_done. Judge the scoped brief over handovers or Agent claims.\n\nGive accepted outcome/reason/link. The hub sends conclusion cards and passes verification unless user_check. needs_user can default to recommend at 24h/deadline. Irreversible or visible_to_others only remind. Recheck at 24h. “You decide”, “This isn't what I asked for” and “Tell me the background first” return to supervision. Clarify without repeating or acting irreversibly/externally.\n\nA non-main reviewer of another supervisor's task may only accept/cancel; send gaps via agent_send. A leader's needs_user reaches main too. Cancel only duplicates/unwanted tasks; their Agents close/archive and cards end.\n\nWrite newly generated user-facing arguments, such as titles, reasons, criteria and messages, in English unless the user requests another language or the field requires source wording. Preserve quoted source text, identifiers, tool and parameter names, enum values and command prefixes exactly. Language does not change approval requirements or permission boundaries.",
     "input_schema": {
       "type": "object",
       "required": [
@@ -2603,7 +2750,7 @@
               }
             }
           },
-          "description": "each criterion, met or not, with its evidence or gap; updates that done_when entry's persisted state, evidence, time and supervisor identity. Omitted entries keep their progress"
+          "description": "each criterion (met or not) with evidence/gap; updates persisted state, evidence, time, and supervisor. Omitted entries keep progress"
         },
         "note": {
           "type": "string",
@@ -2615,11 +2762,11 @@
             "done",
             "cannot"
           ],
-          "description": "accepted: done (the work is done or the answer is yes), or cannot (the task found it cannot be done); default done"
+          "description": "accepted: done (work complete or answer yes) or cannot (proved impossible); default done"
         },
         "reason": {
           "type": "string",
-          "description": "accepted: the conclusion card's one sentence of why, in the user's language; default the note's first line. needs_user (required): one sentence saying what is to be decided, in the user's language. parked (required): one sentence saying what the task waits for, in the user's language; waiting on a PR: include its link"
+          "description": "one sentence in the user's language: accepted (why; default note's first line), needs_user (required: what to decide), or parked (required: what it waits for; include PR link if waiting on a PR)"
         },
         "waiting_on": {
           "type": "string",
@@ -2674,7 +2821,7 @@
               }
             }
           },
-          "description": "needs_user (required): 2 to 4 options the user chooses from, the recommended one first"
+          "description": "needs_user (required): 2–4 options, recommended first"
         },
         "cost_of_waiting": {
           "type": "string",
@@ -2682,15 +2829,15 @@
         },
         "question_quote": {
           "type": "string",
-          "description": "needs_user: quote the Agent's original question verbatim if reason paraphrases it, so the hub can check for an existing reply"
+          "description": "needs_user: the Agent's question verbatim when reason paraphrases it (hub checks for an existing reply)"
         },
         "can_wait": {
           "type": "boolean",
-          "description": "needs_user, optional: defer to next daily briefing (no deadline \u003c12h, low cost_of_waiting); no push/card, listed in Needs you. Ignored for irreversible/visible_to_others, deadline \u003c12h, reversible=false, or no briefing with facts due within 24h and \u003e=12h before deadline; default false"
+          "description": "needs_user, optional: defer to next daily briefing (low cost, nobody blocked today, no deadline \u003c12h); no push/card, listed in Needs you. Ignored for irreversible/visible_to_others, deadline \u003c12h, reversible=false, or no briefing with facts due within 24h and \u003e=12h before deadline; default false"
         },
         "deadline": {
           "type": "string",
-          "description": "needs_user, optional: until when the decision waits, a duration (\"4h\", \"90m\") or an RFC 3339 time, 1 minute to 30 days ahead; needs reversible. Default: 24h and reversible, except for why_owner irreversible and visible_to_others, which have none"
+          "description": "needs_user, optional: how long the decision waits, duration (\"4h\") or RFC 3339 time, 1m–30d ahead; needs reversible. Default 24h reversible; none for why_owner irreversible/visible_to_others"
         },
         "also_done": {
           "type": "array",
@@ -2700,20 +2847,25 @@
           },
           "description": "accepted, optional: what was done beyond the task's brief (one line each); the task's page lists it after the criteria"
         },
+        "withdraw_needs_user": {
+          "type": "boolean",
+          "description": "accepted only, task in needs_user: its supervisor or main takes it back and closes it silently (no card/push)"
+        },
         "user_check": {
           "type": "boolean",
-          "description": "accepted only: the user is still to look at the result themselves (a UI change someone has to see): a \"Please verify\" card waits for their \"Pass\" instead of your acceptance passing it; default false"
+          "description": "accepted only: user must inspect result (e.g. UI change); shows \"Please verify\" card awaiting \"Pass\" instead of auto-passing; default false"
         },
         "reversible": {
           "type": "boolean",
-          "description": "with deadline: whether taking recommend can be undone later. false for deleting, sending anything to other people, spending money or changing production: those are never taken by default (why_owner irreversible and visible_to_others must say false)"
+          "description": "with deadline: whether taking recommend can be undone; false for delete/external send/spend/prod change (never auto-taken; required false for irreversible/visible_to_others)"
         },
         "evidence": {
           "type": "object",
           "required": [
             "kind",
             "target",
-            "wake"
+            "wake",
+            "next_actor"
           ],
           "properties": {
             "kind": {
@@ -2735,6 +2887,14 @@
               "type": "string",
               "maxLength": 600,
               "description": "Observable change that ends the wait"
+            },
+            "next_actor": {
+              "type": "string",
+              "enum": [
+                "external",
+                "owner"
+              ],
+              "description": "external: third party, system or time, without a prior owner step. owner: use needs_user"
             },
             "url": {
               "type": "string",
@@ -2860,7 +3020,7 @@
   },
   {
     "name": "task_scope",
-    "description": "Change what a task you supervise is to do, or what done means for it, after it started (its todo id). The task's brief (the owner's request and the criteria it started with) is never rewritten: this adds an entry to the brief's log with what changed and why, applies the new done_when and expect_minutes, restarts overdue, estimate_due only on a new estimate, and the owner reads the change in their next digest. It is the only way done_when changes after a task started (agent_supervise and agent_send with a task on your own task go through the same log). Give done_when as the whole list after the change: a criterion you leave out is recorded as dropped by this change, and the completion report says so. A change that adds a step only the owner may allow (deploying, merging, releasing, sending or commenting where other people see it, deleting, spending, changing production) and was not part of the task is refused unless the owner's own message started this turn: ask them first (ask_user, or task_review needs_user), then call it again when they answered. Only the task's supervisor may call it. The agent is not told: send it what changed with agent_send. Use it also for estimate_due/overdue: explain and set expect_minutes.\n\nWrite newly generated user-facing arguments, such as titles, reasons, criteria and messages, in English unless the user requests another language or the field requires source wording. Preserve quoted source text, identifiers, tool and parameter names, enum values and command prefixes exactly. Language does not change approval requirements or permission boundaries.",
+    "description": "Change what a supervised task is to do, or what done means, after it started (its todo id). The brief is never rewritten: this adds a brief-log entry (what changed and why), applies the new done_when/expect_minutes, restarts overdue, estimate_due only on a new estimate; the owner reads it in the next digest. It is the only way done_when changes after start (agent_supervise and agent_send on a task use the same log). Give done_when as the whole list after the change: a criterion you leave out is logged as dropped and named in the completion report. A change adding an owner-only step (deploying, merging, releasing, public sends/comments, deleting, spending, production changes) not in the original task is refused unless the owner's own message started this turn: ask first (ask_user, or task_review needs_user), then call again. Only its supervisor may call it; the Agent is not told — send the change with agent_send. estimate_due/overdue: revise expect_minutes here, but a finished task past the settle window with no owner card is refused: give task_review first (accepted/rework/cancelled; needs_user or accepted+user_check if the owner must act); chat-only asks never reach Needs you.\n\nWrite newly generated user-facing arguments, such as titles, reasons, criteria and messages, in English unless the user requests another language or the field requires source wording. Preserve quoted source text, identifiers, tool and parameter names, enum values and command prefixes exactly. Language does not change approval requirements or permission boundaries.",
     "input_schema": {
       "type": "object",
       "required": [
@@ -3817,6 +3977,123 @@
           "description": "evidence links: PRs, deployed pages, documents; the first is shown first"
         }
       }
+    },
+    "defer_loading": true
+  },
+  {
+    "name": "decision_record",
+    "description": "Record {text,scope?,decision:{options[],selected[],rejected[],reason,reversible:bool|null}}. user_quotes[]:{quote,source:{machine,session,msg_uuid|card_id|file,line}} stay inferred.\n\nWrite newly generated user-facing arguments, such as titles, reasons, criteria and messages, in English unless the user requests another language or the field requires source wording. Preserve quoted source text, identifiers, tool and parameter names, enum values and command prefixes exactly. Language does not change approval requirements or permission boundaries.",
+    "input_schema": {
+      "type": "object",
+      "required": [
+        "entry"
+      ],
+      "properties": {
+        "entry": {
+          "type": "object",
+          "required": [
+            "text",
+            "decision"
+          ],
+          "properties": {
+            "text": {
+              "type": "string"
+            },
+            "decision": {
+              "type": "object"
+            }
+          }
+        },
+        "user_quotes": {
+          "type": "array",
+          "maxItems": 20,
+          "items": {
+            "type": "object"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "defer_loading": true
+  },
+  {
+    "name": "decisions_query",
+    "description": "Decisions; scope:{executor,machine[],project[],personal}. memory[]: remembered entries this conversation may use (first page; none with by, trust or a status other than active).\n\nWrite newly generated user-facing arguments, such as titles, reasons, criteria and messages, in English unless the user requests another language or the field requires source wording. Preserve quoted source text, identifiers, tool and parameter names, enum values and command prefixes exactly. Language does not change approval requirements or permission boundaries.",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "after": {
+          "type": "string"
+        },
+        "limit": {
+          "type": "integer"
+        },
+        "by": {
+          "type": "string"
+        },
+        "trust": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        },
+        "tag": {
+          "type": "string"
+        },
+        "scope": {
+          "type": "object"
+        }
+      },
+      "additionalProperties": false
+    },
+    "defer_loading": true
+  },
+  {
+    "name": "health_intake",
+    "description": "Health chats only. log kind/amount (water ml, protein g); list entries/IDs, daily totals/goals (default 7 days incl. today); delete record UUID, repeatable. Estimates need ask_user; new ID per log; list before retrying.\n\nWrite newly generated user-facing arguments, such as titles, reasons, criteria and messages, in English unless the user requests another language or the field requires source wording. Preserve quoted source text, identifiers, tool and parameter names, enum values and command prefixes exactly. Language does not change approval requirements or permission boundaries.",
+    "input_schema": {
+      "type": "object",
+      "required": [
+        "action"
+      ],
+      "properties": {
+        "action": {
+          "type": "string",
+          "enum": [
+            "log",
+            "list",
+            "delete"
+          ]
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "water",
+            "protein"
+          ]
+        },
+        "amount": {
+          "type": "number",
+          "description": "ml 1-3000; g \u003e0-200; max one decimal."
+        },
+        "at": {
+          "type": "string",
+          "description": "RFC3339; default now."
+        },
+        "note": {
+          "type": "string",
+          "description": "Food/portion; max 4096 UTF-8 bytes; no NUL."
+        },
+        "days": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 366
+        },
+        "id": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
     },
     "defer_loading": true
   }

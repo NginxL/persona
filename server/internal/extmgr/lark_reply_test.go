@@ -10,12 +10,15 @@ import (
 	"testing"
 	"time"
 
+	"github.com/nwverse/persona/server/internal/cliport"
+	"github.com/nwverse/persona/server/internal/cliwire"
+
 	"github.com/nwverse/persona/server/internal/assistantwire"
-	larkconnector "github.com/nwverse/persona/server/internal/connector/larkcli"
-	adapter "github.com/nwverse/persona/server/internal/larkcli"
 )
 
 func TestLarkReplyAppCallUsesBoundReadOnlyProvider(t *testing.T) {
+	needsLarkCLI(t)
+	needsLarkModule(t)
 	now := time.Now().UTC()
 	request := map[string]any{
 		"message_id": "om_request", "msg_type": "text", "create_time": now.Add(-time.Hour).Format(time.RFC3339),
@@ -145,12 +148,12 @@ func TestLarkReplyAppCallUsesBoundReadOnlyProvider(t *testing.T) {
 			bin := makeReplyFixtureCLI(t, page, tc.drift, brand)
 			h := newTestManager(t)
 			h.connectors = h.newConnectors(nil)
-			c := larkconnector.New(adapter.Config{Bin: bin})
+			c := cliport.NewConnector(cliwire.Config{Bin: bin})
 			if err := h.connectors.Add(c); err != nil {
 				t.Fatal(err)
 			}
 			if tc.disabled {
-				if err := h.connectors.SetEnabled(larkconnector.ID, false); err != nil {
+				if err := h.connectors.SetEnabled(cliwire.ConnectorID, false); err != nil {
 					t.Fatal(err)
 				}
 			}

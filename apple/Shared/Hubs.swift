@@ -61,6 +61,12 @@ nonisolated struct HubHello: Hashable, Sendable {
     var minAppBuild: Int?
     /// The address the hub's own links use (hub.json `public_url`, #2696); nil when not set or from an older hub.
     var publicURL: URL?
+    /// The send receipts this hello vouches for (`SendReceiptTrust`): none from hubs before them. Only how the hello
+    /// carries them to `LiveConnection.receiptTrust`: a kept hello is the last socket's word, through a drop too, so
+    /// nothing decides from it whether receipts can come now.
+    var sendReceipts = SendReceiptTrust.untrusted
+    /// The pictures a message may carry (`image_limits`, #12973); nil from hubs before them, which take the standard ones.
+    var imageLimits: ImageLimitsTable?
 }
 
 /// One hub this device paired with: its address, this device's credential there, and what the app learned about it.

@@ -1,15 +1,16 @@
 // Transcript notices, recaps and model errors. Background continuation belongs to the normal execution summary.
-import { memo, Suspense, useMemo, useState } from "react";
+import { lazy, memo, Suspense, useMemo, useState } from "react";
 import { lineItemIds } from "../../lib/chat-search";
 import { useChatContext } from "./chat-context";
 import { useExpanded } from "./expanded";
 import { useReveal } from "./search-reveal";
 import { ago, clock } from "../../lib/format";
 import { retryable, type APIErrorInfo } from "../../lib/api-errors";
+import { isImageLimitError } from "../../lib/compact-resend";
 import type { RecoveryExhaustedView } from "../../lib/model-fallback";
 import { runAction, turnErrorFix, type TurnFix } from "../../lib/readiness";
 import { wakeSummary } from "../../lib/tasks";
-import { type ChatLine, type OpenRecap } from "../../lib/turns";
+import { isInterruptNotice, type ChatLine, type OpenRecap, type UserMessage } from "../../lib/turns";
 import { sourceLabel } from "../../lib/message-source";
 import type { Item } from "../../lib/types";
 import { Button, copyText, cx, Dialog } from "../../ui/atoms";
@@ -23,6 +24,7 @@ import { ScrollFold } from "./fold-scroll";
 import { lazyPage } from "../../lib/lazy-page";
 
 export const RefusalNotice = lazyPage(() => import("./RefusalNotice").then((m) => m.RefusalNotice));
+const EmptyResponse = lazy(() => import("./EmptyResponse"));
 
 export interface LineProps {
   line: ChatLine;
@@ -37,6 +39,8 @@ export interface LineProps {
   /** The hub's word on what to fix for the turn's model error (the session's turn_error_code): the chat's last line only,
    *  so its record reads as its banner did. */
   fix?: TurnFix | null;
+  /** The hub's session turn_error_code for the latest failed turn (e.g. images_too_large). */
+  turnErrorCode?: string;
   /** The session is waiting out a subscription usage limit: the last error card says that, not that the turn was interrupted. */
   limit?: string;
   /** The node's recovery chain exhausted every model (#7824): the last error card names the cause and reset time and
@@ -48,6 +52,7 @@ export interface LineProps {
   offscreen?: (section: HTMLElement) => () => void;
   /** The chat's last exchange while the chat is still at work (SegmentView `busy`). */
   busy?: boolean;
+  retryEmpty?: (user: UserMessage, signal: AbortSignal) => Promise<boolean>;
   /** Only the live line: the dock owns its foreground elapsed clock (#12380). Kept out of ChatContext so a turn
    *  starting or ending does not invalidate finished exchanges (#12446). */
   dockTurnClock?: boolean;
@@ -62,7 +67,7 @@ export const ChatLineView = memo(function ChatLineView(props: LineProps) {
   );
 });
 
-function LineBody({ line, mid, sid, streaming, expandFold, assistant, launcher, fix, limit, exhausted, trace, offscreen, busy, dockTurnClock }: LineProps) {
+function LineBody({ line, mid, sid, streaming, expandFold, assistant, launcher, fix, turnErrorCode, limit, exhausted, trace, offscreen, busy, retryEmpty, dockTurnClock }: LineProps) {
   switch (line.kind) {
     case "supervision":
       return <SupervisionLine line={line} mid={mid} sid={sid} streaming={streaming} expandFold={expandFold} assistant={assistant} dockTurnClock={dockTurnClock} />;
@@ -79,6 +84,9 @@ function LineBody({ line, mid, sid, streaming, expandFold, assistant, launcher, 
           expandFold={expandFold}
           offscreen={offscreen}
           busy={busy}
+          beforeWords={line.seg.emptyResponse && !busy && !streaming?.trim() && line.seg.user && (
+            <Suspense fallback={null}><EmptyResponse user={line.seg.user} onRetry={retryEmpty} /></Suspense>
+          )}
           dockTurnClock={dockTurnClock}
         />
       );
@@ -99,6 +107,7 @@ function LineBody({ line, mid, sid, streaming, expandFold, assistant, launcher, 
           count={line.count}
           at={line.item.ts}
           fix={assistant ? (fix ?? turnErrorFix(line.info.code, launcher)) : null}
+          turnErrorCode={turnErrorCode}
           exhausted={assistant && (fix ?? turnErrorFix(line.info.code, launcher)) ? null : exhausted}
         />
       );
@@ -144,7 +153,7 @@ function LineNotice({ item, assistant }: { item: Item; assistant?: boolean }) {
       </div>
     );
   }
-  const text = item.text ?? "";
+  const text = isInterruptNotice(item) ? t("chat-chatview.interrupted") : item.text ?? "";
   if (!text.includes("\n") && text.length <= 60) {
     return (
       <div className="flex justify-center">
@@ -285,7 +294,7 @@ export const errorKey = (line: APIErrorLine) => `${line.id}#${line.count}`;
 
 /** The error the chat stopped on, over the composer (cindy's ErrorBanner, #5313): the card the chat would draw, with what
  *  can be done about it now (Fix it, Retry, Edit last message) and ✕. While it is here the chat leaves the line out. */
-export function ErrorBanner({ line, assistant, launcher, limit, fix, exhausted, onRetry, onEditLastMessage, onDismiss }: {
+export function ErrorBanner({ line, assistant, launcher, limit, fix, turnErrorCode, exhausted, onRetry, onEditLastMessage, onCompactAndResend, compactingToResend, onDismiss }: {
   line: APIErrorLine;
   assistant?: boolean;
   /** The session's launcher keeps a text-derived fallback fix scoped when the hub has no turn_error_code. */
@@ -294,28 +303,38 @@ export function ErrorBanner({ line, assistant, launcher, limit, fix, exhausted, 
   limit?: string;
   /** The hub's word on what to fix for the turn's model error (the session's turn_error_code). */
   fix?: TurnFix | null;
+  /** The hub's session turn_error_code for this failed turn. */
+  turnErrorCode?: string;
   /** An exhausted recovery chain (#7824): Retry stays offered even for a parsed non-transient error such as a
    *  safeguards refusal, as long as the caller says the session is idle and can send. */
   exhausted?: RecoveryExhaustedView | null;
   /** Sends "continue"; offered only for an error that may pass by itself and needs no fix. */
   onRetry?: () => void;
   onEditLastMessage?: () => void;
+  /** Compacts the conversation and resends the failed turn (#13045); offered only when the session supports compaction. */
+  onCompactAndResend?: () => void;
+  /** Compaction-before-resend is currently running. */
+  compactingToResend?: boolean;
   onDismiss: () => void;
 }) {
   if (limit) return <UsageLimitLine text={limit} onDismiss={onDismiss} />;
+  const imageLimit = isImageLimitError(line.info.code, turnErrorCode);
   // the text-derived fix points at Persona's model settings: only for Persona's own conversations
-  const f = assistant ? (fix ?? turnErrorFix(line.info.code, launcher)) : null;
+  const f = !imageLimit && assistant ? (fix ?? turnErrorFix(line.info.code, launcher)) : null;
   // A fix-type error (sign-in, model route) keeps its own fix card: an exhausted marker never overrides it (#7824).
-  const shownExhausted = f ? null : exhausted;
+  const shownExhausted = f || imageLimit ? null : exhausted;
   return (
     <APIErrorCard
       info={line.info}
       count={line.count}
       at={line.item.ts}
       fix={f}
+      turnErrorCode={turnErrorCode}
       exhausted={shownExhausted}
-      onRetry={onRetry && (f ? f.action === "retry" : shownExhausted || retryable(line.info)) ? onRetry : undefined}
+      onRetry={!imageLimit && onRetry && (f ? f.action === "retry" : shownExhausted || retryable(line.info)) ? onRetry : undefined}
       onEditLastMessage={!assistant && line.info.code === "safeguards" ? onEditLastMessage : undefined}
+      onCompactAndResend={imageLimit ? onCompactAndResend : undefined}
+      compactingToResend={compactingToResend}
       onDismiss={onDismiss}
     />
   );
@@ -330,9 +349,10 @@ function UsageLimitLine({ text, onDismiss }: { text: string; onDismiss?: () => v
 /** A model API error (cindy's error notice): why, in words, whether it passes by itself under it, then its actions; the
  *  ids, the status code, how many times in a row and the original are under "Error details". One the user must fix (not
  *  signed in, a wrong key, a model that is not there) says so instead, with "Fix it" (docs/assistant/onboarding.md 4.4). */
-function APIErrorCard({ info, count, at, onRetry, onEditLastMessage, fix, onDismiss, exhausted }: { info: APIErrorInfo; count: number; at?: string; onRetry?: () => void; onEditLastMessage?: () => void; fix?: TurnFix | null; onDismiss?: () => void; exhausted?: RecoveryExhaustedView | null }) {
-  const sub = fix ? fix.detail : info.transient === true ? t("chat-lines.api_transient") : info.transient === false ? t("chat-lines.api_permanent") : "";
-  const reason = (fix ? fix.title : info.reason) || t("chat-lines.reply_failed");
+function APIErrorCard({ info, count, at, onRetry, onEditLastMessage, onCompactAndResend, compactingToResend, fix, turnErrorCode, onDismiss, exhausted }: { info: APIErrorInfo; count: number; at?: string; onRetry?: () => void; onEditLastMessage?: () => void; onCompactAndResend?: () => void; compactingToResend?: boolean; fix?: TurnFix | null; turnErrorCode?: string; onDismiss?: () => void; exhausted?: RecoveryExhaustedView | null }) {
+  const imageLimit = isImageLimitError(info.code, turnErrorCode);
+  const sub = imageLimit ? "" : fix ? fix.detail : info.transient === true ? t("chat-lines.api_transient") : info.transient === false ? t("chat-lines.api_permanent") : "";
+  const reason = (imageLimit ? t("lib-api-errors.images_too_large") : fix ? fix.title : info.reason) || t("chat-lines.reply_failed");
   // An exhausted recovery chain says why every model failed and when the configured one recovers (#7824). The cause
   // and the reset time stay on the card's face; the tried-model list goes under "Error details" only.
   const exhaustedLines = exhausted
@@ -358,6 +378,11 @@ function APIErrorCard({ info, count, at, onRetry, onEditLastMessage, fix, onDism
       onDismiss={onDismiss}
       actions={
         <>
+          {onCompactAndResend && (
+            <Button tone="primary" icon="layers" size="sm" className="touch-hit" busy={compactingToResend} testId="compact-and-resend" onClick={onCompactAndResend}>
+              {t(compactingToResend ? "chat-lines.compacting_to_resend" : "chat-lines.compact_and_resend")}
+            </Button>
+          )}
           {fix && fix.action !== "retry" && (
             <Button tone="primary" size="sm" className="touch-hit" onClick={() => runAction(fix.action, { launcher: fix.launcher, onHelp: () => {}, onPickModel: fix.onPickModel })}>
               {t("chat-lines.fix_it")}

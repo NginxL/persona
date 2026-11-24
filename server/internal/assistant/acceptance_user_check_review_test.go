@@ -17,6 +17,7 @@ import (
 )
 
 func TestUserCheckClosedTaskReopensAsOngoing(t *testing.T) {
+	needsLarkLayer(t)
 	ctx := context.Background()
 	for _, via := range []string{"verification feedback", "PATCH", "successor"} {
 		t.Run(via, func(t *testing.T) {

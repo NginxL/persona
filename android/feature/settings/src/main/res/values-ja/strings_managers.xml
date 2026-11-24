@@ -72,4 +72,8 @@
     <string name="settings_group_device">このデバイス</string>
     <string name="settings_group_hub">ハブ</string>
     <string name="settings_group_hub_footer">この 2 つのグループは、どのアシスタントを選んでいても同じです。</string>
+    <string name="settings_switcher_assistants_on">%1$s のアシスタント</string>
+    <string name="settings_switcher_hub_current">%1$s、現在</string>
+    <string name="settings_switcher_hub_connecting">接続中…</string>
+    <string name="settings_switcher_hub_switch_failed">ハブを切り替えられませんでした。</string>
 </resources>

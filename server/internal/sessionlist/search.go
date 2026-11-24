@@ -210,7 +210,7 @@ func (i *Index) searchCandidates(o Options, f filters, allowed map[string]bool, 
 		}
 		row, rowID, side := item, id, ""
 		if fold := item.item.Fold; o.Roots && fold != nil && fold.SearchAs != "" && fold.Root != "" {
-			if f.NoPrivate && item.item.Private {
+			if (f.NoPrivate || f.AgentsOnly) && item.item.Private || f.AgentsOnly && item.item.Assistant {
 				continue
 			}
 			row, rowID, side = i.items[fold.SearchAs], fold.SearchAs, fold.SearchSession
@@ -334,7 +334,7 @@ func (i *Index) searchResult(o Options, decoded map[*record]decodedDocument) (*r
 		if d.doc.Assistant || rd.doc.Assistant {
 			return nil
 		}
-		state := stateOf(row.item, o.Roots)
+		state := stateOf(row.item, o.Roots, o.CrossMachineHierarchy)
 		if state == "" {
 			state = rd.doc.State
 		}
@@ -391,7 +391,7 @@ func (i *Index) searchResult(o Options, decoded map[*record]decodedDocument) (*r
 		}
 		r.searchHits[rowID] = hit
 		r.events = append(r.events, event{id: rowID, updated: row.item.UpdatedAt, value: row})
-		addCount(&r.counts, row.item, o.Roots, 1)
+		addCount(&r.counts, row.item, o.Roots, o.CrossMachineHierarchy, 1)
 		return nil
 	})
 	if err != nil {

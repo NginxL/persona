@@ -1,8 +1,6 @@
 #if os(iOS)
 import SwiftUI
-#if canImport(UIKit)
 import UIKit
-#endif
 
 /// The Home Screen and Lock Screen widgets (docs/apple/home-widgets.md). The widget extension builds this file but not
 /// `Theme`, as it does `IslandMetrics` and `WatchFaceTokens`: a table of its own. Widget sizes are the system's, so the
@@ -52,6 +50,16 @@ nonisolated enum HomeWidgetTokens {
     static let steps = Color(light: 0xE0336E, dark: 0xFF4F87)
     static let sleep = Color(light: 0x5B4FD6, dark: 0x9C94FF)
     static let heart = Color(light: 0xD93A3A, dark: 0xFF5F57)
+    static let water = HealthIntakePalette.water
+    static let protein = HealthIntakePalette.protein
+    /// Today's Health uses purple steps, clear of Move's red; the existing Health widget keeps its pink.
+    static let healthTodaySteps = Color(light: 0x7540A8, dark: 0xC399ED)
+    static let activity = Color(light: 0x636366, dark: 0xAEAEB2)
+    static let activityBar: CGFloat = 3
+    static let activityBarWidth: CGFloat = 16
+    static let activityNumber = Font.system(size: 11, weight: .semibold, design: .rounded)
+    static let healthCellCaption = Font.system(size: 10, weight: .medium)
+    static let healthLargestTypeSize = DynamicTypeSize.xxxLarge
     /// Inbox: Needs You's blue.
     static let inbox = StatusPalette.needsYou
 
@@ -187,6 +195,9 @@ nonisolated enum HomeWidgetTokens {
     static let healthSymbol = "heart.fill" // icon: Theme.Icon.health, filled for the small mark
     static let stepsSymbol = "figure.walk" // icon: steps, as the Health app marks them
     static let sleepSymbol = "bed.double.fill" // icon: sleep, as the Health app marks it
+    static let waterSymbol = "drop" // icon: mirrors Theme.Icon.water
+    static let proteinSymbol = "fork.knife" // icon: mirrors Theme.Icon.protein
+    static let fitnessSymbol = "figure.run" // icon: mirrors Theme.Icon.fitness
     static let inboxSymbol = "tray.full" // icon: mirrors Theme.Icon.inbox
     static let checkSymbol = "checkmark" // icon: mirrors Theme.Icon.done
 
@@ -208,14 +219,12 @@ nonisolated enum HomeWidgetTokens {
     }
     #endif
 
-    #if canImport(UIKit)
     private static func dynamic(light: (UInt32, CGFloat), dark: (UInt32, CGFloat)) -> Color {
         Color(uiColor: UIColor { trait in
             let (hex, alpha) = trait.userInterfaceStyle == .dark ? dark : light
             return UIColor(hex: hex).withAlphaComponent(alpha)
         })
     }
-    #endif
 }
 #endif
 import PersonaWire

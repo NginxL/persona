@@ -8,8 +8,8 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/nwverse/persona/server/internal/botcard"
 	"github.com/nwverse/persona/server/internal/channel"
-	"github.com/nwverse/persona/server/internal/feishubot"
 	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/lazyre"
 	"github.com/nwverse/persona/server/internal/prompts"
@@ -28,47 +28,69 @@ const openNotesMax = 4000
 // a real topic group, not with the event push (the two carry the same fields): the first message has an empty
 // root_id and parent_id and a thread_id, a reply has both set. The second form is kept as a second accepted shape.
 // A wrong guess either opens nothing (the owner sends "/ai") or opens a to-do for a reply.
-func isTopicRoot(ev feishubot.MessageEvent) bool {
+func isTopicRoot(ev botcard.MessageEvent) bool {
 	m := ev.Message
 	return m.ThreadID != "" && (m.RootID == "" || m.RootID == m.MessageID)
 }
 
 // aiCommand is the line after "/ai" (or the full-width "／ai", whatever its case) when text starts with it as a word of
 // its own ("/ai fix it", "/ai", but not "/aim"); ok is false for any other text.
-func aiCommand(text string) (rest string, ok bool) { return feishubot.AICommand(text) }
+func aiCommand(text string) (rest string, ok bool) { return botcard.AICommand(text) }
 
 // openingWords are the owner's words in ev as an opening reads them: only a text or a rich-text message has any (a
 // voice message, a shared group or card, a location, a card, a file and a message of a type not known come as a
-// placeholder like "[语音消息]", which are no words); the bot's @ at the start is taken off (in a group where the bot
-// only gets what @s it, every message starts with one; content has it as the name, the message's own text as
-// @_user_N), and an @ further in is the person's name when the message's mentions give it, else left as it stands.
-// A rich-text message of only pictures or videos has no words either. "" when there are none.
-func openingWords(ev feishubot.MessageEvent, content feishubot.Content) string {
+// placeholder like "[语音消息]", which are no words); the bot's @ at the start is taken off when separated by whitespace
+// (in a group where the bot only gets what @s it, every message starts with one; content has it as the name, the
+// message's own text as @_user_N), and an @ further in is the person's name when the message's mentions give it, else
+// left as it stands. A rich-text message of only pictures or videos has no words either. "" when there are none.
+func openingWords(ev botcard.MessageEvent, content botcard.Content) string {
+	return extractOpeningWords(ev, content, false)
+}
+
+// openingCommandWords extracts the owner's words for command parsing (/ai, /read, /noreply): for rich-text posts it
+// strips leading structured at elements through their mention IDs so an adjacent command keeps its boundary (#12668),
+// without removing mentions that touch punctuation in ordinary topic-opening notes and quotes (#12932).
+func openingCommandWords(ev botcard.MessageEvent, content botcard.Content) string {
+	return extractOpeningWords(ev, content, true)
+}
+
+func extractOpeningWords(ev botcard.MessageEvent, content botcard.Content, structuredPostMentions bool) string {
 	m := ev.Message
 	var text string
 	switch m.MessageType {
 	case "text":
-		text = feishubot.ParseContent(m.MessageType, m.Content, nil).Text // with the @_user_N keys still in it
+		text = botcard.ParseContent(m.MessageType, m.Content, nil).Text // with the @_user_N keys still in it
+		text = trimOpeningMentions(text, m.Mentions, unicode.IsSpace)
 	case "post":
-		text = content.Text
+		if structuredPostMentions {
+			text = content.StripLeadingMentions(m.Mentions, nil)
+		} else {
+			if stripped := content.StripLeadingMentions(m.Mentions, nil); !hasOpeningWords(stripped) {
+				return ""
+			}
+			text = trimOpeningMentions(content.Text, m.Mentions, unicode.IsSpace)
+		}
 	default:
 		return ""
 	}
-	text = trimOpeningMentions(text, m.Mentions, unicode.IsSpace)
 	for _, mn := range m.Mentions {
 		if mn.Key != "" && mn.Name != "" {
 			// A whole key: "@_user_1" is not the start of "@_user_10".
 			text = regexp.MustCompile(regexp.QuoteMeta(mn.Key)+`\b`).ReplaceAllLiteralString(text, "@"+mn.Name)
 		}
 	}
-	// The placeholders feishubot.ParseContent writes for a picture and a video in rich text.
-	if strings.TrimSpace(strings.NewReplacer("[图片]", "", "[视频]", "").Replace(text)) == "" { // i18n-ignore: matched against the text parsePost writes
+	if !hasOpeningWords(text) {
 		return ""
 	}
 	return text
 }
 
-func trimOpeningMentions(text string, mentions []feishubot.Mention, separator func(rune) bool) string {
+func hasOpeningWords(text string) bool {
+	// The placeholders botcard.ParseContent writes for a picture and a video in rich text.
+	return strings.TrimSpace(strings.NewReplacer("[图片]", "", "[视频]", "").Replace(text)) != "" // i18n-ignore: matched against the text parsePost writes
+}
+
+func trimOpeningMentions(text string, mentions []botcard.Mention, separator func(rune) bool) string {
 	text = strings.TrimLeftFunc(strings.TrimSpace(text), separator)
 	for cut := true; cut; {
 		cut = false
@@ -99,8 +121,10 @@ var (
 
 // openingTitleWords chooses the temporary display name. The full parsed message still supplies
 // the notes, the handoff and the model's later title.
-func openingTitleWords(text string, content feishubot.Content, mentions []feishubot.Mention) (words string, linkLabel bool) {
-	if strings.HasPrefix(text, "@") {
+func openingTitleWords(text string, content botcard.Content, mentions []botcard.Mention) (words string, linkLabel bool) {
+	if stripped := content.StripLeadingMentions(mentions, nil); stripped != content.Text && (text == content.Text || text == stripped) {
+		text = trimOpeningMentions(stripped, mentions, topicSeparator)
+	} else if strings.HasPrefix(text, "@") {
 		text = trimOpeningMentions(text, mentions, topicSeparator)
 	}
 	for text != "" {
@@ -155,14 +179,14 @@ func genericTopicRequest(text string) bool {
 
 // openTopicIfAsked opens a to-do for the message when it asks for one: it starts a topic that is bound to nothing, or
 // it is "/ai …" in such a topic. It says whether it took the message (everything the owner is to be told is said).
-func (s *Service) openTopicIfAsked(ctx context.Context, ev feishubot.MessageEvent, st FeishuStatus, content feishubot.Content, topic *feishuTopic) bool {
-	text := openingWords(ev, content)
-	rest, asked := aiCommand(text)
+func (s *Service) openTopicIfAsked(ctx context.Context, ev botcard.MessageEvent, st FeishuStatus, content botcard.Content, topic *feishuTopic) bool {
+	rest, asked := aiCommand(openingCommandWords(ev, content))
 	if !asked && !isTopicRoot(ev) {
 		return false
 	}
-	if asked {
-		text = rest
+	text := rest
+	if !asked {
+		text = openingWords(ev, content)
 	}
 	s.openTopicTodo(ctx, ev, st, content, text, topic)
 	return true
@@ -170,7 +194,7 @@ func (s *Service) openTopicIfAsked(ctx context.Context, ev feishubot.MessageEven
 
 // openTopicTodo makes the to-do for the topic ev is in, with text (the first words, the command taken off) as its
 // notes, and hands the words to the main conversation (openTodoIn); what keeps it from doing so is said in the topic.
-func (s *Service) openTopicTodo(ctx context.Context, ev feishubot.MessageEvent, st FeishuStatus, content feishubot.Content, text string, topic *feishuTopic) {
+func (s *Service) openTopicTodo(ctx context.Context, ev botcard.MessageEvent, st FeishuStatus, content botcard.Content, text string, topic *feishuTopic) {
 	if _, fail := s.openTodoIn(ctx, ev, st, content, text, "", topic, nil); fail != "" {
 		s.botNoteTo(ctx, topic.target(), ev.Message.MessageID, fail)
 	}
@@ -207,7 +231,7 @@ func (s *Service) openTarget(ctx context.Context, st FeishuStatus) (target botTa
 // is a to-do bound to no topic (a request taken in the owner's private chat, openInOwnerChat): ev is then a message of that
 // chat, and what is said goes there. fail says why no to-do was made, in the bot's language, "" when one was; what goes
 // wrong after the to-do exists is said in the topic (or the private chat).
-func (s *Service) openTodoIn(ctx context.Context, ev feishubot.MessageEvent, st FeishuStatus, content feishubot.Content, text, quote string,
+func (s *Service) openTodoIn(ctx context.Context, ev botcard.MessageEvent, st FeishuStatus, content botcard.Content, text, quote string,
 	topic *feishuTopic, src *TodoSource) (todo Todo, fail string) {
 	msg := ev.Message
 	l := s.botLang(ctx)
@@ -285,7 +309,12 @@ func (s *Service) openTodoIn(ctx context.Context, ev feishubot.MessageEvent, st 
 		s.nameTodoLater(ctx, todo.ID, title, text)
 	}
 	// The main conversation follows up what it hands out (supervise.go), and its feed shows the task as task_plan's do.
-	s.superviseTodo(ctx, todo.ID, origin, nil, 0)
+	if err := s.superviseTodo(ctx, todo.ID, origin, nil, 0); err != nil {
+		if rerr := s.removeTodo(context.WithoutCancel(ctx), todo.ID); rerr != nil {
+			s.logf("todo %s: take back after supervision failure: %v", todo.ID, rerr)
+		}
+		return Todo{}, failed("thread_open_failed", err)
+	}
 	if _, err := s.appendFeed(ctx, origin, feedTask, todo.ID, nil); err != nil {
 		s.logf("task %s: feed: %v", todo.ID, err)
 	}

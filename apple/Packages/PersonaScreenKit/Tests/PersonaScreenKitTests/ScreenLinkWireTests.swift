@@ -3,7 +3,7 @@ import XCTest
 @testable import PersonaScreenKit
 
 /// The iPhone's client frames every session message as the node does: spec/fixtures/screen-link, also checked by
-/// server/internal/screenlink.
+/// server/internal/modules/screen-share/screenlink.
 final class ScreenLinkWireTests: XCTestCase {
     private struct Doc: Decodable {
         struct Case: Decodable {

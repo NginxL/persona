@@ -13,7 +13,7 @@ import (
 
 	"github.com/nwverse/persona/server/internal/connector"
 	"github.com/nwverse/persona/server/internal/kb"
-	"github.com/nwverse/persona/server/internal/mail"
+	"github.com/nwverse/persona/server/internal/mailwire"
 	"github.com/nwverse/persona/server/internal/managerconf"
 )
 
@@ -28,9 +28,9 @@ func (mailReceiptSource) Download(context.Context, string, string) error {
 	return errors.New("no attachments")
 }
 
-func receiptMail(account string, uid uint32, at time.Time, text string) mail.MailSummary {
-	return mail.MailSummary{AccountID: account, Mailbox: "INBOX", UID: uid,
-		From: mail.Address{Email: "sender@example.com"}, Subject: text, Snippet: text,
+func receiptMail(account string, uid uint32, at time.Time, text string) mailwire.MailSummary {
+	return mailwire.MailSummary{AccountID: account, Mailbox: "INBOX", UID: uid,
+		From: mailwire.Address{Email: "sender@example.com"}, Subject: text, Snippet: text,
 		Date: at.Format(time.RFC3339)}
 }
 
@@ -62,7 +62,7 @@ func openMailStore(t *testing.T, dir string) *kb.Store {
 // Exercise actual Changes, receipt persistence and the atomic cursor writer, including a failed publication.
 func TestMailArchiveReceiptKnownGenerationAndRetry(t *testing.T) {
 	at := time.Now().UTC().Add(-time.Hour).Truncate(time.Second)
-	m := &pagedMail{validity: 1, msgs: []mail.MailSummary{receiptMail("acc", 1, at, "first generation")}}
+	m := &pagedMail{validity: 1, msgs: []mailwire.MailSummary{receiptMail("acc", 1, at, "first generation")}}
 	c := mailConnector{h: &Manager{mail: m}}
 	dir := t.TempDir()
 	e := &kb.Engine{Store: openMailStore(t, dir)}
@@ -85,7 +85,7 @@ func TestMailArchiveReceiptKnownGenerationAndRetry(t *testing.T) {
 		t.Fatal(err)
 	}
 	m.validity = 2
-	m.msgs = []mail.MailSummary{receiptMail("acc", 1, at.Add(2*time.Minute), "second generation")}
+	m.msgs = []mailwire.MailSummary{receiptMail("acc", 1, at.Add(2*time.Minute), "second generation")}
 	second, next := receiptChanges(t, c, cursor, 1)
 	if first[0].Chat.ID != second[0].Chat.ID || first[0].Messages[0].ID == second[0].Messages[0].ID {
 		t.Fatalf("reused UID must be distinct within the same chat: first %+v, second %+v", first, second)
@@ -128,7 +128,7 @@ func TestMailArchiveReceiptKnownGenerationAndRetry(t *testing.T) {
 	cursor = string(persisted)
 	for i, validity := range []uint32{3, 2, 1} {
 		m.validity = validity
-		m.msgs = []mail.MailSummary{receiptMail("acc", 1, at.Add(time.Duration(i+3)*time.Minute), "later generation")}
+		m.msgs = []mailwire.MailSummary{receiptMail("acc", 1, at.Add(time.Duration(i+3)*time.Minute), "later generation")}
 		page, next := receiptChanges(t, c, cursor, 1)
 		id := page[0].Messages[0].ID
 		if ids[id] {
@@ -159,7 +159,7 @@ func TestMailArchiveReceiptUnknownValidity(t *testing.T) {
 		}
 		t.Run(name, func(t *testing.T) {
 			at := time.Now().UTC().Add(-time.Hour).Truncate(time.Second)
-			m := &pagedMail{validity: 1, msgs: []mail.MailSummary{receiptMail("acc", 1, at, "old")}}
+			m := &pagedMail{validity: 1, msgs: []mailwire.MailSummary{receiptMail("acc", 1, at, "old")}}
 			c := mailConnector{h: &Manager{mail: m}}
 			e := &kb.Engine{Store: openMailStore(t, t.TempDir())}
 			first, cursor := receiptChanges(t, c, "", 1)
@@ -176,7 +176,7 @@ func TestMailArchiveReceiptUnknownValidity(t *testing.T) {
 			} else {
 				m.validity = 0
 			}
-			m.msgs = []mail.MailSummary{receiptMail("acc", 1, at.Add(time.Minute), "unproven reuse")}
+			m.msgs = []mailwire.MailSummary{receiptMail("acc", 1, at.Add(time.Minute), "unproven reuse")}
 			_, learned := receiptChanges(t, c, cursor, 0)
 			cur := cursorOf(t, learned)
 			if cur["acc"] != 1 || cur["acc#e"] != 0 || (!legacy && cur["acc#v"] != 1) || (legacy && cur["acc#v"] != 2) {
@@ -196,13 +196,13 @@ func TestMailArchiveReceiptUnknownValidity(t *testing.T) {
 
 type multiReceiptMail struct {
 	inboxOnlyMail
-	accounts []mail.MailAccount
+	accounts []mailwire.MailAccount
 	inboxes  map[string]*pagedMail
 	fail     map[string]bool
 }
 
-func (m *multiReceiptMail) ListAccounts() ([]mail.MailAccount, error) { return m.accounts, nil }
-func (m *multiReceiptMail) ListMessages(ctx context.Context, opt mail.ListOptions) (*mail.ListResult, error) {
+func (m *multiReceiptMail) ListAccounts() ([]mailwire.MailAccount, error) { return m.accounts, nil }
+func (m *multiReceiptMail) ListMessages(ctx context.Context, opt mailwire.ListOptions) (*mailwire.ListResult, error) {
 	if m.fail[opt.AccountID] {
 		return nil, errors.New("unreadable inbox")
 	}
@@ -211,17 +211,17 @@ func (m *multiReceiptMail) ListMessages(ctx context.Context, opt mail.ListOption
 	}
 	return m.inboxes[opt.AccountID].ListMessages(ctx, opt)
 }
-func (m *multiReceiptMail) GetMessage(context.Context, string, uint32, string) (*mail.MailMessage, error) {
+func (m *multiReceiptMail) GetMessage(context.Context, string, uint32, string) (*mailwire.MailMessage, error) {
 	return nil, errors.New("use snippet")
 }
 
 func TestMailArchiveReceiptIndependentInboxesAndErrors(t *testing.T) {
 	at := time.Now().UTC().Add(-time.Hour).Truncate(time.Second)
 	m := &multiReceiptMail{
-		accounts: []mail.MailAccount{{ID: "a", Email: "a@example.com"}, {ID: "b", Email: "b@example.com"}},
+		accounts: []mailwire.MailAccount{{ID: "a", Email: "a@example.com"}, {ID: "b", Email: "b@example.com"}},
 		inboxes: map[string]*pagedMail{
-			"a": {validity: 1, msgs: []mail.MailSummary{receiptMail("a", 1, at, "a old")}},
-			"b": {validity: 1, msgs: []mail.MailSummary{receiptMail("b", 1, at, "b old")}},
+			"a": {validity: 1, msgs: []mailwire.MailSummary{receiptMail("a", 1, at, "a old")}},
+			"b": {validity: 1, msgs: []mailwire.MailSummary{receiptMail("b", 1, at, "b old")}},
 		},
 		fail: map[string]bool{},
 	}
@@ -235,7 +235,7 @@ func TestMailArchiveReceiptIndependentInboxesAndErrors(t *testing.T) {
 		t.Fatal("inboxes must use independent chats")
 	}
 	m.inboxes["a"].validity = 2
-	m.inboxes["a"].msgs = []mail.MailSummary{receiptMail("a", 1, at.Add(time.Minute), "a new")}
+	m.inboxes["a"].msgs = []mailwire.MailSummary{receiptMail("a", 1, at.Add(time.Minute), "a new")}
 	m.inboxes["b"].msgs = append(m.inboxes["b"].msgs, receiptMail("b", 2, at.Add(time.Minute), "b new"))
 	m.fail["a"] = true
 	page, next := receiptChanges(t, c, cursor, 1)
@@ -256,7 +256,7 @@ func TestMailArchiveReceiptIndependentInboxesAndErrors(t *testing.T) {
 	}
 	ingestMail(t, e, page[0], 1)
 	m.inboxes["b"].validity = 2
-	m.inboxes["b"].msgs = []mail.MailSummary{receiptMail("b", 1, at.Add(2*time.Minute), "b generation")}
+	m.inboxes["b"].msgs = []mailwire.MailSummary{receiptMail("b", 1, at.Add(2*time.Minute), "b generation")}
 	page, _ = receiptChanges(t, c, cursor, 1)
 	if page[0].Chat.ID != first[1].Chat.ID || page[0].Messages[0].ID == first[1].Messages[0].ID {
 		t.Fatalf("second inbox lost its own generation: %+v", page)
@@ -267,18 +267,18 @@ func TestMailArchiveReceiptIndependentInboxesAndErrors(t *testing.T) {
 // A second change before publishing the first cursor still needs a different receipt namespace.
 func TestMailArchiveReceiptChangesBeforeCheckpoint(t *testing.T) {
 	at := time.Now().UTC().Add(-time.Hour).Truncate(time.Second)
-	m := &pagedMail{validity: 1, msgs: []mail.MailSummary{receiptMail("acc", 1, at, "original")}}
+	m := &pagedMail{validity: 1, msgs: []mailwire.MailSummary{receiptMail("acc", 1, at, "original")}}
 	c := mailConnector{h: &Manager{mail: m}}
 	e := &kb.Engine{Store: openMailStore(t, t.TempDir())}
 	first, checkpoint := receiptChanges(t, c, "", 1)
 	ingestMail(t, e, first[0], 1)
 	m.validity = 2
-	m.msgs = []mail.MailSummary{receiptMail("acc", 1, at.Add(time.Minute), "unpublished generation")}
+	m.msgs = []mailwire.MailSummary{receiptMail("acc", 1, at.Add(time.Minute), "unpublished generation")}
 	second, _ := receiptChanges(t, c, checkpoint, 1)
 	ingestMail(t, e, second[0], 1)
 	// Simulate another renumbering before the new checkpoint was published.
 	m.validity = 3
-	m.msgs = []mail.MailSummary{receiptMail("acc", 1, at.Add(2*time.Minute), "next generation")}
+	m.msgs = []mailwire.MailSummary{receiptMail("acc", 1, at.Add(2*time.Minute), "next generation")}
 	third, next := receiptChanges(t, c, checkpoint, 1)
 	if third[0].Messages[0].ID == second[0].Messages[0].ID || third[0].Messages[0].ID == first[0].Messages[0].ID {
 		t.Fatalf("unpublished changes reused receipt: %q, %q, %q", first[0].Messages[0].ID, second[0].Messages[0].ID, third[0].Messages[0].ID)
@@ -289,13 +289,13 @@ func TestMailArchiveReceiptChangesBeforeCheckpoint(t *testing.T) {
 
 func TestMailArchiveReceiptRetryAfterIngestWriteFailure(t *testing.T) {
 	at := time.Now().UTC().Add(-48 * time.Hour).Truncate(time.Second)
-	m := &pagedMail{validity: 1, msgs: []mail.MailSummary{receiptMail("acc", 1, at, "old day")}}
+	m := &pagedMail{validity: 1, msgs: []mailwire.MailSummary{receiptMail("acc", 1, at, "old day")}}
 	c := mailConnector{h: &Manager{mail: m}}
 	e := &kb.Engine{Store: openMailStore(t, t.TempDir())}
 	first, cursor := receiptChanges(t, c, "", 1)
 	ingestMail(t, e, first[0], 1)
 	m.validity = 2
-	m.msgs = []mail.MailSummary{receiptMail("acc", 1, at.Add(24*time.Hour), "new day")}
+	m.msgs = []mailwire.MailSummary{receiptMail("acc", 1, at.Add(24*time.Hour), "new day")}
 	page, next := receiptChanges(t, c, cursor, 1)
 	day := at.Add(24 * time.Hour).In(e.Store.Zone()).Format("2006-01-02")
 	blocked := e.Store.Path(kb.KindChat, kb.ChatID("mail", first[0].Chat.ID), "messages", day+".md")
@@ -318,13 +318,13 @@ func TestMailArchiveReceiptRetryAfterIngestWriteFailure(t *testing.T) {
 
 func TestMailArchiveReceiptTransientZeroAfterChange(t *testing.T) {
 	at := time.Now().UTC().Add(-time.Hour).Truncate(time.Second)
-	m := &pagedMail{validity: 1, msgs: []mail.MailSummary{receiptMail("acc", 1, at, "original")}}
+	m := &pagedMail{validity: 1, msgs: []mailwire.MailSummary{receiptMail("acc", 1, at, "original")}}
 	c := mailConnector{h: &Manager{mail: m}}
 	e := &kb.Engine{Store: openMailStore(t, t.TempDir())}
 	first, cursor := receiptChanges(t, c, "", 1)
 	ingestMail(t, e, first[0], 1)
 	m.validity = 2
-	m.msgs = []mail.MailSummary{receiptMail("acc", 1, at.Add(time.Minute), "known generation")}
+	m.msgs = []mailwire.MailSummary{receiptMail("acc", 1, at.Add(time.Minute), "known generation")}
 	second, cursor := receiptChanges(t, c, cursor, 1)
 	ingestMail(t, e, second[0], 1)
 	m.msgs = append(m.msgs, receiptMail("acc", 2, at.Add(2*time.Minute), "transient unknown"))
@@ -344,7 +344,7 @@ func TestMailArchiveReceiptTransientZeroAfterChange(t *testing.T) {
 
 func TestMailArchiveReceiptEpochExhaustionFailsClosed(t *testing.T) {
 	at := time.Now().UTC().Add(-time.Hour).Truncate(time.Second)
-	m := &pagedMail{validity: 2, msgs: []mail.MailSummary{receiptMail("acc", 1, at, "new generation")}}
+	m := &pagedMail{validity: 2, msgs: []mailwire.MailSummary{receiptMail("acc", 1, at, "new generation")}}
 	c := mailConnector{h: &Manager{mail: m}}
 	cursor := `{"acc":1,"acc#v":1,"acc#e":4294967295}`
 	batches, next, more, err := c.Changes(context.Background(), cursor, 20)
@@ -355,7 +355,7 @@ func TestMailArchiveReceiptEpochExhaustionFailsClosed(t *testing.T) {
 
 func TestMailArchiveReceiptEpochWithoutValidityFailsClosed(t *testing.T) {
 	at := time.Now().UTC().Add(-time.Hour).Truncate(time.Second)
-	m := &pagedMail{validity: 2, msgs: []mail.MailSummary{receiptMail("acc", 1, at, "unknown generation")}}
+	m := &pagedMail{validity: 2, msgs: []mailwire.MailSummary{receiptMail("acc", 1, at, "unknown generation")}}
 	c := mailConnector{h: &Manager{mail: m}}
 	cursor := `{"acc":1,"acc#e":1}`
 	batches, next, more, err := c.Changes(context.Background(), cursor, 20)
@@ -368,7 +368,7 @@ func TestMailArchiveReceiptEpochWithoutValidityFailsClosed(t *testing.T) {
 // Running this against the original connector also demonstrates why rolling back the writer is unsafe.
 func TestMailArchiveReceiptVersionedCheckpoint(t *testing.T) {
 	at := time.Now().UTC().Add(-time.Hour).Truncate(time.Second)
-	m := &pagedMail{validity: 1, msgs: []mail.MailSummary{receiptMail("acc", 2, at, "legacy receipt")}}
+	m := &pagedMail{validity: 1, msgs: []mailwire.MailSummary{receiptMail("acc", 2, at, "legacy receipt")}}
 	c := mailConnector{h: &Manager{mail: m}}
 	e := &kb.Engine{Store: openMailStore(t, t.TempDir())}
 	legacy, _ := receiptChanges(t, c, "", 1)
@@ -378,7 +378,7 @@ func TestMailArchiveReceiptVersionedCheckpoint(t *testing.T) {
 	ingestMail(t, e, legacy[0], 1)
 	// A new-version writer has seen 1 -> 2 and published UID 1 under epoch 1.
 	m.validity = 2
-	m.msgs = []mail.MailSummary{receiptMail("acc", 2, at.Add(time.Minute), "later epoch")}
+	m.msgs = []mailwire.MailSummary{receiptMail("acc", 2, at.Add(time.Minute), "later epoch")}
 	cursor := `{"acc":1,"acc#v":2,"acc#e":1}`
 	page, next := receiptChanges(t, c, cursor, 1)
 	if cursorOf(t, next)["acc#e"] != 1 {

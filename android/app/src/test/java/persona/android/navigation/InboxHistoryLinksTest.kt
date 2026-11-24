@@ -27,15 +27,15 @@ import persona.feature.inbox.InboxItemDetailRoute
 import persona.feature.inbox.MailRoute
 import persona.feature.inbox.InboxItemPages
 import persona.feature.inbox.InboxLanding
-import persona.feature.inbox.InboxRecord
+import persona.core.inbox.InboxRecord
 import persona.feature.inbox.InboxRepository
-import persona.feature.inbox.InboxSnapshot
-import persona.feature.inbox.LarkConversation
-import persona.feature.inbox.LarkPart
+import persona.core.inbox.InboxSnapshot
+import persona.core.inbox.LarkConversation
+import persona.core.inbox.LarkPart
 import persona.feature.inbox.LarkRoute
-import persona.feature.inbox.ReplyDraft
-import persona.feature.inbox.ReplyRequest
-import persona.feature.inbox.ReplyTarget
+import persona.core.inbox.ReplyDraft
+import persona.core.inbox.ReplyRequest
+import persona.core.inbox.ReplyTarget
 import java.io.IOException
 
 /** Deep links resolve a historical item through the same lookup and states as the event page. */

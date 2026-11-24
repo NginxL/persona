@@ -9,6 +9,7 @@ import (
 
 	"github.com/nwverse/persona/server/internal/agents"
 	"github.com/nwverse/persona/server/internal/i18n"
+	"github.com/nwverse/persona/server/internal/rpc"
 	"github.com/nwverse/persona/server/internal/sessionlist"
 )
 
@@ -21,8 +22,25 @@ func (h *Manager) initAgents() {
 	if h.store != nil {
 		kv = h.store
 	}
-	// The sources come from plugins (agent_sources, extension_agents.go).
+	// Plugin sources join later. Explicit bot registrations are independent sources so one outage cannot hide another.
 	h.agents = agents.NewService(kv, h.agentsChanged, h.logf)
+	registry := agents.NewBotRegistry(kv, agents.BotCallFunc(func(ctx context.Context, machineID, method string, params, out any) error {
+		m := h.localMachine(machineID)
+		if m == nil {
+			return &rpc.Error{Code: "not_found", Message: "bot machine is not registered"}
+		}
+		return m.call(ctx, method, params, out)
+	}))
+	for _, registration := range h.cfg.Bots.Endpoints {
+		src, err := registry.Source(registration)
+		if err != nil {
+			h.logf("agents: bot endpoint %q is not registered: %v", registration.ID, err)
+			continue
+		}
+		if !h.agents.Add(src) {
+			h.logf("agents: bot endpoint %q duplicates another source", registration.ID)
+		}
+	}
 }
 
 // agentsChanged tells the apps which agent sessions to re-pull, like {"type":"lark"} does for chats.

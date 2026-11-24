@@ -955,6 +955,10 @@ func TestCodexStartClaimsItsFile(t *testing.T) {
 func TestEngineSwitchToAnUnrecordedCodexThread(t *testing.T) {
 	const thread = "01a19a00-0000-7000-8000-00000000507a"
 	withShortCodexWaits(t, time.Second, time.Second)
+	// The resumed thread never shows up in the fake herdr: the answer comes when the resume's wait runs out.
+	oldResume := codexResumeWait
+	codexResumeWait = time.Second
+	t.Cleanup(func() { codexResumeWait = oldResume })
 	t.Cleanup(func() { codexResumes.Delete(thread) })
 	n, f, home, cwd, _ := switchNode(t, proto.StatusIdle, longTurn)
 	until := time.Now().Add(-time.Hour).UTC().Truncate(time.Second)

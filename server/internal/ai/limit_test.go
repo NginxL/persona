@@ -84,6 +84,18 @@ func newUpstream(t *testing.T, reply func(w http.ResponseWriter)) *upstream {
 		reply(w)
 	}))
 	t.Cleanup(u.srv.Close)
+	// Gates are package-global and keyed by the server's address, and every test runs on the same fake clock: once this
+	// server's port is reused by a later test's server, a pause left here would still be in force there and its request
+	// would never go out. The gates of this server go with it.
+	host := strings.TrimPrefix(u.srv.URL, "http://")
+	t.Cleanup(func() {
+		gates.Range(func(k, v any) bool {
+			if v.(*gate).host == host {
+				gates.Delete(k)
+			}
+			return true
+		})
+	})
 	return u
 }
 

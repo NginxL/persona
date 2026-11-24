@@ -79,12 +79,12 @@ func (s *Service) askOnPhone(list []proto.Interaction) {
 		now[ix.ID] = true
 		f.mu.Lock()
 		p := f.interactions[ix.ID]
-		clarified := p != nil && p.prepared != nil && p.prepared.clarified && !p.prepared.terminal
+		prepared := p != nil && p.prepared != nil && !p.prepared.terminal
 		f.mu.Unlock()
-		if clarified {
-			// The original caller has already returned Clarifying and the durable
-			// journal owns the eventual report. Another snapshot waiter would only
-			// read history, return "clarifying" and log that expected state again.
+		if prepared {
+			// The original caller and the prepared timer own this operation's whole
+			// lifecycle, before and after clarification. A snapshot waiter must not
+			// cancel the shared card when its own snapshot withdraws.
 			continue
 		}
 		if q := f.asked[ix.ID]; q != nil {

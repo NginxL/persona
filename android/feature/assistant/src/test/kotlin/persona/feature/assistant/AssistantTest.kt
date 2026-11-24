@@ -6,6 +6,8 @@ import persona.core.contracts.api.AssistantSnapshot
 import persona.core.contracts.Direction
 import persona.core.contracts.DirectionCounts
 import persona.core.contracts.DirectionTree
+import persona.core.contracts.ExternalDirection
+import persona.core.contracts.SessionKey
 import persona.core.contracts.api.LeaderCounts
 import java.time.Instant
 import java.time.ZoneId
@@ -173,6 +175,43 @@ class AssistantTest {
         assertNull(old.background)
         assertEquals(listOf(background, scheduled, mine), old.others)
         assertTrue(conversationGroups(snapshot.copy(backgroundSupervisor = null), "后台督办", named).others.isEmpty())
+    }
+
+    @Test fun outsideDirectionsKeepHubOrderCountsAndOptionalAgentTargets() {
+        val real = Session(machineId = "demo", sessionId = "real", title = "Conversation", status = "idle")
+        val bound = ExternalDirection("work", "agent-1")
+        val targetless = ExternalDirection()
+        val tree = DirectionTree(listOf(
+            Direction("real", "Conversation", counts = DirectionCounts(needsYou = 1),
+                external = ExternalDirection("wrong", "wrong")),
+            Direction("dir-bound", "Outside release", counts = DirectionCounts(needsYou = 2), running = true, external = bound),
+            Direction("dir-watching", "Outside watch", counts = DirectionCounts(needsYou = 3), external = targetless),
+        ))
+        val snapshot = AssistantSnapshot(conversations = listOf(real), leaders = listOf("real", "dir-bound", "dir-watching", "gone"),
+            directionNames = tree.names, directionTree = tree)
+        val result = conversationGroups(snapshot, "", words)
+        assertEquals(listOf("real", "dir-bound", "dir-watching"), result.directions.map { it.sessionId })
+        assertEquals(setOf("dir-bound", "dir-watching"), result.externalDirections.keys)
+        assertEquals(SessionKey("work", "agent-1"), result.externalDirections["dir-bound"]?.target)
+        assertNull(result.externalDirections["dir-watching"]?.target)
+        assertNull("a real conversation wins over malformed external metadata", result.externalDirections["real"])
+        val archivedReal = conversationGroups(snapshot.copy(conversations = listOf(real.copy(archived = true))), "", words)
+        assertEquals(listOf("dir-bound", "dir-watching"), archivedReal.directions.map { it.sessionId })
+        assertNull("an archived real conversation is not resurrected as an outside row", archivedReal.externalDirections["real"])
+        assertEquals(LeaderCounts(needsYou = 1), result.counts["real"])
+        assertEquals(LeaderCounts(running = true, needsYou = 2), result.counts["dir-bound"])
+        assertEquals(LeaderCounts(needsYou = 3), result.counts["dir-watching"])
+        assertEquals(listOf(real), snapshot.conversations)
+        assertEquals(listOf("dir-bound"), conversationGroups(snapshot, "release", words).directions.map { it.sessionId })
+
+        // The leaders fallback carries the same metadata; an older hub without it keeps the old conversation-only list.
+        val fallback = conversationGroups(snapshot.copy(directionTree = null,
+            externalDirections = mapOf("dir-bound" to bound, "dir-watching" to targetless)), "", words)
+        assertEquals(result.directions.map { it.sessionId }, fallback.directions.map { it.sessionId })
+        assertEquals(result.externalDirections, fallback.externalDirections)
+        val old = conversationGroups(snapshot.copy(directionTree = null), "", words)
+        assertEquals(listOf(real), old.directions)
+        assertTrue(old.externalDirections.isEmpty())
     }
 
     @Test fun archivedConversationsLeaveTheHistory() {

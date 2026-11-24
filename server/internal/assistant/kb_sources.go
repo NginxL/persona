@@ -5,16 +5,17 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/nwverse/persona/server/internal/assistant/archiverecovery"
 	"os"
 	"path/filepath"
 	"slices"
 	"time"
 
+	"github.com/nwverse/persona/server/internal/assistant/archiverecovery"
+
 	"github.com/nwverse/persona/server/internal/ai"
 	"github.com/nwverse/persona/server/internal/assistantwire"
 	"github.com/nwverse/persona/server/internal/connector"
-	"github.com/nwverse/persona/server/internal/connector/imessage"
+	"github.com/nwverse/persona/server/internal/imessagewire"
 	"github.com/nwverse/persona/server/internal/kb"
 	"github.com/nwverse/persona/server/internal/kbwire"
 	"github.com/nwverse/persona/server/internal/managerconf"
@@ -58,7 +59,7 @@ func (s *Service) kbConnectors(ctx context.Context, e *kb.Engine) {
 		if failedCleanup[src.ID] {
 			continue
 		}
-		if src.ID == imessage.ID && src.FenceVersion != assistantwire.ArchiveFenceV1 {
+		if src.ID == imessagewire.ID && src.FenceVersion != assistantwire.ArchiveFenceV1 {
 			s.logf("kb: iMessage archive requires a manager with commit fencing")
 			continue
 		}

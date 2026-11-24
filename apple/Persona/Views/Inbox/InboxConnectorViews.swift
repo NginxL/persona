@@ -129,14 +129,10 @@ struct InboxConnectorTextView: View {
         .navigationBarTitleDisplayMode(.inline)
         .task(id: item.id) { await load() }
         .refreshable { await retry() }
-        #if os(macOS)
-        .macLinkPanel($link)
-        #else
         .sheet(item: $link) { t in
             if let key = model.assistantMain ?? model.assistantCurrent { LinkSheet(target: t, key: key) }
         }
         .hubLinkSheet($hubSheet)
-        #endif
     }
 
     /// The item's page: one of Persona's own (the assistant's conversation, a to-do…) in the app, any other in the web card.

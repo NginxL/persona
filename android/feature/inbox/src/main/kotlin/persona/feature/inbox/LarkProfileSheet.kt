@@ -32,6 +32,7 @@ import kotlinx.serialization.json.JsonPrimitive
 import persona.core.designsystem.*
 import persona.core.designsystem.Tokens
 import persona.core.designsystem.icons.PhIcons
+import persona.core.inbox.*
 
 data class LarkPersonRef(
     val id: String,

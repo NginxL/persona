@@ -10,6 +10,98 @@ export function shellWordsRe(words) {
 
 const SHELL_BINARIES = new Set(['sh', 'bash', 'zsh', 'dash', 'ksh', 'ash'])
 
+const ANSI_C_ESCAPES = { a: '\x07', b: '\b', e: '\x1b', E: '\x1b', f: '\f', n: '\n', r: '\r', t: '\t', v: '\v', '\\': '\\', "'": "'", '"': '"', '?': '?' }
+
+function readAnsiC(command, start) {
+  const n = command.length
+  let i = start + 2
+  let text = ''
+  while (i < n && command[i] !== "'") {
+    if (command[i] === '\\' && i + 1 < n) {
+      const next = command[i + 1]
+      if (next === 'x') {
+        const hex = /^[0-9a-fA-F]{1,2}/.exec(command.slice(i + 2))
+        if (hex) {
+          text += String.fromCharCode(parseInt(hex[0], 16))
+          i += 2 + hex[0].length
+          continue
+        }
+      }
+      const oct = /^[0-7]{1,3}/.exec(command.slice(i + 1))
+      if (oct) {
+        text += String.fromCharCode(parseInt(oct[0], 8))
+        i += 1 + oct[0].length
+        continue
+      }
+      if (next === 'u' || next === 'U') {
+        const uni = (next === 'u' ? /^[0-9a-fA-F]{1,4}/ : /^[0-9a-fA-F]{1,8}/).exec(command.slice(i + 2))
+        if (uni) {
+          const cp = parseInt(uni[0], 16)
+          if (cp <= 0x10ffff) text += String.fromCodePoint(cp)
+          i += 2 + uni[0].length
+          continue
+        }
+      }
+      text += ANSI_C_ESCAPES[next] ?? next
+      i += 2
+      continue
+    }
+    text += command[i++]
+  }
+  if (i < n) i++
+  return { text, end: i }
+}
+
+function readCommandSub(command, start) {
+  const n = command.length
+  let i = start
+  let depth = 1
+  while (i < n && depth > 0) {
+    const ch = command[i]
+    if (ch === '\\' && i + 1 < n) {
+      i += 2
+      continue
+    }
+    if (ch === '$' && command[i + 1] === "'") {
+      i = readAnsiC(command, i).end
+      continue
+    }
+    if (ch === "'") {
+      i++
+      while (i < n && command[i] !== "'") i++
+      if (i < n) i++
+      continue
+    }
+    if (ch === '"') {
+      i++
+      while (i < n && command[i] !== '"') {
+        if (command[i] === '\\' && i + 1 < n) i += 2
+        else if (command[i] === '$' && command[i + 1] === '(') i = readCommandSub(command, i + 2).end
+        else if (command[i] === '`') {
+          i++
+          while (i < n && command[i] !== '`') i += command[i] === '\\' && i + 1 < n ? 2 : 1
+          if (i < n) i++
+        } else i++
+      }
+      if (i < n) i++
+      continue
+    }
+    if (ch === '`') {
+      i++
+      while (i < n && command[i] !== '`') i += command[i] === '\\' && i + 1 < n ? 2 : 1
+      if (i < n) i++
+      continue
+    }
+    if (ch === '(') depth++
+    else if (ch === ')') {
+      depth--
+      if (depth === 0) return { body: command.slice(start, i), end: i + 1 }
+    }
+    i++
+  }
+  return { body: command.slice(start, i), end: i }
+}
+
 // Parse shell words/operators and retain nested command substitutions.
 function tokenizeShell(command) {
   const tokens = []
@@ -47,17 +139,16 @@ function tokenizeShell(command) {
     }
     if (ch === '$' && command[i + 1] === '(') {
       flush()
-      i += 2
-      const start = i
-      let depth = 1
-      while (i < n && depth > 0) {
-        if (command[i] === '\\' && i + 1 < n) { i += 2; continue }
-        if (command[i] === '(') depth++
-        else if (command[i] === ')') depth--
-        if (depth > 0) i++
-      }
-      embedded.push(command.slice(start, i))
-      if (i < n) i++
+      const sub = readCommandSub(command, i + 2)
+      embedded.push(sub.body)
+      i = sub.end
+      continue
+    }
+    if (ch === '$' && command[i + 1] === "'") {
+      hasToken = true
+      const ansi = readAnsiC(command, i)
+      cur += ansi.text
+      i = ansi.end
       continue
     }
     if (ch === "'") {
@@ -80,17 +171,9 @@ function tokenizeShell(command) {
           continue
         }
         if (command[i] === '$' && command[i + 1] === '(') {
-          i += 2
-          const start = i
-          let depth = 1
-          while (i < n && depth > 0) {
-            if (command[i] === '\\' && i + 1 < n) { i += 2; continue }
-            if (command[i] === '(') depth++
-            else if (command[i] === ')') depth--
-            if (depth > 0) i++
-          }
-          embedded.push(command.slice(start, i))
-          if (i < n) i++
+          const sub = readCommandSub(command, i + 2)
+          embedded.push(sub.body)
+          i = sub.end
           continue
         }
         if (command[i] === '`') {

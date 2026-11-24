@@ -26,6 +26,21 @@ func standingJSON(t *testing.T, v any) json.RawMessage {
 	return raw
 }
 
+func TestStandingAuthorizationSettingStillRequiresApprovalWhenSwitchOn(t *testing.T) {
+	database := taskRecoveryDatabase(t)
+	f := newFakeHub().withMachine()
+	f.hello.Assistant.AutoApproveReversibleSettings = true
+	s := newServiceOn(t, f, database)
+	setSettings(t, s, func(v *Settings) { v.Main, v.MachineID = "conv1", "server" })
+	grant := standingRegistryGrant()
+	value := standingJSON(t, StandingAuthorizations{Authorizations: []StandingAuthorization{grant}})
+	requireReversibleApproval(t, s, standingAuthorizationsKey, string(value), false)
+	list, err := s.standingAuthorizations(context.Background())
+	if err != nil || list.Revision != 0 || len(list.Authorizations) != 0 {
+		t.Fatalf("declined standing authorization changed: %+v %v", list, err)
+	}
+}
+
 func TestStandingAuthorizationRegistryDatabaseAndRoutes(t *testing.T) {
 	ctx := context.Background()
 	database := taskRecoveryDatabase(t)

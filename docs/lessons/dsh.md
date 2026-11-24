@@ -66,3 +66,8 @@ Pitfalls hit while integrating DSH (`docs/integrations/dsh.md`) and node's runti
 - **When a pi extension sends itself a `/command`, a command that doesn't exist becomes a message to the model** (2026-11-02, pi auto-update): pi only gives extensions `reload()` inside a command context, so to switch versions the extension
   registers a command and runs it on itself with `pi.sendUserMessage("/persona-reload", {expandPromptTemplates: true})`. pi looks for an extension command first and, if none is found, hands the string to the model as a user message,
   so only send it to sessions that really registered the command (an old pi without `registerCommand` doesn't switch). pi-web rejects reload while it is replying; wait until between turns.
+- **An entry check that compares `argv[1]` with `import.meta.url` as given skips the program under a symlink** (2026-11-22, #12848): Node loads the
+  entry module by its real path but leaves `process.argv[1]` as typed, so on a machine whose home is a symlink (common on Linux) the built-in
+  opencode companion skipped `main()` and exited 0 without a word, and the node started it again every minute. Compare
+  `realpathSync(process.argv[1])` with `realpathSync(fileURLToPath(import.meta.url))`, returning false when `argv[1]` has no file. A test that
+  starts the script through a symlinked directory catches it; one that starts it from the checkout passes unless the checkout's own path has a symlink.

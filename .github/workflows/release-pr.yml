@@ -232,9 +232,17 @@ jobs:
           if-no-files-found: error
           retention-days: 2
 
+  android-tests:
+    name: Run the complete Android suite in the standard shards
+    needs: plan
+    if: needs.plan.outputs.pr != '0' && needs.plan.outputs.version != ''
+    uses: ./.github/workflows/android-test.yml
+    with:
+      commit: ${{ needs.plan.outputs.commit }}
+
   android:
     name: Build and sign Android for the exact merge result
-    needs: plan
+    needs: [plan, android-tests]
     if: needs.plan.outputs.pr != '0' && needs.plan.outputs.version != ''
     runs-on: ubuntu-latest
     timeout-minutes: 120
@@ -264,6 +272,26 @@ jobs:
         with:
           name: release-pr-plan-${{ needs.plan.outputs.pr }}
           path: ${{ runner.temp }}/release-plan
+      - name: Download every required Android shard receipt
+        uses: actions/download-artifact@v4
+        with:
+          pattern: android-source-receipt-${{ needs.plan.outputs.commit }}-*
+          path: ${{ runner.temp }}/android-source-evidence
+          merge-multiple: true
+      - name: Verify every required Android shard passed this exact source
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/android-source-evidence"
+          for lane in lint-build-test-0 test-1; do
+            test -f "$RUNNER_TEMP/android-source-evidence/receipt-$lane.json"
+            python3 - "$RUNNER_TEMP/android-source-evidence/receipt-$lane.json" "${{ needs.plan.outputs.commit }}" <<'PY'
+          import json, sys
+          from pathlib import Path
+          receipt = json.loads(Path(sys.argv[1]).read_text())
+          assert receipt['commit'] == sys.argv[2], 'Android test evidence belongs to another commit'
+          assert receipt['verified'] is True
+          PY
+          done
       - name: Prepare protected Android signing configuration without logging secrets
         env:
           PERSONA_ANDROID_CERTIFICATE_SHA256: ${{ secrets.PERSONA_ANDROID_CERTIFICATE_SHA256 }}
@@ -285,7 +313,7 @@ jobs:
           python3 scripts/release/android_tag_release.py \
             --config "$RUNNER_TEMP/persona-android/android.json" \
             --worktree "$GITHUB_WORKSPACE" --commit "${{ needs.plan.outputs.commit }}" \
-            --version "${{ needs.plan.outputs.version }}" --receipt "$RUNNER_TEMP/android-receipt.json"
+            --version "${{ needs.plan.outputs.version }}" --receipt "$RUNNER_TEMP/android-receipt.json" --release-only
       - name: Verify the signed APK and Android index against the release plan
         run: |
           set -euo pipefail
@@ -388,6 +416,16 @@ jobs:
           umask 077
           printf '%s' "$PERSONA_APPLE_DISTRIBUTION_P12_BASE64" | base64 --decode > "$RUNNER_TEMP/apple-distribution.p12"
           security create-keychain -p "$PERSONA_SIGNING_KEYCHAIN_PASSWORD" "$PERSONA_SIGNING_KEYCHAIN"
+          # Xcode searches the default keychain domain, not only the path passed to security import. Add the
+          # temporary signing keychain while retaining the runner's existing list; never replace that list.
+          # Read each printed path as one argument so paths containing spaces cannot be split into other identities.
+          python3 - "$PERSONA_SIGNING_KEYCHAIN" <<'PY'
+          import subprocess, sys
+          existing = subprocess.check_output(["security", "list-keychains", "-d", "user"], text=True).splitlines()
+          paths = [path.strip().strip('"') for path in existing if path.strip()]
+          subprocess.run(["security", "list-keychains", "-d", "user", "-s", sys.argv[1], *paths], check=True)
+          PY
+          security list-keychains -d user | grep -F "$PERSONA_SIGNING_KEYCHAIN"
           security set-keychain-settings -lut 21600 "$PERSONA_SIGNING_KEYCHAIN"
           security unlock-keychain -p "$PERSONA_SIGNING_KEYCHAIN_PASSWORD" "$PERSONA_SIGNING_KEYCHAIN"
           security import "$RUNNER_TEMP/apple-distribution.p12" -k "$PERSONA_SIGNING_KEYCHAIN" -P "$PERSONA_APPLE_DISTRIBUTION_P12_PASSWORD" -T /usr/bin/codesign
@@ -409,6 +447,14 @@ jobs:
           mkdir -p "$RUNNER_TEMP/persona-public-config/persona"
           printf '# The public account identifier is not private; all other privacy checks remain active.\n!chyroc\n' > "$RUNNER_TEMP/persona-public-config/persona/private-words.txt"
           printf 'XDG_CONFIG_HOME=%s\n' "$RUNNER_TEMP/persona-public-config" >> "$GITHUB_ENV"
+      - name: Stage the exact source and its Meta-specific package-resolution input
+        env:
+          PERSONA_META_WEARABLES: ${{ vars.PERSONA_META_WEARABLES }}
+        run: |
+          set -euo pipefail
+          meta="${PERSONA_META_WEARABLES:-NO}"
+          python3 scripts/ci/apple_release_source.py --source "$GITHUB_WORKSPACE" --destination "$RUNNER_TEMP/apple-release-source" --meta "$meta"
+          printf 'PERSONA_RELEASE_SOURCE=%s\n' "$RUNNER_TEMP/apple-release-source" >> "$GITHUB_ENV"
       - name: Archive, export and upload the formal iPhone/Watch build
         env:
           RUSTUP_TOOLCHAIN: '1.98.0'

@@ -188,6 +188,8 @@ func TestPlaceCountsFollowTheFilters(t *testing.T) {
 	page := mustQuery(t, &index, Options{Limit: 1})
 	_, err = index.PlaceCounts(Options{Cursor: page.NextCursor})
 	requireCode(t, err, "invalid_query")
+	_, err = index.PlaceCounts(Options{Search: "quarterly", SearchContext: searchContext()})
+	requireCode(t, err, "invalid_query")
 	var empty Index
 	if got, err := empty.PlaceCounts(Options{}); err != nil || got.Total != 0 || got.Project == nil || got.Group == nil || got.Revision == "" {
 		t.Fatalf("zero index: %+v %v", got, err)

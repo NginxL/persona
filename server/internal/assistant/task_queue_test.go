@@ -6,6 +6,7 @@ import (
 	"errors"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -54,11 +55,32 @@ func busyHealthy(d *resourceDevs) {
 func TestAdmissionQueueParksInsteadOfFailing(t *testing.T) {
 	s, f, d := admissionHub(t)
 	busyOverloaded(d)
+	// Check the stored plan as the manager publishes each update. Reading just
+	// the final card would miss a refusal published before the queue entry.
+	var premature atomic.Bool
+	f.mu.Lock()
+	f.onBroadcast = func() {
+		plan, err := s.loadPlan(context.Background(), "plan_q")
+		if err == nil {
+			task := plan.Tasks[0]
+			if task.Placement != nil && task.Queue == nil {
+				premature.Store(true)
+			}
+		}
+	}
+	f.mu.Unlock()
 	p, todo := queuedStart(t, s, "busy")
+	if premature.Load() {
+		t.Fatal("published a refusal before its queue entry")
+	}
 
 	pt := p.Tasks[0]
 	if pt.Queue == nil {
 		t.Fatal("the refused task must be queued")
+	}
+	if decision := pt.Placement; decision == nil || decision.Requested != "busy" || decision.Choice != "" ||
+		decision.Reason != pt.Queue.Reason || !decision.WaitAt.Equal(pt.Queue.NextAt) {
+		t.Fatalf("waiting placement = %+v, queue = %+v", decision, pt.Queue)
 	}
 	if pt.Queue.Attempt != 1 || pt.Queue.NextAt.IsZero() || pt.Queue.QueuedAt.IsZero() {
 		t.Fatalf("bad queue record: %+v", pt.Queue)

@@ -31,5 +31,12 @@
   "direction_working": "作業中",
   "direction_needs_you": "あなた待ち",
   "direction_stuck": "停滞中",
-  "direction_planned": "未着手"
+  "direction_planned": "未着手",
+  "bg_stalled_minutes_one": "バックグラウンドコマンドが{count}分間動いていません",
+  "bg_stalled_minutes_other": "バックグラウンドコマンドが{count}分間動いていません",
+  "bg_stalled_hours_one": "バックグラウンドコマンドが{count}時間動いていません",
+  "bg_stalled_hours_other": "バックグラウンドコマンドが{count}時間動いていません",
+  "bg_stalled_days_one": "バックグラウンドコマンドが{count}日間動いていません",
+  "bg_stalled_days_other": "バックグラウンドコマンドが{count}日間動いていません",
+  "bg_stalled_hint": "バックグラウンドコマンドがしばらく CPU を使わず出力もないため、止まっている可能性があります。実行中のツールは作業中として数えるので「作業中」のままです。止めるかどうかはあなた次第です。"
 }

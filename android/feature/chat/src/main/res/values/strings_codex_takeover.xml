@@ -1,0 +1,20 @@
+<resources>
+    <string name="chat_takeover_action">Take over</string>
+    <string name="chat_takeover_continue_short">New session</string>
+    <string name="chat_takeover_continue_long">Continue in a new session</string>
+    <string name="chat_takeover_continue_instead">Continue in a new session instead</string>
+    <string name="chat_takeover_running_reason">Codex is running in Terminal</string>
+    <string name="chat_takeover_confirm_title">Take over this session?</string>
+    <string name="chat_takeover_running_confirm">This will end the turn currently running in the terminal.</string>
+    <string name="chat_takeover_continue_title">Continue in a new session?</string>
+    <string name="chat_takeover_reason_encrypted_context">This conversation\'s context is sealed. Continue in a new session instead.</string>
+    <string name="chat_takeover_reason_unavailable">This session cannot be safely resumed. Continue in a new session instead.</string>
+    <string name="chat_takeover_done">Taken over</string>
+    <string name="chat_takeover_continued">Started new session</string>
+    <string name="chat_takeover_progress">Taking over…</string>
+    <string name="chat_takeover_continuing">Starting new session…</string>
+    <string name="chat_takeover_checking">Checking new session status…</string>
+    <string name="chat_takeover_continue_pending">The new session is still starting. Check its status before trying again.</string>
+    <string name="chat_takeover_continue_unknown">Couldn\'t confirm whether the new session started. Check its status before trying again.</string>
+    <string name="chat_takeover_check_status">Check status</string>
+</resources>

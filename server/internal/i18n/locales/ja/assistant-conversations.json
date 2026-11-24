@@ -1,12 +1,16 @@
 {
+  "reporting_direction_supervisor": "この方向は進捗報告用です。タスクを監督する Persona のチャットを選んでください。",
   "archive_main": "メインチャットはアーカイブできません",
   "archive_background_supervisor": "バックグラウンド監督のチャットはアーカイブできません",
   "supervision_source": "監督",
   "background_supervisor": "バックグラウンド監督",
-  "background_supervisor_former": "バックグラウンド監督 · {month}月{day}日まで",
   "notice_delivery_refused": "このチャットが、タスクまたはチャットに関する Persona からの更新を受け取りませんでした。届いておらず、自動では再送しません。",
   "relay_delivery_failed": "メッセージを届けられませんでした",
   "supervision_delivery_failed": "このチャットではタスクのフォローアップ指示を受け取れません。タスクを開いて最新の状態と報告を確認してください。このコンピュータで対応するランチャー：{launchers}。",
   "supervision_delivery_refused": "このチャットがタスクのフォローアップメッセージを受け取らなかったため、自動では再送しません。タスクを開いて最新の状態と報告を確認してください。",
-  "supervision_reviewer_required": "このタスクを始める前に、Claude Code または Codex の監督チャットを選んでください。"
+  "supervision_reviewer_required": "このタスクを始める前に、Claude Code または Codex の監督チャットを選んでください。",
+  "started_on": "実行構成は {run} です。",
+  "pick_save_failed": "次のターンで使うモデル設定を保存できませんでした：{error}",
+  "pin_requested": "最初のターンが終わると、この会話を固定するかどうかを Persona が確認します。",
+  "pin_save_failed": "この会話の固定リクエストを保存できませんでした。"
 }

@@ -123,8 +123,10 @@ class AppleRenameTests(unittest.TestCase):
             'Persona/Intents/AskPersonaIntent.swift': ['AskPersonaIntent'],
             'Persona/Intents/PersonaStatusIntent.swift': ['PersonaStatusIntent'],
             'Persona/Intents/PersonaShortcuts.swift': ['PersonaShortcuts'],
-            'PersonaWidgets/PersonaControls.swift': ['AskPersonaControl', 'PersonaAgentsControl', 'DictatePersonaControl'],
-            'LiveActivity/PersonaControlIntents.swift': ['OpenPersonaAssistantIntent', 'OpenPersonaAgentsIntent', 'OpenPersonaDictationIntent'],
+            'PersonaWidgets/PersonaControls.swift': ['AskPersonaControl', 'PersonaAgentsControl', 'DictatePersonaControl',
+                                                     'CallPersonaControl'],
+            'LiveActivity/PersonaControlIntents.swift': ['OpenPersonaAssistantIntent', 'OpenPersonaAgentsIntent',
+                                                         'OpenPersonaDictationIntent', 'OpenPersonaCallIntent'],
             'LiveActivity/PersonaActivityAttributes.swift': ['PersonaActivityAttributes'],
         }
         for path, names in expected.items():
@@ -136,6 +138,7 @@ class AppleRenameTests(unittest.TestCase):
         self.assertIn('kind: "persona.control.ask"', controls)
         self.assertIn('kind: "persona.control.agents"', controls)
         self.assertIn('kind: "persona.control.dictate"', controls)
+        self.assertIn('kind: "persona.control.call"', controls)
         info = plistlib.loads((APPLE / 'PersonaNotify/Info.plist').read_bytes())
         self.assertEqual(info['NSExtension']['NSExtensionPrincipalClass'], '$(PRODUCT_MODULE_NAME).NotificationService')
         self.assertIn('PersonaPushKeychainGroup', info)
@@ -182,7 +185,8 @@ class AppleRenameTests(unittest.TestCase):
         selection = root.split('private var usesShell: Bool {', 1)[1].split('\n    }', 1)[0]
         self.assertRegex(selection, r'#if os\(visionOS\)[\s\S]*?return false')
         # Active compact width still selects the shell; #2836 holds that width while iOS snapshots the app away.
-        self.assertRegex(selection, r'#elseif os\(iOS\)\s+return \(heldWidthClass \?\? widthClass\) == \.compact \|\| flipped\s+#else\s+return false')
+        # No other platform since the Mac app went (#13611): iOS is the last branch.
+        self.assertRegex(selection, r'#elseif os\(iOS\)\s+return \(heldWidthClass \?\? widthClass\) == \.compact \|\| flipped\s+#endif')
         # The Sidebar layout when it is chosen, at every width (#6332: the drawer on a phone, the column at regular width);
         # otherwise the shell at compact width, else the tabs. Nothing picked is Merged where wide and the shell at compact
         # width (#4206, NavigationLayout.effective).

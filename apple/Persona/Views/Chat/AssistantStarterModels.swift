@@ -15,7 +15,9 @@ nonisolated enum AssistantStarterEffort {
             ?? own.flatMap { ModelID.isValid($0) ? $0 : nil }
         let model: AgentModel?
         if let named {
-            model = list.models.first { $0.id == named } ?? list.models.first { $0.resolved == named }
+            model = list.models.first { $0.id == named }
+                ?? list.models.first { $0.resolved == named }
+                ?? list.models.first { ($0.aliases ?? []).contains(named) }
         } else {
             model = list.models.first(where: \.isDefault)
         }

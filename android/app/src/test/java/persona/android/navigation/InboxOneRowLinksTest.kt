@@ -11,7 +11,7 @@ import persona.core.domain.inbox.InboxItem
 import persona.core.navigation.InboxItemRoute
 import persona.core.navigation.LarkChatRoute
 import persona.feature.inbox.InboxEventRoute
-import persona.feature.inbox.InboxRecord
+import persona.core.inbox.InboxRecord
 import persona.feature.inbox.LarkRoute
 
 /**

@@ -109,10 +109,11 @@ func (s *Service) toolAgentsSwitch(ctx context.Context, machine, self string, ar
 	}
 	// One confirmation for the whole batch (in the health space: one card), never one per agent.
 	summary := fmt.Sprintf("→ %s\n\n%s", t.Launcher, strings.Join(lines, "\n"))
-	if ok, err := s.confirmOutbound(ctx, machine, self, "agents_switch", summary, args); err != nil {
+	if ok, outcome, err := s.confirmOutbound(ctx, machine, self, "agents_switch", "", summary, args); err != nil {
 		return "", err
 	} else if !ok {
-		return "The user declined on the phone: no agent was moved and nothing was sent.", nil
+		return outboundNotDone(outcome, "The user declined on the phone: no agent was moved and nothing was sent.",
+			"no agent was moved and nothing was sent"), nil
 	}
 	sem := make(chan struct{}, switchParallel)
 	var wg sync.WaitGroup
@@ -249,13 +250,15 @@ func (s *Service) switchNowOrQueue(ctx context.Context, it *switchItem, t switch
 		return
 	}
 	text := ""
+	var source *proto.MessageSource
 	if it.plan == switchContinued {
 		text = prompts.RenderAgentLimitContinue(answerLanguage(s.hello(ctx).Locale))
+		source = autoContinueSource()
 		if _, theirs, err := s.supervisedElsewhere(ctx, self, it.m, it.c); err == nil && theirs {
 			text = prompts.RenderSideConversation(text)
 		}
 	}
-	err := s.moveAgent(ctx, it.m, it.c, t, text)
+	err := s.moveAgent(ctx, it.m, it.c, t, text, source)
 	switch {
 	case err == nil:
 		it.outcome = it.plan
@@ -504,14 +507,16 @@ func (s *Service) runQueuedSwitch(ctx context.Context, w queuedSwitch, c proto.S
 	}
 	t := switchTarget{Launcher: w.Launcher, Model: w.Model, Effort: w.Effort}
 	text := ""
+	var source *proto.MessageSource
 	var err error
 	if switchStopped(c) {
 		err = s.retargetStopped(ctx, m, c, t)
 	} else {
 		if limitStopped(c) {
 			text = prompts.RenderAgentLimitContinue(answerLanguage(s.hello(ctx).Locale))
+			source = autoContinueSource()
 		}
-		err = s.moveAgent(ctx, m, c, t, text)
+		err = s.moveAgent(ctx, m, c, t, text, source)
 	}
 	q.mu.Lock()
 	delete(q.running, k)

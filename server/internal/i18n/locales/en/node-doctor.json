@@ -158,5 +158,11 @@
   "socket_missing": "Missing",
   "socket_stale_hint": "An old node may have left this file behind; restart the node on this computer",
   "summary": "Checks: {total} total; OK: {ok}; warnings: {warn}; problems: {fail}",
-  "title": "Node self-check ({dir})"
+  "title": "Node self-check ({dir})",
+  "agy_hooks_installed": "Persona's Antigravity CLI hooks are installed",
+  "agy_hooks_missing": "Persona's Antigravity CLI hooks are not installed",
+  "agy_hooks_stale": "Persona's Antigravity CLI hooks run another program than this one",
+  "agy_hooks_hint": "Run personad node doctor --fix (agy panes then show their conversation under any engine)",
+  "agy_hooks_off": "Persona's Antigravity CLI hooks were removed on purpose (personad node agy-hooks install puts them back)",
+  "agy_hooks_unreadable": "Cannot read the Antigravity CLI hooks file ({error})"
 }

@@ -69,7 +69,7 @@ describe("formatFollowDetail", () => {
       list,
       [{ name: "claude" }],
     );
-    expect(detail).toBe("claude · deepseek-v4.1-flash · 最高");
+    expect(detail).toBe("claude · deepseek-v4.1-flash · Max");
   });
 });
 

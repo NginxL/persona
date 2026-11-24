@@ -25,6 +25,7 @@
   "deleted": "Removed from queue",
   "pulled_back": "Moved back to the input. Edit, then send.",
   "failed": "Couldn't update: {error}",
+  "changed": "The queue changed. Try again.",
   "send_now_body": "{agent} gets them right away instead of at its next step. A command it is running keeps running in the background; a reply it is writing starts again with your message.",
   "send_now_body_persona": "{agent} gets them right away instead of at its next step. What it is doing now stops, or goes on in the background when it can, and it starts again with your messages.",
   "send_now_body_runtime": "{agent} stops its current turn and starts the next queued message. The remaining messages stay in order.",

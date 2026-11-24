@@ -166,12 +166,14 @@ type Peer struct {
 	// Lanes (lanes.go): the table EnableLanes set (nil: this peer never frames), the frame writer once either direction
 	// is framed (mu), set as out once this side's output is, this side's rpc.lanes call until its answer is read (mu),
 	// whether this side answered one (mu), and closed once this side's output is framed.
-	lanes      laneTable
-	lw         *laneWriter
-	out        atomic.Pointer[laneWriter]
-	lanesCall  string
-	lanesAsked bool
-	lanesUp    chan struct{}
+	lanes laneTable
+	// creditReplies: methods whose answers this side writes with credit (CreditReplies).
+	creditReplies map[string]bool
+	lw            *laneWriter
+	out           atomic.Pointer[laneWriter]
+	lanesCall     string
+	lanesAsked    bool
+	lanesUp       chan struct{}
 
 	// resume (resume.go): nil unless EnableResume. OnLost, when set, is told (in a goroutine of its own) that the
 	// transport was lost and the peer waits to be resumed: the caller closes it, which ends a write or read still stuck
@@ -465,7 +467,7 @@ func (p *Peer) handle(ctx context.Context, m message) {
 			out.Result = b
 		}
 	}
-	r := p.lanes.reply(m.Method)
+	r := p.replyRoute(m.Method)
 	if err := p.write(out, r); errors.Is(err, errFrameBudget) {
 		// The request must get an error, not a permanently unresolved promise.
 		// If even the error cannot fit, disconnect so all pending calls fail.
@@ -709,7 +711,10 @@ func (p *Peer) Notify(event string, params any) error {
 // NotifyContext bounds waiting for the writer. Once writing starts, the transport owner must close a stalled
 // connection to interrupt it; cancellation alone cannot stop an arbitrary io.Writer.
 func (p *Peer) NotifyContext(ctx context.Context, event string, params any) error {
-	r := p.lanes.eventRoute(event)
+	return p.notifyRoute(ctx, event, params, p.lanes.eventRoute(event))
+}
+
+func (p *Peer) notifyRoute(ctx context.Context, event string, params any, r route) error {
 	if raw, ok := params.(Marshaled); ok {
 		if line, ok := marshaledLine(event, raw); ok {
 			return p.writeContext(ctx, message{line: line}, r)

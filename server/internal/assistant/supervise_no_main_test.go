@@ -68,8 +68,8 @@ func TestFailedStartWithoutAMainConversationGoesToTheDispatchingConversation(t *
 	}
 	waitFor(t, "the failed start", func() bool { return onlyTodo(s).StartError != "" })
 	todo := onlyTodo(s)
-	if v := todo.Supervision; v == nil || v.Supervisor != "side1" || todo.Origin != "side1" {
-		t.Fatalf("ledger = %+v (origin %q)", todo.Supervision, todo.Origin)
+	if v := todo.Supervision; v != nil || todo.Origin != "side1" {
+		t.Fatalf("dispatch origin must not become the acceptance authority: ledger = %+v (origin %q)", v, todo.Origin)
 	}
 
 	waitFor(t, "the failed start told to the dispatching conversation", func() bool { return len(supervisionTo(f, "side1", sigFailed)) == 1 })

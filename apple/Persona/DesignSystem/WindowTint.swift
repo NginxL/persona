@@ -1,4 +1,3 @@
-#if os(iOS) || os(visionOS)
 import SwiftUI
 import UIKit
 
@@ -16,4 +15,3 @@ enum WindowTint {
         }
     }
 }
-#endif

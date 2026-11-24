@@ -105,7 +105,7 @@ class AgentRepoTitleShotsTest {
             rule.onNodeWithText("Fix the login flow").assertIsDisplayed()
             rule.onNodeWithText("Speed up the importer").assertIsDisplayed()
             val layouts = mutableListOf<TextLayoutResult>()
-            rule.onNodeWithText(longTitle).assertIsDisplayed().fetchSemanticsNode()
+            val _ = rule.onNodeWithText(longTitle).assertIsDisplayed().fetchSemanticsNode()
                 .config.getOrNull(SemanticsActions.GetTextLayoutResult)?.action?.invoke(layouts)
             assertEquals("a long title stays on one line", 1, layouts.single().lineCount)
             assertTrue("and ends in an ellipsis", layouts.single().isLineEllipsized(0))

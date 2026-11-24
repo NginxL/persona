@@ -42,6 +42,7 @@ func assertCountStays(t *testing.T, f *fakeOpenAPI, want string, n int) {
 // next legitimate try is answered again. At the cap the code is declared dead, and afterwards the generic hint is
 // back.
 func TestBotPairWrongCodeFeedbackAndShortThrottle(t *testing.T) {
+	needsLarkModule(t)
 	w := newBotWorld(t)
 	now := fakeBotClock(w)
 	advance := func(d time.Duration) { now.Store(now.Load() + int64(d)) }
@@ -97,6 +98,7 @@ func TestBotPairWrongCodeFeedbackAndShortThrottle(t *testing.T) {
 // A time-expired pairing is not a wrong code: even the correct code gets the generic hint, does not burn a failure,
 // and does not clear the pairing (only the cap, success, unpair and re-pair do).
 func TestBotPairTimeExpiredCodeKeepsTheHint(t *testing.T) {
+	needsLarkModule(t)
 	w := newBotWorld(t)
 	now := fakeBotClock(w)
 	_, out := w.do(t, "POST", "/api/v1/bots/feishu/pair", "")
@@ -125,6 +127,7 @@ func TestBotPairTimeExpiredCodeKeepsTheHint(t *testing.T) {
 
 // A non-owner is still on the 10-minute window: a retry 31 s later is swallowed, one 10 minutes later goes through.
 func TestBotPairNonOwnerKeepsTheLongWindow(t *testing.T) {
+	needsLarkModule(t)
 	w := newBotWorld(t)
 	now := fakeBotClock(w)
 	w.pair(t)
@@ -143,6 +146,7 @@ func TestBotPairNonOwnerKeepsTheLongWindow(t *testing.T) {
 
 // When Feishu refuses the paired card, its body still arrives as rich text.
 func TestBotPairedCardFallbackKeepsBody(t *testing.T) {
+	needsLarkModule(t)
 	w := newBotWorld(t)
 	w.h.opts.AssistantEvent = nil // no assistant to greet: the manager posts the paired card
 	w.api.rejectInteractive = 230099
@@ -154,6 +158,7 @@ func TestBotPairedCardFallbackKeepsBody(t *testing.T) {
 
 // The bot test message's body is kept as the rich-text fallback too.
 func TestBotTestCardFallbackKeepsBody(t *testing.T) {
+	needsLarkModule(t)
 	w := newBotWorld(t)
 	w.pair(t)
 	w.api.rejectInteractive = 230099

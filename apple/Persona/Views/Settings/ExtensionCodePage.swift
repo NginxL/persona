@@ -568,11 +568,7 @@ struct ExtensionCodePage: View {
     }
 
     private func isWide(_ width: CGFloat) -> Bool {
-        #if os(macOS)
-        width >= Self.splitWidth
-        #else
         sizeClass == .regular && width >= Self.splitWidth
-        #endif
     }
 
     private var look: CodeDiffLook { CodeDiffLook(rawValue: lookRaw) ?? .split }

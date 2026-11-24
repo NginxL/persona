@@ -117,9 +117,10 @@ func (n *Node) scanOffline() []proto.Session {
 	unlisted := n.runtimes.unlistedTranscripts() // sessions of a runtime's own that it no longer lists (runtimeunlisted.go)
 	// The desktop app's sessions as its sidebar lists them (claudedesktop.go).
 	desktop := readClaudeDesktopIndex(n.home)
+	desktopProjects := map[string]string{}
 	for _, p := range files {
 		id := strings.TrimSuffix(filepath.Base(p), ".jsonl")
-		if !validID(id) {
+		if !validID(id) || n.isRoundFork(id) {
 			continue
 		}
 		st, err := os.Stat(p)
@@ -187,6 +188,18 @@ func (n *Node) scanOffline() []proto.Session {
 			title, cwd = cmp.Or(title, about.title), cmp.Or(cwd, about.cwd)
 		}
 		cwd = n.assistantHome(id, cwd)
+		if c.count == assistants && !identity.IsAssistantDir(cwd) && !identity.InSpace(cwd) {
+			base := filepath.Base(filepath.Dir(c.path))
+			if dir := n.assistantDirOfProject(base); dir != "" {
+				cwd = dir
+			} else if !isMeetingRoomProject(base) {
+				if strings.HasSuffix(base, "-health") {
+					cwd = identity.HealthDir(n.home)
+				} else if strings.HasSuffix(base, "-assistant") {
+					cwd = identity.AssistantDir(n.home)
+				}
+			}
+		}
 		if !n.sessionScopeAllows(cwd) {
 			continue
 		}
@@ -209,12 +222,13 @@ func (n *Node) scanOffline() []proto.Session {
 			LastText: snippet(m.lastText), UpdatedAt: lastUsed(m, c.st), Rev: c.st.Size(),
 		}
 		s.Activity, s.ActivityAt = m.activityOf()
-		setContext(&s, m)
+		n.setSessionContext(&s, m)
 		m.turnErr.set(&s) // Preserve the full gateway error and its reset after the terminal Agent exits.
 		s.ModelFallback = m.modelFallback
 		n.setModelRestore(&s, c.path, m)
 		n.terminalModesRow(&s, m)
 		untitled(&s, m)
+		n.decorateClaudeDesktop(&s, desktop, desktopProjects)
 		out = append(out, s)
 		shown[id] = true
 		counted[c.count]++
@@ -305,13 +319,14 @@ func (n *Node) assistantDirOfProject(base string) string {
 }
 
 // assistantHome is the directory session id is listed in at rest: the directory its node record says it started in,
-// when that is an assistant or health directory (the unresolved path its running process and resumes use), else cwd
-// (what its transcript says: where an assistant conversation started, an agent's latest directory, #2368).
+// when that is an assistant or space directory (the unresolved path its running process and resumes use), else cwd
+// (what its transcript says: where an assistant conversation started, an agent's latest directory, #2368). A record
+// of a scoped node's unlisted built-in directory (unlistedAssistantDir) is passed over for the transcript's.
 func (n *Node) assistantHome(id, cwd string) string {
 	if n.state == nil {
 		return cwd
 	}
-	if st, ok := n.state.get(id); ok && (identity.IsAssistantDir(st.Cwd) || identity.InHealthSpace(st.Cwd)) {
+	if st, ok := n.state.get(id); ok && (identity.IsAssistantDir(st.Cwd) || identity.InSpace(st.Cwd)) && !n.unlistedAssistantDir(st.Cwd) {
 		return st.Cwd
 	}
 	return cwd

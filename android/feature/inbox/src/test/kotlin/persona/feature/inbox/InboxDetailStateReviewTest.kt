@@ -25,6 +25,7 @@ import persona.core.designsystem.PersonaTheme
 import persona.core.domain.inbox.InboxItem
 import persona.core.navigation.AppTab
 import persona.core.navigation.Navigator
+import persona.core.inbox.*
 
 /**
  * The detail page's state line: shared `now` words stay above a suggestion, whose card still says the suggestion once;

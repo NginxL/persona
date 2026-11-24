@@ -342,6 +342,16 @@ func codexInnerReason(argv, env []string, cwd, home string) *sandbox.StatusReaso
 			}
 		}
 	}
+	return codexSandboxModeReason(argv, env, home)
+}
+
+// Resolve the local mode separately from the outer-sandbox compatibility decision:
+// the shared daemon also enforces workspace-write and needs the same preflight.
+func codexSandboxModeReason(argv, env []string, home string, configPaths ...string) *sandbox.StatusReason {
+	codexHome := proto.ExpandHome(envValue(env, "CODEX_HOME"), home)
+	if codexHome == "" {
+		codexHome = filepath.Join(home, ".codex")
+	}
 	mode, profile, override := "", "", ""
 	for i := 1; i < len(argv); i++ {
 		a := argv[i]
@@ -394,13 +404,28 @@ func codexInnerReason(argv, env []string, cwd, home string) *sandbox.StatusReaso
 		}
 	}
 	if mode == "" {
-		b, err := os.ReadFile(filepath.Join(codexHome, "config.toml"))
-		if err != nil && !errors.Is(err, fs.ErrNotExist) {
-			return sandbox.NewStatusReason("node-doctor.sandbox_codex_config_unreadable", nil)
+		if len(configPaths) == 0 {
+			configPaths = []string{filepath.Join(codexHome, "config.toml")}
 		}
-		cfg, ok := codexSandboxConfig(string(b))
-		if !ok {
-			return sandbox.NewStatusReason("node-doctor.sandbox_codex_config_invalid_profile", nil)
+		cfg := codexConfig{profiles: map[string]string{}}
+		for _, path := range configPaths {
+			b, err := os.ReadFile(path)
+			if err != nil && !errors.Is(err, fs.ErrNotExist) {
+				return sandbox.NewStatusReason("node-doctor.sandbox_codex_config_unreadable", nil)
+			}
+			layer, ok := codexSandboxConfig(string(b))
+			if !ok {
+				return sandbox.NewStatusReason("node-doctor.sandbox_codex_config_invalid_profile", nil)
+			}
+			if layer.mode != "" {
+				cfg.mode = layer.mode
+			}
+			if layer.profile != "" {
+				cfg.profile = layer.profile
+			}
+			for name, mode := range layer.profiles {
+				cfg.profiles[name] = mode
+			}
 		}
 		if profile == "" {
 			profile = cfg.profile

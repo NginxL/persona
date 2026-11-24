@@ -744,7 +744,7 @@ func (n *Node) portDial(ctx context.Context, params json.RawMessage) (any, error
 		}
 	}
 	if link {
-		_, relay := n.links.Open(p.Pair, c) // the session owns Screen Sharing's connection from here
+		relay := n.links.Open(p.Pair, c) // the session owns Screen Sharing's connection from here
 		n.streams.Start(p.ID, relay)
 		return map[string]any{"link": 1}, nil
 	}

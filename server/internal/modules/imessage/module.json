@@ -1,0 +1,8 @@
+{
+  "$schema": "../../../../schema/module.schema.json",
+  "id": "imessage",
+  "api": 1,
+  "origin": "builtin",
+  "title": "Messages (iMessage)",
+  "feature": "module.imessage"
+}

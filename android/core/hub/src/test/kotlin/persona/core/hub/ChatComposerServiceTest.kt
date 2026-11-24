@@ -60,6 +60,7 @@ class ChatComposerServiceTest {
         var attempts = 0
         val provenance = mutableListOf<String?>()
         val retryResults = mutableListOf<Pair<DeliveryState, MessageTransportResult?>>()
+        val retryStarts = mutableListOf<Pair<String, String>>()
         val service = HttpChatComposerService(scope, transport, request = { path, body, headers ->
             val buffer = Buffer()
             body.writeTo(buffer)
@@ -81,6 +82,7 @@ class ChatComposerServiceTest {
                         .protocol(Protocol.HTTP_1_1).code(200).message("test").body("{}".toResponseBody()).build()
                 }
                 attempts++
+                if (attempts > 1) assertEquals(retryStarts.single().second, headers["X-Persona-Op-Id"])
                 provenance += fields["via"]?.jsonPrimitive?.content
                 // The retry goes under a new operation id: the hub would answer "operation" from its first try.
                 assertEquals(attempts == 1, headers["X-Persona-Op-Id"] == "operation")
@@ -94,7 +96,8 @@ class ChatComposerServiceTest {
             }
             Response.Builder().request(Request.Builder().url("https://example.com/").build())
                 .protocol(Protocol.HTTP_1_1).code(code).message("test").body(response.toResponseBody()).build()
-        }, onRetryDelivery = { _, delivery, _, result -> retryResults += delivery.state to result })
+        }, onRetryStart = { id, opId -> retryStarts += id to opId },
+            onRetryDelivery = { _, delivery, _, result -> retryResults += delivery.state to result })
         val file = File.createTempFile("composer-test-", ".txt")
         try {
             file.writeText("abc")

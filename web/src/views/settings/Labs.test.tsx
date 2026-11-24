@@ -180,3 +180,33 @@ describe.each(["settings", "feature dialog"])("experiment guidance from %s", (en
     expect(row.querySelector("[aria-live]")?.textContent).toBe(t("settings-configuration.saved"));
   });
 });
+
+describe("Settings › Labs › Features (#13434)", () => {
+  it("switches a feature module off and on in this browser, through the generic form", async () => {
+    const { registerModule, resetModulesForTest, enabledNavItems } = await import("../../core/module-host");
+    const { forgetModuleSwitches } = await import("../../core/module-switch");
+    const { modulesLabsSource } = await import("../../core/module-labs");
+    forgetModuleSwitches();
+    resetModulesForTest();
+    registerModule({ id: "garden", title: () => "Garden", description: () => "A synthetic module", navItems: [{ key: "garden", path: "/garden", icon: "heart", label: () => "Garden", after: "inbox" }], load: async () => ({}) });
+    try {
+      act(() => root.render(<LabsSettings modules={[{ source: modulesLabsSource()! }]} />));
+      await settle();
+      const row = host.querySelector<HTMLElement>('[data-configuration-field="garden"]')!;
+      expect(row.textContent).toContain("Garden");
+      expect(row.textContent).toContain("A synthetic module");
+      const toggle = row.querySelector<HTMLButtonElement>('[role="switch"]')!;
+      expect(toggle.getAttribute("aria-checked")).toBe("true");
+      expect(enabledNavItems().map((n) => n.key)).toEqual(["garden"]);
+      await click(toggle);
+      expect(localStorage.getItem("persona.modules.off")).toBe('["garden"]');
+      expect(enabledNavItems()).toEqual([]);
+      await click(host.querySelector<HTMLButtonElement>('[data-configuration-field="garden"] [role="switch"]')!);
+      expect(localStorage.getItem("persona.modules.off")).toBeNull();
+      expect(enabledNavItems().map((n) => n.key)).toEqual(["garden"]);
+    } finally {
+      resetModulesForTest();
+      forgetModuleSwitches();
+    }
+  });
+});

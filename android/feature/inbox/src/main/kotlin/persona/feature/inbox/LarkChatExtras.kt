@@ -20,6 +20,7 @@ import persona.core.designsystem.*
 import persona.core.designsystem.icons.PhIcons
 import java.time.Instant
 import java.time.ZoneId
+import persona.core.inbox.*
 
 // A Feishu chat's extras that iOS has (LarkChatPins, LarkReadReceipts, LarkMessageDisplay): "Pinned messages", the read receipt
 // beside my messages, and message display ("Keep recalled messages", "Edit history") applied to the rows.
@@ -31,14 +32,6 @@ fun LarkMessageDisplay.showsBody(message: LarkMessage): Boolean =
 /** "Edited" opens the earlier versions with "Edit history" on, when the Lark gateway kept any. */
 fun LarkMessageDisplay.showsHistory(message: LarkMessage): Boolean =
     showEditHistory && showsBody(message) && message.editHistory.isNotEmpty()
-
-internal fun larkEditHistory(data: JsonObject): List<LarkEditVersion> =
-    (data["edit_history"] as? JsonArray).orEmpty().mapNotNull { it as? JsonObject }.map { v ->
-        val parts = (v["parts"] as? JsonArray).orEmpty().mapNotNull { it as? JsonObject }.map { it.text("text") }.filter { it.isNotBlank() }
-        LarkEditVersion(v.text("edited_at"), v.text("text").ifBlank { parts.joinToString("") })
-    }
-
-// MARK: Pins
 
 data class LarkChatPin(
     val id: String,

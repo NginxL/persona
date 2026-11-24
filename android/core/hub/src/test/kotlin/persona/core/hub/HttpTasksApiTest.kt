@@ -164,6 +164,75 @@ class HttpTasksApiTest {
         }
     }
 
+    @Test fun retriesKeepTheEmptyBodyAndLauncherRetrySendsOnlyItsEscapedChoice() = runBlocking {
+        MockWebServer().use { server ->
+            val api = api(server)
+            val id = "todo/start #1"
+            val path = "/api/v1/todos/todo%2Fstart%20%231/retry"
+            server.enqueue(MockResponse().setBody("""{"todo":{"id":"todo/start #1","title":"Reopened","reopened_at":"2026-11-20T10:00:00Z"}}"""))
+            val ordinary = api.retryTask(id)
+            val plain = server.takeRequest()
+            assertEquals("POST", plain.method)
+            assertEquals(path, plain.path)
+            assertEquals("{}", plain.body.readUtf8())
+            assertEquals(id, ordinary.id)
+            assertEquals("2026-11-20T10:00:00Z", ordinary.reopenedAt)
+
+            val launcher = "codex \"review\"\nnext\\model"
+            server.enqueue(MockResponse().setBody("""{"todo":{"id":"todo/start #1","title":"Reopened with another launcher"}}"""))
+            val retried = api.retryTaskOnLauncher(id, launcher)
+            val request = server.takeRequest()
+            assertEquals("POST", request.method)
+            assertEquals(path, request.path)
+            // Exact bytes also rule out an extra model field.
+            assertEquals("""{"launcher":"codex \"review\"\nnext\\model"}""", request.body.readUtf8())
+            assertEquals("Reopened with another launcher", retried.title)
+            assertEquals(2, server.requestCount)
+        }
+    }
+
+    @Test fun taskStartAnswerUsesOnlySlowLaneAndRestoresItsListedManager() = runBlocking {
+        val choice = persona.core.contracts.api.AssistantManagerChoice
+        val id = "todo/start #1"
+        try {
+            choice.noteItem(listOf("todos", id), "assistant-two")
+            MockWebServer().use { server ->
+                val http = OkHttpClient.Builder().retryOnConnectionFailure(false).build()
+                val slow = mutableListOf<String>()
+                val api = HttpTasksApi({ _, _, _ -> error("a task start answer must use slowRequest") }, null, { path, method, body ->
+                    slow += path
+                    val rb = body?.toString()?.toRequestBody("application/json".toMediaType())
+                    http.newCall(Request.Builder().url(server.url(path)).method(method, rb).build()).execute()
+                })
+                val answer = "Retry \"yes\"\nnow\\terminal"
+                val path = "/api/v1/todos/todo%2Fstart%20%231/start/answer"
+                server.enqueue(MockResponse().setBody("""{"todo":{"id":"todo/start #1","title":"Started","reopened_at":"2026-11-20T10:01:00Z"}}"""))
+                val answered = api.answerTaskStart(id, answer)
+                val request = server.takeRequest()
+                assertEquals("POST", request.method)
+                assertEquals(path, request.path)
+                assertEquals("""{"choice":"Retry \"yes\"\nnow\\terminal"}""", request.body.readUtf8())
+                assertEquals(id, answered.id)
+                assertEquals("Started", answered.title)
+                assertEquals("2026-11-20T10:01:00Z", answered.reopenedAt)
+                assertEquals("assistant-two", answered.manager)
+                assertEquals(listOf(path), slow)
+
+                server.enqueue(MockResponse().setResponseCode(409).setBody("""{"error":"The start answer was refused","code":"start_answer_refused"}"""))
+                val failure = runCatching { api.answerTaskStart(id, answer) }.exceptionOrNull() as HubFailure
+                assertEquals(409, failure.status)
+                assertEquals("start_answer_refused", failure.code)
+                assertEquals("The start answer was refused", failure.message)
+                server.takeRequest()
+                assertEquals(listOf(path, path), slow)
+                assertEquals(2, server.requestCount)
+            }
+        } finally {
+            choice.reset()
+            choice.forgetItems()
+        }
+    }
+
     @Test fun anOfflineMachineIsSaidInTheHubsWords() = runBlocking {
         MockWebServer().use { server ->
             server.enqueue(MockResponse().setResponseCode(409).setBody("""{"error":"「公司 Mac」现在离线，等它连上再重试"}"""))

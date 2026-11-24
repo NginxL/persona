@@ -7,7 +7,6 @@ extension EnvironmentValues {
     @Entry var shellRailEdge: HorizontalEdge?
 }
 
-#if os(iOS) || os(visionOS)
 extension View {
     /// Where the system presents bars vertically (`toolbarVerticalEdge`, iOS 27.1), nil when it does not: always nil
     /// before iOS 27.1 and when built with Xcode 26 (Swift ≤ 6.3 has no such key path).
@@ -114,4 +113,3 @@ struct ShellRailButtonRoom: View {
         .accessibilityHidden(true)
     }
 }
-#endif

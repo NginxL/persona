@@ -22,6 +22,11 @@ nonisolated struct PlanTask: Codable, Hashable, Sendable {
     /// Set once started: the todo the task is, and why its agent did not start.
     var todoID: String?
     var error: String?
+    /// The coded start failure, its startup-question arguments, and the first launcher the hub suggests instead.
+    /// Read-only like `brief`: plan edits never send these back.
+    var errorCode: String?
+    var errorArgs: [String: String]?
+    var retryWith: [String]?
     /// The existing to-do this plan carries on, if any. Read-only.
     var continues: String?
     /// What the task will be held to, shown on the plan card before Start (docs/assistant/unified-entry.md "Briefs").
@@ -36,12 +41,13 @@ nonisolated struct PlanTask: Codable, Hashable, Sendable {
 
     enum CodingKeys: String, CodingKey {
         case title, prompt, machine, cwd, launcher, model, permission, ultracode, readonly, why, error, brief, schedule
-        case todoID = "todo_id", scheduleTitle = "schedule_title", tier, continues
+        case todoID = "todo_id", scheduleTitle = "schedule_title", tier, continues, errorCode = "error_code", errorArgs = "error_args", retryWith = "retry_with"
     }
 
     init(title: String, prompt: String, machine: String, cwd: String, launcher: String? = nil, model: String? = nil,
          permission: String? = nil, ultracode: Bool? = nil, readonly: Bool? = nil, why: String? = nil, todoID: String? = nil,
-         error: String? = nil, brief: TaskBrief? = nil, schedule: String? = nil, scheduleTitle: String? = nil, tier: String? = nil) {
+         error: String? = nil, errorCode: String? = nil, errorArgs: [String: String]? = nil, retryWith: [String]? = nil,
+         brief: TaskBrief? = nil, schedule: String? = nil, scheduleTitle: String? = nil, tier: String? = nil) {
         self.title = title
         self.prompt = prompt
         self.machine = machine
@@ -54,6 +60,9 @@ nonisolated struct PlanTask: Codable, Hashable, Sendable {
         self.why = why
         self.todoID = todoID
         self.error = error
+        self.errorCode = errorCode
+        self.errorArgs = errorArgs
+        self.retryWith = retryWith
         self.brief = brief
         self.schedule = schedule
         self.scheduleTitle = scheduleTitle
@@ -74,6 +83,9 @@ nonisolated struct PlanTask: Codable, Hashable, Sendable {
         why = try c.decodeIfPresent(String.self, forKey: .why)
         todoID = try c.decodeIfPresent(String.self, forKey: .todoID)
         error = try c.decodeIfPresent(String.self, forKey: .error)
+        errorCode = (try? c.decodeIfPresent(String.self, forKey: .errorCode)) ?? nil
+        errorArgs = (try? c.decodeIfPresent([String: String].self, forKey: .errorArgs)) ?? nil
+        retryWith = (try? c.decodeIfPresent([String].self, forKey: .retryWith)) ?? nil
         continues = try c.decodeIfPresent(String.self, forKey: .continues)
         brief = (try? c.decodeIfPresent(TaskBrief.self, forKey: .brief)) ?? nil
         schedule = (try? c.decodeIfPresent(String.self, forKey: .schedule)).flatMap { $0?.isEmpty == false ? $0 : nil }
@@ -120,9 +132,12 @@ nonisolated struct TaskPlan: Codable, Hashable, Identifiable, Sendable {
     /// A standing rule the hub suggests on this open plan (#4929, #5802): the owner started this kind three times. Filled
     /// in where the plan is read, never stored with it; a hub from before sends none.
     var suggestion: RuleSuggestion?
+    /// The space of the conversation that made it ("health", a domain space's slug; nil: the assistant's own). Main's
+    /// Needs You lists every open plan but Health's, which stay in Health. A hub from before sends none.
+    var space: String?
 
     enum CodingKeys: String, CodingKey {
-        case id, conversation, tasks, state, suggestion
+        case id, conversation, tasks, state, suggestion, space
         case createdAt = "created_at", updatedAt = "updated_at"
     }
 
@@ -402,6 +417,28 @@ nonisolated struct TodayBody: Codable, Hashable, Sendable {
     }
 }
 
+/// One to-do in a task brief's lineage; continues and superseded_by are the two directions of a hand-off (#5732).
+nonisolated struct TodoLineageStep: Codable, Hashable, Identifiable, Sendable {
+    var todoID: String
+    var title: String?
+    var agent: String?
+    var machine: String?
+    var sessionID: String?
+    var started: Date?
+    var ended: Date?
+    var why: String?
+    var continues: String?
+    var supersededBy: String?
+    var current: Bool?
+
+    var id: String { todoID }
+
+    enum CodingKeys: String, CodingKey {
+        case title, agent, machine, started, ended, why, continues
+        case todoID = "todo_id", sessionID = "session_id", supersededBy = "superseded_by", current
+    }
+}
+
 /// The round of a task's owner decision (`decision_review`, docs/protocol/protocol.md): `reviewAt` is the hub's own string,
 /// sent back as it came (a `Date` would lose the sub-second part and the hub would answer 409), and `dismissalID` is the
 /// receipt of a Don't handle that has not been undone.
@@ -410,9 +447,45 @@ nonisolated struct DecisionReview: Codable, Hashable, Sendable {
     var dismissalID: String?
 
     enum CodingKeys: String, CodingKey { case reviewAt = "review_at", dismissalID = "dismissal_id" }
+}
 
-    /// Don't handle was pressed for this very round and not undone.
-    var dismissed: Bool { !(dismissalID ?? "").isEmpty }
+/// What the hub last read of one pull request (`pr_status` / `other_prs`, docs/protocol/protocol.md "Tasks and the chat feed").
+nonisolated struct TodoPRStatus: Codable, Hashable, Sendable {
+    var url: String
+    var state: String
+    var draft: Bool
+    var review: String
+    var checks: String
+    var conflicts: Bool
+    var checkedAt: String?
+
+    enum CodingKeys: String, CodingKey {
+        case url, state, draft, review, checks, conflicts
+        case checkedAt = "checked_at"
+    }
+
+    init(url: String, state: String = "open", draft: Bool = false, review: String = "pending", checks: String = "none",
+         conflicts: Bool = false, checkedAt: String? = nil) {
+        self.url = url
+        self.state = state
+        self.draft = draft
+        self.review = review
+        self.checks = checks
+        self.conflicts = conflicts
+        self.checkedAt = checkedAt
+    }
+
+    /// Older or reduced fixtures may omit the optional review/check fields; use the same defaults as the memberwise init.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        url = try c.decode(String.self, forKey: .url)
+        state = try c.decodeIfPresent(String.self, forKey: .state) ?? ""
+        draft = try c.decodeIfPresent(Bool.self, forKey: .draft) ?? false
+        review = try c.decodeIfPresent(String.self, forKey: .review) ?? "pending"
+        checks = try c.decodeIfPresent(String.self, forKey: .checks) ?? "none"
+        conflicts = try c.decodeIfPresent(Bool.self, forKey: .conflicts) ?? false
+        checkedAt = try c.decodeIfPresent(String.self, forKey: .checkedAt)
+    }
 }
 
 /// One read of the to-do list (`APIClient.todos(etag:)`): the rows (nil when the hub said the tagged list did not
@@ -480,6 +553,9 @@ nonisolated struct TodoItem: Codable, Hashable, Identifiable, Sendable {
     /// docs/assistant/todos.md「Automatic completion」); nil when the user did.
     var doneBy: String?
     var doneReason: String?
+    /// Closed by cancellation, with why; both are additive so older hubs and caches still decode (#5732).
+    var cancelledAt: Date?
+    var cancelledReason: String?
     var agents: [Agent]
     var spaces: [Space]?
     /// How far its work got (`stage`): one of `TodoStage`'s values, empty when the hub does not know (#2776). Kept as
@@ -487,6 +563,9 @@ nonisolated struct TodoItem: Codable, Hashable, Identifiable, Sendable {
     var stage: String?
     /// The pull request its work is in (`pr_url`, #2768); nil from a hub without it.
     var prURL: String?
+    /// Fresh hub-read facts for the current PR and earlier PRs of the same task (#7935).
+    var prStatus: TodoPRStatus?
+    var otherPRs: [TodoPRStatus]?
     /// `code` or `general` (`stage_kind`, #3380): general work draws no stage bar, since its status already says how it
     /// goes. Nil from a hub without it, which keeps the bar for any stage.
     var stageKind: String?
@@ -513,6 +592,8 @@ nonisolated struct TodoItem: Codable, Hashable, Identifiable, Sendable {
     var priority: String?
     /// Where its finished work stands (`delivery`, docs/assistant/todos.md "Delivery"); nil from a hub without it.
     var delivery: TodoDelivery?
+    /// The to-dos that carried the same brief, oldest first (#5732); nil on older hubs and caches.
+    var lineage: [TodoLineageStep]?
     /// Nobody is working on it (#3618, docs/assistant/todos.md "Nobody is working on this"): every agent of this open
     /// to-do is gone and nothing brings one back. Nil otherwise, and from a hub before it.
     var orphaned: TodoOrphaned?
@@ -538,21 +619,23 @@ nonisolated struct TodoItem: Codable, Hashable, Identifiable, Sendable {
     var somedayUntil: Date?
 
     enum CodingKeys: String, CodingKey {
-        case id, title, notes, origin, kind, agents, spaces, quiet, stage, supervision, priority, ask, delivery, manager, orphaned, project, check, after
+        case id, title, notes, origin, kind, agents, spaces, quiet, stage, supervision, priority, ask, delivery, lineage, manager, orphaned, project, check, after
         case decisionReview = "decision_review"
         case doneAt = "done_at", createdAt = "created_at", updatedAt = "updated_at", reopenedAt = "reopened_at", seenAt = "seen_at", planID = "plan_id", startError = "start_error",
-             doneBy = "done_by", doneReason = "done_reason", prURL = "pr_url", dueAt = "due_at", dueDate = "due_date",
-             remindAt = "remind_at", remindedAt = "reminded_at", partOf = "part_of", restoredAt = "restored_at",
+             doneBy = "done_by", doneReason = "done_reason", cancelledAt = "cancelled_at", cancelledReason = "cancelled_reason", prURL = "pr_url", dueAt = "due_at", dueDate = "due_date",
+             prStatus = "pr_status", otherPRs = "other_prs", remindAt = "remind_at", remindedAt = "reminded_at", partOf = "part_of", restoredAt = "restored_at",
              somedayUntil = "someday_until", stageKind = "stage_kind", stageDone = "stage_done"
     }
 
     init(id: String, title: String, notes: String? = nil, doneAt: Date? = nil, createdAt: Date? = nil, updatedAt: Date? = nil,
          origin: String? = nil, planID: String? = nil, startError: String? = nil, doneBy: String? = nil, doneReason: String? = nil,
+         cancelledAt: Date? = nil, cancelledReason: String? = nil,
          agents: [Agent] = [], spaces: [Space]? = nil, quiet: Bool = false, stage: String? = nil, prURL: String? = nil,
+         prStatus: TodoPRStatus? = nil, otherPRs: [TodoPRStatus]? = nil,
          supervision: TaskSupervision? = nil, dueAt: Date? = nil, dueDate: String? = nil, remindAt: Date? = nil,
          remindedAt: Date? = nil, priority: String? = nil, ask: TodoAsk? = nil, reopenedAt: Date? = nil,
-         delivery: TodoDelivery? = nil, manager: String? = nil, seenAt: Date? = nil, decisionReview: DecisionReview? = nil,
-         orphaned: TodoOrphaned? = nil, project: String? = nil, kind: String? = nil, check: TodoCheck? = nil,
+         delivery: TodoDelivery? = nil, lineage: [TodoLineageStep]? = nil, manager: String? = nil, seenAt: Date? = nil,
+         decisionReview: DecisionReview? = nil, orphaned: TodoOrphaned? = nil, project: String? = nil, kind: String? = nil, check: TodoCheck? = nil,
          partOf: String? = nil, after: [String]? = nil, restoredAt: Date? = nil, somedayUntil: Date? = nil,
          stageKind: String? = nil, stageDone: Bool = false) {
         self.id = id
@@ -566,11 +649,15 @@ nonisolated struct TodoItem: Codable, Hashable, Identifiable, Sendable {
         self.startError = startError
         self.doneBy = doneBy
         self.doneReason = doneReason
+        self.cancelledAt = cancelledAt
+        self.cancelledReason = cancelledReason
         self.agents = agents
         self.spaces = spaces
         self.quiet = quiet
         self.stage = stage
         self.prURL = prURL
+        self.prStatus = prStatus
+        self.otherPRs = otherPRs
         self.supervision = supervision
         self.dueAt = dueAt
         self.dueDate = dueDate
@@ -580,6 +667,7 @@ nonisolated struct TodoItem: Codable, Hashable, Identifiable, Sendable {
         self.ask = ask
         self.reopenedAt = reopenedAt
         self.delivery = delivery
+        self.lineage = lineage
         self.manager = manager
         self.seenAt = seenAt
         self.decisionReview = decisionReview
@@ -608,12 +696,16 @@ nonisolated struct TodoItem: Codable, Hashable, Identifiable, Sendable {
         startError = try c.decodeIfPresent(String.self, forKey: .startError)
         doneBy = try c.decodeIfPresent(String.self, forKey: .doneBy)
         doneReason = try c.decodeIfPresent(String.self, forKey: .doneReason)
+        cancelledAt = (try? c.decodeIfPresent(Date.self, forKey: .cancelledAt)) ?? nil
+        cancelledReason = try c.decodeIfPresent(String.self, forKey: .cancelledReason)
         agents = try c.decodeIfPresent([Agent].self, forKey: .agents) ?? []
         spaces = try c.decodeIfPresent([Space].self, forKey: .spaces)
         quiet = try c.decodeIfPresent(Bool.self, forKey: .quiet) ?? false
         // A hub before #2776 / #2768 sends neither: old payloads decode as before.
         stage = try c.decodeIfPresent(String.self, forKey: .stage)
         prURL = try c.decodeIfPresent(String.self, forKey: .prURL)
+        prStatus = (try? c.decodeIfPresent(TodoPRStatus.self, forKey: .prStatus)) ?? nil
+        otherPRs = (try? c.decodeIfPresent([TodoPRStatus].self, forKey: .otherPRs)) ?? nil
         // Optional and new (#3124): one that does not decode is as if there were none, never the whole todo failing.
         supervision = (try? c.decodeIfPresent(TaskSupervision.self, forKey: .supervision)) ?? nil
         // New (#1683): absent from older hubs; one that does not decode is as if there were none.
@@ -628,6 +720,7 @@ nonisolated struct TodoItem: Codable, Hashable, Identifiable, Sendable {
         // New (#5707): absent from older hubs; one that does not decode is as if it was never seen.
         seenAt = (try? c.decodeIfPresent(Date.self, forKey: .seenAt)) ?? nil
         delivery = (try? c.decodeIfPresent(TodoDelivery.self, forKey: .delivery)) ?? nil
+        lineage = (try? c.decodeIfPresent([TodoLineageStep].self, forKey: .lineage)) ?? nil
         manager = try c.decodeIfPresent(String.self, forKey: .manager)
         // New: only on an open task whose latest review needs the owner; one that does not decode is as if there were none.
         decisionReview = (try? c.decodeIfPresent(DecisionReview.self, forKey: .decisionReview)) ?? nil
@@ -662,6 +755,9 @@ nonisolated struct TodoItem: Codable, Hashable, Identifiable, Sendable {
     var isConcern: Bool { kind == "concern" }
     /// The hub marked it done because its task's work was judged finished; reopening undoes it.
     var autoDone: Bool { doneAt != nil && doneBy == "auto" }
+    /// Cancellation is not completion, including the legacy supervision-only form (#5732).
+    var isCancelled: Bool { cancelledAt != nil || doneBy == "cancelled" || doneBy == "review" && reviewState == .cancelled }
+    var cancellationReason: String? { isCancelled ? cancelledReason ?? doneReason : nil }
 
     /// Why a stopped task is still open (#3180; the web's `stoppedReason`): the judge's reason ("" when it gave none)
     /// while the task is neither working nor done and its check, newer than its latest reopen, found it not done; nil
@@ -748,6 +844,12 @@ nonisolated struct TodoDelivery: Codable, Hashable, Sendable {
         unblock == "user" && (state == "pr" || state == "merged" || state == "off")
     }
 
+    /// An owner hold its Agent reported on a supervised task that the supervisor has not read yet (`unblock`
+    /// `supervisor`, #13191): the supervisor's to turn into a decision, park or send on, never the owner's Needs You.
+    var heldForSupervisor: Bool {
+        unblock == "supervisor" && (state == "pr" || state == "merged" || state == "off")
+    }
+
     enum CodingKeys: String, CodingKey { case state, gate, unblock, at }
 
     init(state: String, gate: String? = nil, unblock: String? = nil, at: Date? = nil) {
@@ -815,9 +917,10 @@ extension QuietTasks {
 nonisolated enum WatchInteractions {
     /// A muted agent's or space's card stays off the watch entirely (#4360): no row and no buzz when it arrives,
     /// like the phone's Agents badge and inbox. The hub stamps `muted`; an older hub leaves it false. A question the
-    /// assistant is still looking at stays off too (#544): it buzzes once it is handed to the user.
+    /// assistant is still looking at stays off too (#544): it buzzes once it is handed to the user. So does a card its
+    /// task's supervisor holds (`Interaction.supervisorHeld`): the watch would answer it with a tap.
     static func leavingMuted(_ interactions: [Interaction]) -> [Interaction] {
-        interactions.filter { !$0.muted && !$0.isDelegating }
+        interactions.filter { !$0.muted && !$0.isDelegating && $0.answerableHere }
     }
 
     /// The cards the watch has not shown yet: only these are worth a buzz. Called after the muted ones are out, so a
@@ -1241,9 +1344,23 @@ nonisolated extension APIClient {
     /// Retry on a task whose agent did not start, Continue on one a model error cut off (`POST /api/v1/todos/{id}/retry`): the
     /// hub starts it again and answers with the todo. 409: it is not a task that can be retried now (or its machine is
     /// offline).
-    func retryTodo(_ id: String) async throws -> TodoItem {
+    func retryTodo(_ id: String, launcher: String? = nil) async throws -> TodoItem {
+        struct Body: Encodable { var launcher: String }
         struct Response: Decodable { var todo: TodoItem }
-        return try await post("/api/v1/todos/\(Self.pathPart(id))/retry", as: Response.self).todo
+        let path = "/api/v1/todos/\(Self.pathPart(id))/retry"
+        if let launcher {
+            return try await post(path, body: Body(launcher: launcher), as: Response.self).todo
+        }
+        // Ordinary Retry stays genuinely bodyless, including on a hub that also takes launcher overrides. `post` would
+        // turn a nil body into `{}`, so this branch goes through `request` directly.
+        return try JSON.decoder.decode(Response.self, from: await request("POST", path)).todo
+    }
+
+    /// Answers a planned task's shell startup question; the hub restarts that task in the kept terminal tab.
+    func answerTaskStart(_ id: String, choice: String) async throws -> TodoItem? {
+        struct Body: Encodable { var choice: String }
+        struct Response: Decodable { var todo: TodoItem? }
+        return try await post("/api/v1/todos/\(Self.pathPart(id))/start/answer", body: Body(choice: choice), as: Response.self).todo
     }
 
     /// The Handled button of a question that can wait (a `brief` item's `later` row). A 409 means it is not in the queue any

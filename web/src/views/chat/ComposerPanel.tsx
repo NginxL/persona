@@ -7,12 +7,13 @@
 // folder keeps browsing, a file types `@path `, a workspace or a session becomes a context chip (Composer.tsx).
 import { useEffect, useImperativeHandle, useMemo, useRef, useState, type Ref } from "react";
 import { api, enc } from "../../lib/api";
+import { stampedHeaders } from "../../lib/manager-choice";
 import { PickerMenu, type PickerButton } from "./PickerMenu";
 import { useSkillCatalog, type CatalogMemory } from "./useSkillCatalog";
 import { SkillDetail, SkillRow } from "./SkillRow";
 import { SkillCatalogStatus } from "./SkillCatalogStatus";
 import type { FsListing } from "../../lib/files";
-import { browseTarget, byPrefix, displayTitle, nameMatches, otherSessions, relPath, sessionDetail } from "../../lib/mentions";
+import { browseTarget, byPrefix, displayTitle, nameMatches, otherSessions, pageSessions, relPath, sessionDetail } from "../../lib/mentions";
 import type { RepositoryMentionRow } from "../../lib/mentions-repositories";
 import { modeTitle } from "../../lib/session-actions";
 import type { Session } from "../../lib/types";
@@ -30,6 +31,14 @@ export interface MentionSource {
   cwd?: string;
   /** This chat's draft key ("mid/sid"), left out of the sessions. */
   self?: string;
+  /** Restrict directory browsing to inputs supported by a scoped file source. */
+  allowsFileQuery?: (query: string) => boolean;
+  /** Scheduled prompts have no live session to quote. */
+  sessions?: boolean;
+  /** Stable file references use the same execution context as the task. */
+  referenceFiles?: { machine: string; cwd: string; launcher: string; runtime: string };
+  /** The manager that resolved the task's file selection scope. */
+  fileManager?: string;
   /** Absolute paths the chat's tools read or wrote, newest first (read when the panel opens). */
   files: () => string[];
   /** Offer the hub's workspaces (GET /workspaces): the Persona assistant, which works on any computer. */
@@ -60,6 +69,7 @@ export interface ComposerPanelHandle {
 type Entry = { kind: "action"; action: PanelAction; label: string; icon: IconName; hint?: string; checked?: boolean } | { kind: "row"; row: MentionRow };
 
 const NO_SESSIONS: Record<string, Session[]> = {};
+const NO_ROWS: Session[] = [];
 const MAX_ROWS = 40;
 /** An empty query shows this many of each resource (cindy's EMPTY_QUERY_CONTEXT_SECTION_LIMIT); typing finds the rest. */
 const EMPTY_PER_GROUP = 3;
@@ -74,6 +84,9 @@ export interface AssistantMentions {
  *  the panel is open. */
 export function useMentionRows(query: string, source: MentionSource | undefined, machineId: string | undefined, skills?: MentionSkill[], assistant?: AssistantMentions): { rows: MentionRow[]; loading: boolean } {
   const sessions = useStore((s) => (source ? s.sessions : NO_SESSIONS));
+  // A paging hub keeps unopened Agents in the list's rows.
+  const listed = useStore((s) => (source && source.sessions !== false ? s.sessionSummaries : NO_ROWS));
+  // Composer remounts this panel when the execution environment changes.
   const cache = useRef(new Map<string, FsListing | null>());
   const [, setTick] = useState(0);
   const [loading, setLoading] = useState(false);
@@ -81,17 +94,21 @@ export function useMentionRows(query: string, source: MentionSource | undefined,
 
   const cwd = source?.cwd;
   const target = source ? browseTarget(query, cwd) : null;
-  const dir = !source || !machineId ? null : target ? target.dir : cwd ?? null;
+  const taskFiles = Boolean(source?.referenceFiles);
+  const fileManager = taskFiles ? source?.fileManager : undefined;
+  const dir = !source || !machineId || source.allowsFileQuery?.(query) === false ? null : target ? target.dir : cwd ?? null;
+  const cacheKey = dir && (taskFiles ? JSON.stringify([fileManager, machineId, cwd, dir]) : dir);
 
   useEffect(() => {
-    if (!dir || !machineId || cache.current.has(dir)) return;
+    if (!dir || !machineId || !cacheKey || cache.current.has(cacheKey)) return;
     const ac = new AbortController();
     const timer = setTimeout(() => {
       setLoading(true);
-      api<FsListing>(`/machines/${enc(machineId)}/fs?path=${enc(dir)}&cwd=${enc(cwd ?? "")}`, { signal: ac.signal })
-        .then((l) => { if (!ac.signal.aborted) cache.current.set(dir, l); })
+      api<FsListing>(`/machines/${enc(machineId)}/fs?path=${enc(dir)}&cwd=${enc(cwd ?? "")}${taskFiles ? "&task_input=1" : ""}`,
+        { signal: ac.signal, headers: stampedHeaders(fileManager) })
+        .then((l) => { if (!ac.signal.aborted) cache.current.set(cacheKey, l); })
         .catch(() => {
-          if (!ac.signal.aborted) cache.current.set(dir, null); // not a folder / unreadable: no rows from it
+          if (!ac.signal.aborted) cache.current.set(cacheKey, null); // not a folder / unreadable: no rows from it
         })
         .finally(() => {
           if (ac.signal.aborted) return;
@@ -104,9 +121,9 @@ export function useMentionRows(query: string, source: MentionSource | undefined,
       ac.abort();
       setLoading(false);
     };
-  }, [dir, machineId, cwd]);
+  }, [cacheKey, dir, machineId, cwd, taskFiles, fileManager]);
 
-  const listing = dir ? cache.current.get(dir) : undefined;
+  const listing = cacheKey ? cache.current.get(cacheKey) : undefined;
   const rows = useMemo<MentionRow[]>(() => {
     if (!source) return [];
     if (target) {
@@ -140,14 +157,14 @@ export function useMentionRows(query: string, source: MentionSource | undefined,
     if (assistant) {
       out.push(...assistant.rows(query));
     }
-    for (const s of otherSessions(Object.values(sessions).flat(), source.self, q)) {
+    for (const s of source.sessions === false ? [] : otherSessions(pageSessions(sessions, listed), source.self, q)) {
       out.push({ kind: "session", id: `session:${s.machine_id}/${s.session_id}`, name: displayTitle(s), detail: sessionDetail(s), session: s });
     }
     // A large skill inventory must not crowd the existing resource groups out of the empty panel.
     const matches: MentionRow[] = matchingSkills(skills ?? [], q).map(skill => ({ kind: "skill", id: `skill:${skill.id}`, skill }));
     return [...matches, ...(q.trim() ? out : firstOfEach(out)).slice(0, MAX_ROWS)];
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [query, source, listing, sessions, cwd, files, assistant, skills]);
+  }, [query, source, listing, sessions, listed, cwd, files, assistant, skills]);
 
   return { rows, loading: Boolean((loading && !listing) || assistant?.loading) };
 }

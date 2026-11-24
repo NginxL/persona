@@ -56,12 +56,18 @@ func (r WorkReport) LegacyText(reply string) string {
 		body + "</closeout>" + reply[r.End:]
 }
 
-// Markdown code fences use at least three backticks or tildes. A closing fence must be at least
-// as long as its opener, and may only be followed by whitespace.
+// Markdown code fences use at least three backticks or tildes indented by at most three spaces.
+// A backtick fence opener's info string cannot contain backticks; a closing fence must be at least
+// as long as its opener and followed only by spaces or tabs.
 func insideFence(before string) bool {
 	var open string
 	for line := range strings.Lines(before) {
-		line = strings.TrimSpace(line)
+		line = strings.TrimRight(line, "\r\n")
+		indent := len(line) - len(strings.TrimLeft(line, " "))
+		if indent >= 4 {
+			continue
+		}
+		line = line[indent:]
 		if len(line) < 3 || line[0] != '`' && line[0] != '~' {
 			continue
 		}
@@ -70,8 +76,10 @@ func insideFence(before string) bool {
 			continue
 		}
 		if open == "" {
-			open = line[:n]
-		} else if strings.HasPrefix(line[:n], open) && strings.TrimSpace(line[n:]) == "" {
+			if line[0] != '`' || !strings.ContainsRune(line[n:], '`') {
+				open = line[:n]
+			}
+		} else if strings.HasPrefix(line[:n], open) && strings.TrimRight(line[n:], " \t") == "" {
 			open = ""
 		}
 	}

@@ -19,6 +19,10 @@ Pitfalls, odd behavior and the trade-offs made at the time (formerly in `CLAUDE.
 - Privacy hooks must resolve the tracked default branch, not assume `origin/master` (#733). A new remote branch has an all-zero old SHA, so falling back to that SHA and skipping an unavailable range silently lets its first push through. Test real first pushes to an isolated bare repository, retain existing-ref and deletion controls, and refuse a new branch when no scan base is available.
 
 - PR merges and progress comments must be checked serially (#2024): `gh pr merge` can fail on a new conflict; if a compound shell command does not stop, the "merged" comment after it still goes out. Exit when the merge command fails, and read the PR's `state` again before posting a completion comment; mark it done only on `MERGED`. `mergeable: UNKNOWN` is not confirmation that it can merge, nor proof of a conflict; read back a definite state before acting. On a false report, edit the original comment first, keeping the verified results and the unfinished items; never leave two contradicting progress comments.
+- Lightweight semantic verification is not local build/test evidence. Require a dedicated exact-head runner status
+  at the automatic merge boundary, including cached approvals and merge retries. Baseline exceptions must name the
+  fixed comparison commit; never infer success from an interrupted remote run.
+
 - An unattended PR review service must bind every result to repository + PR + head SHA, and a pre-existing review must not bypass its own checks. Treat model failure, malformed findings, unavailable platform tests and GitHub read failures as not verified. Run manual and automated merges through the same shared-Git-directory lock and exact-head wrapper (`docs/operations/pr-review-automation.md`); an in-process lock alone cannot protect two service instances or a manual merge.
 
 - Migration inventories must distinguish actual extension packages from SDK templates, schema examples and duplicate application worktrees (#5956). Deduplicate real package IDs across repository copies before counting runtime kinds; a manifest with a command under `runtime` is executable even when `runtime.mode` is omitted. Finding and classifying authoring fixtures is not evidence of a third marketplace or additional migrated extensions.
@@ -346,3 +350,7 @@ Apple builds, where a cold build costs the most:
 - After merging `main`, `cannot find 'persona_core_…'` means the Rust core's XCFramework is stale: run
   `native/app-core/scripts/build-apple.sh` first. If `ContinuityFixture` reports a wrong `fold_id` argument, delete the old
   `PersonaCore*.swiftmodule` at the root of `Build/Products/<config>/` in DerivedData.
+
+- Finish static review, generated tool snapshots and fixture corrections before queuing expensive shared-runner verification. A dedupe key prevents repeated submissions of one commit/group set; it cannot coalesce a series of intermediate commits. While a run waits, collect further fixes into one candidate instead of queuing each edit. Reuse an earlier shard result only when its relevant source is unchanged, and record the exact candidate and baseline commits in the PR.
+
+- Inspect test-running Git hooks before remote-only verification: merging upstream can stage token or icon files and trigger local tests even when the feature itself changes server code. Keep privacy scanning enabled and run the triggered test suites through the prescribed remote workflow.

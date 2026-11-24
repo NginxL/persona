@@ -166,3 +166,21 @@ func TestBackendWorkspacesRequireFullCredentials(t *testing.T) {
 		}
 	}
 }
+
+func TestRepoMirrorsRequireFullCredentials(t *testing.T) {
+	patterns := routePatterns(t)
+	for _, pattern := range []string{
+		"GET /api/v1/assistant/repositories/mirrors",
+		"GET /api/v1/assistant/repositories/{id}/mirrors/{machine_id}",
+		"PUT /api/v1/assistant/repositories/{id}/mirrors/{machine_id}",
+		"POST /api/v1/assistant/repositories/{id}/mirrors/{machine_id}/sync",
+		"DELETE /api/v1/assistant/repositories/{id}/mirrors/{machine_id}",
+	} {
+		if !slices.Contains(patterns, pattern) {
+			t.Errorf("missing repo mirror route %s", pattern)
+		}
+		if scope := extwire.RouteScopes[pattern]; scope != "" {
+			t.Errorf("repo mirror route %s grants extension scope %s", pattern, scope)
+		}
+	}
+}

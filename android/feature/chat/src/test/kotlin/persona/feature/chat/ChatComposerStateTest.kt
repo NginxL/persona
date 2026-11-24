@@ -8,6 +8,11 @@ import org.robolectric.annotation.Config
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.core.content.FileProvider
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.*
 import org.junit.Test
@@ -76,6 +81,33 @@ class ChatComposerStateTest {
         assertTrue(state.hasContent)
         state.clearIfUnchanged(state.draft)
         assertFalse(state.hasContent)
+    }
+
+    @Test fun independentAttachmentUpdatesDoNotRestoreAnotherUploadsStaleState() = runTest {
+        val first = ComposerAttachment("first", "first.png", "content://example.com/first", true)
+        val second = ComposerAttachment("second", "second.png", "content://example.com/second", true)
+        val state = ChatComposerState(ChatComposerDraft(attachments = listOf(first, second)))
+        val firstRead = CompletableDeferred<Unit>()
+        val finish = CompletableDeferred<Unit>()
+        fun upload(attachment: ComposerAttachment) = async(Dispatchers.Default + SupervisorJob()) {
+            // Each upload used to read and later replace this whole list. Per-id updates must keep the other result.
+            state.updateAttachment(attachment.id) { it.copy(uploadState = DraftUploadState.Uploading) }
+            firstRead.complete(Unit)
+            finish.await()
+            state.updateAttachment(attachment.id) {
+                it.copy(path = "/up/${attachment.name}", uploadState = DraftUploadState.Uploaded)
+            }
+        }
+        val uploads = listOf(upload(first), upload(second))
+        firstRead.await()
+        finish.complete(Unit)
+        uploads.awaitAll()
+
+        assertEquals(listOf("/up/first.png", "/up/second.png"), state.attachments.map { it.path })
+        assertEquals(listOf("first", "second"), state.attachments.map { it.id })
+        assertTrue(state.attachments.all { it.uploadState == DraftUploadState.Uploaded })
+        assertTrue(state.ready)
+        assertTrue(state.message().endsWith("<attached_images>\n/up/first.png\n/up/second.png\n</attached_images>"))
     }
 
     @Test fun photosAloneSayPleaseLookAndKeepTheirTag() {

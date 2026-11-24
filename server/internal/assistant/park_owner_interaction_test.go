@@ -36,6 +36,9 @@ func newParkOwnerService(t *testing.T) (*Service, *fakeHub, Todo, *parkOwnerStor
 	s, f, todo := newSupervisedService(t)
 	store := newParkOwnerStore()
 	s.store = func() Store { return store }
+	// The replacement store must retain the existing main identity: under #5732 Origin alone is not review authority,
+	// and these cases must reach interaction validation rather than failing earlier on an accidentally anonymous fixture.
+	setSettings(t, s, func(v *Settings) { v.Main = "conv1" })
 	return s, f, todo, store
 }
 

@@ -8,9 +8,8 @@ import (
 	"testing"
 
 	"github.com/nwverse/persona/server/internal/connector"
-	"github.com/nwverse/persona/server/internal/connector/github"
-	"github.com/nwverse/persona/server/internal/connector/imessage"
-	"github.com/nwverse/persona/server/internal/mail"
+	"github.com/nwverse/persona/server/internal/githubwire"
+	"github.com/nwverse/persona/server/internal/imessagewire"
 	"github.com/nwverse/persona/server/internal/proto"
 	"github.com/nwverse/persona/server/internal/subscriptions"
 )
@@ -62,7 +61,7 @@ func TestGoldenConnectorTools(t *testing.T) {
 		assertNoEmptyToolEnums(t, append(wire.Tools, wire.AssistantTools...))
 		return string(b) + "\n"
 	}
-	h.mail = (*mail.Service)(nil) // Tools() reads nothing from the service
+	h.mail = testMail(t) // Tools() reads nothing from the service
 	// Subscriptions run in every manager: their tools are the assistant's (subscription_tools.go).
 	h.subs = subscriptions.New(subscriptions.Options{Store: subscriptions.NewMemStore(), Connectors: subscriptionConnectors{h}})
 	register := func() { // the connectors as the manager registers them (mail's and Feishu's tools come from them)
@@ -74,14 +73,14 @@ func TestGoldenConnectorTools(t *testing.T) {
 	golden(t, "connector_tools.agent", show(false))
 	// With GitHub signed in: its read tools, for the assistant only.
 	withoutGitHub(h) // every manager registers a GitHub, signed out until the user signs in
-	if err := h.addConnector(signedInGitHub{github.New(github.Config{}, "Mac", nil)}); err != nil {
+	if err := h.addConnector(signedInGitHub{newTestGitHub(t, githubwire.Config{}, "Mac", nil).(fullGitHub)}); err != nil {
 		t.Fatal(err)
 	}
 	golden(t, "connector_tools.assistant_with_github", show(true))
 	golden(t, "connector_tools.agent", show(false))
 	// With iMessage handed to Persona (the switch is on by default): its read tools too.
 	register()
-	if err := h.addConnector(readableIMessage{imessage.NewRemote(imessage.Config{Machine: "mac"}, "Mac", nil)}); err != nil {
+	if err := h.addConnector(readableIMessage{newTestIMessage(t, imessagewire.Config{Machine: "mac"}, "Mac", nil).(fullIMessage)}); err != nil {
 		t.Fatal(err)
 	}
 	golden(t, "connector_tools.assistant_with_imessage", show(true))
@@ -99,13 +98,30 @@ func withoutGitHub(h *Manager) {
 	h.connectors = r
 }
 
-type readableIMessage struct{ *imessage.Remote }
+type readableIMessage struct{ fullIMessage }
 
 func (readableIMessage) Status(context.Context) connector.Status {
 	return connector.Status{State: connector.StateOK}
 }
 
-type signedInGitHub struct{ *github.Connector }
+// fullGitHub is the module's GitHub connector with every interface it implements, so that a wrapper keeps them.
+type fullGitHub interface {
+	githubwire.Connector
+	connector.ReadTools
+	connector.ReadJSON
+	connector.RefActions
+	connector.Recaller
+	connector.Events
+	connector.Inbox
+	connector.InboxSettler
+	connector.Archive
+	connector.Login
+	connector.Threads
+	connector.Machines
+}
+
+// signedInGitHub is the module's GitHub connector, always signed in.
+type signedInGitHub struct{ fullGitHub }
 
 func (signedInGitHub) Status(context.Context) connector.Status {
 	return connector.Status{State: connector.StateOK}

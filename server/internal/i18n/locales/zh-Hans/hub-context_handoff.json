@@ -1,0 +1,7 @@
+{
+  "full_device": "请在有完整权限的设备上转接会话。",
+  "unavailable": "这段会话无法在这里转接。",
+  "target_missing": "旧 Agent 的目录或启动器不可用。",
+  "empty": "旧会话没有可转接的历史消息。",
+  "launcher_missing": "旧会话的启动器不可用。"
+}

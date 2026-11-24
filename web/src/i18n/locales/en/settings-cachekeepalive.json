@@ -1,0 +1,8 @@
+{
+  "title": "Keep idle chats ready",
+  "enabled": "Keep the cache warm",
+  "minutes": "Interval (minutes)",
+  "maximum": "Maximum consecutive refreshes",
+  "hint": "On by default for the main chat and registered leads using Claude launchers. Background supervision, workers and subagents are excluded. Codex and other runtimes are not supported yet. Launchers that override the connection and requests without a one-hour cache are skipped. Refreshes use paid cached input and may generate output; manual thinking can require its full thinking budget plus one output token. A new request resets the limit.",
+  "unconfirmed": "The cache settings were not confirmed. Try again."
+}

@@ -374,10 +374,75 @@
   "source": "contacts"
  },
  "phone_device_info": {
-  "description": "Describe the phone: model identifier and name, iOS version, battery percentage and charging state, low power mode, free and total storage in bytes, current network type (wifi/cellular/wired/offline), timezone and locale, and the Persona app's version, build number and build channel (debug/release). Cheap and safe to call when you need context about the device.",
+  "description": "Describe the phone: model identifier and name, iOS version, battery percentage and charging state, low power mode, free and total storage in bytes, current network type (wifi/cellular/wired/offline), timezone and locale, and the Persona app's version, build number and build channel (debug/release). Cheap and safe to call when you need context about the device. Also \"build\" (what this app was built from: commit, dirty, branch, built_at, builder, xcode, swift, configuration, bundle_id; Debug builds have them all, Release builds the commit) and \"runtime\" (hub_host, hub_version, hub_connection, launched_at); any field may be missing.",
   "properties": {},
   "required": [],
   "source": "device"
+ },
+ "phone_health_request_access": {
+  "description": "Ask the user on the phone to allow reading the given health types (names from phone_health_types; [\"all\"] for every type the phone can read). Only types not asked about yet bring up the system's permission screen, so the user decides once and later calls ask nothing. Needs Persona open on the phone's screen; otherwise it answers status: needs_foreground. Returns each type's access afterwards.",
+  "properties": {
+   "types": {
+    "description": "Type names from phone_health_types, or [\"all\"].",
+    "items": {
+     "description": "One type name.",
+     "type": "string"
+    },
+    "type": "array"
+   }
+  },
+  "required": [
+   "types"
+  ],
+  "source": "health"
+ },
+ "phone_health_samples": {
+  "description": "Read individual health samples of one type in a time window, in the order the health store returns them: id, start, end, value and unit (or the kind's own fields: a category's value and value_label, a workout's activity and totals, the readings inside a correlation, an ECG's classification and average heart rate, an audiogram's hearing levels), source (app name and bundle id or package), device (name, manufacturer, model, versions) and metadata. Pass type from phone_health_types. Returns at most limit samples with more: true when there are more, and an anchor: pass it back with the same type and window for the next page, and later for only what was added since, with the ids of deleted samples in deleted. A type Persona may not read yet answers its access (not_requested, or not_granted on Android) instead of failing. Health data goes only to the hub that asked and is not written to logs. When the iPhone is locked the app cannot read Apple Health: a type kept current with phone_health_watch answers from the on-device snapshot (\"source\": \"snapshot\" with \"as_of\"; its samples may repeat ones you already have, so match them by id), any other type answers status: device_locked.",
+  "properties": {
+   "anchor": {
+    "description": "The anchor from the previous answer for this type and window: the next page, or what changed since.",
+    "type": "string"
+   },
+   "end": {
+    "description": "Window end, ISO 8601 with a timezone. Default: none, so an anchor keeps finding new samples.",
+    "type": "string"
+   },
+   "limit": {
+    "description": "At most this many samples, default 100, max 500.",
+    "maximum": 500,
+    "minimum": 1,
+    "type": "integer"
+   },
+   "start": {
+    "description": "Window start, ISO 8601 with a timezone. Default: 7 days ago.",
+    "type": "string"
+   },
+   "type": {
+    "description": "The type name from phone_health_types, for example heart_rate.",
+    "type": "string"
+   }
+  },
+  "required": [
+   "type"
+  ],
+  "source": "health"
+ },
+ "phone_health_sources": {
+  "description": "List the apps and devices that saved health data on this phone: each source's name, bundle id (or Android package) and the types it saved. With type, only that type's sources in the last days, plus the devices its samples name (name, manufacturer, model, hardware and software versions). Without type, every type the user was asked about is looked at. Health data goes only to the hub that asked and is not written to logs. When the iPhone is locked it answers from the on-device snapshots of the types phone_health_watch keeps current (\"source\": \"snapshot\").",
+  "properties": {
+   "days": {
+    "description": "How many days back to look, default 30, max 3650.",
+    "maximum": 3650,
+    "minimum": 1,
+    "type": "integer"
+   },
+   "type": {
+    "description": "Only this type (a name from phone_health_types); every type the user was asked about when absent.",
+    "type": "string"
+   }
+  },
+  "required": [],
+  "source": "health"
  },
  "phone_health_summary": {
   "description": "Summarize the user's health data per day. Metrics: steps, distance (meters), active_energy, resting_energy, dietary_energy (kcal, daily totals), protein, carbs, fat (grams, daily totals), heart_rate (bpm, average/min/max over the day), resting_heart_rate (bpm), sleep (hours asleep), weight (kg). Defaults to steps over the last 7 days. Only the requested metrics are read. Days run from local midnight to midnight; today's numbers are partial. Returns one row per day with only the days that have data. Read access is never reported to apps, so an empty result can also mean the user denied read access. When the iPhone is locked the app cannot read HealthKit: it returns the last snapshot saved while the device was unlocked (\"source\": \"snapshot\" with \"as_of\"), or a device_locked error when no snapshot exists yet.",
@@ -409,6 +474,17 @@
      "type": "string"
     },
     "type": "array"
+   }
+  },
+  "required": [],
+  "source": "health"
+ },
+ "phone_health_types": {
+  "description": "List the health data types this phone can read, from Apple Health on an iPhone or Health Connect on Android: quantities, categories, workouts, correlations, ECGs, audiograms and the rest. Each row has the type name to pass to phone_health_samples, the store's own identifier, the kind, the unit values come in, and access: not_requested (ask with phone_health_request_access), requested (the user was asked; Apple Health never tells apps whether reading was allowed, so no data can also mean it was refused), granted or not_granted (Health Connect tells), or unavailable with a reason. Health data goes only to the hub that asked and is not written to logs.",
+  "properties": {
+   "kind": {
+    "description": "Only types of this kind, for example quantity, category or workout; every kind when absent.",
+    "type": "string"
    }
   },
   "required": [],

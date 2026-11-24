@@ -9,6 +9,11 @@ import SwiftUI
 /// menu: Knowledge, Details, the launcher…), like tapping the title in ChatGPT; tapping Agents while it is selected opens
 /// the list's options (Group By, Display, Machines…).
 ///
+/// Both destinations look tappable at rest (#13450, TestFlight: the one not selected read as dimmed text): the one not
+/// selected is outlined (`SegmentOutline`), the selected one carries the pull-down mark while tapping it again opens its
+/// menu (`MenuMark`), a finger on either fills it (`SegmentPress`), and each is hit the capsule's whole height
+/// (`hitRoom`). iPhone Duo's tab bar is drawn as it was.
+///
 /// In the shell the selection is the shell's (`ShellState.page`, docs/apple/shell.md), not `tab`: a tap selects at once, and a
 /// segment is its page's menu only while the strip rests on that page, so a segment never stands for a page that is
 /// not on screen (a tab that said Agents over Assistant made Agents the menu of an empty list of options, 2026-11-02).
@@ -47,19 +52,26 @@ struct ShellSwitch<ChatMenu: View, WorkMenu: View>: View {
                 .shadow(color: StyleSpec.current.softShadow, radius: Theme.Space.s, y: Theme.Space.xxs)
                 .modifier(SwitchMotion(chosen: chosen, upright: true))
         } else if AppStyle.current.usesBeautifulUI {
-            // BeautifulUI's pill segmented control: a field-colored track, the chosen segment a raised capsule.
+            // BeautifulUI's pill segmented control: a field-colored track, the chosen segment a raised capsule. Its padding
+            // above and below the segments is theirs to be hit in (`hitRoom`).
             row
-                .padding(Theme.Space.xs)
+                .padding(.horizontal, Self.hitRoom)
                 .background(theme.colors.field, in: .capsule)
                 .overlay(Capsule().strokeBorder(theme.colors.line, lineWidth: Theme.Size.hairline))
                 .modifier(SwitchMotion(chosen: chosen, upright: false))
         } else {
             row
-                .padding(Theme.Space.xs)
+                .padding(.horizontal, Self.hitRoom)
                 .surface(interactive: true, in: .capsule)
                 .modifier(SwitchMotion(chosen: chosen, upright: false))
         }
     }
+
+    /// The capsule's padding around the segments across the top. Above and below them it is inside each segment's
+    /// button or menu (`segment`): a menu is hit only in the frame its label lays out, and the padding alone hit nothing,
+    /// so a segment drawn `Theme.Shell.switchHeight` less `Space.s` tall is hit the capsule's whole height, the 44 pt
+    /// of `switchHeight` at the default text size and more above it (#13450, HIG-053). The capsule is as large as it was.
+    private static var hitRoom: CGFloat { Theme.Space.xs }
 
     /// The switch is iPhone Duo's tab bar on the outer display (#4231), down the side column. Its items are the
     /// page's symbol over its name; across the top it is the iPhone's switch of names.
@@ -86,13 +98,22 @@ struct ShellSwitch<ChatMenu: View, WorkMenu: View>: View {
         return !pager.moving
     }
 
+    /// Whether the chosen segment across the top carries the menu mark (#13450): while it opens its menu. The moving
+    /// bar's switch has no menus (`ShellMovingBar`); it stands in for the page's own bar while the strip slides, so it
+    /// marks the segment that bar marks at rest, and the name does not move or change size as the bars change places.
+    private func marksMenu(_ value: AppTab) -> Bool {
+        guard !tabBar, chosen == value else { return false }
+        guard follows, let shell else { return opensMenu(value) }
+        return value == .assistant || (value == .chats && shell.workAtRoot)
+    }
+
     private var row: some View {
         stack {
             ZStack(alignment: .topTrailing) {
                 if opensMenu(.assistant) {
                     Menu { chatMenu() } label: { segment(String(localized: "shell.assistant", defaultValue: "Assistant", comment: "The chat side of the top switch (72 pt wide)"), .assistant, selected: true) }
                         .menuStyle(.button)
-                        .buttonStyle(.plain)
+                        .modifier(SegmentPress(upright: tabBar))
                         .accessibilityIdentifier("shell-assistant")
                         .modifier(MenuSegmentAccess(hint: "Chat menu", upright: tabBar, title: String(localized: "shell.assistant", defaultValue: "Assistant", comment: "The chat side of the top switch (72 pt wide)"), symbol: Self.symbol(.assistant)))
                 } else {
@@ -103,24 +124,25 @@ struct ShellSwitch<ChatMenu: View, WorkMenu: View>: View {
                 if opensMenu(.chats) {
                     Menu { workMenu() } label: { segment("Agents", .chats, selected: true) }
                         .menuStyle(.button)
-                        .buttonStyle(.plain)
+                        .modifier(SegmentPress(upright: tabBar))
                         .accessibilityIdentifier("shell-agents")
                         .modifier(MenuSegmentAccess(hint: "List options", upright: tabBar, title: "Agents", symbol: Self.symbol(.chats)))
                 } else {
                     button("Agents", .chats, id: "shell-agents")
                 }
-                // The tab bar's counts are on its items' symbols (`TabBarBadge`).
+                // The tab bar's counts are on its items' symbols (`TabBarBadge`). Across the top the count hangs off the
+                // corner of the segment's hit frame, the capsule's top (`hitRoom`, #13450): clear of the menu mark after
+                // the chosen Agents' name.
                 if !tabBar { WaitingBadge() }
             }
-            #if os(iOS) || os(visionOS)
             if LarkHomePreference.shared.shows {
                 button(String(localized: "Messages [Quote Views 4da199]"), .feishu, id: "shell-feishu")
             }
-            #endif
         }
         .background(alignment: .leading) {
-            // The tab bar marks its chosen item itself (`tabBarSegment`).
-            if let shell, !tabBar { PagerPill(shell: shell, follows: follows) }
+            // The tab bar marks its chosen item itself (`tabBarSegment`). Across the top the pill is the drawn segments'
+            // height, inside their hit room.
+            if let shell, !tabBar { PagerPill(shell: shell, follows: follows).padding(.vertical, Self.hitRoom) }
             // Its lens glides to a newly chosen item (#9837): under the items where it does not bend them…
             if tabBar, !StyleSpec.current.usesGlass { TabBarLens(index: ShellState.index(for: chosen), axis: axis) }
         }
@@ -151,26 +173,32 @@ struct ShellSwitch<ChatMenu: View, WorkMenu: View>: View {
         } label: {
             segment(title, value, selected: chosen == value)
         }
-        .buttonStyle(.plain)
+        .modifier(SegmentPress(upright: tabBar))
         .accessibilityIdentifier(id)
         .modifier(ButtonSegmentAccess(selected: chosen == value, upright: tabBar, title: title, symbol: Self.symbol(value)))
     }
 
+    /// A segment as its button or menu draws it. Across the top it is hit the capsule's whole height (`hitRoom`), its
+    /// corners too: the room is inside the label, where a menu is hit.
     @ViewBuilder private func segment(_ title: String, _ value: AppTab, selected: Bool) -> some View {
         if tabBar {
             tabBarSegment(title, value, selected: selected)
-        } else if AppStyle.current.usesBeautifulUI {
-            beautifulSegment(title, selected: selected)
         } else {
-            plainSegment(title, selected: selected)
+            Group {
+                if AppStyle.current.usesBeautifulUI {
+                    beautifulSegment(title, selected: selected, marked: marksMenu(value))
+                } else {
+                    plainSegment(title, selected: selected, marked: marksMenu(value))
+                }
+            }
+            .padding(.vertical, Self.hitRoom)
+            .contentShape(.rect)
         }
     }
 
     /// The page's symbol on the rail, matching its shared tab.
     private static func symbol(_ value: AppTab) -> String {
-        #if os(iOS) || os(visionOS)
-        if value == .feishu { return Theme.Icon.feishuChats } // a phone's tab only (no such tab on the Mac)
-        #endif
+        if value == .feishu { return Theme.Icon.feishuChats }
         return value == .chats ? Theme.Icon.agents : Theme.Icon.ai
     }
 
@@ -205,35 +233,132 @@ struct ShellSwitch<ChatMenu: View, WorkMenu: View>: View {
         .accessibilityLabel(title)
     }
 
-    private func beautifulSegment(_ title: String, selected: Bool) -> some View {
-        Text(title)
-            .buiFont(BUITextStyle(size: 13, weight: selected ? .semibold : .medium, lineHeight: 1.19))
-            .foregroundStyle(selected ? theme.colors.ink : theme.colors.ink3)
-            .lineLimit(1)
-            .minimumScaleFactor(0.8)
-            .scaledFrame(width: Theme.Shell.segmentWidth, height: Theme.Shell.switchHeight - Theme.Space.s)
-            .background {
-                if selected, shell == nil {
+    /// How far a segment's name may shrink to fit the segment's width: as before, and further with the menu mark after it,
+    /// so "Assistant" stays whole beside the mark in the 72 pt (#13450; about 0.7 of its size at the default text size) and
+    /// the switch is no wider. The name shrinks only as far as it must.
+    private static func nameScale(marked: Bool) -> CGFloat { marked ? 0.6 : 0.8 }
+
+    /// Between a segment's name and the ends of its capsule (#13450): a name that ran the segment's whole width touched
+    /// the outline drawn there now, and the pill's ends.
+    private static var nameInset: CGFloat { Theme.Space.xs }
+
+    /// A segment across the top in the BeautifulUI style (#13450): its name, and while tapping it again opens its menu the
+    /// pull-down mark after it (`marksMenu`, `MenuMark`). The chosen one is the raised capsule, every other one has the
+    /// raised capsule's ring alone (`SegmentOutline`), and a finger on one fills it (`SegmentPressFill`). In the shell
+    /// `PagerPill` draws the capsule and the rings, which follow the strip.
+    private func beautifulSegment(_ title: String, selected: Bool, marked: Bool) -> some View {
+        HStack(spacing: Theme.Space.xxs) {
+            Text(title)
+                .buiFont(BUITextStyle(size: 13, weight: selected ? .semibold : .medium, lineHeight: 1.19))
+                .lineLimit(1)
+                .allowsTightening(true)
+                .minimumScaleFactor(Self.nameScale(marked: marked))
+            if marked { MenuMark(color: theme.colors.ink2) }
+        }
+        .foregroundStyle(selected ? theme.colors.ink : theme.colors.ink3)
+        .padding(.horizontal, Self.nameInset)
+        .scaledFrame(width: Theme.Shell.segmentWidth, height: Theme.Shell.switchHeight - Theme.Space.s)
+        .background {
+            if shell == nil {
+                if selected {
                     Color.clear.buiSurface(Capsule(), fill: theme.colors.surface, elevation: .button)
                         .matchedGeometryEffect(id: "pill", in: pill)
+                } else {
+                    SegmentOutline()
                 }
             }
-            .contentShape(.capsule)
+            SegmentPressFill()
+        }
     }
 
-    private func plainSegment(_ title: String, selected: Bool) -> some View {
-        Text(title)
-            .font(selected ? Theme.Font.bodyStrong : Theme.Font.body)
-            .foregroundStyle(selected ? Color.primary : Color.secondary)
-            .lineLimit(1)
-            .minimumScaleFactor(0.8)
-            .scaledFrame(width: Theme.Shell.segmentWidth, height: Theme.Shell.switchHeight - Theme.Space.s)
-            .background {
-                if selected, shell == nil {
+    /// A segment across the top (#13450): its name, and while tapping it again opens its menu the pull-down mark after it
+    /// (`marksMenu`, `MenuMark`); the name gives way to the mark within the segment's width. The chosen one sits on the
+    /// gray pill, every other one is outlined (`SegmentOutline`), and a finger on one fills it (`SegmentPressFill`). In
+    /// the shell `PagerPill` draws the pill and the outlines, which follow the strip.
+    private func plainSegment(_ title: String, selected: Bool, marked: Bool) -> some View {
+        HStack(spacing: Theme.Space.xxs) {
+            Text(title)
+                .font(selected ? Theme.Font.bodyStrong : Theme.Font.body)
+                .lineLimit(1)
+                .allowsTightening(true)
+                .minimumScaleFactor(Self.nameScale(marked: marked))
+            if marked { MenuMark(color: Color.secondary) }
+        }
+        .foregroundStyle(selected ? Color.primary : Color.secondary)
+        .padding(.horizontal, Self.nameInset)
+        .scaledFrame(width: Theme.Shell.segmentWidth, height: Theme.Shell.switchHeight - Theme.Space.s)
+        .background {
+            if shell == nil {
+                if selected {
                     Capsule().fill(Theme.Shell.segment).matchedGeometryEffect(id: "pill", in: pill)
+                } else {
+                    SegmentOutline()
                 }
             }
-            .contentShape(.capsule)
+            SegmentPressFill()
+        }
+    }
+}
+
+/// The pull-down mark after the chosen segment's name while tapping it again opens its menu (#13450): `Icon.pullDown`,
+/// small, in the name's quieter color. VoiceOver does not read it: the menu says what it is ("Chat menu", "List options").
+private struct MenuMark: View {
+    var color: Color
+
+    var body: some View {
+        ThemedIcon(Theme.Icon.pullDown)
+            .font(Theme.Font.labelStrong)
+            .imageScale(.small)
+            .foregroundStyle(color)
+            .accessibilityHidden(true)
+    }
+}
+
+/// A segment across the top that is not chosen (#13450): a hairline capsule where it is, so it reads as a place to tap
+/// and not as a dimmed word, while the chosen one, filled, stays apart. Liquid Glass draws it as the app's other glass
+/// capsules are edged (`Theme.cardStroke`: the Agents filter capsule, iPhone Duo's tab bar); BeautifulUI in its strong
+/// line, lighter than the chosen capsule's ring.
+private struct SegmentOutline: View {
+    @Environment(\.buiTheme) private var theme
+
+    var body: some View {
+        Capsule().strokeBorder(AppStyle.current.usesBeautifulUI ? theme.colors.lineStrong : Theme.cardStroke,
+                               lineWidth: Theme.Size.hairline)
+    }
+}
+
+extension EnvironmentValues {
+    /// A finger is down on a segment of the switch across the top (`SegmentPress`, #13450).
+    @Entry var shellSegmentPressed = false
+}
+
+/// A segment across the top pressed (#13450): its button or menu tells the segment (`SegmentPressFill`), which fills
+/// itself, over the pill too; the name stays as it is (the plain style only dimmed it). iPhone Duo's tab bar keeps the
+/// plain style.
+private struct SegmentPress: ViewModifier {
+    let upright: Bool
+
+    func body(content: Content) -> some View {
+        if upright { content.buttonStyle(.plain) } else { content.buttonStyle(Style()) }
+    }
+
+    private struct Style: ButtonStyle {
+        func makeBody(configuration: Configuration) -> some View {
+            configuration.label.environment(\.shellSegmentPressed, configuration.isPressed)
+        }
+    }
+}
+
+/// A pressed segment's fill (`Theme.Fill.pressed`, the system's fill for a pressed control) over its capsule: at once as
+/// the finger lands, fading on the state spring as it lifts.
+private struct SegmentPressFill: View {
+    @Environment(\.shellSegmentPressed) private var pressed
+
+    var body: some View {
+        Capsule().fill(Theme.Fill.pressed)
+            .opacity(pressed ? 1 : 0)
+            .animation(pressed ? nil : Theme.Motion.state, value: pressed)
+            .allowsHitTesting(false)
     }
 }
 
@@ -244,6 +369,9 @@ struct ShellSwitch<ChatMenu: View, WorkMenu: View>: View {
 /// one pushed while the strip still slides), and a view there that took the slide's animation never runs it: the
 /// slide's end waited for it, both pages out of reach and the moving bar's switch over the chat (2026-11-03, opening an
 /// agent from the inbox, `ShellInboxAgentTests`).
+///
+/// Under the pill every segment has its outline (`SegmentOutline`, #13450), faded by how far the pill is from it: none
+/// under the pill at rest, whole a segment's width away, so the pill takes it in as it comes and leaves it behind.
 private struct PagerPill: View {
     let shell: ShellState
     var follows: Bool
@@ -251,10 +379,17 @@ private struct PagerPill: View {
 
     var body: some View {
         GeometryReader { g in
-            let n = CGFloat(shell.pager.pageCount)
+            let count = shell.pager.pageCount
+            let n = CGFloat(count)
             let at = follows ? min(n - 1, max(0, shell.pager.position)) : CGFloat(shell.page)
             let size = CGSize(width: g.size.width / n, height: g.size.height)
             let offset = CGSize(width: at * size.width, height: 0)
+            ForEach(0..<count, id: \.self) { i in
+                SegmentOutline()
+                    .frame(width: size.width, height: size.height)
+                    .offset(x: CGFloat(i) * size.width)
+                    .opacity(min(1, abs(CGFloat(i) - at)))
+            }
             if AppStyle.current.usesBeautifulUI {
                 // BeautifulUI's segmented control: the chosen segment is a raised capsule.
                 Color.clear.buiSurface(Capsule(), fill: theme.colors.surface, elevation: .button)
@@ -274,9 +409,7 @@ private struct PagerPill: View {
 private struct WaitingBadge: View {
     @Environment(AppModel.self) private var model
     private var offset: CGSize {
-        #if os(iOS) || os(visionOS)
         if LarkHomePreference.shared.shows { return CGSize(width: -Theme.Space.s, height: -Theme.Space.l) }
-        #endif
         return CGSize(width: Theme.Space.s, height: -Theme.Space.sm)
     }
 
@@ -450,15 +583,11 @@ private struct TabBarPersonaFace: View {
     var body: some View {
         let persona = model.persona
         Group {
-            #if os(iOS) || os(visionOS)
             if !persona.isBuiltin, let frames = model.personas.frames(persona, .idle) {
                 PersonaFramesView(frames: frames, animating: false, eligible: false)
             } else {
                 AssistantAvatar(size: Theme.Size.well, design: persona.avatarDesign, still: true)
             }
-            #else
-            AssistantAvatar(size: Theme.Size.well, design: persona.avatarDesign, still: true)
-            #endif
         }
         .frame(width: Theme.Size.well, height: Theme.Size.well)
         .clipShape(.circle)
@@ -750,13 +879,10 @@ struct ShellNavigationClearance: View {
     static let line = " "
 
     var body: some View {
-        #if os(iOS) || os(visionOS)
         PromptLine(active: active)
-        #endif
     }
 }
 
-#if os(iOS) || os(visionOS)
 private struct PromptLine: UIViewControllerRepresentable {
     var active: Bool
 
@@ -784,7 +910,6 @@ private struct PromptLine: UIViewControllerRepresentable {
         }
     }
 }
-#endif
 
 /// The text size the app settled on (the system's, moved by Small / Standard / Large), set once at the root. `shellScaled` goes one
 /// step up from this, not from the environment's own size: that one is not always what the page has. The drawer's

@@ -13,7 +13,7 @@ import (
 	"github.com/nwverse/persona/server/internal/assistantwire"
 	"github.com/nwverse/persona/server/internal/connector"
 	"github.com/nwverse/persona/server/internal/kb"
-	"github.com/nwverse/persona/server/internal/mail"
+	"github.com/nwverse/persona/server/internal/mailwire"
 	"github.com/nwverse/persona/server/internal/proto"
 )
 
@@ -100,7 +100,7 @@ func (c mailConnector) Changes(ctx context.Context, cursor string, _ int) ([]con
 	return batches, string(raw), more, nil
 }
 
-func (c mailConnector) archiveMessage(ctx context.Context, a mail.MailAccount, box string, m mail.MailSummary, id string, readFull bool) connector.ChatBatch {
+func (c mailConnector) archiveMessage(ctx context.Context, a mailwire.MailAccount, box string, m mailwire.MailSummary, id string, readFull bool) connector.ChatBatch {
 	text := m.Snippet
 	if readFull {
 		if full, err := c.h.mail.GetMessage(ctx, a.ID, m.UID, box); err == nil && strings.TrimSpace(full.Text) != "" {
@@ -150,11 +150,11 @@ func (st mailCursor) store(cursors map[string]uint32, id string) {
 
 // mailChanges is the mailbox's mail to archive now, oldest first, moving st past it; ok is false when the
 // inbox could not be read (st is left as it was).
-func (c mailConnector) mailChanges(ctx context.Context, account, box string, st *mailCursor) ([]mail.MailSummary, bool, error) {
+func (c mailConnector) mailChanges(ctx context.Context, account, box string, st *mailCursor) ([]mailwire.MailSummary, bool, error) {
 	if st.epoch != 0 && st.validity == 0 {
 		return nil, false, errors.New("mail archive identity epoch has no known validity")
 	}
-	res, err := c.h.mail.ListMessages(ctx, mail.ListOptions{AccountID: account, Mailbox: box, Limit: mailArchivePage})
+	res, err := c.h.mail.ListMessages(ctx, mailwire.ListOptions{AccountID: account, Mailbox: box, Limit: mailArchivePage})
 	if err != nil {
 		return nil, false, nil
 	}
@@ -171,8 +171,8 @@ func (c mailConnector) mailChanges(ctx context.Context, account, box string, st 
 	if res.UIDValidity != 0 {
 		st.validity = res.UIDValidity
 	}
-	var out []mail.MailSummary
-	take := func(m mail.MailSummary) {
+	var out []mailwire.MailSummary
+	take := func(m mailwire.MailSummary) {
 		at, _ := time.Parse(time.RFC3339, m.Date)
 		if !after.IsZero() && !at.After(after) {
 			return
@@ -187,7 +187,7 @@ func (c mailConnector) mailChanges(ctx context.Context, account, box string, st 
 	pages := 1
 	fill := func() {
 		for ; st.holeTop != 0 && pages < mailArchivePages; pages++ {
-			page, err := c.h.mail.ListMessages(ctx, mail.ListOptions{AccountID: account, Mailbox: box, Limit: mailArchivePage, BeforeUID: st.holeTop})
+			page, err := c.h.mail.ListMessages(ctx, mailwire.ListOptions{AccountID: account, Mailbox: box, Limit: mailArchivePage, BeforeUID: st.holeTop})
 			if err != nil || (page.UIDValidity != 0 && page.UIDValidity != st.validity) {
 				pages = mailArchivePages // read again next time; a renumbering in between is seen on the newest page then
 				return
@@ -222,12 +222,12 @@ func (c mailConnector) mailChanges(ctx context.Context, account, box string, st 
 		st.deferred = true
 	}
 	fill() // the hole the newest page left, with the pages still left
-	slices.SortFunc(out, func(a, b mail.MailSummary) int { return cmp.Compare(a.UID, b.UID) })
+	slices.SortFunc(out, func(a, b mailwire.MailSummary) int { return cmp.Compare(a.UID, b.UID) })
 	return out, true, nil
 }
 
 // pageReaches says a page (newest first, down from its before_uid) holds every UID above floor up to it.
-func pageReaches(page *mail.ListResult, floor uint32) bool {
+func pageReaches(page *mailwire.ListResult, floor uint32) bool {
 	return !page.HasMore || page.NextBeforeUID == 0 || page.NextBeforeUID <= floor+1
 }
 
@@ -236,7 +236,7 @@ func pageReaches(page *mail.ListResult, floor uint32) bool {
 func (c mailConnector) Tools() []proto.Tool {
 	var out []proto.Tool
 	for _, t := range c.h.mail.Tools() {
-		if t.Name != mail.ToolSend {
+		if t.Name != mailwire.ToolSend {
 			out = append(out, t)
 		}
 	}
@@ -245,7 +245,7 @@ func (c mailConnector) Tools() []proto.Tool {
 
 func (c mailConnector) Actions() []proto.Tool {
 	for _, t := range c.h.mail.Tools() {
-		if t.Name == mail.ToolSend {
+		if t.Name == mailwire.ToolSend {
 			return []proto.Tool{t}
 		}
 	}
@@ -258,15 +258,15 @@ func (c mailConnector) Call(ctx context.Context, name string, args json.RawMessa
 
 var _ connector.ReadJSON = mailConnector{}
 
-// CallJSON is connector.ReadJSON: mail_accounts and mail_search as JSON for subscriptions (mail.Service.CallJSON),
+// CallJSON is connector.ReadJSON: mail_accounts and mail_search as JSON for subscriptions (mailwire.Service.CallJSON),
 // mail_read as its text.
 func (c mailConnector) CallJSON(ctx context.Context, name string, args json.RawMessage) (json.RawMessage, bool, error) {
 	return c.h.mail.CallJSON(ctx, name, args)
 }
 
 // Describe refuses a mail_send that could not be sent before the user is asked.
-func (mailConnector) Describe(_ context.Context, name string, args json.RawMessage) (connector.Action, string, error) {
-	summary, err := mail.SendSummary(args)
+func (c mailConnector) Describe(_ context.Context, name string, args json.RawMessage) (connector.Action, string, error) {
+	summary, err := c.h.mail.SendSummary(args)
 	return connector.Action{Name: name}, summary, err
 }
 
@@ -295,7 +295,7 @@ var errMailAttachmentUnavailable = errors.New("mail is not available")
 // (assistant: an assistant conversation, which the assistant has checked; an agent gets it only when mail's tools go to
 // the agents too). The machine and conversation checks of mcp.call are the assistant's (fleet_tools.go mailAttachment).
 func (h *Manager) MailAttachment(ctx context.Context, req proto.MailAttachmentRequest) (proto.MailAttachment, error) {
-	if !h.ready(ctx) || h.mail == nil || h.connectors == nil || !h.offersTool(ctx, mail.ToolSaveAttachment, req.Assistant) {
+	if !h.ready(ctx) || h.mail == nil || h.connectors == nil || !h.offersTool(ctx, mailwire.ToolSaveAttachment, req.Assistant) {
 		return proto.MailAttachment{}, errMailAttachmentUnavailable
 	}
 	a, data, err := h.mail.FetchAttachment(ctx, req.AccountID, req.UID, req.Mailbox, req.AttachmentID, proto.MaxMailAttachment)

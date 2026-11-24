@@ -107,6 +107,10 @@ func (s *Service) relayArrived(machine, to string, msg relayMsg) (bool, error) {
 	return false, nil
 }
 
+// errSupervisionRelayUnconfirmed marks a supervision send whose RPC returned without a matching user item in the
+// destination transcript. It is not a refusal; the caller persists the relay with its attempt state for reconciliation.
+var errSupervisionRelayUnconfirmed = errors.New("supervision send not confirmed in transcript")
+
 // lookForRelay notes a match as delivered. Otherwise it advances the relay's look schedule.
 func (s *Service) lookForRelay(machine, to string, msg *relayMsg) bool {
 	landed, err := s.relayArrived(machine, to, *msg)
@@ -123,20 +127,111 @@ func (s *Service) lookForRelay(machine, to string, msg *relayMsg) bool {
 	return false
 }
 
-// tryDirectRelay carries an immediate try's start into the queue if the send ends in doubt.
-func (s *Service) tryDirectRelay(ctx context.Context, machine, to string, msg *relayMsg) error {
-	tried := time.Now().UTC()
-	err := s.deliverRelay(ctx, machine, to, *msg)
-	if relayInDoubt(err) {
-		msg.TriedAt = tried
-		if msg.Tool == superviseTool {
-			if s.lookForRelay(machine, to, msg) {
-				return nil
+// confirmSupervisionRelay checks the destination transcript after a supervision send, including a successful RPC
+// return (#12567). Delivery is completed only once the rendered supervision user item is confirmed present.
+func (s *Service) confirmSupervisionRelay(ctx context.Context, machine, to string, msg *relayMsg, res superviseRoundReply, round, inDoubt bool) bool {
+	landed, err := s.relayArrived(machine, to, *msg)
+	if !landed && err == nil && res.SessionID != "" && res.SessionID != to {
+		landed, err = s.relayArrived(machine, res.SessionID, *msg)
+	}
+	if landed {
+		if inDoubt {
+			s.logf("relay to %s: a try in doubt is in the conversation, taken as delivered", short(to))
+		}
+		if !inDoubt && round {
+			s.superviseRoundAnswered(to, res)
+		}
+		s.relayDelivered(ctx, to, *msg)
+		return true
+	}
+	if err != nil {
+		s.logf("relay to %s: transcript check failed: %v", short(to), err)
+	} else if !inDoubt {
+		s.logf("relay to %s: supervision send returned without a transcript item; waiting to confirm", short(to))
+	}
+	msg.Looks = min(msg.Looks+1, relayLookLimit)
+	msg.LookAfter = time.Now().UTC().Add(relayLookGap)
+	return false
+}
+
+func (s *Service) noteDoubt(to string, msg relayMsg, tried time.Time) {
+	b := &s.relays
+	b.mu.Lock()
+	if b.doubted == nil {
+		b.doubted = map[string]time.Time{}
+	}
+	id := relayMsgID(to, msg)
+	if _, ok := b.doubted[id]; !ok {
+		b.doubted[id] = tried
+	}
+	b.mu.Unlock()
+}
+
+func (s *Service) recordQueuedDoubt(to string, msg *relayMsg) {
+	b := &s.relays
+	b.mu.Lock()
+	if b.doubted == nil {
+		b.doubted = map[string]time.Time{}
+	}
+	id := relayMsgID(to, *msg)
+	triedAt, ok := b.doubted[id]
+	if !ok {
+		triedAt = msg.TriedAt
+		if !msg.DoubtedAt.IsZero() {
+			triedAt = msg.DoubtedAt
+		}
+		b.doubted[id] = triedAt
+	}
+	if msg.Tool == superviseTool {
+		msg.DoubtedAt = triedAt
+		// Keep the doubt with the durable queue head too. A restart loses b.doubted, and a confirmation may rewrite
+		// the head's signals while this send is in flight; neither may turn a late-visible original into a replay (#5732).
+		q := b.st.Queue[to]
+		for i := range q {
+			if relayMsgID(to, q[i]) != id {
+				continue
 			}
-			s.releasePushes(context.Background(), to)
+			if q[i].DoubtedAt.IsZero() {
+				q[i].DoubtedAt = triedAt
+			}
+			q[i].Looks, q[i].LookAfter = msg.Looks, msg.LookAfter
+			b.st.Queue[to] = q
+			_ = s.saveRelayLocked()
+			break
 		}
 	}
-	return err
+	b.mu.Unlock()
+}
+
+// tryDirectRelay carries an immediate try's start into the queue if the send ends in doubt. Supervision sends always
+// confirm their user item in the destination transcript before completing delivery (#12567).
+func (s *Service) tryDirectRelay(ctx context.Context, machine, to string, msg *relayMsg) error {
+	tried := time.Now().UTC()
+	if msg.Tool != superviseTool {
+		err := s.deliverRelay(ctx, machine, to, *msg)
+		if relayInDoubt(err) {
+			msg.TriedAt = tried
+		}
+		return err
+	}
+	if msg.OnceID == "" {
+		msg.OnceID = relayMsgID(to, *msg)
+	}
+	res, round, err := s.sendRelay(ctx, machine, to, *msg)
+	if err != nil && !relayInDoubt(err) {
+		return err
+	}
+	msg.TriedAt = tried
+	if s.confirmSupervisionRelay(ctx, machine, to, msg, res, round, err != nil) {
+		return nil
+	}
+	msg.DoubtedAt = tried
+	s.noteDoubt(to, *msg, tried)
+	s.releasePushes(context.Background(), to)
+	if err != nil {
+		return err
+	}
+	return errSupervisionRelayUnconfirmed
 }
 
 // tryQueuedRelay sends the queue head after reconciliation and updates head to its saved pre-send state.
@@ -172,16 +267,64 @@ func (s *Service) tryQueuedRelay(ctx context.Context, machine, to string, head *
 		return previous, relayRetryGap, err
 	}
 	*head = msg
-	err = s.deliverRelay(ctx, machine, to, msg)
-	if !relayInDoubt(err) {
+	if msg.Tool != superviseTool {
+		err = s.deliverRelay(ctx, machine, to, msg)
+		if !relayInDoubt(err) {
+			// A refusal does not add any doubt. Retain the earlier try's mark, if there was one.
+			return previous, 0, err
+		}
+		if s.lookForRelay(machine, to, &msg) {
+			return msg, 0, nil
+		}
+		s.recordQueuedDoubt(to, &msg)
+		return msg, relayLookGap, nil
+	}
+	res, round, err := s.sendRelay(ctx, machine, to, msg)
+	if err != nil && !relayInDoubt(err) {
 		// A refusal does not add any doubt. Retain the earlier try's mark, if there was one.
 		return previous, 0, err
 	}
-	if s.lookForRelay(machine, to, &msg) {
+	if s.confirmSupervisionRelay(ctx, machine, to, &msg, res, round, err != nil) {
 		return msg, 0, nil
 	}
-	if msg.Tool == superviseTool {
-		s.releasePushes(context.Background(), to)
-	}
+	s.recordQueuedDoubt(to, &msg)
+	s.releasePushes(context.Background(), to)
 	return msg, relayLookGap, nil
+}
+
+// relayLanded says whether an earlier try of msg that ended in doubt has gone in since: its line may come after the
+// look (relaySettled), and a node restarted in between no longer knows the once_id. Found, it is noted as delivered.
+func (s *Service) relayLanded(machine, to string, msg relayMsg) bool {
+	b := &s.relays
+	b.mu.Lock()
+	tried, ok := b.doubted[relayMsgID(to, msg)]
+	b.mu.Unlock()
+	if !ok && !msg.DoubtedAt.IsZero() {
+		tried, ok = msg.DoubtedAt, true // the durable head survived a manager restart
+	}
+	if !ok && msg.Withdrawn && !msg.At.IsZero() {
+		// The original send may have landed just before a restart removed the process, after withdrawal but before the
+		// queue head was removed. No doubt was recorded for that acknowledged send; its original timestamp still bounds
+		// the transcript lookup, so an older identical line is not accepted as this delivery.
+		tried, ok = msg.At, true
+	}
+	if !ok {
+		return false
+	}
+	msg.TriedAt = tried
+	landed, err := s.relayArrived(machine, to, msg)
+	if err != nil || !landed {
+		return false
+	}
+	s.logf("relay to %s: an earlier try in doubt is in the conversation, taken as delivered", short(to))
+	s.relayDelivered(context.Background(), to, msg)
+	s.forgetDoubt(to, msg)
+	return true
+}
+
+func (s *Service) forgetDoubt(to string, msg relayMsg) {
+	b := &s.relays
+	b.mu.Lock()
+	delete(b.doubted, relayMsgID(to, msg))
+	b.mu.Unlock()
 }

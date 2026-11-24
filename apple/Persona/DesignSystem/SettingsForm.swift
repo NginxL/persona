@@ -7,11 +7,7 @@ struct SettingsForm<Content: View>: View {
     @ViewBuilder var content: Content
 
     var body: some View {
-        #if os(macOS)
-        Form { content }.formStyle(.grouped)
-        #else
         List { content }
-        #endif
     }
 }
 
@@ -22,22 +18,14 @@ struct FormAction<Content: View>: View {
     @ViewBuilder var content: Content
 
     var body: some View {
-        #if os(macOS)
-        HStack { Spacer(minLength: 0); content }
-        #else
         content.listRowBackground(Color.clear)
-        #endif
     }
 }
 
 extension View {
     /// A `FormAction` button's label: the row's whole width on the phone, its own width on the Mac.
     @ViewBuilder func formActionWidth() -> some View {
-        #if os(macOS)
-        self
-        #else
         frame(maxWidth: .infinity)
-        #endif
     }
 
     /// A settings row with a progress indicator at its trailing edge while `active` (an action it started still runs,
@@ -59,11 +47,7 @@ extension View {
 /// the form's buttons and text.
 struct RowProgress: View {
     var body: some View {
-        #if os(macOS)
-        ProgressView().controlSize(.small)
-        #else
         ProgressView()
-        #endif
     }
 }
 
@@ -77,16 +61,7 @@ struct LoadProblem: View {
     var labeled = true
 
     var body: some View {
-        #if os(macOS)
-        if model.isDemo {
-            Label("Demo mode has no sample data for this part. It shows up once you connect your own hub.", systemImage: Theme.Icon.info)
-                .font(Theme.Font.label).foregroundStyle(.secondary)
-        } else {
-            problem
-        }
-        #else
         problem
-        #endif
     }
 
     @ViewBuilder private var problem: some View {

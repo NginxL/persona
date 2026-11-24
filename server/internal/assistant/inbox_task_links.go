@@ -199,9 +199,23 @@ func (s *Service) linkInboxTaskURLs(ctx context.Context) {
 		return
 	}
 	idx := &inboxTaskIndex{byRef: map[string][]string{}, bare: map[uint64][]Todo{}, open: map[string]Todo{}}
+	acceptedPRs := map[string]Todo{}
+	followAcceptedPRs := s.inboxSignalsOn(ctx)
 	s.todos.mu.RLock()
 	for _, t := range s.todos.todos {
-		if t.DoneAt != nil || t.Cancelled() || isAskTodo(t.ID) {
+		if t.Cancelled() || isAskTodo(t.ID) {
+			continue
+		}
+		if t.DoneAt != nil {
+			if followAcceptedPRs && taskAcceptedForFeedback(*t) {
+				for _, raw := range append(slices.Clone(t.PRs), t.PRURL) {
+					if u := triageNormalizePRURL(raw); u != "" {
+						if other, ok := acceptedPRs[u]; !ok || t.DoneAt.After(*other.DoneAt) {
+							acceptedPRs[u] = *t
+						}
+					}
+				}
+			}
 			continue
 		}
 		idx.add(*t)
@@ -228,7 +242,7 @@ func (s *Service) linkInboxTaskURLs(ctx context.Context) {
 		}
 		if a := it.Agent; a != nil && a.TodoID != "" {
 			if sc := inboxScopeOf(it); sc.repo != "" {
-				if t, ok := open[a.TodoID]; ok && t.InboxItem != it.ID && !taskOfRepo(t, sc.repo) {
+				if t, ok := open[a.TodoID]; ok && t.InboxItem != it.ID && (it.TodoForward == nil || it.TodoForward.TodoID != a.TodoID) && !taskOfRepo(t, sc.repo) {
 					w := beginWrite(it)
 					unlinked = append(unlinked, it.ID+" from "+a.TodoID)
 					a.TodoID = ""
@@ -243,6 +257,14 @@ func (s *Service) linkInboxTaskURLs(ctx context.Context) {
 				closes = inboxClosesIndex(b.items)
 			}
 			id := idx.match(it, closes)
+			if id == "" {
+				if u := inboxOpenPR(it); u != "" {
+					repo, n := inboxScopeOf(it).repo, inboxItemNumber(it)
+					if n != 0 && len(idx.tasksOf(githubRef(repo, n), repo, n)) == 0 {
+						id = acceptedPRs[u].ID
+					}
+				}
+			}
 			if id != "" {
 				w := beginWrite(it)
 				if it.Agent == nil {
@@ -279,6 +301,7 @@ func (s *Service) linkInboxTaskURLs(ctx context.Context) {
 // suggestion stays. Saved like any item write; a failed save undoes it.
 func (s *Service) fileTaskDone(ctx context.Context, items []*InboxItem) {
 	b := &s.inbox
+	followAcceptedPRs := s.inboxSignalsOn(ctx)
 	pending := map[string]bool{}
 	s.todos.mu.RLock()
 	for _, task := range s.todos.todos {
@@ -303,7 +326,8 @@ func (s *Service) fileTaskDone(ctx context.Context, items []*InboxItem) {
 			continue
 		}
 		b.mu.Lock()
-		if b.items[it.ID] == it && taskDoneFileable(it) && it.Agent.TodoID == id {
+		if b.items[it.ID] == it && taskDoneFileable(it) && it.Agent.TodoID == id &&
+			(!followAcceptedPRs || !acceptedPRFeedback(t, inboxOpenPR(it))) {
 			now := time.Now()
 			w := beginWrite(it)
 			it.done(now, doneByManager)

@@ -32,5 +32,7 @@
   "new_version": "有新版本",
   "new_version_reload": "点此刷新",
   "title_request": "请求",
-  "title_compare_runs": "对比运行"
+  "title_compare_runs": "对比运行",
+  "title_space": "空间",
+  "title_new_space": "新建空间"
 }

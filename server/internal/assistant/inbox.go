@@ -82,6 +82,8 @@ type InboxItem struct {
 	Connector *InboxConnector `json:"connector,omitempty"`
 	// Agent is the AI twin's work on the item: judged by model 2, handled and drafted by the agent (inbox_agent.go).
 	Agent *InboxAgent `json:"agent,omitempty"`
+	// TodoForward records deterministic PR/Issue auto-forwarding of this item to a bound open to-do (#12492, inbox_forward.go).
+	TodoForward *InboxTodoForward `json:"todo_forward,omitempty"`
 	// Mutes are what it can be muted by (listed only; inbox_mutes.go).
 	Mutes []MuteOption `json:"mutes,omitempty"`
 	// Version names what the item holds now (listed only): a bulk "Done" sends it back, so an item that took new
@@ -167,6 +169,9 @@ type InboxItem struct {
 	// ChainSeq numbers the chain's entries; SuggestSeq is the last suggestion's version (a new one is the next).
 	ChainSeq   int `json:"chain_seq,omitempty"`
 	SuggestSeq int `json:"suggest_seq,omitempty"`
+	// ReplyPolicy is the latest server-side reply-policy classification for this item (inbox_reply_policy.go).
+	// Persisted, never listed.
+	ReplyPolicy *InboxReplyPolicySnapshot `json:"reply_policy,omitempty"`
 }
 
 type InboxLark struct {
@@ -240,6 +245,7 @@ func (it *InboxItem) listed() InboxItem {
 	c.ArrivedAt = time.Time{}
 	c.Meta, c.Group = nil, nil
 	c.ChainSeq, c.SuggestSeq = 0, 0
+	c.ReplyPolicy = nil
 	c.Status = it.status()
 	c.Now, c.TitleBy = it.nowKey(), ""
 	c.PreMergeTitle, c.PreMergeTitleBy, c.MergeTitle = "", "", ""
@@ -259,6 +265,7 @@ func (it *InboxItem) listed() InboxItem {
 		g.Changes, g.Cwd = slices.Clone(g.Changes), ""
 		g.MailTarget = nil // the reply's internal conflict check, not a client's target to choose
 		g.Owner, g.SourceOf = nil, ""
+		g.ReplyPolicy = nil
 		c.Suggestion = &g
 		if c.Handling == nil && g.Conversation == nil && it.Agent != nil { // an old draft: its conversation is done with this round
 			c.Handling = &InboxHandling{Owner: HandlingOwner, State: HandlingDone, MachineID: it.Agent.MachineID, SessionID: it.Agent.SessionID}
@@ -282,8 +289,14 @@ func (it *InboxItem) listed() InboxItem {
 		}
 		a.Pending, a.Wake, a.SentOf, a.Lost = nil, false, "", nil
 		a.ProcessingTurn = ""
+		a.InterruptedByDisable = false
 		a.DeferredAt, a.WakeSlot = nil, false
 		c.Agent = &a
+	}
+	if it.TodoForward != nil {
+		tf := *it.TodoForward
+		tf.Last = ""
+		c.TodoForward = &tf
 	}
 	if it.Mail != nil {
 		m := *it.Mail

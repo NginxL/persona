@@ -156,6 +156,9 @@ func (m *Manifest) Validate() error {
 				}
 			}
 		}
+		if name == "memory_sources" && len(items) > 1 {
+			bad("contributes.memory_sources: one per extension")
+		}
 		if name == "auth_relay" && !m.Permissions.AuthRelay {
 			bad("contributes.auth_relay needs permissions.auth_relay (the user agrees that it completes the authorization links their Agents stop at)")
 		}

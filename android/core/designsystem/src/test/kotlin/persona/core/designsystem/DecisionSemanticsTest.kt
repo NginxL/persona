@@ -158,7 +158,7 @@ class DecisionSemanticsTest {
 
     private fun overflows(text: String): Boolean {
         val layouts = mutableListOf<TextLayoutResult>()
-        rule.onNodeWithText(text, useUnmergedTree = true).fetchSemanticsNode().config[SemanticsActions.GetTextLayoutResult].action!!(layouts)
+        val _ = rule.onNodeWithText(text, useUnmergedTree = true).fetchSemanticsNode().config[SemanticsActions.GetTextLayoutResult].action!!(layouts)
         return layouts.single().hasVisualOverflow
     }
 }

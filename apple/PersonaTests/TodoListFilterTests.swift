@@ -124,7 +124,7 @@ struct TodoListFilterTests {
 
         let today = TodoListLogic.list(all, searched: all, filter: .today, lookup: nil, now: now, restored: [:], calendar: calendar)
         #expect(today.result.groups(.waiting).isEmpty)
-        #expect(today.result.groups(.justDone).flatMap { $0.members.map(\.id) } == ["failed"])
+        #expect(today.result.groups(.done).flatMap { $0.members.map(\.id) } == ["failed"])
         #expect(today.hiddenWaiting == 1)
 
         let searched = TodoListLogic.list(all, searched: [failed, waiting], filter: .all, lookup: nil, now: now, restored: [:],

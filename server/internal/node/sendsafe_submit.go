@@ -148,11 +148,20 @@ func later(a, b time.Time) time.Time {
 	return a
 }
 
-// localInput: a line Claude Code runs itself instead of sending it to the model (a slash command, a `!` shell line),
-// which the transcript never takes as a prompt.
+// claudeMessageText keeps a message from activating Claude Code's local shell
+// mode. A leading space preserves the model-facing words, as in tuiMessageText.
+func claudeMessageText(text string) string {
+	if strings.HasPrefix(text, "!") {
+		return " " + text
+	}
+	return text
+}
+
+// localInput: a line Claude Code runs itself instead of sending it to the model (a slash command, an unescaped `!`
+// shell line), which the transcript never takes as a prompt. claudeMessageText's leading space makes ! model input.
 func localInput(text string) bool {
 	t := strings.TrimLeft(text, " \t")
-	return strings.HasPrefix(t, "/") || strings.HasPrefix(t, "!")
+	return strings.HasPrefix(t, "/") || strings.HasPrefix(text, "!")
 }
 
 // stuckPromptMessage: the prompt stayed in Claude's input box, Enter pressed (ensureSubmitted).
@@ -209,7 +218,7 @@ func (n *Node) afterPrompt(ctx context.Context, id, pane, text string, typedAt t
 		}
 		watch = n.watchPrompt(id, text)
 		typedAt = time.Now()
-		if err := n.prompt(ctx, pane, text); err != nil {
+		if err := n.promptClaude(ctx, pane, text); err != nil {
 			if r := deliveryRefusal(err); r != nil {
 				return false, r
 			}

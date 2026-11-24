@@ -145,7 +145,7 @@ func sessionStartErr(sess proto.Session) error {
 // failed task's error_code and error_args. Stalled starts also keep their code, with the node's existing message.
 func codedStartRefusal(err error) (string, map[string]string) {
 	var re *rpc.Error
-	if !errors.As(err, &re) || re.Code != proto.CodeAgentStartStalled && apierr.Sentence(i18n.Default, re.Code, nil) == "" {
+	if !errors.As(err, &re) || re.Code != proto.CodeAgentStartStalled && re.Code != proto.CodeCheckoutDirty && apierr.Sentence(i18n.Default, re.Code, nil) == "" {
 		return "", nil
 	}
 	var data map[string]any
@@ -166,6 +166,10 @@ func codedStartRefusal(err error) (string, map[string]string) {
 // user's language for a coded refusal (a launcher the new terminal tab cannot run, #1642), else err's own text.
 func (s *Service) startFailureText(ctx context.Context, machine string, err error) string {
 	code, args := codedStartRefusal(err)
+	var checkout taskCheckoutRefusal
+	if code == proto.CodeCheckoutDirty && errors.As(err, &checkout) {
+		return checkout.Text(s.lang(ctx))
+	}
 	if code == "" {
 		if text := s.linkFailureText(ctx, machine, err); text != "" { // machine busy or link down (#7511)
 			return text

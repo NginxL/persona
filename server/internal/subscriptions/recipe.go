@@ -360,7 +360,7 @@ func seenValue(s string) bool {
 		return true
 	}
 	f, err := strconv.ParseFloat(s, 64)
-	return err == nil && f != 0
+	return err == nil && !math.IsNaN(f) && !math.IsInf(f, 0) && f != 0
 }
 
 func hashOf(parts ...string) string {

@@ -15,7 +15,7 @@ const workspace = (id: string, machine_id: string, cwd: string): Workspace =>
 
 // every path shape the hub canonicalizes, plus ones it never matches
 const paths = ["/repo/app", "/repo/app/", "/repo//app", "/repo/./app", "/repo/x/../app", "/repo/app-other", "/repo", "/app", "", "relative/app",
-  "C:\\Repo\\App\\", "c:/Repo/App", "\\\\Server\\Share\\app", "//server/share/app/", "C:repo", "/repo/\0app"];
+  "C:\\Repo\\App\\", "c:/Repo/App", "c:/repo/app", "\\\\Server\\Share\\App", "//server/share/app/", "C:repo", "/repo/\0app"];
 const machines = ["mac", "nas", "mac\0/repo"];
 const sessions = machines.flatMap((m) => paths.flatMap((p) => [session(m, p), session(m, "/elsewhere", p), session(m, p, "")]));
 const cards = machines.flatMap((m) => paths.map((p, i) => card(`${m}-${i}`, m, p)));
@@ -40,6 +40,13 @@ describe("sessionsByCard", () => {
     expect(of(card("b", "other", "/repo/app"))).toBe(NO_SESSIONS);
     expect(of(card("c", "mac", ""))).toBe(NO_SESSIONS);
     expect(of(card("d", "mac", "relative"))).toBe(NO_SESSIONS);
+  });
+
+  it("indexes Windows sessions by directory identity while keeping POSIX case distinct", () => {
+    const windows = session("pc", "c:/projects/demo"), posix = session("pc", "/Projects/Demo");
+    const of = sessionsByCard([windows, posix]);
+    expect(of(card("windows", "pc", "C:\\Projects\\Demo"))).toEqual([windows]);
+    expect(of(card("posix", "pc", "/projects/demo"))).toBe(NO_SESSIONS);
   });
 
   it("hands out the same array on every lookup, and one frozen empty array for a card with no Agent", () => {
@@ -80,5 +87,10 @@ describe("workspacesByCard", () => {
     expect(workspacesByCard([again, bound])(c)).toBe(again);
     expect(workspacesByCard([workspace("x", "nas", "/repo/app")])(c)).toBeUndefined();
     expect(workspacesByCard([workspace("x", "mac", "")])(card("b", "mac", ""))).toBeUndefined();
+  });
+
+  it("finds Windows workspace bindings when directory components use different case", () => {
+    const target = workspace("project", "pc", "C:\\Projects\\Demo");
+    expect(workspacesByCard([target])(card("card", "pc", "c:/projects/demo"))).toBe(target);
   });
 });

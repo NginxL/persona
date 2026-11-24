@@ -173,3 +173,64 @@ func TestMainKeepsTheGoToolsSettings(t *testing.T) {
 		t.Fatalf("go env under the throw-away HOME:\n%s\nwant\n%s", got, want)
 	}
 }
+
+// A run started from inside git (`git bisect run` exports GIT_DIR) has no git repository variables: a test's `git init`
+// in its own directory makes a repository there and leaves the one the run was started from alone (#13610). They come
+// back afterwards.
+func TestMainKeepsGitOffTheRepositoryItWasStartedFrom(t *testing.T) {
+	gitBin, err := exec.LookPath("git")
+	if err != nil {
+		t.Skip("no git:", err)
+	}
+	t.Setenv(isolated, "")
+	_ = os.Unsetenv(isolated)
+	outer := t.TempDir()
+	if out, err := exec.Command(gitBin, "init", "-q", outer).CombinedOutput(); err != nil {
+		t.Fatalf("git init: %s %v", out, err)
+	}
+	config := filepath.Join(outer, ".git", "config")
+	before, err := os.ReadFile(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	elsewhere := t.TempDir() // a work tree apart from the repository: a leaked `git init` writes core.worktree
+	t.Setenv("GIT_DIR", filepath.Join(outer, ".git"))
+	t.Setenv("GIT_WORK_TREE", elsewhere)
+	inner := filepath.Join(t.TempDir(), "repo")
+	code := quiet(func() int {
+		for _, k := range gitLocators {
+			if v, ok := os.LookupEnv(k); ok {
+				t.Errorf("%s=%q inside the run", k, v)
+			}
+		}
+		if out, err := exec.Command(gitBin, "init", "-q", inner).CombinedOutput(); err != nil {
+			t.Errorf("git init: %s %v", out, err)
+		}
+		return 0
+	})
+	if code != 0 {
+		t.Fatalf("exit code %d", code)
+	}
+	if after, err := os.ReadFile(config); err != nil || string(after) != string(before) {
+		t.Errorf("the outer repository's config changed:\n%s\nwas\n%s", after, before)
+	}
+	if _, err := os.Stat(filepath.Join(inner, ".git")); err != nil {
+		t.Errorf("no repository where the test made one: %v", err)
+	}
+	if os.Getenv("GIT_DIR") != filepath.Join(outer, ".git") || os.Getenv("GIT_WORK_TREE") != elsewhere {
+		t.Fatalf("not restored: GIT_DIR=%q GIT_WORK_TREE=%q", os.Getenv("GIT_DIR"), os.Getenv("GIT_WORK_TREE"))
+	}
+}
+
+// ClearGit, for a package that does not run through Main, unsets every one of them.
+func TestClearGitUnsetsTheRepositoryVariables(t *testing.T) {
+	for _, k := range gitLocators {
+		t.Setenv(k, "/elsewhere")
+	}
+	ClearGit()
+	for _, k := range gitLocators {
+		if v, ok := os.LookupEnv(k); ok {
+			t.Errorf("%s=%q after ClearGit", k, v)
+		}
+	}
+}

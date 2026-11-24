@@ -1,5 +1,6 @@
 import persona.buildlogic.configureFilteredTestRuns
 import persona.buildlogic.configureRepositoryTests
+import persona.buildlogic.configureReturnValueChecks
 
 plugins {
     id("com.android.library")
@@ -9,6 +10,8 @@ plugins {
 configureRepositoryTests()
 // A --tests run draws its screenshots instead of taking a result from the build cache (persona/buildlogic/TestRuns.kt).
 configureFilteredTestRuns()
+// A dropped must-use result is a compile error (persona/buildlogic/ReturnValues.kt).
+configureReturnValueChecks()
 
 val libs = extensions.getByType<VersionCatalogsExtension>().named("libs")
 android {

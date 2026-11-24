@@ -40,12 +40,15 @@ func TestPRReviewWakeMessageDoesNotCompleteCriteria(t *testing.T) {
 			}
 			s.deploy.forge = &statusForge{status: status}
 			s.sweepPRStatuses(ctx, at.Add(2*time.Second))
+			wokeBy := wakeBound(at.Add(2 * time.Second))
 			cur := todoNow(s, task.ID)
 			if cur.DoneAt != nil || cur.Supervision.State != reviewPending ||
 				!slices.Equal(cur.Supervision.DoneWhen, criteria) ||
-				!reflect.DeepEqual(cur.Supervision.Criteria, before.Supervision.Criteria) ||
-				!reflect.DeepEqual(cur.Supervision.Reviews, before.Supervision.Reviews) {
-				t.Fatal("a PR review wake completed the task or changed its criteria/history")
+				!reflect.DeepEqual(cur.Supervision.Criteria, before.Supervision.Criteria) {
+				t.Fatal("a PR review wake completed the task or changed its criteria")
+			}
+			if !reflect.DeepEqual(requireParkEnded(t, before.Supervision, cur.Supervision.Reviews, wokeBy), before.Supervision.Reviews) {
+				t.Fatal("a PR review wake changed the task's history")
 			}
 			signal, ok := reviewSignal(s, task.ID)
 			if !ok || signal.Detail != "PR "+state+": "+source {

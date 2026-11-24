@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -22,12 +23,21 @@ import (
 	"github.com/nwverse/persona/server/internal/rexcli"
 	"github.com/nwverse/persona/server/internal/rpc"
 	"github.com/nwverse/persona/server/internal/terncli"
+	"github.com/nwverse/persona/server/internal/testhome"
 )
 
 // Orca as the machine's engine (hostorca.go, engine.go), driven through the node's requests against a fake Orca
 // runtime socket (orcarttest) and a fake process table. No test here talks to a real Orca.
 
 func TestMain(m *testing.M) {
+	// The tests make, commit to and add worktrees to repositories of their own: none of that may reach the repository
+	// this run was started from (`git bisect run` exports GIT_DIR; #13610).
+	testhome.ClearGit()
+	if os.Getenv("NODE_TEST_TASK_TERMINAL_IDLE") == "1" {
+		fmt.Println("ready")
+		_, _ = io.Copy(io.Discard, os.Stdin)
+		os.Exit(0)
+	}
 	if os.Getenv("NODE_TEST_LAUNCH") == "1" { // the real managed-launch path, before the test harness clears its environment
 		if err := Launch(context.Background(), os.Args[2], os.Args[3:], ""); err != nil {
 			panic(err)
@@ -60,6 +70,9 @@ func TestMain(m *testing.M) {
 		return []string{self}, []string{"NODE_TEST_PREFLIGHT=1"}
 	}
 	preflightStart = 30 * time.Second
+	// A Codex the fake herdr starts or resumes never draws its input box, so each start would watch the full 8 s for
+	// the update offer; the tests that show the offer show it at once, and a second still reads the screen a few times.
+	codexStartupLook = time.Second
 	// No test may reach the user's running Orca: the default metadata path points nowhere.
 	os.Setenv("ORCA_USER_DATA_PATH", "/tmp/persona-test-no-orca")
 	// Nor the user's botmux: a node registers no botmux host unless a test gives it one.

@@ -116,7 +116,7 @@ class TodoSeenTest {
         runCurrent()
         val optimistic = store.todos.value.first { it.id == seen.id }
         assertNull(optimistic.seenAt)
-        assertEquals(TriageSection.JustDone, optimistic.triage({ null }, now.toEpochMilli()).section)
+        assertEquals(TriageSection.Done, optimistic.triage({ null }, now.toEpochMilli()).section)
         assertEquals(seen.doneAt, optimistic.doneAt)
         api.failure = IllegalStateException("delete refused")
         api.gate!!.complete(Unit); runCurrent()

@@ -74,6 +74,43 @@ struct StyleSpecTests {
         #expect(found.isEmpty, "white on the accent under 3.5:1: \(found)")
     }
 
+    @Test func healthRingsHaveDistinctHuesAndReadableActivityLabels() {
+        func hue(_ hex: UInt32) -> Double {
+            let color = UIColor(hex: hex)
+            var h: CGFloat = 0
+            color.getHue(&h, saturation: nil, brightness: nil, alpha: nil)
+            return Double(h) * 360
+        }
+        for hex in [Theme.Health.waterHex.light, Theme.Health.waterHex.dark,
+                    Theme.Health.proteinHex.light, Theme.Health.proteinHex.dark] {
+            for activity: UInt32 in [0xFA114F, 0xA6FF00, 0x00FFF6] {
+                let distance = abs(hue(hex) - hue(activity))
+                #expect(min(distance, 360 - distance) >= 25, "intake hues must stay apart from Activity rings")
+            }
+        }
+        for ui in [UIUserInterfaceStyle.light, .dark] {
+            for color in [Theme.Health.move, Theme.Health.exercise, Theme.Health.stand] {
+                #expect(Self.contrast(color, Theme.Health.activityBackground, ui) >= 4.5)
+            }
+        }
+    }
+
+    @Test func healthWidgetsShareIntakeColorsAndKeepActivityNeutral() {
+        for ui in [UIUserInterfaceStyle.light, .dark] {
+            let water = Self.rgb(HomeWidgetTokens.water, ui), appWater = Self.rgb(Theme.Health.water, ui)
+            let protein = Self.rgb(HomeWidgetTokens.protein, ui), appProtein = Self.rgb(Theme.Health.protein, ui)
+            #expect(water.0 == appWater.0 && water.1 == appWater.1 && water.2 == appWater.2)
+            #expect(protein.0 == appProtein.0 && protein.1 == appProtein.1 && protein.2 == appProtein.2)
+            let neutral = Self.rgb(HomeWidgetTokens.activity, ui)
+            #expect(abs(neutral.0 - neutral.1) < 0.02 && abs(neutral.1 - neutral.2) < 0.03)
+            #expect(Self.contrast(HomeWidgetTokens.healthTodaySteps, HomeWidgetTokens.surface, ui) >= 4.5)
+            var hue: CGFloat = 0
+            UIColor(HomeWidgetTokens.healthTodaySteps).resolvedColor(with: UITraitCollection(userInterfaceStyle: ui))
+                .getHue(&hue, saturation: nil, brightness: nil, alpha: nil)
+            #expect(hue > 0.6 && hue < 0.85, "steps stays purple, clear of Move's red")
+        }
+    }
+
     /// Someday's swipe on a To-dos row (#10465): white words on `Theme.somedayTint` at 4.5:1 or better, light and dark
     /// (DESIGN_SYSTEM 2.1).
     @Test func whiteOnSomeday() {
@@ -165,38 +202,6 @@ struct StyleSpecTests {
         #expect(PersonaPalette.contrast(hex.dark, Theme.ChatBox.personaHex.dark) >= 4.5)
         #expect(PersonaPalette.contrast(hex.light, 0xFFFFFF) > PersonaPalette.contrast(Theme.Reply.secondaryInkHex.light, 0xFFFFFF))
         #expect(PersonaPalette.contrast(hex.dark, 0x000000) > PersonaPalette.contrast(Theme.Reply.secondaryInkHex.dark, 0x000000))
-    }
-
-    /// The Mac window's chrome a style brings (`StyleSpec.MacChrome`, Lark's), in the style's own colors: a selected
-    /// row's icon in the accent ≥ 3:1 on the sections column's raised block and on the selection's wash over the side
-    /// column and over the page, the row's words ≥ 4.5:1 on that wash, and the white letter ≥ 3:1 on every monogram
-    /// hue (a heading-sized letter, so the large-text floor).
-    @Test func theMacChromeReads() {
-        var found: [String] = []
-        for style in AppStyle.allCases {
-            let chrome = style.component.mac
-            let spec = StyleSpec(style.component, style.component.colors)
-            for (look, ui) in Self.appearances {
-                func check(_ what: String, _ a: (Double, Double, Double), _ b: (Double, Double, Double), _ floor: Double) {
-                    let c = Self.contrast(a, b)
-                    if c < floor { found.append("\(style.rawValue) \(look) \(what): \(String(format: "%.2f", c))") }
-                }
-                let accent = Self.rgb(spec.accent, ui)
-                if let raised = chrome.sidebarSelected { check("icon on the raised block", accent, Self.rgb(raised, ui), 3) }
-                if let tint = chrome.selectionTint {
-                    let unders: [(String, Color)] = [("side column", chrome.sideColumn ?? spec.page), ("page", spec.page)]
-                    for (name, under) in unders {
-                        let wash = Self.over(spec.accent.opacity(tint), Self.rgb(under, ui), ui)
-                        check("icon on the selection over the \(name)", accent, wash, 3)
-                        check("words on the selection over the \(name)", Self.rgb(Theme.primaryText, ui), wash, 4.5)
-                    }
-                }
-                for (i, hue) in chrome.monogramHues.enumerated() {
-                    check("white on monogram hue \(i)", Self.rgb(Theme.onSolid, ui), Self.rgb(hue, ui), 3)
-                }
-            }
-        }
-        #expect(found.isEmpty, "the Mac chrome under its floors: \(found)")
     }
 
     /// The minutes' summary card (#6563), on every style's card and the system's grouped cell, in light and dark: a topic

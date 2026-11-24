@@ -40,6 +40,20 @@ The device layer returns `node_outdated` before dispatching unsupported requests
 back to its own conversation on that typed refusal. Keep it distinct from timeouts, closed links and unclassified
 errors, which cannot prove that a turn never started and must not cause replacement sends.
 
+## Capability waits stay before delivery and updates need two handoffs (#11504)
+
+Retry only the marshaled transport call after a structured capability refusal. Re-entering `runTask` repeats model
+preparation, origin bookkeeping and possibly conversation creation; replaying an uncertain send can execute twice.
+Actual legacy omission is device evidence, not the task's `legacy_compatible` eligibility bit, so carry that evidence
+from the device boundary into run history. A structured timeout must keep its `ErrNotSent` / `DeadlineExceeded` chain
+through directory validation and must not arm the ordinary one-off retry.
+
+An update grace only in `ResidentReload.Prepare` is not enough: continuous headless turns can prevent `node.update.begin`
+from ever happening. Signal handoff during the manager's pre-transfer idle poll and gate new headless admission there,
+then keep the resident drain closed after its own grace while admitted replies and current turns finish. Preserve the
+natural-idle fast path and reopen admission after a failed deployment. A pre-transfer headless pause must survive the
+resident's general RPC `Resume` until the manager clears it.
+
 ## A new conversation's lost reply is not an unstarted task (#6800)
 
 `startConversation` can fail after `assistant.send` reached the node. Treating every error as a one-off that never

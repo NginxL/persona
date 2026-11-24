@@ -1,4 +1,3 @@
-#if os(iOS)
 import AVFoundation
 import Foundation
 import Testing
@@ -417,5 +416,4 @@ import Testing
         ended?()
     }
 }
-#endif
 import PersonaWire

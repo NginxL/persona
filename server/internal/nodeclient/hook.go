@@ -73,6 +73,10 @@ func RunHook(ctx context.Context, args []string, stdin io.Reader, stdout io.Writ
 		}
 		args = args[2:]
 	}
+	if len(args) > 0 && args[0] == AgyFlag { // an entry in the Antigravity CLI's hooks: report only, prints {}
+		RunAgyHook(ctx, args[1:], stdin, stdout, os.Getenv)
+		return
+	}
 	input, err := io.ReadAll(stdin)
 	if err != nil || !json.Valid(input) {
 		return

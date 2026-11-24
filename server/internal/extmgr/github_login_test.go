@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	"github.com/nwverse/persona/server/internal/connector"
-	"github.com/nwverse/persona/server/internal/connector/github"
+	"github.com/nwverse/persona/server/internal/githubwire"
 )
 
 // extensionGitHub is an extension's connector that took the "github" id over (connector/proc in production): its
@@ -32,7 +32,7 @@ func TestGitHubLoginFromTheConnectorHoldingTheID(t *testing.T) {
 		{"the extension's, signed in", extensionGitHub{connector.Status{State: connector.StateOK, Account: " octocat "}}, "octocat", true},
 		{"the extension's, signed out", extensionGitHub{connector.Status{State: connector.StateNotSignedIn}}, "", true},
 		{"the extension's, not said yet", extensionGitHub{}, "", false},
-		{"the hub's own", signedInGitHub{github.New(github.Config{}, "Mac", nil)}, "", true},
+		{"the hub's own", signedInGitHub{newTestGitHub(t, githubwire.Config{}, "Mac", nil).(fullGitHub)}, "", true},
 	} {
 		h := newTestManager(t)
 		h.connectors = connector.NewRegistry(nil)

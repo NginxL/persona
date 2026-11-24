@@ -34,6 +34,20 @@ func (s *Service) taskModel(ctx context.Context, taskID string, launcher, model,
 	id := "task." + taskID
 	s.models.mu.Lock()
 	defer s.models.mu.Unlock()
+	if save {
+		// An owner save takes the same model lock before changing the schedule.
+		// Recheck the current task after the tool's earlier schedule write.
+		sc, err := s.lockedSchedule(ctx)
+		if err != nil {
+			return ModelBinding{}, err
+		}
+		i := sc.indexLocked(taskID)
+		selected := i >= 0 && sc.tasks[i].PromptSelections
+		sc.mu.Unlock()
+		if selected {
+			return ModelBinding{}, errTaskSelectionsOwner
+		}
+	}
 	providers := s.modelProviders(ctx)
 	p, err := s.modelPurpose(ctx, id, providers)
 	if err != nil {

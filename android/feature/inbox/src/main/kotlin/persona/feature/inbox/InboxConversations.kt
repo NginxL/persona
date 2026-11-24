@@ -37,6 +37,7 @@ import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.intOrNull
 import kotlin.coroutines.CoroutineContext
 import kotlin.coroutines.EmptyCoroutineContext
+import persona.core.inbox.*
 
 /** Conversation identity includes pairing and assistant ownership, even when they share the same source thread. */
 data class InboxConversationKey(val scope: String, val source: String, val account: String, val thread: String, val manager: String? = null)
@@ -296,7 +297,7 @@ class InboxConversations(
                 combine(repository.conversation(key.thread, null).flowOn(asRow(key)), repository.messageReads) { window, reads ->
                     acceptWindow(key, window)
                     window.copy(messages = window.messages.map { message ->
-                        if (message.position != null && InboxMessageRead(scope, key.thread, message.id, message.position) in reads) message.copy(isRead = true) else message
+                        if (message.position?.let { InboxMessageRead(scope, key.thread, message.id, it) in reads } == true) message.copy(isRead = true) else message
                     })
                 }.distinctUntilChanged().collect { send(it) }
             } finally {

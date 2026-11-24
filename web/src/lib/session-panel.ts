@@ -10,7 +10,7 @@
 // effort and speed only. Loaded with the panel, not with the composer.
 import { t } from "../i18n";
 import { agentId, agentName, providerAgent } from "./agent-kind";
-import { ALL_EFFORTS, defaultModel, launcherAgent, modelName, typedModelOffered, type AgentModel, type LauncherModels } from "./launcher-models";
+import { ALL_EFFORTS, defaultModel, effortVariantBase, launcherAgent, modelName, typedModelOffered, type AgentModel, type LauncherModels } from "./launcher-models";
 import { launcherBlock } from "./launcher-health";
 import { validModelId } from "./model-id";
 import { cleanSetup, type PanelConfig, type PanelModel, type PanelProvider, type PanelState } from "./model-panel";
@@ -38,7 +38,7 @@ function panelModel(m: AgentModel, engine: string, current: boolean, s: Session,
   if (m.description) out.description = m.description;
   if (m.resolved) out.resolved = m.resolved;
   if (m.aliases?.length) out.aliases = m.aliases;
-  if (m.default_effort && (!current || s.effort)) out.defaultEffort = m.default_effort;
+  if (m.default_effort && (!current || s.effort || effortVariantBase(m.id, m.default_effort))) out.defaultEffort = m.default_effort;
   if (m.custom) out.custom = true;
   if (m.price) out.price = m.price;
   if (current && engine === "codex" && hasFast(s)) out.fast = true;
@@ -177,8 +177,8 @@ export function pickPlan(s: Session, config: PanelConfig, listOf: (launcher: str
   const steps: ModeStep[] = [];
   if (s.pending_switch?.launcher && s.pending_switch.launcher !== own) steps.push({ launcher: own, from: own });
   if (!same) steps.push({ model: config.model });
-  const effort = config.effort || (sessionEngine(s) === "agy" ? row?.default_effort : undefined);
-  if (effort && effort !== s.effort) steps.push({ effort });
+  const effortAfterModel = (!same && sessionEngine(s) === "agy" ? row?.default_effort : undefined) || s.effort;
+  if (config.effort && config.effort !== effortAfterModel) steps.push({ effort: config.effort });
   // a saved setup without Fast is Standard (cleanSetup drops `fast: false`)
   const speed = speedStep(s, Boolean(config.fast));
   if (speed) steps.push(speed);

@@ -7,6 +7,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.navigation3.runtime.NavKey
 import persona.core.domain.inbox.InboxBar
+import persona.core.inbox.*
 
 /**
  * Where one stack's Inbox list goes when an item is opened from outside it (#9053, docs/assistant/inbox.md "Section

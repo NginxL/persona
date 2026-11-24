@@ -18,6 +18,9 @@ public nonisolated struct APIErrorInfo: Hashable, Sendable {
     /// Two errors are "the same" for folding when these match.
     public var signature: String { "\(status ?? 0)|\(reason)" }
 
+    /// A permanent conversation's explanation and the only way forward, shared by chat errors and task rows.
+    public static let invalidConversationReason = String(localized: "Conversation invalid: its compacted context belongs to another account. Start a new conversation to continue.")
+
     nonisolated(unsafe) private static let statusRe = /^\s*(\d{3})\b/
     nonisolated(unsafe) private static let requestRe = /(?i)\b(?:req(?:uest)?(?:[ _-]?id)?)[:=\s"]+([A-Za-z0-9_-]{8,})/
     nonisolated(unsafe) private static let sessionRe = /(?i)\bsession(?:[ _-]?id)?[:=\s"]+([A-Za-z0-9_:-]{6,})/
@@ -54,7 +57,7 @@ public nonisolated struct APIErrorInfo: Hashable, Sendable {
     /// What went wrong, as a person would say it, and whether it is likely to pass.
     private static func explain(_ s: String, status: Int?) -> (String, Bool?) {
         if unrecoverable(s) {
-            return (String(localized: "Conversation invalid: its compacted context belongs to another account. Start a new conversation to continue."), false)
+            return (invalidConversationReason, false)
         }
         if s.contains("no available gpu") { return (String(localized: "The inference service has no GPU available right now"), true) }
         if s.contains("overloaded") || status == 529 { return (String(localized: "The model service is overloaded"), true) }

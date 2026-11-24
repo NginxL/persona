@@ -45,6 +45,7 @@ import persona.core.domain.sort.AgentPreferences
 import java.io.File
 import java.time.Instant
 import java.time.ZoneOffset
+import persona.core.inbox.*
 
 /**
  * Native-graphics evidence that a long reported original expands inline once, including at 200% text.
@@ -81,7 +82,7 @@ class InboxReportedShotsTest {
         val nodes = rule.onAllNodesWithText(REPORTED_SHOTS_ORIGINAL, useUnmergedTree = true).fetchSemanticsNodes()
         assertEquals("$context: the original must appear exactly once", 1, nodes.size)
         val layouts = mutableListOf<TextLayoutResult>()
-        nodes.single().config[SemanticsActions.GetTextLayoutResult].action!!(layouts)
+        val _ = nodes.single().config[SemanticsActions.GetTextLayoutResult].action!!(layouts)
         return layouts.single()
     }
 

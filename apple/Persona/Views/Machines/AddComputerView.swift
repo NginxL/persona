@@ -497,9 +497,6 @@ private struct AddComputerSheetModifier: ViewModifier {
         content.sheet(item: $request) { r in
             AddComputerSheet(request: r)
                 .environment(model)
-                #if os(macOS)
-                .macSheet()
-                #endif
         }
     }
 }
@@ -510,12 +507,7 @@ private struct AppAddComputerPresentation: ViewModifier {
     func body(content: Content) -> some View {
         @Bindable var model = model
         content
-            #if os(macOS)
-            // On a view of its own: a second sheet on the Mac's root next to New Agent's broke the window's layout.
-            .background { Color.clear.addComputerSheet($model.addComputer) }
-            #else
             .addComputerSheet($model.addComputer)
-            #endif
             #if DEBUG
             // `-showAddComputer YES | add:<mac|linux|windows>:<name> | <machine id>`: Add Computer (filled in and sent with add:…),
             // or Confirm Computer for that computer, as the app opens: for screenshots.
@@ -815,9 +807,7 @@ struct AddComputerSheet: View {
                 .accessibilityIdentifier("addComputer.reject")
             }
         }
-        #if !os(macOS)
         .listRowSeparator(.hidden) // two buttons on clear rows: no line between them
-        #endif
     }
 
     // MARK: Confirming one that is not here

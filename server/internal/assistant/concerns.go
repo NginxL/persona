@@ -10,6 +10,7 @@ import (
 
 	"github.com/nwverse/persona/server/internal/assistant/repository"
 	"github.com/nwverse/persona/server/internal/db"
+	"github.com/nwverse/persona/server/internal/larkhost"
 )
 
 // Concerns (#3561, docs/assistant/todos.md "Concerns", docs/design/proposals/owner-at-a-glance.md G5): something the owner
@@ -97,7 +98,7 @@ func (s *Service) reportConcern(ctx context.Context, id, report, machine, sessio
 	s.todoDecisionEvent(row)
 	if !closed && postable(row) {
 		// A close already posts the report as its done line (setTodoRow): only a report on a closed one is posted here.
-		s.threadPost(id, threadEvent{kind: threadDecision, text: decisionLine(row)})
+		s.chat().ThreadPost(id, larkhost.ThreadEvent{Kind: larkhost.ThreadDecision, Text: decisionLine(row)})
 	}
 	s.logf("todo %s: concern reported (closed %v)", id, closed)
 	return out, closed, nil

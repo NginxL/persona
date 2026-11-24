@@ -12,7 +12,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/nwverse/persona/server/internal/apierr"
-	"github.com/nwverse/persona/server/internal/feishubot"
+	"github.com/nwverse/persona/server/internal/botcard"
 	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/lazyre"
 )
@@ -126,7 +126,7 @@ func (s *Service) noticesTaken(ctx context.Context) bool {
 }
 
 // divertNotices hands cards to the notifications companion when it takes them; false: they go to the bot's chat.
-func (s *Service) divertNotices(ctx context.Context, kind string, cards []*feishubot.Card, fallbacks []string) bool {
+func (s *Service) divertNotices(ctx context.Context, kind string, cards []*botcard.Card, fallbacks []string) bool {
 	if len(cards) == 0 || !s.noticesTaken(ctx) {
 		return false
 	}
@@ -155,7 +155,7 @@ func (s *Service) divertNotices(ctx context.Context, kind string, cards []*feish
 
 // divertAnswer is divertNotices for an answer laid out in cards.
 func (s *Service) divertAnswer(ctx context.Context, kind string, cards []botAnswerCard) bool {
-	cs := make([]*feishubot.Card, 0, len(cards))
+	cs := make([]*botcard.Card, 0, len(cards))
 	fs := make([]string, 0, len(cards))
 	for _, ac := range cards {
 		cs = append(cs, ac.card)
@@ -263,7 +263,7 @@ func (s *Service) companionRoutes() {
 			apierr.Write(w, http.StatusForbidden, errors.New("read-only role cannot press cards"))
 			return
 		}
-		var a feishubot.CardAction
+		var a botcard.CardAction
 		if err := json.NewDecoder(r.Body).Decode(&a); err != nil {
 			apierr.Write(w, http.StatusBadRequest, err)
 			return

@@ -5,7 +5,7 @@ import (
 	"path"
 	"strings"
 
-	"github.com/nwverse/persona/server/internal/feishubot"
+	"github.com/nwverse/persona/server/internal/botcard"
 	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/proto"
 )
@@ -18,11 +18,11 @@ func botStep(l i18n.Lang, it proto.Item) string {
 	switch {
 	case s.target == "":
 	case s.plain:
-		line += " · " + feishubot.EscapeMarkdown(s.target)
+		line += " · " + botcard.EscapeMarkdown(s.target)
 	default:
-		line += " " + feishubot.Code(s.target)
+		line += " " + botcard.Code(s.target)
 	}
-	return withNote(line, feishubot.EscapeMarkdown(s.note))
+	return withNote(line, botcard.EscapeMarkdown(s.note))
 }
 
 // botStepParts is what a tool call did, in l: the verb ("" when it is no tool call) and what it did it to.

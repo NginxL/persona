@@ -10,27 +10,35 @@ import (
 	"time"
 
 	"github.com/nwverse/persona/server/internal/connector"
-	"github.com/nwverse/persona/server/internal/connector/imessage"
+	"github.com/nwverse/persona/server/internal/extmgr/imessageport"
 	"github.com/nwverse/persona/server/internal/i18n"
+	"github.com/nwverse/persona/server/internal/imessagewire"
 	"github.com/nwverse/persona/server/internal/proto"
 	"github.com/nwverse/persona/server/internal/rpc"
 )
 
-// Messages (connector/imessage, docs/plans/plan-connectors.md "5"): the app reads one Mac's Messages through that Mac's node;
+// Messages (modules/imessage, docs/plans/plan-connectors.md "5"): the app reads one Mac's Messages through that Mac's node;
 // the hub passes the pages along and keeps none of them. With "Hand to Persona" on (the user's switch, on by default,
 // imessageAIKey) the real conversations also go to the knowledge base, the inbox and the assistant's tools
-// (connector/imessage/persona.go). No number or message is logged (only the connector, the Mac and the kind of failure).
+// (modules/imessage/persona.go). No number or message is logged (only the connector, the Mac and the kind of failure).
 
 // imessageAIKey is the settings key of "Hand to Persona": absent means on.
 const imessageAIKey = "imessage.ai"
 
-func (h *Manager) addIMessage(cfg imessage.Config) error {
+// errNoIMessageModule: this build has no iMessage module (imessageport), so there is no Messages connector to make.
+var errNoIMessageModule = errors.New("this build has no iMessage module")
+
+func (h *Manager) addIMessage(cfg imessagewire.Config) error {
+	newRemote := imessageport.Factory()
+	if newRemote == nil {
+		return errNoIMessageModule
+	}
 	name := cfg.Machine
 	if m := h.localMachine(cfg.Machine); m != nil {
 		name = m.name()
 	}
-	c := imessage.NewRemote(cfg, name, h.imessageCall(cfg.Machine))
-	c.Zone = h.userLocation
+	c := newRemote(cfg, name, h.imessageCall(cfg.Machine))
+	c.SetZone(h.userLocation)
 	on, err := h.imessageAI(context.Background())
 	if err != nil {
 		on = false
@@ -98,7 +106,7 @@ func (h *Manager) reconcileIMessageAI(ctx context.Context) {
 var errNotAMachine = errors.New("信息's Mac is not a machine of this hub")
 
 // imessageCall asks the Mac's node, turning its failures into the connector's errors.
-func (h *Manager) imessageCall(machine string) imessage.Caller {
+func (h *Manager) imessageCall(machine string) imessagewire.Caller {
 	return func(ctx context.Context, method string, params, out any) error {
 		m := h.localMachine(machine)
 		if m == nil {
@@ -110,20 +118,20 @@ func (h *Manager) imessageCall(machine string) imessage.Caller {
 		case err == nil:
 			return nil
 		case errors.Is(err, errOffline):
-			return imessage.ErrOffline
+			return imessagewire.ErrOffline
 		case errors.As(err, &re) && strings.HasPrefix(re.Message, "unknown method"):
-			return imessage.ErrNodeTooOld
+			return imessagewire.ErrNodeTooOld
 		case errors.As(err, &re) && re.Code == proto.CodeNoPermission:
-			return imessage.ErrNoPermission
+			return imessagewire.ErrNoPermission
 		case errors.As(err, &re) && re.Code == proto.CodeNoChat:
-			return imessage.ErrNoChat
+			return imessagewire.ErrNoChat
 		}
 		return fmt.Errorf("%s: %w", method, err)
 	}
 }
 
-func (h *Manager) imessage() *imessage.Remote {
-	c, _ := h.connectors.Get(imessage.ID).(*imessage.Remote)
+func (h *Manager) imessage() imessagewire.Remote {
+	c, _ := h.connectors.Get(imessagewire.ID).(imessagewire.Remote)
 	return c
 }
 
@@ -234,7 +242,7 @@ func (h *Manager) imessageRoutes(api *http.ServeMux) {
 			return
 		}
 		limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
-		page, err := c.Chats(r.Context(), limit, r.URL.Query().Get("before"))
+		page, err := c.ChatsPage(r.Context(), limit, r.URL.Query().Get("before"))
 		if err != nil {
 			h.imessageFailed(w, c, "chats", err)
 			return
@@ -248,7 +256,7 @@ func (h *Manager) imessageRoutes(api *http.ServeMux) {
 			return
 		}
 		limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
-		page, err := c.Messages(r.Context(), r.PathValue("id"), limit, r.URL.Query().Get("before"))
+		page, err := c.MessagesPage(r.Context(), r.PathValue("id"), limit, r.URL.Query().Get("before"))
 		if err != nil {
 			h.imessageFailed(w, c, "messages", err)
 			return
@@ -259,20 +267,20 @@ func (h *Manager) imessageRoutes(api *http.ServeMux) {
 
 // forgetIMessage removes what the hub kept of iMessage (forgetSource).
 func (h *Manager) forgetIMessage(ctx context.Context) (sourceForgotten, error) {
-	return h.forgetSource(ctx, imessage.ID)
+	return h.forgetSource(ctx, imessagewire.ID)
 }
 
 // imessageFailed answers a read that failed, with a code the app acts on; only the kind of failure is logged.
-func (h *Manager) imessageFailed(w http.ResponseWriter, c *imessage.Remote, what string, err error) {
+func (h *Manager) imessageFailed(w http.ResponseWriter, c imessagewire.Remote, what string, err error) {
 	msg := c.Explain(err)
 	switch {
-	case errors.Is(err, imessage.ErrNoChat):
+	case errors.Is(err, imessagewire.ErrNoChat):
 		writeCode(w, http.StatusNotFound, proto.CodeNoChat, msg, nil)
-	case errors.Is(err, imessage.ErrNoPermission):
+	case errors.Is(err, imessagewire.ErrNoPermission):
 		writeCode(w, http.StatusForbidden, proto.CodeNoPermission, msg, nil)
-	case errors.Is(err, imessage.ErrNodeTooOld):
+	case errors.Is(err, imessagewire.ErrNodeTooOld):
 		writeCode(w, http.StatusConflict, proto.CodeNodeOutdated, msg, nil)
-	case errors.Is(err, imessage.ErrOffline):
+	case errors.Is(err, imessagewire.ErrOffline):
 		writeCode(w, http.StatusServiceUnavailable, "offline", msg, nil)
 	default:
 		h.logf("imessage: %s: %v", what, err)

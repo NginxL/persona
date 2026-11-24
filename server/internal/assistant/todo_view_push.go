@@ -77,10 +77,11 @@ func todoClassOf(v assistantwire.TodoSummary) todoClass {
 
 // todoViewBook is what the apps were told of the views and when the views are looked at next.
 type todoViewBook struct {
-	mu   sync.Mutex
-	gen  uint64               // the {"type":"todos"} gone out so far
-	told map[string]todoClass // by to-do id, since the last of them
-	next map[string]time.Time // each to-do's next_change_at, as last worked out
+	mu     sync.Mutex
+	gen    uint64               // the {"type":"todos"} gone out so far
+	told   map[string]todoClass // by to-do id, since the last of them
+	listed map[string]todoClass // the latest stable classes, kept across pushes for todoRevisionCurrent
+	next   map[string]time.Time // each to-do's next_change_at, as last worked out
 
 	machines   map[string]bool // the computers whose runs changed, waiting for todoViewSettle
 	differs    bool            // a list read found a row that reads differently, waiting for todoViewSettle
@@ -189,12 +190,23 @@ func (s *Service) todoViewsSeen(gen uint64, p todoProjection, ids map[string]boo
 	if b.told == nil {
 		b.told = make(map[string]todoClass, len(p.facts))
 	}
+	if ids == nil {
+		b.listed = make(map[string]todoClass, len(p.facts))
+	} else {
+		if b.listed == nil {
+			b.listed = make(map[string]todoClass, len(p.facts))
+		}
+		for id := range ids {
+			delete(b.listed, id)
+		}
+	}
 	for i := range p.facts {
 		c := todoClassOf(p.views[i])
 		if was, ok := b.told[p.facts[i].ID]; ok && was != c {
 			changed = true
 		}
 		b.told[p.facts[i].ID] = c
+		b.listed[p.facts[i].ID] = c
 	}
 	if ids == nil || b.next == nil {
 		b.next = make(map[string]time.Time, len(p.facts))

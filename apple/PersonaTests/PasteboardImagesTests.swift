@@ -1,4 +1,3 @@
-#if os(iOS)
 import ImageIO
 import UIKit
 import UniformTypeIdentifiers
@@ -491,4 +490,3 @@ private enum SyntheticClipboardImage {
         }
     }
 }
-#endif

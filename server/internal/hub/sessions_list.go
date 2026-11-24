@@ -47,6 +47,11 @@ const (
 	// with machine_id (the children folded under that session), docs/protocol/protocol.md "Session hierarchy" (#5120).
 	// An older hub reads neither key, so an app sends them only to a hub that says this.
 	featureSessionsHierarchy = "sessions_hierarchy"
+	// featureSessionsCrossMachineHierarchy: a paged GET /api/v1/sessions takes parent_machine_id with parent_session_id
+	// (and machine_id with parent_session_id) to return both same-machine and cross-machine children folded under that
+	// parent, carries folded_under_machine_id / parent_machine_id / a2a_task_id / subagent_origin on rows and
+	// folded_under_machine_id on interactions, and excludes orphan is_subagent rows under roots=1.
+	featureSessionsCrossMachineHierarchy = "sessions_cross_machine_hierarchy"
 	// featureSessionsSideFold: the rows carry the side-session fold (folded_as "side", folded_side, the children's
 	// sides rollup; docs/protocol/protocol.md "Session hierarchy", #7944), and a client folds side sessions into their
 	// parent's chat. The fold is the managers' (assistant/fleet_fold.go): the hub lists the feature only while every
@@ -104,6 +109,10 @@ type runtimeList struct {
 	// unaligned: machines whose last pass had a row not encoded under an id of its own (indexSessionsLocked); guarded
 	// by sessionsMu.
 	unaligned map[string]bool
+	// crossFolded: parentMachine -> set of childMachines carrying rows with FoldedUnderMachineID == parentMachine, so
+	// parent machine updates or removals re-evaluate cross-machine children's roots; guarded by sessionsMu.
+	crossFolded     map[string]map[string]bool
+	reindexingCross bool
 }
 
 func (h *Hub) sessionListIndex() *sessionlist.Index {
@@ -178,12 +187,61 @@ func (h *Hub) indexStampedLocked(mid string, list []proto.Session, stamp bool, m
 	} else {
 		items = make([]sessionlist.Item, len(ids))
 	}
+	var crossParents map[string]bool
+	var localKids map[string]proto.SessionChildren
+	for _, i := range rows {
+		if list[i].Children().Total > 0 {
+			localKids = map[string]proto.SessionChildren{}
+			break
+		}
+	}
+	if localKids != nil {
+		for _, i := range rows {
+			r := list[i].FoldedUnder()
+			rm := list[i].FoldedUnderMachineID()
+			if r == "" || (rm != "" && rm != mid) || !seen[r] {
+				continue
+			}
+			c := localKids[r]
+			c.Total++
+			switch list[i].State {
+			case proto.StateWorking:
+				c.Working++
+			case proto.StateNeedsYou:
+				c.NeedsYou++
+			}
+			if list[i].FoldedAs() == proto.FoldedAsSide && list[i].State == proto.StateUnread {
+				c.SidesUnread++
+			}
+			localKids[r] = c
+		}
+	}
 	for k, i := range rows {
 		root := list[i].FoldedUnder() // the paged list folds it only under a row it lists (roots, parent_session_id)
-		if !seen[root] {
-			root = ""
+		rootMachine := list[i].FoldedUnderMachineID()
+		if rootMachine == mid {
+			rootMachine = ""
 		}
-		items[k] = indexedRow(mid, ids[k], &list[i], stamp, manager, root, full[list[i].SessionID], items[k])
+		if root != "" {
+			if rootMachine == "" {
+				if !seen[root] {
+					root = ""
+				}
+			} else {
+				if crossParents == nil {
+					crossParents = map[string]bool{}
+				}
+				crossParents[rootMachine] = true
+				if !h.hubListsSessionLocked(rootMachine, root) {
+					root, rootMachine = "", ""
+				}
+			}
+		}
+		var local proto.SessionChildren
+		if localKids != nil {
+			local = localKids[list[i].SessionID]
+		}
+		items[k] = indexedRow(mid, ids[k], &list[i], stamp, manager, root, rootMachine, local, full[list[i].SessionID], items[k])
 	}
 	// The machine's manager goes with its batch (?manager=<id>, sessionsManager): the one a kept list is stamped with,
 	// else the one its rows came stamped with (stamped: every row of a machine carries its manager).
@@ -193,14 +251,86 @@ func (h *Hub) indexStampedLocked(mid string, list []proto.Session, stamp bool, m
 	}
 	h.listCache.index.ReplaceOwned(mid, manager, items)
 	h.listCache.machines[mid] = true
+	if len(crossParents) > 0 || len(h.listCache.crossFolded) > 0 {
+		h.updateCrossFoldedLocked(mid, crossParents)
+		h.reindexCrossDependentsLocked(mid)
+	}
 }
 
-// indexedRow is row's item in the paged index (row stamped with manager when stamp), folded under root ("" for none: a
-// session of the same batch, sessionlist.Fold.Root), raw its encoding and indexed what the index holds under id (the
-// zero Item for none). When indexed's Full is raw with the same pane_source, its Summary is what row's is too: the
-// summary is cut from the fields raw encodes. Both are then kept, and the item is unchanged for Replace, rather than
-// marshalled again. The scalars are always read from row.
-func indexedRow(mid, id string, row *proto.Session, stamp bool, manager, root string, raw json.RawMessage, indexed sessionlist.Item) sessionlist.Item {
+// hubListsSessionLocked reports whether the hub currently lists (mid, sid) as a shown session.
+// Caller holds h.sessionsMu.
+func (h *Hub) hubListsSessionLocked(mid, sid string) bool {
+	if mid == "" || sid == "" {
+		return false
+	}
+	m := h.localMachine(mid)
+	if m == nil {
+		return false
+	}
+	for _, s := range h.shown(mid, m.keptSessions()) {
+		if s.SessionID == sid {
+			return true
+		}
+	}
+	return false
+}
+
+// updateCrossFoldedLocked tracks which parent machines child machine mid references across machine boundaries.
+// Caller holds h.sessionsMu.
+func (h *Hub) updateCrossFoldedLocked(childMid string, parentMachines map[string]bool) {
+	for pm, children := range h.listCache.crossFolded {
+		if !parentMachines[pm] {
+			delete(children, childMid)
+			if len(children) == 0 {
+				delete(h.listCache.crossFolded, pm)
+			}
+		}
+	}
+	if len(parentMachines) == 0 {
+		return
+	}
+	if h.listCache.crossFolded == nil {
+		h.listCache.crossFolded = map[string]map[string]bool{}
+	}
+	for pm := range parentMachines {
+		if h.listCache.crossFolded[pm] == nil {
+			h.listCache.crossFolded[pm] = map[string]bool{}
+		}
+		h.listCache.crossFolded[pm][childMid] = true
+	}
+}
+
+// reindexCrossDependentsLocked refreshes machines whose rows fold under sessions on parentMid.
+// Caller holds h.sessionsMu.
+func (h *Hub) reindexCrossDependentsLocked(parentMid string) {
+	if h.listCache.reindexingCross {
+		return
+	}
+	dependents := h.listCache.crossFolded[parentMid]
+	if len(dependents) == 0 {
+		return
+	}
+	h.listCache.reindexingCross = true
+	defer func() { h.listCache.reindexingCross = false }()
+	var mids []string
+	for childMid := range dependents {
+		if childMid != parentMid && h.listCache.machines[childMid] {
+			mids = append(mids, childMid)
+		}
+	}
+	for _, childMid := range mids {
+		if m := h.localMachine(childMid); m != nil {
+			h.indexKeptLocked(m)
+		}
+	}
+}
+
+// indexedRow is row's item in the paged index (row stamped with manager when stamp), folded under (rootMachine, root)
+// ("" for none; empty rootMachine means mid, sessionlist.Fold.Root / RootMachine), raw its encoding and indexed what
+// the index holds under id (the zero Item for none). When indexed's Full is raw with the same pane_source, its Summary
+// is what row's is too: the summary is cut from the fields raw encodes. Both are then kept, and the item is unchanged
+// for Replace, rather than marshalled again. The scalars are always read from row.
+func indexedRow(mid, id string, row *proto.Session, stamp bool, manager, root, rootMachine string, localKids proto.SessionChildren, raw json.RawMessage, indexed sessionlist.Item) sessionlist.Item {
 	project := row.RepoRoot
 	if project == "" {
 		project = row.WorkspaceCwd
@@ -222,7 +352,8 @@ func indexedRow(mid, id string, row *proto.Session, stamp bool, manager, root st
 		ID: id, Machine: mid, Project: project, Group: group, PaneSource: pane, HiddenByDirectory: row.HiddenByDirectory(),
 		State: row.State, BackgroundWaiting: row.BackgroundWaiting, JustFinished: row.Work != nil && row.Work.JustFinished,
 		Source: row.SourceKind, Provider: row.Agent, UpdatedAt: row.UpdatedAt,
-		Fold: indexedFold(mid, row, root, todo, indexed.Fold), Private: healthSession(row), Assistant: row.Assistant,
+		Fold: indexedFold(mid, row, root, rootMachine, todo, localKids, indexed.Fold), Private: spaceSession(row), Assistant: row.Assistant,
+		Subagent: row.IsSubagent || row.IsCodexSubagent(),
 	}
 	// What q finds a row by: the fields the apps' own searches read, the branch too (#4770).
 	text := [...]string{row.Title, row.Cwd, row.RepoRoot, row.Branch, row.SpaceName, row.SlotName, row.AgentName, row.LastText}
@@ -247,14 +378,52 @@ func indexedRow(mid, id string, row *proto.Session, stamp bool, manager, root st
 	return item
 }
 
-// indexedFold is machine mid's row's optional sessionlist.Fold: its fold under root and open to-do, nil when it has
-// neither and shows its own state and background wait (a row without children or a to-do), else was when that is the
-// same metadata, else a new one. A side session folded under root is searched as root's row (SearchAs, #7944). Folds
-// are shared between copies of an item and never written in place.
-func indexedFold(mid string, row *proto.Session, root, todo string, was *sessionlist.Fold) *sessionlist.Fold {
+// indexedFold is machine mid's row's optional sessionlist.Fold: its fold under (rootMachine, root) and open to-do, nil
+// when it has neither and shows its own state and background wait (a row without children or a to-do), else was when
+// that is the same metadata, else a new one. A side session folded under root is searched as root's row (SearchAs,
+// #7944). Folds are shared between copies of an item and never written in place.
+func foldedStateWith(s *proto.Session, c proto.SessionChildren) string {
+	switch {
+	case s.State == proto.StateNeedsYou || c.NeedsYou > 0:
+		return proto.StateNeedsYou
+	case c.Working > 0 && s.State != proto.StateUnread && !(s.State == proto.StateIdle && s.AwaitsReply):
+		return proto.StateWorking
+	case c.SidesUnread > 0 && s.State != proto.StateWorking:
+		return proto.StateUnread
+	}
+	return s.State
+}
+
+func indexedFold(mid string, row *proto.Session, root, rootMachine, todo string, localKids proto.SessionChildren, was *sessionlist.Fold) *sessionlist.Fold {
+	if root == "" {
+		rootMachine = ""
+	}
 	kids := row.Children()
-	fold := sessionlist.Fold{Root: root, State: row.FoldedState(), Todo: todo, BackgroundWaiting: row.BackgroundWaiting && kids.Working == 0 && kids.NeedsYou == 0}
-	if root != "" && row.FoldedAs() == proto.FoldedAsSide {
+	fold := sessionlist.Fold{Root: root, RootMachine: rootMachine, State: row.FoldedState(), Todo: todo, BackgroundWaiting: row.BackgroundWaiting && kids.Working == 0 && kids.NeedsYou == 0}
+	if kids.Total > 0 && localKids.Total < kids.Total {
+		// Parent rolls up at least one cross-machine child. Legacy roots=1 clients (without
+		// cross_machine_hierarchy=1) keep cross-machine children listed separately, so compute
+		// the parent's same-machine-only folded state to avoid double-counting needs_you/working.
+		fold.HasLegacyFold = true
+		fold.LegacyState = foldedStateWith(row, localKids)
+		fold.LegacyBackgroundWaiting = row.BackgroundWaiting && localKids.Working == 0 && localKids.NeedsYou == 0
+	}
+	if root == "" && (row.IsSubagent || row.IsCodexSubagent()) {
+		directParent := row.ParentSessionID
+		if directParent == "" {
+			directParent = row.AskingParentSessionID()
+		}
+		if directParent == "" && row.RootSessionID != "" && row.RootSessionID != row.SessionID {
+			directParent = row.RootSessionID
+		}
+		if directParent != "" {
+			fold.DirectParent = directParent
+			if pm := row.ParentMachineID(); pm != "" && pm != mid {
+				fold.DirectParentMachine = pm
+			}
+		}
+	}
+	if root != "" && rootMachine == "" && row.FoldedAs() == proto.FoldedAsSide {
 		fold.SearchAs, fold.SearchSession = runtimeListID(mid, root), row.SessionID
 	}
 	switch {
@@ -445,7 +614,7 @@ func runtimeSummary(s proto.Session) runtimeRowSummary {
 		Title: rowText(s.Title, 256), Cwd: s.Cwd, WorkspaceCwd: s.WorkspaceCwd, RepoRoot: s.RepoRoot, Worktree: s.Worktree, Branch: s.Branch,
 		Status: s.Status, State: s.State, UpdatedAt: s.UpdatedAt, StateSince: s.StateSince, SeenAt: s.SeenAt,
 		LastText: rowText(s.LastText, 180), Activity: rowText(s.Activity, 120), ActivityAt: s.ActivityAt,
-		AwaitsReply: s.AwaitsReply, BackgroundWorking: s.BackgroundWorking, BackgroundWaiting: s.BackgroundWaiting,
+		AwaitsReply: s.AwaitsReply, BackgroundWorking: s.BackgroundWorking, BackgroundWaiting: s.BackgroundWaiting, BackgroundStalledSince: s.BackgroundStalledSince,
 		Agent: s.Agent, AgentLabel: s.AgentLabel, AgentName: s.AgentName, AgentSurface: s.AgentSurface,
 		SourceKind: s.SourceKind, SourceThreadID: s.SourceThreadID, SourceInstanceID: s.SourceInstanceID,
 		ParentThreadID: s.ParentThreadID, ParentSessionID: s.ParentSessionID, RootSessionID: s.RootSessionID, IsSubagent: s.IsSubagent,
@@ -462,7 +631,8 @@ func runtimeSummary(s proto.Session) runtimeRowSummary {
 		PendingInteractions: s.PendingInteractions, Rev: s.Rev, Quiet: s.Quiet,
 		Model: s.Model, RequestedModel: s.RequestedModel, Effort: s.Effort, PendingEffort: s.PendingEffort, EffortChangeFailed: s.EffortChangeFailed,
 		ContextTokens: s.ContextTokens, ContextWindow: s.ContextWindow,
-		Hierarchy: s.Hierarchy, // folded_under, children, started_at: the child cards and the parent's state (#5120)
+		ContextRestartRecommended: s.ContextRestartRecommended,
+		Hierarchy:                 s.Hierarchy, // folded_under, children, started_at: the child cards and the parent's state (#5120)
 	}
 	out.SetBackgroundEnded(nil)
 	if s.Work != nil {
@@ -582,7 +752,7 @@ func (h *Hub) pagedSessions(w http.ResponseWriter, r *http.Request, manager stri
 		return
 	}
 	opts.Manager = manager
-	opts.NoPrivate = restrictedAgentData(r) // external Agent clients cannot see health-space conversations
+	opts.NoPrivate = h.spacesHidden(r) // external Agent clients cannot see a space's conversations, but the user's own extension (#13246)
 	if values, lookup := r.URL.Query()["session_id"]; lookup {
 		if len(values) != 1 || values[0] == "" || opts.Machine == "" || opts.Since != "" || opts.Cursor != "" {
 			sessionListErr(w, errors.New("exact session lookup requires one nonempty session_id and machine_id, without since or cursor"))
@@ -606,10 +776,22 @@ func (h *Hub) pagedSessions(w http.ResponseWriter, r *http.Request, manager stri
 			writeErrCode(w, http.StatusForbidden, codeOtherManager, errOtherManager)
 			return
 		}
-		if opts.Machine == "" && len(own) == 1 {
-			opts.Machine = own[0]
+		if opts.UnderMachine != "" && !slices.Contains(own, opts.UnderMachine) {
+			writeErrCode(w, http.StatusForbidden, codeOtherManager, errOtherManager)
+			return
 		}
-		limited = opts.Machine == ""
+		childMachine := opts.Machine
+		if opts.Under != "" && opts.UnderMachine == "" && opts.CrossMachineHierarchy {
+			childMachine = ""
+		}
+		if childMachine == "" && len(own) == 1 {
+			if opts.Under != "" && opts.UnderMachine == "" && opts.CrossMachineHierarchy {
+				opts.UnderMachine = opts.Machine
+			}
+			opts.Machine = own[0]
+			childMachine = own[0]
+		}
+		limited = childMachine == ""
 	}
 	if opts.Search != "" {
 		// Search authorizes before matching and freezing totals/evidence. Never
@@ -703,43 +885,63 @@ func (h *Hub) extensionMachines(r *http.Request) (own []string, limited bool) {
 	return own, limited
 }
 
-func (h *Hub) heldNeedsIDs() []string {
+// supervisorHeldCard: a card its task's supervisor holds (assistant/ask_route.go routeAsk): marked delegating and no
+// question (only a question is ever delegated to the assistant's own decision, which stays counted).
+func supervisorHeldCard(ix proto.Interaction) bool {
+	return ix.Delegating && ix.Kind != proto.IxQuestion
+}
+
+// heldNeedsIDs are the list ids of the sessions whose pending cards are all held: held, only P1/P2 cards for push
+// grading (no supervisor's among them counted either way); supervised, only cards their supervisor holds.
+// When crossMachine is false (legacy client without cross_machine_hierarchy=1), cross-machine folded children stay
+// listed on their own machine, so their cards are credited to their own row rather than a parent on another machine.
+func (h *Hub) heldNeedsIDs(crossMachine bool) (held, supervised []string) {
 	interactions := h.pendingInteractions()
 	if len(interactions) == 0 {
-		return nil
+		return nil, nil
 	}
 	type flags struct {
-		hasP0   bool
-		hasHeld bool
+		hasP0      bool
+		hasHeld    bool
+		supervisor bool // a card its supervisor holds
+		other      bool // any card that is not
 	}
 	byHome := map[[2]string]flags{}
 	for _, ix := range interactions {
-		if ix.Delegating {
-			continue
-		}
 		home := ix.FoldedUnder
-		if home == "" {
+		homeMachine := ix.FoldedUnderMachineID
+		if home == "" || (!crossMachine && homeMachine != "" && homeMachine != ix.MachineID) {
 			home = ix.SessionID
+			homeMachine = ix.MachineID
+		} else if homeMachine == "" {
+			homeMachine = ix.MachineID
 		}
 		if home == "" {
 			continue
 		}
-		k := [2]string{ix.MachineID, home}
+		k := [2]string{homeMachine, home}
 		st := byHome[k]
-		if ix.PushLevel == assistantwire.LevelP1 || ix.PushLevel == assistantwire.LevelP2 {
-			st.hasHeld = true
-		} else {
-			st.hasP0 = true
+		switch {
+		case supervisorHeldCard(ix):
+			st.supervisor = true
+		case ix.Delegating:
+			st.other = true
+		case ix.PushLevel == assistantwire.LevelP1 || ix.PushLevel == assistantwire.LevelP2:
+			st.hasHeld, st.other = true, true
+		default:
+			st.hasP0, st.other = true, true
 		}
 		byHome[k] = st
 	}
-	var ids []string
 	for k, st := range byHome {
-		if st.hasHeld && !st.hasP0 {
-			ids = append(ids, runtimeListID(k[0], k[1]))
+		switch {
+		case st.supervisor && !st.other:
+			supervised = append(supervised, runtimeListID(k[0], k[1]))
+		case st.hasHeld && !st.hasP0:
+			held = append(held, runtimeListID(k[0], k[1]))
 		}
 	}
-	return ids
+	return held, supervised
 }
 
 func (h *Hub) countsWithHeld(index *sessionlist.Index, opts sessionlist.Options, own []string, limited bool) (sessionlist.Counts, error) {
@@ -755,26 +957,37 @@ func (h *Hub) countsWithHeld(index *sessionlist.Index, opts sessionlist.Options,
 	if err != nil {
 		return sessionlist.Counts{}, err
 	}
-	ids := h.heldNeedsIDs()
-	if len(ids) == 0 || counts.State[proto.StateNeedsYou] == 0 {
+	held, supervised := h.heldNeedsIDs(opts.CrossMachineHierarchy)
+	if counts.State[proto.StateNeedsYou] == 0 {
 		return counts, nil
 	}
-	if limited {
+	count := func(ids []string) (int, error) {
+		if len(ids) == 0 {
+			return 0, nil
+		}
+		if !limited {
+			return index.CountMatchingState(opts, proto.StateNeedsYou, ids)
+		}
+		n := 0
 		for _, mid := range own {
 			o := opts
-			o.Machine, o.Cursor = mid, ""
-			n, herr := index.CountMatchingState(o, proto.StateNeedsYou, ids)
-			if herr != nil {
-				return sessionlist.Counts{}, herr
+			if o.Under != "" && o.UnderMachine == "" && o.CrossMachineHierarchy {
+				o.UnderMachine = o.Machine
 			}
-			counts.HeldNeeds += n
+			o.Machine, o.Cursor = mid, ""
+			c, err := index.CountMatchingState(o, proto.StateNeedsYou, ids)
+			if err != nil {
+				return 0, err
+			}
+			n += c
 		}
-	} else {
-		n, herr := index.CountMatchingState(opts, proto.StateNeedsYou, ids)
-		if herr != nil {
-			return sessionlist.Counts{}, herr
-		}
-		counts.HeldNeeds = n
+		return n, nil
+	}
+	if counts.HeldNeeds, err = count(held); err != nil {
+		return sessionlist.Counts{}, err
+	}
+	if counts.SupervisorHeld, err = count(supervised); err != nil {
+		return sessionlist.Counts{}, err
 	}
 	return counts, nil
 }
@@ -787,6 +1000,9 @@ func ownCounts(index *sessionlist.Index, opts sessionlist.Options, own []string)
 	}
 	for _, mid := range own {
 		o := opts
+		if o.Under != "" && o.UnderMachine == "" && o.CrossMachineHierarchy {
+			o.UnderMachine = o.Machine
+		}
 		o.Machine, o.Cursor = mid, "" // current membership (a cursor's frozen view is of every machine)
 		c, err := index.Counts(o)
 		if err != nil {
@@ -817,8 +1033,12 @@ func ownPage(index *sessionlist.Index, opts sessionlist.Options, own []string, p
 		var k [2]string
 		return json.Unmarshal([]byte(id), &k) != nil || !keep(k[0])
 	})
+	underMachine := opts.UnderMachine
+	if opts.Under != "" && underMachine == "" && opts.CrossMachineHierarchy {
+		underMachine = opts.Machine
+	}
 	counts, err := ownCounts(index, sessionlist.Options{Since: opts.Since, State: opts.State, Project: opts.Project, Group: opts.Group,
-		Source: opts.Source, Provider: opts.Provider, Q: opts.Q, Manager: opts.Manager, Roots: opts.Roots, NoPrivate: opts.NoPrivate, AgentsOnly: opts.AgentsOnly, Places: opts.Places, Spaces: opts.Spaces}, own)
+		Source: opts.Source, Provider: opts.Provider, Q: opts.Q, Manager: opts.Manager, Roots: opts.Roots, CrossMachineHierarchy: opts.CrossMachineHierarchy, Under: opts.Under, UnderMachine: underMachine, NoPrivate: opts.NoPrivate, AgentsOnly: opts.AgentsOnly, Places: opts.Places, Spaces: opts.Spaces}, own)
 	if err != nil {
 		return sessionlist.Page{}, err
 	}
@@ -844,6 +1064,11 @@ func (h *Hub) pruneSessionListMachines() bool {
 			h.listCache.index.RemoveSource(mid)
 			delete(h.listCache.machines, mid)
 			delete(h.listCache.unaligned, mid)
+			if len(h.listCache.crossFolded) > 0 {
+				h.updateCrossFoldedLocked(mid, nil)
+				h.reindexCrossDependentsLocked(mid)
+				delete(h.listCache.crossFolded, mid)
+			}
 			changed = true
 		}
 	}
@@ -916,7 +1141,7 @@ func (h *Hub) sessionListHint(before, revision string) listHint {
 }
 
 // send queues the hint for c: with since and changed when c asked for them in its URL and is not an extension's token
-// (which never sees a health conversation, and so must not see its id change either).
+// (which never sees a space conversation, and so must not see its id change either).
 func (hint listHint) send(c *client) {
 	if hint.detailed != nil && c.urlFeatures[featureSessionsListChanges] && c.role != roleExtension {
 		c.queue(hint.detailed)

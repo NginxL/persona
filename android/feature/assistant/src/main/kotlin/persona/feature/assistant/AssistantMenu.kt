@@ -1,5 +1,6 @@
 package persona.feature.assistant
 
+import persona.core.moduleapi.serves
 import android.content.res.Resources
 import androidx.annotation.StringRes
 import androidx.compose.runtime.Composable
@@ -15,20 +16,29 @@ import persona.core.contracts.api.AssistantSnapshot
 import persona.core.contracts.api.ChatComposerService
 import persona.core.contracts.api.ConnectionState
 import persona.core.designsystem.AppStyle
+import persona.core.designsystem.CopyAction
 import persona.core.designsystem.JAction
 import persona.core.designsystem.JActionSheet
 import persona.core.designsystem.PersonaTheme
 import persona.core.designsystem.icons.PersonaIcons
 import persona.core.designsystem.icons.PhIcon
 import persona.core.domain.modelShortName
+import persona.core.moduleapi.MenuSlot
+import persona.core.moduleapi.ModuleMenuAction
+
+/** One entry of the title menu: one of its own items ([AssistantMenuItem]) or a module's ([ModuleItem]). */
+internal sealed interface AssistantMenuEntry
+
+/** A module's action in the title menu ([MenuSlot.AssistantTitle], the app's Modules.kt), with the module's words and icon. */
+internal data class ModuleItem(val action: ModuleMenuAction) : AssistantMenuEntry
 
 /**
  * One item of the title menu (iOS `AssistantTopBar.menuItems`) with its words and iOS's icon for it (`Theme.Icon`, by
- * meaning); Android's Voice chat takes iOS's voice-chat icon. Glass draws the icons; Brief and Board keep the words alone.
+ * meaning). Glass draws the icons; Brief and Board keep the words alone.
  */
-internal enum class AssistantMenuItem(val icon: PhIcon, @StringRes val label: Int) {
+internal enum class AssistantMenuItem(val icon: PhIcon, @StringRes val label: Int) : AssistantMenuEntry {
     ConnectionDetails(PersonaIcons.offline, R.string.assistant_connection_details), Knowledge(PersonaIcons.knowledge, R.string.assistant_info_knowledge),
-    Details(PersonaIcons.person, R.string.assistant_details), Voice(PersonaIcons.voiceChannel, R.string.assistant_voice_chat),
+    Details(PersonaIcons.person, R.string.assistant_details),
     BackToMain(PersonaIcons.home, R.string.assistant_back_to_main), CopyDirectory(PersonaIcons.folder, R.string.assistant_copy_directory),
     CopyInfo(PersonaIcons.copy, R.string.assistant_copy_info), CopySessionId(PersonaIcons.id, R.string.assistant_copy_session_id),
     CopyDiagnostics(PersonaIcons.diagnostics, R.string.assistant_copy_diagnostics), Compact(PersonaIcons.compactContext, R.string.assistant_compact),
@@ -40,24 +50,36 @@ internal enum class AssistantMenuItem(val icon: PhIcon, @StringRes val label: In
 
 /**
  * The title menu's items in iOS's order and sections (#4339 C18): while the hub is out of reach Connection details,
- * then Knowledge, Details (the assistant's own page, iOS's profile), Voice chat (Android's, while the hub runs a voice
- * extension) and Back to main chat (off the main conversation); the copies (the directory and the info always, the
+ * then Knowledge, Details (the assistant's own page, iOS's profile), the modules' actions ([modules], in Modules.kt's order)
+ * and Back to main chat (off the main conversation); the copies (the directory and the info always, the
  * session ID and diagnostics with a conversation open); Compact context, the main conversation's Clear context (#5100,
  * between them as on the web) and New main chat; Session
  * info and, while it works, Interrupt. The per-conversation launcher and model are #5055's pill and panel, not menu items,
  * and the menu's heading names them ([AssistantCopyText.menuTitle]); Screen is not done: Android has no live screen. Each
  * list is one section; a rule goes above every section after the first.
  */
-internal fun assistantMenu(offline: Boolean, voice: Boolean, main: SessionKey?, active: SessionKey?, compact: Boolean,
-                           newMain: Boolean, working: Boolean, clear: Boolean = false): List<List<AssistantMenuItem>> = listOf(
-    listOfNotNull(AssistantMenuItem.ConnectionDetails.takeIf { offline }, AssistantMenuItem.Knowledge, AssistantMenuItem.Details,
-        AssistantMenuItem.Voice.takeIf { voice }, AssistantMenuItem.BackToMain.takeIf { main != null && main != active }),
+internal fun assistantMenu(offline: Boolean, modules: List<ModuleMenuAction>, main: SessionKey?, active: SessionKey?, compact: Boolean,
+                           newMain: Boolean, working: Boolean, clear: Boolean = false, knowledge: Boolean = true): List<List<AssistantMenuEntry>> = listOf(
+    listOfNotNull(AssistantMenuItem.ConnectionDetails.takeIf { offline }, AssistantMenuItem.Knowledge.takeIf { knowledge }, AssistantMenuItem.Details) +
+        modules.map(::ModuleItem) + listOfNotNull(AssistantMenuItem.BackToMain.takeIf { main != null && main != active }),
     listOfNotNull(AssistantMenuItem.CopyDirectory, AssistantMenuItem.CopyInfo,
         AssistantMenuItem.CopySessionId.takeIf { active != null }, AssistantMenuItem.CopyDiagnostics.takeIf { active != null }),
     listOfNotNull(AssistantMenuItem.Compact.takeIf { compact }, AssistantMenuItem.ClearContext.takeIf { clear },
         AssistantMenuItem.NewMain.takeIf { newMain }),
     listOfNotNull(AssistantMenuItem.SessionInfo.takeIf { active != null }, AssistantMenuItem.Interrupt.takeIf { active != null && working }),
 ).filter { it.isNotEmpty() }
+
+/** The icon an entry shows on Glass: the item's own, or the module's. */
+internal val AssistantMenuEntry.icon: PhIcon get() = when (this) {
+    is AssistantMenuItem -> icon
+    is ModuleItem -> action.icon
+}
+
+/** An entry's words: the item's string, or the module's already resolved words. */
+internal fun AssistantMenuEntry.label(resources: Resources): String = when (this) {
+    is AssistantMenuItem -> resources.getString(label)
+    is ModuleItem -> action.label
+}
 
 /** Where Persona keeps its files when neither the conversation nor the settings say (iOS `AssistantCopyText.cwd`). */
 internal const val AssistantDefaultCwd = "~/.persona/assistant"
@@ -155,9 +177,9 @@ internal fun AssistantTitleMenu(
     demo: Boolean,
     connection: ConnectionState?,
     mainActions: MainActions,
-    onVoice: (() -> Unit)?,
+    moduleActions: List<ModuleMenuAction>,
     mainConversation: MainConversationController,
-    copy: (String, String?) -> Boolean,
+    copy: CopyAction,
     scope: CoroutineScope,
     onDismiss: () -> Unit,
     onKnowledge: () -> Unit,
@@ -180,9 +202,11 @@ internal fun AssistantTitleMenu(
     val copyText = AssistantCopyText(shown, active, onMain, menuConfig, assistantMachine, machines)
     val interrupt = composerService.takeIf { !demo }
     val sections = assistantMenu(offline = connection != null && connection != ConnectionState.Online,
-        voice = onVoice != null, main = snapshot.mainSession, active = active, compact = active != null && mainActions.compact,
+        modules = moduleActions, main = snapshot.mainSession, active = active, compact = active != null && mainActions.compact,
         newMain = onMain && mainActions.newMain, working = interrupt != null && persona.core.domain.lines.isLiveStatus(shown?.status),
-        clear = onMain && mainActions.clear)
+        clear = onMain && mainActions.clear,
+        // Knowledge only while a module serves its pages (#13934, :module:knowledge-ui).
+        knowledge = persona.core.moduleapi.LocalModulePlaces.current.serves(persona.core.navigation.KnowledgeRoute::class))
         fun rawAction(item: AssistantMenuItem, separator: Boolean): JAction = when (item) {
             AssistantMenuItem.ConnectionDetails -> JAction(resources.getString(item.label), separatorBefore = separator,
                 onClick = onConnectionDetails)
@@ -193,8 +217,6 @@ internal fun AssistantTitleMenu(
             AssistantMenuItem.Details -> JAction(resources.getString(item.label), separatorBefore = separator, onClick = {
                 onDetails()
             })
-            AssistantMenuItem.Voice -> JAction(resources.getString(item.label), separatorBefore = separator,
-                onClick = { onVoice?.invoke() })
             // In place of the home page's Home (#4339 C11), as iOS's menu has it: off the main conversation only.
             AssistantMenuItem.BackToMain -> JAction(resources.getString(item.label), PersonaIcons.home,
                 separatorBefore = separator, onClick = { snapshot.mainSession?.let(onOpenConversation) })
@@ -225,7 +247,12 @@ internal fun AssistantTitleMenu(
         }
         // iOS's icon on every item: Glass draws them; Brief and Board keep their words (Back to main chat has had its house all along).
         val glassIcons = PersonaTheme.style == AppStyle.Glass
-        fun action(item: AssistantMenuItem, separator: Boolean): JAction = rawAction(item, separator)
+        // A module's action (Modules.kt) carries its own words, icon and click.
+        fun entryAction(item: AssistantMenuEntry, separator: Boolean): JAction = when (item) {
+            is ModuleItem -> JAction(item.action.label, separatorBefore = separator, onClick = item.action.onClick)
+            is AssistantMenuItem -> rawAction(item, separator)
+        }
+        fun action(item: AssistantMenuEntry, separator: Boolean): JAction = entryAction(item, separator)
             .copy(icon = item.icon.takeIf { glassIcons || item == AssistantMenuItem.BackToMain })
         // iOS's heading: which conversation and what it runs on ("Main chat · claude · Opus 4.5").
         JActionSheet(title = copyText.menuTitle(resources, assistantName, hubGroup), onDismiss = onDismiss,

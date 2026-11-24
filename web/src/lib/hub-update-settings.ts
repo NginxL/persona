@@ -1,6 +1,39 @@
-// Settings-only presentation loads with the page; the first screen needs only Hub notices and update states.
+// Hub settings loads its reads and presentation on demand. The first screen needs only the Hub notice.
 import { t } from "../i18n";
-import { updateWorking, type HubUpdateStatus } from "./hub-update";
+import { api } from "./api";
+import { workingUpdateTitle, type HubUpdateBackup, type HubUpdateRecord, type HubUpdateStatus } from "./hub-update";
+
+export const checkHubUpdate = () => api<HubUpdateStatus>("/hub/update/check", { method: "POST" });
+export const hubUpdateHistory = () => api<{ history: HubUpdateRecord[] | null }>("/hub/update/history").then(r => r.history ?? []);
+export const hubUpdateBackups = () => api<{ backups: HubUpdateBackup[] }>("/hub/update/backups").then(r => r.backups);
+export const applyHubUpdateBackup = (id: string) => api<HubUpdateStatus>(`/hub/update/backups/${encodeURIComponent(id)}/apply`, { method: "POST" });
+
+/** An update is under way (the progress row, no buttons). */
+export function updateWorking(s: HubUpdateStatus): boolean {
+  return ["building", "applying_backup", "backing_up", "downloading", "waiting_idle", "restarting", "confirming"].includes(s.state);
+}
+
+/** A state that ends an update: the history has a new line. */
+export function updateFinished(prev: string | undefined, next: string): boolean {
+  return prev !== next && ["updated", "rolled_back", "failed"].includes(next);
+}
+
+export function updateStateTitle(s: HubUpdateStatus): string {
+  const working = workingUpdateTitle(s);
+  if (working) return working;
+  switch (s.state) {
+    case "checking":
+      return t("lib-hub-update.state_checking");
+    case "updated":
+    case "rolled_back":
+    case "failed":
+      return recordTitle(s.state);
+    case "available":
+      return t("lib-hub-update.state_available");
+    default:
+      return t("lib-hub-update.state_current");
+  }
+}
 
 export const DOCKER_COMMAND = "docker compose pull && docker compose up -d";
 

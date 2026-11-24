@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"strings"
+	"time"
 )
 
 // ReviewStatus is what a code host says about one review request (a GitHub pull request, a GitLab merge request, a
@@ -12,6 +13,7 @@ import (
 type ReviewStatus struct {
 	State          string
 	MergeCommit    string
+	TerminalAt     time.Time // when it merged or closed, if the host supplies a timestamp
 	HeadSHA        string
 	HeadRef        string
 	BaseRef        string

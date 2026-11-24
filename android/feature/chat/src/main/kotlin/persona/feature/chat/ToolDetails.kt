@@ -36,6 +36,7 @@ import persona.core.contracts.Item
 import persona.core.contracts.SessionKey
 import persona.core.designsystem.AppStyle
 import persona.core.designsystem.JIcon
+import persona.core.designsystem.InterfaceContent
 import persona.core.designsystem.JSpinner
 import persona.core.designsystem.JTag
 import persona.core.designsystem.JTextButton
@@ -253,12 +254,14 @@ internal fun DiffHeader(path: String, added: Int, removed: Int) {
     }
 }
 
-/** ExitPlanMode's plan as Markdown, the way it was proposed. */
+/** ExitPlanMode's collapsed plan as interface Markdown; ReaderEntry opens the full plan at the reading scale. */
 @Composable
 private fun PlanDetail(plan: String, id: String) {
-    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(Tokens.Space.xs)) {
-        ChatMarkdown(plan, "$id/plan", PersonaTheme.type.callout)
-        ReaderEntry(plan, stringResource(R.string.chat_tool_plan_title))
+    InterfaceContent {
+        Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(Tokens.Space.xs)) {
+            ChatMarkdown(plan, "$id/plan", PersonaTheme.type.callout)
+            ReaderEntry(plan, stringResource(R.string.chat_tool_plan_title))
+        }
     }
 }
 

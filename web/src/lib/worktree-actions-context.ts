@@ -7,6 +7,7 @@ import { sessionWorkspace } from "./agent-repos";
 import { normalizePath } from "./files";
 import type { Machine, Session } from "./types";
 import { workspaceTarget, type HostWorkspace, type WorkspaceCatalogSnapshot } from "./workspace-catalog";
+import { directoryKey } from "./workspace-directory";
 import type { WorkspaceTarget } from "./workspace-target";
 
 export const worktreeActionKey = (target: WorkspaceTarget) => JSON.stringify([
@@ -21,19 +22,26 @@ export interface WorktreeActionContext {
   linkedWorktree?: boolean;
 }
 
+function sameDesktopRoot(a: string, b: string): boolean {
+  const key = directoryKey(a);
+  return key !== null && key === directoryKey(b);
+}
+const desktopProject = (host: string) => host === "codex_app" || host === "claude_desktop";
+
 /** Hosts that make worktrees of a workspace: herdr and Orca, and Paseo of its Git workspaces, where Paseo makes them itself
  *  (docs/integrations/paseo.md, "Capabilities"); a Paseo folder has none. */
 const makesWorktrees = (host: string, workspace?: HostWorkspace) =>
   ["herdr", "orca"].includes(host) || host === "paseo" && workspace?.workspace_kind === "git";
 
-/** All entry points resolve the exact host-owned catalog row; paths are checked for replacement, never used to find it. */
+/** Resolve the host-owned identity first. A desktop project's root directory distinguishes its catalog rows. */
 export function resolveWorktreeAction(target: WorkspaceTarget, context: WorktreeActionContext) {
   const { catalog, machines, writable } = context;
   const owned = Boolean(target.owner && target.manager && target.owner === credentialOwner()
     && target.manager === shownManager() && catalog.owner === target.owner && catalog.manager === target.manager);
   const matches = owned ? catalog.workspaces.filter((w) => w.machine_id === target.machineId
-    && w.source === target.host && w.source_id === target.workspaceId && w.source !== "session-directory") : [];
-  const workspace = matches.length === 1 && matches[0].cwd === target.cwd ? matches[0] : undefined;
+    && w.source === target.host && w.source_id === target.workspaceId && w.source !== "session-directory"
+    && (!desktopProject(target.host) || sameDesktopRoot(w.cwd, target.cwd))) : [];
+  const workspace = matches.length === 1 && (desktopProject(target.host) || matches[0].cwd === target.cwd) ? matches[0] : undefined;
   const computers = machines.filter((m) => m.id === target.machineId && (m.manager || defaultManager()) === target.manager);
   const machine = computers.length === 1 ? computers[0] : undefined;
   const available = Boolean(workspace && machine?.online && workspace.online !== false && workspace.available !== false
@@ -92,7 +100,8 @@ export function firstDirectWorktreeAgent(target: WorkspaceTarget, catalog: Works
   if (target.owner !== catalog.owner || target.manager !== catalog.manager) return;
   return sessions.find((session) => {
     const w = sessionWorkspace(session, catalog.workspaces, catalog.manager);
-    return w?.machine_id === target.machineId && w.source === target.host && w.source_id === target.workspaceId;
+    return w?.machine_id === target.machineId && w.source === target.host && w.source_id === target.workspaceId
+      && (!desktopProject(target.host) || sameDesktopRoot(w.cwd, target.cwd));
   });
 }
 

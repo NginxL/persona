@@ -90,6 +90,10 @@ struct MachinesView: View {
                 if !machines.isEmpty {
                     summary(machines, alerts: alerts.values.filter { $0 > .normal }, waiting: tallies.values.reduce(0) { $0 + $1.needsYou })
                 }
+                #if DEBUG
+                // Simulator screenshots of the usage cards (#13173): the cards first, not below every computer.
+                if ProcessInfo.processInfo.arguments.contains("-showUsageCardsDemo") { UsageWindowsCard() }
+                #endif
                 // Today's tokens across the computers, from their cards' usage (#4973).
                 let shares = machines.compactMap { m in metrics[m.ref]?.usage.map { (name: m.name, usage: $0) } }
                 if !shares.isEmpty { TodayTokensCard(shares: shares) }
@@ -105,8 +109,10 @@ struct MachinesView: View {
                 } else {
                     grid(machines, tallies: tallies, alerts: alerts)
                 }
-                #if !os(macOS)
-                UsageWindowsCard() // the Mac has it at the foot of its sections column
+                #if DEBUG
+                if !ProcessInfo.processInfo.arguments.contains("-showUsageCardsDemo") { UsageWindowsCard() }
+                #else
+                UsageWindowsCard()
                 #endif
                 if machines.isEmpty, model.canAddComputer {
                     EmptyStateView(symbol: Theme.Icon.machines, title: String(localized: "No computers yet"),
@@ -123,21 +129,13 @@ struct MachinesView: View {
             }
             .padding(Theme.Space.l)
         }
-        #if os(macOS)
-        .modifier(MacBelowTitleRowIfAsked()) // under Machines' title in the window: the cards start below it (#1243)
-        #endif
         .themedGroupedPage()
         .navigationTitle("Machines")
         // Large wherever it is pushed (the Agents list's stack would make it inline, and the principal item below would
         // then hide the title); the bar's middle is only for Connecting… and the like.
         .navigationBarTitleDisplayMode(.large)
         .pageToolbar {
-            #if os(macOS)
-            // Empty while connected: its glass drew a thin line in the middle of the title bar's row (#830).
-            ToolbarItem(placement: .principal) { ConnectionTitle() }.sharedBackgroundVisibility(.hidden)
-            #else
             ToolbarItem(placement: .principal) { ConnectionTitle() }
-            #endif
             if model.canAddComputer {
                 ToolbarItem(placement: .primaryAction) {
                     Button { adding = .add } label: { Label("Add Computer", systemImage: Theme.Icon.add) }
@@ -160,23 +158,11 @@ struct MachinesView: View {
             // hub must not keep the others waiting (nor the refresh spinner).
             async let refreshed: Void = model.refresh()
             async let metricsLoaded: Void = loadMetrics()
-            #if !os(macOS)
             async let usageLoaded: Void = UsageWindowsStore.shared.load(model)
-            #endif
             await refreshed
             await metricsLoaded
-            #if !os(macOS)
             await usageLoaded
-            #endif
         }
-        #if os(macOS)
-        .macRefreshes { // ⌘R: no pull to refresh on the Mac
-            async let refreshed: Void = model.refresh()
-            async let metricsLoaded: Void = loadMetrics()
-            await refreshed
-            await metricsLoaded
-        }
-        #endif
         .tabActiveTask(id: phase == .active) {
             guard phase == .active else { return } // in the background or another tab: nothing to draw, nothing to fetch
             while !Task.isCancelled {
@@ -184,12 +170,10 @@ struct MachinesView: View {
                 try? await Task.sleep(for: .seconds(10))
             }
         }
-        #if !os(macOS)
         .tabActiveTask(id: phase == .active ? "usage" : "") {
             guard phase == .active else { return }
             await UsageWindowsStore.shared.poll(model)
         }
-        #endif
     }
 
     private func updateSettingsMachines() {

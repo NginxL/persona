@@ -32,12 +32,17 @@ type apnsConfig = apns.Config
 type Pusher struct {
 	dir     string
 	store   Store
+	quiesce *writeQuiescer
 	logf    func(string, ...any)
 	traffic func(trafficKey, int64, time.Duration)
 	// direct: the hub's own APNs key. Set, every push goes straight to APNs as before; nil, through the relay.
 	direct *apns.Client
 	// relay posts to the devices' relays over connections kept between pushes (apns.NewTransport, #4800).
 	relay *http.Client
+	// privateOnly is office network mode (private_network.go): no relay is ever posted to, the hub's own key pushes only
+	// sealed payloads with the relay's content-free envelope (sealedDirect), and Live Activities, which iOS reads in the
+	// clear, are not pushed.
+	privateOnly bool
 	// retryWaits: how long a push the relay did not take for a reason that may pass waits before each further try
 	// (postRelayRetrying); tests shorten them.
 	retryWaits []time.Duration
@@ -50,6 +55,8 @@ type Pusher struct {
 	userLang func() i18n.Lang
 	// userLoc is the user's time zone (Hub.userLocation): quiet hours without a zone of their own read in it (quiethours.go).
 	userLoc func() *time.Location
+	// attention is the attention mode the assistant last reported (Hub.attentionMode, push_attention.go); nil: normal.
+	attention func() *assistantwire.Attention
 	// desktopOpen: the desktop app with this push device id is connected (Hub.desktopOpen); it posts its own
 	// notifications for agents then (the Mac's MacAttentionWatcher).
 	desktopOpen func(device string) bool
@@ -78,7 +85,9 @@ type Pusher struct {
 	acceptedDirty map[string]bool
 	// withdrawals: where each card's push went, to take it back when the card is over (push_withdraw.go).
 	withdrawals withdrawals
-	saveMu      sync.Mutex // one device row write at a time, always the latest state (register, setPrefsBy, renewal, forget, maintenance)
+	// todoPushes: when each to-do's push to the owner about one reason last rang (push_todo_dedup.go).
+	todoPushes todoPushBook
+	saveMu     sync.Mutex // one device row write at a time, always the latest state (register, setPrefsBy, renewal, forget, maintenance)
 	// storeTimeout bounds each device row write, which never runs under mu; tests shorten it.
 	storeTimeout time.Duration
 	// prefsEdit holds one change of a device's settings from its read to its write (editPrefs); taken before saveMu
@@ -107,6 +116,10 @@ type Pusher struct {
 	sentMirroredAt time.Time
 	sentMirrorMu   sync.Mutex
 	gradingWriting bool // the one saver goroutine is running
+
+	maintenanceWake     chan struct{}
+	maintenanceDeferred bool
+	pendingForgets      []Device
 }
 
 // deviceStoreTimeout: how long a device row write may take before it gives up (the pool has no statement_timeout).
@@ -170,6 +183,10 @@ func validRelayURL(s string) bool {
 }
 
 func (p *Pusher) register(d Device) error {
+	return p.registerContext(context.Background(), d)
+}
+
+func (p *Pusher) registerContext(ctx context.Context, d Device) error {
 	d.UpdatedAt = p.now().UTC()
 	d.RegisteredAt = d.UpdatedAt
 	d.Registering = true
@@ -204,7 +221,7 @@ func (p *Pusher) register(d Device) error {
 	p.mu.Unlock()
 	// Publish only after the ownership check and duplicate retirement commit.
 	// A failed enrollment must not expose an unpersisted APNs target to sends.
-	if err := p.writeDevice(d); err != nil {
+	if err := p.writeDeviceIn(ctx, d); err != nil {
 		return err
 	}
 	d.Registering = false
@@ -238,6 +255,12 @@ func (p *Pusher) writeDeviceIn(parent context.Context, d Device) error {
 	if p.store == nil {
 		return nil
 	}
+	if !quiesceHeld(parent) {
+		if !p.quiesce.begin() {
+			return i18n.Err("hub-selfupdate.err_quiesced")
+		}
+		defer p.quiesce.end()
+	}
 	ctx, cancel := context.WithTimeout(parent, p.storeTimeout)
 	defer cancel()
 	if err := p.store.UpsertDevice(ctx, d); err != nil {
@@ -249,7 +272,7 @@ func (p *Pusher) writeDeviceIn(parent context.Context, d Device) error {
 
 // relayed: this device can be pushed through its relay (the hub has no key of its own).
 func (p *Pusher) relayed(d Device) bool {
-	return p.direct == nil && d.RelayURL != "" && d.RelayGrant != "" && d.PushKey != ""
+	return !p.privateOnly && p.direct == nil && d.RelayURL != "" && d.RelayGrant != "" && d.PushKey != ""
 }
 
 // reachable: a push to this device can go anywhere.
@@ -351,6 +374,14 @@ func (p *Pusher) deleteRow(d Device) {
 // grant), and that late answer must not delete the new registration and its settings. Under saveMu, so a save of a
 // newer registration is not undone by the delete that follows it, or the other way round.
 func (p *Pusher) forgetIfCurrent(d Device) {
+	if !p.quiesce.beginOrDefer(func() {
+		p.mu.Lock()
+		p.pendingForgets = append(p.pendingForgets, d)
+		p.mu.Unlock()
+	}) {
+		return
+	}
+	defer p.quiesce.end()
 	p.saveMu.Lock()
 	defer p.saveMu.Unlock()
 	p.mu.Lock()

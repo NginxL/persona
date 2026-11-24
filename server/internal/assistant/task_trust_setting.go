@@ -120,7 +120,7 @@ func (s *Service) changeTrustSetting(ctx context.Context, action string, raw jso
 	// remove: every way the same directory was remembered on that machine with that access
 	match := func(k string) bool {
 		km, kd, md, ok := splitTrustKey(k)
-		return ok && km == m.ID && md == v.Access && trustDir(kd, h) == dir
+		return ok && km == m.ID && md == v.Access && trustDirEqual(trustDir(kd, h), dir)
 	}
 	n := 0
 	for k := range have {

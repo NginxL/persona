@@ -65,7 +65,7 @@ func TestTaskTurnEndWithoutOutputIsInterrupted(t *testing.T) {
 			f.setItems(c.items...)
 			f.setSessions("box", proto.Session{SessionID: "s1", MachineID: "box", Cwd: "/code/app", Agent: cmp.Or(c.agent, "claude"),
 				Status: proto.StatusWorking, State: proto.StateWorking, UpdatedAt: time.Now()})
-			s.taskWorking(ctx, "box", "s1")
+			s.taskWorking(ctx, "box", "s1", startRow{})
 			f.setSessions("box", proto.Session{SessionID: "s1", MachineID: "box", Cwd: "/code/app", Agent: cmp.Or(c.agent, "claude"),
 				Status: proto.StatusDone, State: cmp.Or(c.endState, proto.StateUnread), TurnError: c.turnError, LastText: c.lastText, UpdatedAt: time.Now()})
 			s.taskTurnEnded(ctx, "box", "s1")

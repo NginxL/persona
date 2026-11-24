@@ -6,9 +6,13 @@ allows (sleep_ratchet.py), or a web/src file more hard-coded px font sizes than 
 allows (web_font_ratchet.py). Those scan the whole tree: seconds, and a failure in any file. This reads only the files
 the change touches and the baseline entries it edits, from Git objects, as the merge leaves them: the change's version,
 merged three ways (git merge-file) with the base's where the base changed the file too. No checkout is needed. Each
-ratchet's own counting and messages apply, and only what the merge adds is reported. A file the base already has away
-from its baseline is the base's failure, unless the change moves it further. A file the two sides change in
-conflicting ways is left to the merge itself, which refuses it.
+ratchet's own counting and messages apply, and only what the merge adds is reported. A count ratchet fails only when a
+count rises (docs/operations/testing.md, "Count ratchets"), so a merge is refused only when a file ends further above
+its baseline than the base has it: a file under its baseline merges, as the checkers pass it. A file the base already
+has above its baseline is the base's failure, unless the change moves it further. A file the two sides change in
+conflicting ways is left to the merge itself, which refuses it. Holding a changed file to its count at the base, as
+the checkers do with --base, is not done here: a change that raises a count back into the room a fall left under the
+baseline merges.
 
 scripts/hooks/merge-pr.sh runs it before merging, with its trusted copy of this script and of the ratchets:
 
@@ -106,6 +110,20 @@ class Repository:
         out = self.run(["diff", "--name-only", "--no-renames", "-z", old, new, "--"])
         return [name for name in out.decode("utf-8", "surrogateescape").split("\0") if name]
 
+    def renames(self, old, new):
+        """{new path: old path} for the files git's rename detection sees as moved between two commits."""
+        out = self.run(["diff", "--name-status", "-M", "-z", old, new, "--"])
+        fields = out.decode("utf-8", "surrogateescape").split("\0")
+        moved, at = {}, 0
+        while at < len(fields) and fields[at]:
+            if fields[at].startswith(("R", "C")):
+                if fields[at].startswith("R"):
+                    moved[fields[at + 2]] = fields[at + 1]
+                at += 3
+            else:
+                at += 2
+        return moved
+
     def blobs(self, rev, paths):
         """{path: bytes} for the paths that are files at rev; a path that is absent or not a file is missing."""
         wanted = [path for path in paths if (rev, path) not in self.cache]
@@ -199,9 +217,9 @@ class Change:
 
 
 def worse(got, allowed, base_got, base_allowed):
-    """Whether a file ends further from its baseline, in a failing direction, than the base has it."""
+    """Whether a file ends further above its baseline than the base has it. Under the baseline is never worse."""
     delta, base_delta = got - allowed, base_got - base_allowed
-    return delta > max(base_delta, 0) or delta < min(base_delta, 0)
+    return delta > max(base_delta, 0)
 
 
 def ratchet_failures(change, ratchet):
@@ -244,7 +262,10 @@ def ratchet_failures(change, ratchet):
             failures.extend(ratchet.violations({path: got}, {path: allowed}))
     if ratchet.raised:
         current = {path: merged_counts[path] for path in sorted(edited) if path in merged_counts}
-        failures.extend(ratchet.raised(current, base_counts, change.base[:12]))
+        # A file the change only moved keeps the entry it had (sleep_ratchet.carry_renames): moving is no raise.
+        moved = {new: old for new, old in change.repo.renames(change.base, change.head).items()
+                 if ratchet.covers(new) and ratchet.covers(old)}
+        failures.extend(ratchet.raised(current, sleep_ratchet.carry_renames(base_counts, moved), change.base[:12]))
     return failures, notes
 
 

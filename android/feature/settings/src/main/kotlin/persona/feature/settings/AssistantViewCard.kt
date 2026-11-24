@@ -183,9 +183,9 @@ internal fun AssistantViewCard(key: String, version: Long, card: AssistantCard, 
 
     fun open(url: String) {
         when (val target = AssistantOpen.target(url)) {
-            is AssistantOpenTarget.Web -> runCatching { uri.openUri(target.url) }
-            is AssistantOpenTarget.Session -> runCatching {
-                uri.openUri("persona://session/${segment(target.machine)}/${segment(target.session)}")
+            is AssistantOpenTarget.Web -> { val _ = runCatching { uri.openUri(target.url) } }
+            is AssistantOpenTarget.Session -> {
+                val _ = runCatching { uri.openUri("persona://session/${segment(target.machine)}/${segment(target.session)}") }
             }
             null -> feedback?.notice(badLinkText)
             else -> feedback?.notice(unsupportedText)
@@ -237,7 +237,7 @@ internal fun AssistantViewCard(key: String, version: Long, card: AssistantCard, 
         press = { item, a -> press(item, a.id) },
         edit = { name, value -> if (!locked) edits[name] = value },
         choose = { if (!locked) choosing = it },
-        open = { url -> if (ExtensionViewText.isHttps(url)) runCatching { uri.openUri(url) } },
+        open = { url -> if (ExtensionViewText.isHttps(url)) { val _ = runCatching { uri.openUri(url) } } },
         segment = { item, value ->
             val action = item.action?.id?.let { card.actions[it] }
             if (action?.reply != null && !locked) {

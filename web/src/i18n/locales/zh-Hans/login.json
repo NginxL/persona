@@ -2,12 +2,11 @@
   "invalid_token": "这把钥匙不对",
   "invalid_link": "这个链接不对或已经用过，在已登录的设备上重新生成一个",
   "title": "连接到 Persona",
-  "subtitle": "用一台已经登录的设备给这个浏览器开门。",
-  "phone_title": "用已登录的手机扫码登录",
+  "get_link": "如何获取登录链接？",
   "phone_step_open": "在已登录的手机或电脑上打开 {path}，选「浏览器」。",
   "phone_path": "设置 › 设备 › 连接新设备",
-  "phone_step_scan": "在手机或平板上用相机扫屏幕上的码，会直接打开并登录。",
-  "phone_step_copy": "要在这台电脑上登录，就在那边点「复制登录链接」，发到这台电脑上打开，或贴到下面。",
+  "phone_step_copy": "点「复制登录链接」，在这个浏览器打开，或粘贴到输入框。",
+  "phone_step_scan": "如果要在手机或平板上打开链接，也可以用相机扫已登录设备上显示的码。",
   "link_placeholder": "粘贴登录链接或配对链接",
   "sign_in": "登录",
   "connect": "用总钥匙连接",
@@ -32,5 +31,8 @@
   "qr_title": "用手机上的 Persona 扫这个码",
   "qr_number_label": "手机上显示的数字",
   "qr_number_hint": "输入手机上显示的数字。只能输一次，输错这次登录就作废。",
-  "qr_voided": "数字不对，这次登录已作废。请刷新二维码再试。"
+  "qr_voided": "数字不对，这次登录已作废。请刷新二维码再试。",
+  "qr_short": "扫码",
+  "help_short": "帮助",
+  "key_short": "密钥"
 }

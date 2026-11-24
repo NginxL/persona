@@ -14,8 +14,8 @@ import (
 // Lessons learned from accepted tasks (#12295; docs/assistant/todos.md "Lessons from accepted tasks"). They are typed
 // records in the project's memory.jsonl, beside the worker outcomes, decisions and pitfalls (M1), and are never changed
 // in place. A lesson taught again, or corrected by the owner, is appended as a record that supersedes it. A deleted
-// lesson gets a lesson_retired tombstone that keeps its kind and text, so the same lesson is not learned again (an
-// undo sticks, docs/design/PRINCIPLES.md 3). Readers keep the newest record of each chain. A manager from before
+// lesson gets a lesson_retired tombstone that keeps its kind and text. Readers keep the newest record of each chain
+// and track the IDs and readable text of deleted versions, so the learner can reject them. A manager from before
 // lessons skips these types (ProjectMemoryForDispatch reads only the types it knows).
 
 // The lesson kinds.
@@ -54,6 +54,9 @@ type ProjectLessons struct {
 	Live []ProjectMemoryRecord
 	// Retired are the tombstones of deleted lessons, each with the deleted lesson's kind and text, newest first.
 	Retired []ProjectMemoryRecord
+	// RetiredTextByID holds tombstones and their earlier versions. It includes the last linked ID even when
+	// its record could not be read, with an empty string in place of the missing text.
+	RetiredTextByID map[string]string
 	// IDs are every lesson record and tombstone read, older versions included.
 	IDs map[string]bool
 }
@@ -106,11 +109,22 @@ func (s *Store) projectLessonsLocked(slug string) (ProjectLessons, error) {
 		return out, err
 	}
 	size, start := info.Size(), int64(0)
+	var partialFirstLine bool
 	if size > projectLessonsScanMost {
-		start = size - projectLessonsScanMost // the cut line is not JSON and is skipped
+		start = size - projectLessonsScanMost
+		var preceding [1]byte
+		if _, err := f.ReadAt(preceding[:], start-1); err != nil {
+			return out, err
+		}
+		partialFirstLine = preceding[0] != '\n'
 	}
+	remaining := size - start
 	superseded := map[string]bool{}
-	err = linesBack(io.NewSectionReader(f, start, size-start), size-start, logChunk, func(line []byte) bool {
+	err = linesBack(io.NewSectionReader(f, start, remaining), remaining, logChunk, func(line []byte) bool {
+		if partialFirstLine && remaining == int64(len(line)) {
+			return false // this is only the end of the oldest line in range
+		}
+		remaining -= int64(len(line)) + 1
 		var r ProjectMemoryRecord
 		if len(bytes.TrimSpace(line)) == 0 || json.Unmarshal(line, &r) != nil || r.ID == "" {
 			return true
@@ -127,6 +141,16 @@ func (s *Store) projectLessonsLocked(slug string) (ProjectLessons, error) {
 			out.Retired = append(out.Retired, r)
 		case !superseded[r.ID] && strings.TrimSpace(r.Conclusion) != "":
 			out.Live = append(out.Live, r)
+		}
+		// Newer records were read first, so a tombstone or its descendant has already marked this version.
+		if _, retired := out.RetiredTextByID[r.ID]; retired || r.Type == ProjectMemoryLessonRetired {
+			if out.RetiredTextByID == nil {
+				out.RetiredTextByID = map[string]string{}
+			}
+			out.RetiredTextByID[r.ID] = r.Conclusion
+			if _, known := out.RetiredTextByID[r.SupersedesID]; r.SupersedesID != "" && !known {
+				out.RetiredTextByID[r.SupersedesID] = ""
+			}
 		}
 		return true
 	})

@@ -450,7 +450,7 @@ func TestSecretRunDismissal(t *testing.T) {
 		at   time.Duration
 		want string
 	}{{-10 * time.Minute, secretDeclined}, {-3 * time.Second, secretDeclined}, {-time.Second, secretExpired}, {0, secretExpired}, {time.Minute, secretExpired}} {
-		if got, _ := secretRunDismissal(expires.Add(c.at), expires); got != c.want {
+		if got, _ := secretRunDismissal(proto.Resolution{Dismiss: true}, expires.Add(c.at), expires); got != c.want {
 			t.Errorf("dismissed %v from the deadline: %s, want %s", c.at, got, c.want)
 		}
 	}

@@ -1,6 +1,7 @@
 package transcript
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"testing"
@@ -46,7 +47,7 @@ func TestChangedSeesWhatRefreshWould(t *testing.T) {
 	if err := os.Rename(other, path); err != nil {
 		t.Fatal(err)
 	}
-	if inodeOf(t, path) != 0 { // a file system without inodes (Windows) sees no replacement, as before
+	if inodeOf(t, path) != 0 {
 		if !f.Changed() {
 			t.Fatal("a file replaced by one of the same size is a change")
 		}
@@ -68,9 +69,95 @@ func TestChangedSeesWhatRefreshWould(t *testing.T) {
 
 func inodeOf(t *testing.T, path string) uint64 {
 	t.Helper()
-	st, err := os.Stat(path)
+	st, err := statTranscript(path)
 	if err != nil {
 		t.Fatal(err)
 	}
 	return inode(st)
+}
+
+// Rebuilt desktop histories can preserve their first line and be the same size or larger.
+// Each replacement must discard old messages and begin a new history from line one.
+func TestTranscriptReplacementStartsNewHistory(t *testing.T) {
+	for _, larger := range []bool{false, true} {
+		name := "same size"
+		if larger {
+			name = "larger"
+		}
+		t.Run(name, func(t *testing.T) {
+			dir := t.TempDir()
+			first := `{"type":"user","uuid":"u1","message":{"role":"user","content":"one"}}`
+			old := `{"type":"user","uuid":"u2","message":{"role":"user","content":"old"}}`
+			next := `{"type":"user","uuid":"u3","message":{"role":"user","content":"new"}}`
+			path := writeFile(t, dir, []string{first, old}, "")
+			f := NewFile(path)
+			_, before, err := f.RefreshSpan()
+			if err != nil {
+				t.Fatal(err)
+			}
+			replacement := first + "\n" + next + "\n"
+			wantLines := 2
+			if larger {
+				replacement += `{"type":"user","uuid":"u4","message":{"role":"user","content":"more"}}` + "\n"
+				wantLines++
+			}
+			other := filepath.Join(dir, "replacement.jsonl")
+			if err := os.WriteFile(other, []byte(replacement), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Rename(other, path); err != nil {
+				t.Fatal(err)
+			}
+			if !f.Changed() {
+				t.Fatal("replacement was not detected")
+			}
+			fresh, after, err := f.RefreshSpan()
+			if err != nil || after.History == before.History || after.From != 0 || after.To != wantLines {
+				t.Fatalf("replacement span = %+v, %v; before = %+v", after, err, before)
+			}
+			if len(fresh) != wantLines || fresh[0].Seq != 1 || fresh[1].Text != "new" {
+				t.Fatalf("replacement messages = %+v", fresh)
+			}
+			page, _, span := f.Page(0, 10)
+			if len(page) != wantLines || page[1].Text != "new" || span.History != after.History {
+				t.Fatalf("replacement page = %+v, %+v", page, span)
+			}
+			if f.Changed() {
+				t.Fatal("replacement should be unchanged after it has been read")
+			}
+		})
+	}
+}
+
+func TestTranscriptPageDoesNotMixReplacedHistory(t *testing.T) {
+	defer func(w int64) { windowBytes = w }(windowBytes)
+	f, _ := windowedClaude(t, 0)
+	base, history := f.base, f.history()
+	data, err := os.ReadFile(f.Path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	other := filepath.Join(filepath.Dir(f.Path), "replacement.jsonl")
+	if err := os.WriteFile(other, bytes.ReplaceAll(data, []byte("answer"), []byte("change")), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(other, f.Path); err != nil {
+		t.Fatal(err)
+	}
+	// A page requested before the next refresh must not read new messages using old offsets.
+	if page, _, _ := f.Page(base+1, 10); len(page) != 0 || f.base != base {
+		t.Fatalf("stale page read replacement messages: %+v, base %d to %d", page, base, f.base)
+	}
+	if _, span, err := f.RefreshSpan(); err != nil || span.History == history {
+		t.Fatalf("refresh did not replace the window: %+v, %v", span, err)
+	}
+	page, _, _ := f.Page(0, 10)
+	if len(page) == 0 {
+		t.Fatal("replacement page is empty")
+	}
+	for _, item := range page {
+		if !bytes.HasPrefix([]byte(item.Text), []byte("change ")) {
+			t.Fatalf("replacement page retained an old message: %+v", item)
+		}
+	}
 }

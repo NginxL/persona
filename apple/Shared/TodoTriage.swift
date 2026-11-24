@@ -17,16 +17,17 @@ nonisolated enum TodoSection: String, CaseIterable, Sendable {
     case pr
     /// Open, recently active, none of the above.
     case other
-    /// Closed, accepted or deployed in the last 24 hours, or a turn nobody has seen / a review not done yet; not seen
-    /// by the owner since.
+    /// Fresh closed or accepted results, delivered work still waiting to be seen or accepted; unaccepted live has no timeout.
     case justDone = "just_done"
     /// A task with no activity for 48 hours and nothing running.
     case shelved
-    /// Closed, accepted or deployed more than 24 hours ago or seen since; a finished turn seen since it last moved.
+    /// Closed, accepted or superseded immediately; an unsupervised finished turn seen since it moved.
     case done
+    /// Cancelled, with its reason; never mixed into Done (#5732).
+    case cancelled
 
-    /// Shelved and Done start folded; the rest start open, unfinished to-dos included.
-    var startsFolded: Bool { self == .shelved || self == .done }
+    /// Shelved, Done and Cancelled start folded; unfinished to-dos stay open (#5707, #5732).
+    var startsFolded: Bool { self == .shelved || self == .done || self == .cancelled }
 
     /// The section's header (the web's `todos.section_*`).
     var title: String {
@@ -38,7 +39,16 @@ nonisolated enum TodoSection: String, CaseIterable, Sendable {
         case .other: String(localized: "Other Open")
         case .shelved: String(localized: "Shelved")
         case .done: String(localized: "Done [To-do Sections]")
+        case .cancelled: String(localized: "Canceled")
         }
+    }
+    /// Closed concerns and mixed sections keep the ordinary Just finished wording; only unaccepted deliveries awaiting
+    /// review use the more specific title, matching Android and the web (#5732).
+    func title(rules: [TodoTriageRule]) -> String {
+        if self == .justDone, !rules.isEmpty, rules.allSatisfy({ $0 == .finishedUnseen }) {
+            return String(localized: "Delivered · Awaiting Review [To-do Sections]")
+        }
+        return title
     }
 }
 
@@ -49,7 +59,7 @@ nonisolated enum TodoBucket: String, Sendable {
 
 /// Which SOP rule placed a to-do; the section follows from it.
 nonisolated enum TodoTriageRule: String, Sendable {
-    case failedStart = "failed_start", superseded, agentAsks = "agent_asks", ownerDecides = "owner_decides", agentRunning = "agent_running"
+    case failedStart = "failed_start", cancelled, superseded, agentAsks = "agent_asks", ownerDecides = "owner_decides", agentRunning = "agent_running"
     case closed, accepted, deployed, finishedUnseen = "finished_unseen", prOpen = "pr_open", seen, stale, rest
 }
 
@@ -85,22 +95,33 @@ nonisolated struct TodoTriageResult: Sendable {
     var open: Int
     var shelved: Int
     var finished: Int
+    /// Cancelled to-dos, separate from completed (#5732).
+    var cancelled: Int
 
     func groups(_ section: TodoSection) -> [TodoTriageGroup] { sections[section] ?? [] }
     var isEmpty: Bool { sections.values.allSatisfy(\.isEmpty) }
 }
 
 nonisolated enum TodoTriageLogic {
+    /// Legacy raw sealed-compaction detection shared with the app and watch, which do not link PersonaKit.
+    private static func unrecoverableLegacy(_ text: String?) -> Bool {
+        let s = (text ?? "").lowercased()
+        return s.contains("compacted natively") && s.contains("compaction is sealed") && s.contains("to that account")
+    }
+
     /// No activity for this long, nothing of it running: shelved.
     static let shelveAfter: TimeInterval = 48 * 3600
-    /// Finished this recently, and not seen since: Just finished; earlier, Done. Seeing it (Got It, or opening it,
-    /// #5707) files it at once; the time is the fallback.
+
+    /// The Assistant Finished projection's recency window. Concern visibility uses justDoneAfter instead.
     static let justDone: TimeInterval = 24 * 3600
+
+    /// A fresh closed concern stays visible for this long unless its report has been seen.
+    static let justDoneAfter: TimeInterval = 24 * 3600
 
     /// How a to-do's linked agents stand, the way the web's `todoStatus` reads them: an open ask does not count here
     /// (rules 3 and 8 read it), unlike `TaskState(todo:agents:)`.
     enum AgentsStatus: Equatable, Sendable {
-        case failed, done, notStarted, needsYou, interrupted, usageLimit, unread, working, followUp
+        case failed, done, notStarted, needsYou, interrupted, usageLimit, unread, working, waiting, followUp
     }
 
     static func agentsStatus(_ todo: TodoItem, lookup: TodosLogic.SessionLookup?) -> AgentsStatus {
@@ -108,23 +129,32 @@ nonisolated enum TodoTriageLogic {
         if todo.doneAt != nil { return .done }
         let active = todo.activeAgents
         if active.isEmpty { return .notStarted }
-        var interrupted = false, limit = false, unread = false, working = false
+        var interrupted = false, limit = false, unread = false, working = false, waiting = false
         for a in active {
             if let e = a.startError, !e.isEmpty { continue } // a failed start counts as stopped
             let s = lookup?(a.machineID, a.sessionID)
             let st = s?.state ?? .offline
-            if st == .needsYou { return .needsYou }
+            if st == .needsYou || s?.status == .blocked || (s?.pendingInteractions ?? 0) > 0 { return .needsYou }
             let stopped = st == .unread || st == .idle
             let error = !(s?.turnError ?? "").isEmpty
             if error, s?.turnErrorKind == "usage_limit", stopped { limit = true }
+            else if error, stopped, (s?.turnErrorKind == "unrecoverable" || s?.turnErrorCode == "compaction_sealed" ||
+                unrecoverableLegacy(s?.turnError)) {
+                interrupted = true
+            }
+            else if st == .working || s?.starting == true { working = true }
+            else if active.count > 1, st != .working, s?.waitsToBeWoken == true { waiting = true }
+            else if st != .needsYou, st != .unread, s?.work?.phase == "blocked", ["agent", "external", "transient"].contains(s?.work?.on ?? "") {
+                waiting = true
+            }
             else if error, stopped { interrupted = true }
             else if st == .unread { unread = true }
-            else if st == .working || s?.starting == true { working = true }
         }
-        if interrupted { return .interrupted }
+        if interrupted, !working, !waiting, todo.supervision?.state != "parked" { return .interrupted }
         if limit { return .usageLimit }
         if unread { return .unread }
         if working { return .working }
+        if waiting { return .waiting }
         return .followUp
     }
 
@@ -140,12 +170,36 @@ nonisolated enum TodoTriageLogic {
         return times.compactMap { $0 }.max() ?? .distantPast
     }
 
-    /// The PR its work stopped at, still to merge: the hub says the delivery stopped at a PR, or it knows a PR and no
-    /// delivery state past it.
-    static func openPR(_ todo: TodoItem) -> Bool {
-        let d = todo.delivery?.state ?? ""
-        if d == "pr" { return true }
-        return !(todo.prURL ?? "").isEmpty && (d.isEmpty || d == "none")
+    /// How long hub-read PR facts remain authoritative for triage, matching the web and Android.
+    private static let prStatusFresh: TimeInterval = 15 * 60
+
+    private static func normalizedPR(_ url: String?) -> String {
+        (url ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: "[#?].*$", with: "", options: .regularExpression)
+            .replacingOccurrences(of: "/+$", with: "", options: .regularExpression)
+            .lowercased()
+    }
+
+    /// This task's PRs whose fresh facts say open and non-draft: the current URL first, then earlier PRs (#7935).
+    static func openMergePRs(_ todo: TodoItem, now: Date) -> [TodoPRStatus] {
+        func fresh(_ facts: TodoPRStatus) -> Bool {
+            guard let checked = JSON.parseDate(facts.checkedAt ?? "") else { return false }
+            let age = now.timeIntervalSince(checked)
+            return age >= 0 && age <= prStatusFresh && facts.state == "open" && !facts.draft
+        }
+        var out: [TodoPRStatus] = []
+        if let current = todo.prStatus, let prURL = todo.prURL,
+           normalizedPR(prURL) == normalizedPR(current.url), fresh(current) {
+            out.append(current)
+        }
+        for facts in todo.otherPRs ?? [] where normalizedPR(facts.url) != normalizedPR(todo.prURL) && fresh(facts) {
+            out.append(facts)
+        }
+        return out
+    }
+
+    static func hasOpenPR(_ todo: TodoItem, now: Date) -> Bool {
+        !openMergePRs(todo, now: now).isEmpty
     }
 
     /// A task (an agent was linked, or a conversation handed it out) with no due date ahead. The user's own to-dos
@@ -162,60 +216,75 @@ nonisolated enum TodoTriageLogic {
         return a
     }
 
+    /// Got It files a finished turn only when no acceptance is still required. An open concern goes to Other open rather
+    /// than Done after Seen and bypasses only the ordinary live-delivery restriction, never review or supervision (#5732, #3582).
+    static func seenCanFile(_ todo: TodoItem) -> Bool {
+        (todo.isConcern || todo.delivery?.state != "live") && todo.reviewState != .pendingReview && (todo.supervision?.supervisor ?? "").isEmpty
+    }
+
     /// A to-do's section by the SOP's decision table, first match wins:
     ///
     ///  1. failedStart    the task's agent never started                    → Waiting on you, Done after 48 h;
-    ///     superseded     … and a related to-do (its row) really finished   → Just finished (24 h), then Done (#3713)
+    ///     superseded     … and a related to-do (its row) really finished   → Done immediately (#3713)
     ///  2. agentAsks      an agent asks (question, approval) or was cut off → Waiting on you
-    ///  3. ownerDecides   review says needs_user, or a decision / "cannot" ask → Waiting on you
+    ///  3. ownerDecides   review says needs_user, or an undismissed decision / "cannot" ask → Waiting on you
     ///  4. agentRunning   an agent is working or starting                   → Working
-    ///  5. closed         done_at set                                       → Just finished (24 h), then Done
-    ///  6. accepted       the latest review accepted it (even reopened)     → Just finished (24 h), then Done
-    ///  7. deployed       its delivery is live                              → Just finished (24 h), then Done
-    ///  8. finishedUnseen an agent finished unseen, awaits review, or a done ask → Just finished
+    ///  5. closed         done_at set                                       → Just finished for a fresh unseen report, Done otherwise
+    ///  6. accepted       the latest review accepted it (even reopened)     → Done immediately
+    ///  7. finishedUnseen its delivery is live, not accepted                → Delivered · awaiting review, no timeout
+    ///  8. finishedUnseen an agent finished unseen, awaits review, or a done ask → Delivered · awaiting review
     ///  9. prOpen         its PR is open, nothing running                   → PR to merge (however old)
-    ///  9a. seen          rule 8, seen since it last moved, no PR open      → Done
+    ///  9a. seen          rule 8 without supervision, seen since it last moved, no PR open → Done
     /// 10. stale          a task with no activity for 48 h                  → Shelved
     /// 11. rest           anything else                                     → Other open
     ///
-    /// Seen (#5707): the owner looked at it (`seenAt`: Got It, or opening it) at or after the moment that put it in Just
-    /// finished — its close, its accepting review, its deploy, its last move for rule 8 — so it goes to Done at once.
+    /// Seen (#5707) files only an unsupervised finished turn. A supervised task or an unaccepted live delivery remains
+    /// awaiting review even after the owner opens it (#5732).
     static func triage(_ todo: TodoItem, lookup: TodosLogic.SessionLookup?, now: Date, restoredAt: Date? = nil,
                        superseded: Bool = false, calendar: Calendar = .current) -> TodoTriage {
         let last = lastActivity(todo, lookup: lookup, restoredAt: restoredAt)
         let status = agentsStatus(todo, lookup: lookup)
-        // seen: the owner looked at it at or after `at`; fresh: it got to Just finished at `at`, under a day ago, unseen since
+        // Seen files an unsupervised finished turn (#5707), never a task that still needs acceptance (#5732).
+        // Acceptance and ordinary closure are already Done; a fresh reported concern leaves Just finished once seen.
         let seen = { (at: Date) in todo.seenAt.map { $0 >= at } ?? false }
-        let fresh = { (at: Date) in now.timeIntervalSince(at) < justDone && !seen(at) }
+        let fresh = { (at: Date) in now.timeIntervalSince(at) < justDoneAfter && !seen(at) }
         let ask = openAsk(todo)
         let review = todo.reviewState
         // An open concern closes only with its report: nothing else files it with the finished ones (#3582).
         let concern = todo.isConcern && todo.doneAt == nil
         func at(_ s: TodoSection, _ r: TodoTriageRule) -> TodoTriage { TodoTriage(section: s, rule: r, last: last) }
 
+        if todo.isCancelled { return at(.cancelled, .cancelled) }
         if status == .failed {
             // the same piece of work finished in a related to-do (`supersededFailedStarts`): history, nothing to retry
-            if superseded { return at(fresh(todo.doneAt ?? last) ? .justDone : .done, .superseded) }
+            if superseded { return at(.done, .superseded) }
             if now.timeIntervalSince(last) < shelveAfter { return at(.waiting, .failedStart) }
             return concern ? at(.other, .rest) : at(.done, .failedStart)
         }
         if status == .needsYou || status == .interrupted { return at(.waiting, .agentAsks) }
-        if todo.doneAt == nil, review == .userCheck || todo.delivery?.waitsForOwner == true ||
-            review == .needsUser || ask?.outcome == "decide" || ask?.outcome == "cannot" {
+        let ownerDelivery = todo.delivery?.waitsForOwner == true
+        let ownerReview = review == .userCheck || !todo.decisionDismissed &&
+            (review == .needsUser || ask?.outcome == "decide" || ask?.outcome == "cannot")
+        if todo.doneAt == nil, ownerDelivery || ownerReview {
             return at(.waiting, .ownerDecides)
         }
-        if status == .working { return at(.working, .agentRunning) }
-        if let done = todo.doneAt { return at(fresh(done) ? .justDone : .done, .closed) }
+        if status == .working || status == .waiting { return at(.working, .agentRunning) }
+        if let doneAt = todo.doneAt {
+            // A concern's unseen report stays in Just finished for 24 h; its rule remains Closed, not FinishedUnseen.
+            return at(todo.isConcern && fresh(doneAt) ? .justDone : .done, .closed)
+        }
         if !concern, todo.acceptanceStands {
-            return at(fresh(todo.supervision?.latestReview?.at ?? .distantPast) ? .justDone : .done, .accepted)
+            return at(.done, .accepted)
         }
-        if !concern, todo.delivery?.state == "live" {
-            return at(fresh(todo.delivery?.at ?? last) ? .justDone : .done, .deployed)
-        }
+        // Live is delivery, not acceptance: an unreviewed live task stays open and awaiting review, however old (#5732).
+        // An open concern still waits for its own report instead (#3582).
+        if !concern, todo.delivery?.state == "live" { return at(.justDone, .finishedUnseen) }
         let finished = status == .unread || review == .pendingReview || (ask != nil && (ask?.outcome ?? "").isEmpty)
             || ask?.outcome == "done"
-        if finished, !seen(last) { return at(.justDone, .finishedUnseen) }
-        if openPR(todo) { return at(.pr, .prOpen) }
+        let acceptanceRequired = !seenCanFile(todo)
+        // Parked open-PR work is not awaiting acceptance; keep it in PR to Merge, matching Android and the web (#5732).
+        if finished, (!seen(last) || acceptanceRequired), todo.supervision?.state != "parked" { return at(.justDone, .finishedUnseen) }
+        if hasOpenPR(todo, now: now) { return at(.pr, .prOpen) }
         // seen since it last moved, and no PR waits on the owner; a concern is never Done while open
         if finished, !concern { return at(.done, .seen) }
         if shelvable(todo, now: now, calendar: calendar), now.timeIntervalSince(last) >= shelveAfter { return at(.shelved, .stale) }
@@ -231,18 +300,18 @@ nonisolated enum TodoTriageLogic {
         case .closed: todo.doneAt ?? .distantPast
         case .accepted: todo.supervision?.latestReview?.at ?? .distantPast
         case .deployed: todo.delivery?.at ?? t.last
+        case .finishedUnseen: todo.delivery?.state == "live" ? (todo.delivery?.at ?? t.last) : t.last
         case .superseded: todo.doneAt ?? t.last
         default: t.last
         }
     }
 
-    /// Whether a to-do counts toward the header's open count: not closed, not accepted or deployed, not shelved. A
-    /// finished turn nobody looked at yet (Just finished, still open) counts: only a review or the user closes a to-do.
-    /// One the owner has seen since (rule 9a, in Done) does not.
+    /// Whether a to-do counts toward the header's open count: not closed, accepted or shelved. An unaccepted delivery
+    /// still counts after being seen; only an unsupervised finished turn can be filed by Seen (#5707, #5732).
     static func countsAsOpen(_ todo: TodoItem, _ t: TodoTriage) -> Bool {
         // a failed start has done_at too (the hub ends it), yet while it waits on the owner it is theirs to retry: open
         if t.rule == .failedStart { return t.section == .waiting }
-        if todo.doneAt != nil || t.section == .shelved || t.section == .done { return false }
+        if todo.doneAt != nil || t.section == .cancelled || t.section == .shelved || t.section == .done { return false }
         return t.rule != .accepted && t.rule != .deployed
     }
 
@@ -335,7 +404,7 @@ nonisolated enum TodoTriageLogic {
         for td in list {
             // An open concern has its own row and cannot join, directly or through another to-do (#3582).
             if td.isConcern && td.doneAt == nil { continue }
-            let side = td.doneAt != nil ? "c" : "o"
+            let side = td.isCancelled ? "x" : td.doneAt != nil ? "c" : "o"
             for k in relatedKeys(td) {
                 let key = side + "|" + k
                 if let other = owner[key] {
@@ -356,7 +425,7 @@ nonisolated enum TodoTriageLogic {
     /// badge and the assistant's entries alike (the web's `supersededFailedStarts`).
     static func supersededFailedStarts(_ todos: [TodoItem]) -> Set<String> {
         let root = relatedRoots(todos)
-        let finished = Set(todos.filter { $0.doneAt != nil && !$0.failedToStart }.compactMap { root[$0.id] })
+        let finished = Set(todos.filter { $0.doneAt != nil && !$0.failedToStart && !$0.isCancelled }.compactMap { root[$0.id] })
         return Set(todos.filter { $0.failedToStart && root[$0.id].map(finished.contains) == true }.map(\.id))
     }
 
@@ -392,6 +461,7 @@ nonisolated enum TodoTriageLogic {
             if countsAsOpen(td, t) { open += 1 }
         }
         let shelved = counts[.shelved] ?? 0
+        let cancelled = counts[.cancelled] ?? 0
         let order = Dictionary(uniqueKeysWithValues: TodoSection.allCases.enumerated().map { ($0.element, $0.offset) })
         var sections = Dictionary(uniqueKeysWithValues: TodoSection.allCases.map { ($0, [TodoTriageGroup]()) })
         for r in rootOrder {
@@ -414,7 +484,7 @@ nonisolated enum TodoTriageLogic {
             sections[s]!.sort { a, b in a.last != b.last ? a.last > b.last : a.key < b.key }
         }
         return TodoTriageResult(sections: sections, todoCounts: counts, open: open, shelved: shelved,
-                                finished: list.count - open - shelved)
+                                finished: list.count - open - shelved - cancelled, cancelled: cancelled)
     }
 }
 

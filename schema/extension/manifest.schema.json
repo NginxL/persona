@@ -308,7 +308,7 @@
         "network": {"type": "array", "items": {"$ref": "#/$defs/NetworkEntry"}},
         "hub_api": {"type": "boolean", "description": "The old way: the hub's full token. With hub scopes, the scopes win."},
         "hub": {"type": "array", "description": "The scopes of the hub's API it calls: its token opens their routes only.",
-          "items": {"type": "string", "pattern": "^(kb\\.read|kb\\.write|sent\\.read|inbox\\.read|inbox\\.write|agents\\.read|agents\\.control|agents\\.permission_mode|machines\\.read|notify|assistant\\.ask|assistant\\.read|assistant\\.memory\\.read|todos\\.read|todos\\.write|decisions\\.raise|leaders\\.read|assistant\\.dispatch_policy|assistant\\.start_defaults|dispatch.guard|models|transcription|market\\.refresh_own|extensions\\.call:[a-z0-9][a-z0-9_-]{0,31})$"}},
+          "items": {"type": "string", "pattern": "^(kb\\.read|kb\\.write|sent\\.read|inbox\\.read|inbox\\.write|agents\\.read|agents\\.control|agents\\.permission_mode|machines\\.read|machines\\.pair|browser\\.run|notify|assistant\\.ask|assistant\\.read|assistant\\.memory\\.read|assistant\\.entries\\.read|todos\\.read|todos\\.write|decisions\\.raise|leaders\\.read|leaders\\.write|assistant\\.dispatch_policy|assistant\\.start_defaults|dispatch.guard|models|transcription|market\\.refresh_own|extensions\\.call:[a-z0-9][a-z0-9_-]{0,31})$"}},
         "launcher_keys": {"type": "boolean"},
         "gh_login": {"type": "boolean", "description": "It asks the hub for the GitHub token of a computer's gh login (the one the user picks for the GitHub connector), held in its memory only."},
         "usage_gateways": {"type": "boolean", "description": "It reads the account list of the account-pool gateways in the hub's usage sources (usage.gateway_accounts): accounts, status and quota windows, never a key."},
@@ -364,6 +364,7 @@
         "auth_relay": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/AuthRelayItem"}},
         "secret_providers": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/SecretProviderItem"}},
         "repository_providers": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/RepositoryProviderItem"}},
+        "memory_sources": {"type": "array", "minItems": 1, "maxItems": 1, "items": {"$ref": "#/$defs/MemorySourceItem"}},
         "messaging": {"type": "array", "minItems": 1, "items": {"$ref": "messaging.schema.json#/$defs/MessagingItem"}}
       }
     },
@@ -578,6 +579,17 @@
           "items": {"$ref": "#/$defs/RepositoryCapability"}}
       },
       "required": ["id", "name", "hosts"]
+    },
+    "MemorySourceItem": {
+      "description": "The extension's memory, read by the manager one entry at a time (memory.entries; memory.schema.json) so the hub decides which entries reach which scene (a conversation's standing context, a recall, a dispatched task, the Inbox's helper). Needs the program to speak the protocol; one per extension. Once declared, the hub stops delivering the extension's own text outlets (its assistant instructions, project context, Inbox context and its connectors' read tools in the assistant's conversations) directly.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {"$ref": "#/$defs/ID"},
+        "name": {"type": "string", "minLength": 1, "maxLength": 80, "pattern": "^[^\\x00-\\x1f\\x7f-\\x9f]*[^\\x00-\\x20\\x7f-\\xa0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000][^\\x00-\\x1f\\x7f-\\x9f]*$",
+          "description": "What settings call the source (My memory). Not only spaces, no control characters."}
+      },
+      "required": ["id", "name"]
     },
     "RepositoryCapability": {
       "description": "A repository provider's optional answer: pr_status (repo.pr_status).",
@@ -829,6 +841,7 @@
         "max_text": {"type": "integer", "minimum": 0},
         "asks": {"type": "string", "enum": ["none", "text", "buttons"]},
         "push": {"type": "boolean"},
+        "reply_only": {"type": "boolean", "description": "It only replies to incoming messages or triggers and cannot send unsolicited proactive messages without reply_to; testing checks connectivity instead of calling channel.send."},
         "typing": {"type": "boolean"},
         "progress": {"type": "boolean"},
         "threads": {"type": "boolean"}
@@ -839,7 +852,7 @@
       "additionalProperties": false,
       "properties": {
         "id": {"$ref": "#/$defs/ID"},
-        "subscribe": {"type": "array", "minItems": 1, "items": {"type": "string", "enum": ["kb.changed", "kb.forgotten", "inbox.changed", "agent.needs_you", "agent.finished", "todo.changed", "todo.decision", "leader.changed", "leader.report"]}}
+        "subscribe": {"type": "array", "minItems": 1, "items": {"type": "string", "enum": ["assistant.entries.changed", "kb.changed", "kb.forgotten", "inbox.changed", "agent.needs_you", "agent.finished", "todo.changed", "todo.decision", "leader.changed", "leader.report"]}}
       },
       "required": ["id", "subscribe"]
     },

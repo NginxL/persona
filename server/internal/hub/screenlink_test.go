@@ -170,7 +170,7 @@ func TestOnlyAPhoneOfferingTheScreenLinkGetsIt(t *testing.T) {
 				t.Fatalf("the node was asked %v", asked)
 			}
 			if tc.wantProto == link {
-				return // the node's session framing from here: internal/node and internal/screenlink test it
+				return // the node's session framing from here: internal/node and internal/modules/screen-share/screenlink test it
 			}
 			// The raw stream, both ways: Screen Sharing's greeting, then the phone's bytes echoed back unchanged.
 			nc := websocket.NetConn(ctx, c, websocket.MessageBinary)

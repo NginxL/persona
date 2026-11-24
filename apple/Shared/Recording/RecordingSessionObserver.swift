@@ -1,4 +1,3 @@
-#if os(iOS) || os(visionOS) || os(watchOS)
 import AVFoundation
 
 /// What the audio session tells a recording, the same on every OS version: watchOS / iOS / visionOS 27 say it with
@@ -58,4 +57,3 @@ final class RecordingSessionObserver {
         })
     }
 }
-#endif

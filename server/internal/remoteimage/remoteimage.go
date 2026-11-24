@@ -281,6 +281,18 @@ func (f *Fetcher) serve(ctx context.Context, caller, sub, id string, size int, f
 	}
 }
 
+// Fit is fit (render.go) within the decode slots the fetches use: decoding may hold a large picture in memory, so a
+// burst of pictures sent to the channels waits its turn rather than decoding all at once. A wait ends with ctx.
+func (f *Fetcher) Fit(ctx context.Context, src []byte, most int) (*Image, error) {
+	select {
+	case f.decodes <- struct{}{}:
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+	defer func() { <-f.decodes }()
+	return fit(src, most)
+}
+
 // make fetches (or finds) the source, draws the size and keeps it.
 func (f *Fetcher) make(ctx context.Context, caller, sub, id string, size int, out string, fetch func(context.Context) ([]byte, error)) (*Image, error) {
 	src, err := f.source(ctx, caller, sub, id, fetch)

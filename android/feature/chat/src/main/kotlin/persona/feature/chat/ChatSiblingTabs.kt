@@ -35,7 +35,7 @@ internal fun spaceTabs(session: Session?, sessions: List<Session>): List<Session
         if (other.machineId != session.machineId || other.assistant || other.agentState == AgentState.Offline) continue
         if (other.spaceId?.takeIf(String::isNotBlank) != space) continue
         if (other.key != session.key &&
-            other.foldedUnder?.takeIf(String::isNotBlank)?.let { SessionKey(other.machineId, it) in listed } == true) continue
+            other.foldedUnderKey?.let { it in listed } == true) continue
         val pane = other.paneId?.takeIf(String::isNotBlank)
         if (pane == null) { if (rest.none { it.key == other.key }) rest += other; continue }
         val had = byPane[pane]

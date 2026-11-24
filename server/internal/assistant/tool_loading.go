@@ -24,7 +24,7 @@ import (
 var coreTools = []string{
 	"agent_archive", "agent_interrupt", "agent_read", "agent_send", "agent_start", "agent_supervise", "agents_list",
 	"ask_user", "cancel_followup", "conversation_read", "conversation_send", "conversations_list", "interaction_answer",
-	"kb_get", "kb_list", "kb_search", "kb_update", "lark_chats", "lark_messages", "lark_search", "larkcli_chats",
+	"kb_get", "kb_list", "kb_search", "kb_update", "lark_chats", "lark_image", "lark_messages", "lark_search", "larkcli_chats",
 	"larkcli_messages", "larkcli_search", "list_followups", "machines_list", "model_profiles_list", "notify_user",
 	"persona_settings", "schedule_followup", "schedule_routine", "supervision_finish", "task_plan", "task_review",
 	"task_scope", "todo_get", "todo_list", "todo_update",
@@ -42,7 +42,7 @@ var workGuideTools = []string{
 	"agent_supervise", "agent_transfer", "task_plan", "task_plan_withdraw", "task_scope", "task_retry",
 	"task_start_screen", "task_start_keys", "task_review", "task_decided", "leader_progress", "direction_name",
 	"todo_list", "todo_get", "todo_create", "todo_update", "todo_complete", "todo_reopen", "todo_delete", "concern_report",
-	"conversations_list", "conversation_read", "conversation_rename", "conversation_tags_set", "conversation_new",
+	"conversations_list", "conversations_switch", "conversation_read", "conversation_rename", "conversation_tags_set", "conversation_new",
 	"conversation_send", "conversation_archive", "conversation_unarchive", "repositories_list", "repository_get",
 	"repository_add", "todo_repositories_get", "todo_repositories_set", "todo_repository_links_add", "todo_repository_links_set",
 }

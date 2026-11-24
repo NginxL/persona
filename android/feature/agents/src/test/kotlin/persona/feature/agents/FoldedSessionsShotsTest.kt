@@ -68,7 +68,7 @@ class FoldedSessionsShotsTest {
                 rule.onNodeWithText(child.title).assertDoesNotExist()
                 rule.onNode(hasText("Which sign-in method should I test?", substring = true) and
                     SemanticsMatcher.keyIsDefined(SemanticsActions.GetTextLayoutResult), useUnmergedTree = true).assertIsDisplayed()
-                rule.onNodeWithText("Subagents running: 3", substring = true).assertExists()
+                rule.onNodeWithText("Subagents · 1 need you", substring = true).assertExists()
                 val bitmap = rule.onNodeWithTag("shot").captureToImage().asAndroidBitmap()
                 colors += bitmap.getPixel(2, 2)
                 out.resolve("parent-${s.name.lowercase()}-${if (d) "dark" else "light"}.png").outputStream().use {

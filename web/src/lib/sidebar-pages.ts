@@ -10,6 +10,8 @@
 // What is not decided by the user: the built-in pages stay in the list; an extension's page does too while fewer
 // than EXTENSION_CAP extension pages are in it, and goes under More after that, so installing a tenth extension
 // does not make the list longer. Settings always stays in the list (it is where all this is changed).
+// More itself can be hidden (#13798): its row, rail menu and phone-grid button disappear together. Its pages keep their
+// switches and arrangement for when it comes back; Settings remains the fixed recovery path.
 import { useSyncExternalStore } from "react";
 
 const KEY = "sidebar.pages";
@@ -26,7 +28,7 @@ export type PageGroup = { id: string; title?: string };
 
 /** What the user chose: an order (keys, the first ones first) and, per key, shown in the list or put under More; the
  *  groups in their order, the group a page was moved to, and the extensions' groups removed. */
-export type SidebarPrefs = { order: string[]; shown: string[]; hidden: string[]; groups?: PageGroup[]; assign?: Record<string, string>; removed?: string[] };
+export type SidebarPrefs = { order: string[]; shown: string[]; hidden: string[]; groups?: PageGroup[]; assign?: Record<string, string>; removed?: string[]; more?: boolean };
 
 const NONE: SidebarPrefs = { order: [], shown: [], hidden: [] };
 
@@ -38,7 +40,7 @@ const strings = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is
 export function readPrefs(v: unknown): SidebarPrefs {
   if (!v || typeof v !== "object") return NONE;
   const o = v as Record<string, unknown>;
-  const p: SidebarPrefs = { order: strings(o.order), shown: strings(o.shown), hidden: strings(o.hidden) };
+  const p: SidebarPrefs = { order: strings(o.order), shown: strings(o.shown), hidden: strings(o.hidden), ...(typeof o.more === "boolean" ? { more: o.more } : {}) };
   const groups = (Array.isArray(o.groups) ? o.groups : []).filter((g): g is PageGroup => typeof g?.id === "string").map((g) => (g.title ? { id: g.id, title: String(g.title) } : { id: g.id }));
   const assign = Object.entries(o.assign && typeof o.assign === "object" ? o.assign : {}).filter((e): e is [string, string] => typeof e[1] === "string");
   if (groups.length) p.groups = groups;
@@ -57,7 +59,7 @@ export function parsePrefs(raw: string | null): SidebarPrefs {
 }
 
 /** Whether `p` holds any choice at all. */
-export const chosen = (p: SidebarPrefs) => Boolean(p.order.length || p.shown.length || p.hidden.length || p.groups?.length || p.removed?.length || Object.keys(p.assign ?? {}).length);
+export const chosen = (p: SidebarPrefs) => Boolean(p.order.length || p.shown.length || p.hidden.length || p.groups?.length || p.removed?.length || Object.keys(p.assign ?? {}).length || p.more !== undefined);
 
 /** `keys` in the user's order: the ordered ones as ordered; one the order does not know (a page added since, a new
  *  extension) right before the page that comes after it by default, so a new extension's page lands before Settings as it
@@ -94,13 +96,16 @@ export function inList(keys: readonly string[], prefs: SidebarPrefs): Set<string
   return out;
 }
 
+/** Whether More itself is available. It defaults on; hiding it leaves the pages' arrangement and Settings intact. */
+export const moreShown = (p: SidebarPrefs) => p.more !== false;
+
 /** The pages split as the sidebar draws them: the list, then what waits under More, both in the user's order. */
 export function arrangePages<T extends { k: string }>(pages: readonly T[], prefs: SidebarPrefs): { shown: T[]; more: T[] } {
   const byKey = new Map(pages.map((p) => [p.k, p]));
   const keys = ordered(pages.map((p) => p.k), prefs.order);
   const listed = inList(keys, prefs);
   const all = keys.map((k) => byKey.get(k)!);
-  return { shown: all.filter((p) => listed.has(p.k)), more: all.filter((p) => !listed.has(p.k)) };
+  return { shown: all.filter((p) => listed.has(p.k)), more: moreShown(prefs) ? all.filter((p) => !listed.has(p.k)) : [] };
 }
 
 /** One group of the sidebar's pages as drawn: its id, its title (none: Pages, which the app names) and its pages. */
@@ -181,6 +186,11 @@ export function setPageShown(k: string, on: boolean) {
   if (k === LOCKED) return;
   const p = getSidebarPrefs();
   save({ ...p, shown: on ? [...p.shown.filter((x) => x !== k), k] : p.shown.filter((x) => x !== k), hidden: on ? p.hidden.filter((x) => x !== k) : [...p.hidden.filter((x) => x !== k), k] });
+}
+
+/** Shows or hides More itself. Off does not promote its pages or discard their arrangement. */
+export function setMoreShown(on: boolean) {
+  save({ ...getSidebarPrefs(), more: on });
 }
 
 /** The whole order, as the settings list now has it. */

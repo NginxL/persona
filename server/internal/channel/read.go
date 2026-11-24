@@ -173,10 +173,11 @@ func RunAnswer(r *Run, items []proto.Item) ([]proto.Item, bool) {
 
 // UnrelatedHeldTurn reports whether items contain ordinary user input. A held run already answered its only channel
 // message, so any such input after its base belongs to another turn, even when a background wake appears earlier.
-// Background notices and tool results are not ordinary user input.
+// Background notices and tool results are not ordinary user input. Tool-result images carry the user role too;
+// their ToolUseID distinguishes them from photos the owner sent.
 func UnrelatedHeldTurn(items []proto.Item) bool {
 	for _, it := range items {
-		if it.Role == "user" && (it.Kind == proto.KindText || it.Kind == proto.KindImage) {
+		if it.Role == "user" && (it.Kind == proto.KindText || it.Kind == proto.KindImage && it.ToolUseID == "") {
 			return true
 		}
 	}

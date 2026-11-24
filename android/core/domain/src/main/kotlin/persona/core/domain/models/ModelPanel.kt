@@ -15,6 +15,8 @@ data class PanelModel(
     val description: String? = null,
     /** The concrete model an alias stands for under this provider. */
     val resolved: String? = null,
+    /** Other spellings folded into this row; each still selects it. Empty on an older hub. */
+    val aliases: List<String> = emptyList(),
     /** Thinking efforts it takes, weakest first; empty: no effort control. */
     val efforts: List<String> = emptyList(),
     /** The effort it runs with when none is set: the slider's "Recommended" stop. */
@@ -189,13 +191,13 @@ object ModelPanel {
         if (current == null || current.provider != provider.id) return false
         val want = current.model.lowercase()
         if (provider.models.orEmpty().any { it.id.lowercase() == want }) return model.id.lowercase() == want
-        return isCurrentModel(model.id, model.resolved, current.model)
+        return isCurrentModel(model.id, model.resolved, current.model, model.aliases)
     }
 
-    /** Whether a model ([id], the model it stands for [resolved]) is [current], in any case. */
-    fun isCurrentModel(id: String, resolved: String?, current: String?): Boolean {
+    /** Whether a model ([id], the model it stands for [resolved], or a folded [aliases] spelling) is [current], in any case. */
+    fun isCurrentModel(id: String, resolved: String?, current: String?, aliases: List<String> = emptyList()): Boolean {
         val c = current?.lowercase() ?: return false
-        return id.lowercase() == c || resolved?.lowercase() == c
+        return id.lowercase() == c || resolved?.lowercase() == c || aliases.any { it.lowercase() == c }
     }
 
     private fun takes(model: PanelModel, effort: String?) = effort?.takeIf { it.isNotEmpty() && it in model.efforts }
@@ -248,9 +250,9 @@ object ModelPanel {
         else -> rowBlock(row.provider, state) == null && row.model.efforts.isNotEmpty()
     }
 
-    /** The search (every word, any case) over the model's name, id, the model it stands for, its description and the provider's name. */
+    /** The search (every word, any case) over the model's names, folded aliases, description and provider's name. */
     fun matches(provider: PanelProvider, model: PanelModel, query: String): Boolean = matchesWords(
-        listOfNotNull(model.name, model.id, model.resolved, model.description, provider.name), query)
+        listOfNotNull(model.name, model.id, model.resolved, model.description, provider.name) + model.aliases, query)
 
     private fun matchesWords(fields: List<String>, query: String): Boolean {
         val words = query.trim().lowercase().split(Regex("""\s+""")).filter(String::isNotEmpty)
@@ -265,7 +267,7 @@ object ModelPanel {
     private fun resolve(providers: List<PanelProvider>, copy: PanelConfig): Resolved? {
         val provider = providers.firstOrNull { it.id == copy.provider } ?: return null
         val models = provider.models ?: return Resolved(provider, PanelModel(copy.model, copy.model), false)
-        models.firstOrNull { isCurrentModel(it.id, it.resolved, copy.model) }?.let { return Resolved(provider, it, true) }
+        models.firstOrNull { isCurrentModel(it.id, it.resolved, copy.model, it.aliases) }?.let { return Resolved(provider, it, true) }
         if (provider.typable) return Resolved(provider, PanelModel(copy.model, copy.model, custom = true), false)
         return null
     }
@@ -291,7 +293,7 @@ object ModelPanel {
                 val r = resolve(providers, c) ?: return@mapNotNull null
                 val setup = copySetup(c, r.model, r.listed)
                 val starred = prefs.favorites.firstOrNull { f ->
-                    f.setup.provider == setup.provider && isCurrentModel(r.model.id, r.model.resolved, f.setup.model) &&
+                    f.setup.provider == setup.provider && isCurrentModel(r.model.id, r.model.resolved, f.setup.model, r.model.aliases) &&
                         copySetup(f.setup, r.model, r.listed).same(setup)
                 }
                 val now = state.current
@@ -344,7 +346,7 @@ object ModelPanel {
             val rows = groups[p.id].orEmpty().toMutableList()
             // only in a provider that takes a pick here, and only when none of its models answers the search by its own words
             if (typed != null && p.typable && p.unavailable == null && !p.locked &&
-                p.models.none { matchesWords(listOfNotNull(it.name, it.id, it.resolved, it.description), q) }) {
+                p.models.none { matchesWords(listOfNotNull(it.name, it.id, it.resolved, it.description) + it.aliases, q) }) {
                 val model = PanelModel(typed, typed, custom = true)
                 rows += PanelRow("typed:${p.id}\n$typed", PanelRow.Kind.Typed, p, model, PanelConfig(p.id, typed))
             }

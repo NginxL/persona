@@ -77,3 +77,13 @@ func CanModes(on bool) *bool { return &on }
 
 // Bool returns a pointer to on for optional capability flags.
 func Bool(on bool) *bool { return &on }
+
+// CodeCodexEffortTerminal is a pre-launch refusal until the task card explains the fallback.
+const CodeCodexEffortTerminal = "codex_effort_terminal"
+
+// Session starts from a task card first request a notice. Only the acknowledged retry
+// pins the terminal route, so a change in daemon availability cannot stale the notice.
+const (
+	CodexFallbackNotify    = "notify"
+	CodexFallbackAnnounced = "announced"
+)

@@ -7,13 +7,7 @@ struct WorkspaceSidebarControl<Label: View, Actions: View>: View {
     @ViewBuilder var actions: Actions
 
     var body: some View {
-        #if os(macOS)
-        Button(action: open) { label }
-            .buttonStyle(.plain)
-            .macBoundedContextMenu { actions }
-        #else
         Menu { actions } label: { label } primaryAction: { open() }
             .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden)
-        #endif
     }
 }

@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="chat_overview_title">セッションの概要</string>
+    <string name="chat_overview_section_environment">環境</string>
+    <string name="chat_overview_section_context">コンテキスト</string>
+    <string name="chat_overview_section_subagents">サブエージェント</string>
+    <string name="chat_overview_section_background">バックグラウンドタスク</string>
+    <string name="chat_overview_computer">コンピュータ</string>
+    <string name="chat_overview_subagents_running_count">%1$d 件が実行中</string>
+    <string name="chat_overview_subagents_ended_count">%1$d 件終了</string>
+    <string name="chat_overview_subagents_running_group">実行中 · %1$d</string>
+    <string name="chat_overview_subagents_ended_group">終了 · %1$d</string>
+    <string name="chat_overview_subagents_needs_you">確認待ち</string>
+    <string name="chat_overview_subagents_button_running">サブエージェント：%1$d 件が実行中</string>
+    <string name="chat_overview_subagents_button_needs_you">サブエージェント：%1$d 件が確認待ち</string>
+    <string name="chat_overview_background_open_all">バックグラウンドタスクをすべて表示</string>
+    <string name="chat_subagent_view_full">すべて表示</string>
+</resources>

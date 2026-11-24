@@ -54,6 +54,8 @@ type BusOptions struct {
 	// Outbox keeps the pushes and the apps' live updates made while the hub is away, for when it is back
 	// (outbox.go); nil: they are lost then (tests).
 	Outbox OutboxStore
+	// Features is the built-in modules' wire feature flags to announce in manager.hello; nil: no module features.
+	Features func() []string
 	// ConfigFile is the manager's manager.json: its sections go over the hub's hello (ownconfig.go); "": the
 	// hello as it is (tests).
 	ConfigFile string
@@ -147,14 +149,23 @@ func NewBusHub(o BusOptions) *BusHub {
 		Uncompressed: o.Deploy == "child" || o.Deploy == DeployService && id == assistantwire.AssistantID && loopbackHub(o.Hub),
 		HelloMethod:  assistantwire.MethodHello,
 		HelloParams: func() any {
-			return map[string]any{"id": id, "host": host, "os": runtime.GOOS, "arch": runtime.GOARCH,
-				"deploy": o.Deploy, "version": o.Version, "capabilities": []string{assistantwire.CapabilityConfigOwn, assistantwire.CapabilityAgentSessionArchives,
+			b.mu.Lock()
+			svc := b.svc
+			b.mu.Unlock()
+			params := map[string]any{"id": id, "host": host, "os": runtime.GOOS, "arch": runtime.GOARCH,
+				"deploy": o.Deploy, "version": o.Version, "capabilities": withRecording([]string{assistantwire.CapabilityConfigOwn, assistantwire.CapabilityAgentSessionArchives,
 					assistantwire.CapabilityAgentSessionArchiveClose, assistantwire.CapabilityAgentNaming, assistantwire.CapabilityAgentAutoname, assistantwire.CapabilityMachinesOwn,
 					assistantwire.CapabilityMeetingAttendance, assistantwire.CapabilityMeetingConversation, assistantwire.CapabilityMeetingPhotos, assistantwire.CapabilityMeetingLiveView,
 					assistantwire.CapabilityMeetingHighlights, assistantwire.CapabilityMeetingNotes, assistantwire.CapabilityMeetingEcho, assistantwire.CapabilityMeetingTranscription,
-					assistantwire.CapabilityRecordingDay, assistantwire.CapabilityAssistantSearch, assistantwire.CapabilityAssistantSegments, assistantwire.CapabilityDirectionSessions, assistantwire.CapabilityHTTPBodyStream, assistantwire.CapabilityAssistantStartServiceTier,
+					assistantwire.CapabilityTaskInput, assistantwire.CapabilityRecordingDay, assistantwire.CapabilityAssistantSearch, assistantwire.CapabilityHealthIntake, assistantwire.CapabilityAssistantSegments, assistantwire.CapabilityDirectionSessions, assistantwire.CapabilityHTTPBodyStream, assistantwire.CapabilityAssistantStartServiceTier,
 					assistantwire.CapabilityMCPWait, assistantwire.CapabilitySessionsSideFold, assistantwire.CapabilityRemoteImages, assistantwire.CapabilityTodoView,
-					assistantwire.CapabilityTodoPlaces, assistantwire.CapabilityTodoAsks, assistantwire.CapabilityTodoTimeline, assistantwire.CapabilityTodoImages, devicewire.SharingCapability}}
+					assistantwire.CapabilityTodoRevision, assistantwire.CapabilityTodoPlaces, assistantwire.CapabilityTodoAsks, assistantwire.CapabilityTodoTimeline, assistantwire.CapabilityTodoImages, devicewire.SharingCapability, devicewire.DevelopmentPackagesCapability}, svc)}
+			if o.Features != nil {
+				if features := o.Features(); len(features) > 0 {
+					params["features"] = features
+				}
+			}
+			return params
 		},
 		OnHello: b.onHello,
 		// A node's tool call that its caller stopped waiting for ends at the hub too (fleet_tools.go).
@@ -210,6 +221,7 @@ func (b *BusHub) Serve(ctx context.Context, svc *Service) error {
 	b.svc, b.ctx = svc, ctx
 	b.mu.Unlock()
 	defer svc.kbEnd()
+	defer svc.larkWait(2 * time.Second) // the Feishu agent messages' workers end with the connection's last calls
 	go b.takeEvents(ctx)
 	go b.runOutbox(ctx) // what was made while the hub was away, once it is back (outbox.go)
 	return b.client.Run(ctx)
@@ -519,7 +531,7 @@ func (b *BusHub) httpHandler(s *Service) http.Handler {
 	return b.httpH
 }
 
-func (b *BusHub) request(ctx context.Context, method string, params json.RawMessage) (any, error) {
+func (b *BusHub) request(ctx context.Context, method string, params json.RawMessage) (reply any, requestErr error) {
 	b.waitHello(ctx)
 	s := b.service()
 	decode := func(v any) error {
@@ -619,7 +631,14 @@ func (b *BusHub) request(ctx context.Context, method string, params json.RawMess
 			s.notesOwnerRefused(ctx, carry) // an approval is not a model turn or a conversation message
 			return map[string]any{"params": params}, nil
 		}
+		laterDone, err := s.withOwnerRelayLater(ctx, p.MachineID, p.SessionID, msg, params, true)
+		if err != nil {
+			s.notesOwnerRefused(ctx, carry)
+			s.appSendRefused(p.MachineID, p.SessionID, err)
+			return nil, err
+		}
 		s.notesOwnerSent(ctx, carry, msg)
+		s.relayLaterOwnerSent(p.SessionID, msg, laterDone)
 		if *note != "" {
 			return map[string]any{"params": params, "launcher_note": *note}, nil
 		}
@@ -724,6 +743,10 @@ func (b *BusHub) request(ctx context.Context, method string, params json.RawMess
 				if err := s.conversationParamsAvailable(ctx, d.Canonical(p.MachineID), p.Params); err != nil {
 					return nil, err
 				}
+			}
+			if devicewire.IsSessionStart(p.Method) {
+				finish := s.beginPlacementBind(ctx, d.Canonical(p.MachineID), p.Params)
+				defer func() { raw, _ := reply.(json.RawMessage); finish(raw) }()
 			}
 			if out, handled, err := s.logicalCall(context.WithValue(ctx, logicalTransportKey{}, p), d.Canonical(p.MachineID), p.Method, p.Params); handled {
 				return out, err

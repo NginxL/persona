@@ -267,6 +267,16 @@ export function modelName(m: { id: string; name?: string }): string {
   return gpt[1].split("-").map((part, i) => i ? part[0].toUpperCase() + part.slice(1) : part).join(" ");
 }
 
+/** A catalog variant encodes its default effort in its model ID. */
+export function effortVariantBase(id: string, effort?: string): string | undefined {
+  return effort && id.endsWith(`-${effort}`) ? id.slice(0, -effort.length - 1) || undefined : undefined;
+}
+
+/** Drop effort from the trailing qualifiers while keeping context size and other model qualifiers. */
+export function withoutEffortQualifier(name: string): string {
+  return name.replace(/\s*[(（](?:minimal|low|medium|high|xhigh|max|ultra)[)）](?=(?:\s*[(（[][^()（）[\]]*[)）\]])*\s*$)/giu, "").trimEnd() || name;
+}
+
 /** "Default"'s second line: what "Model configuration" sets, else the concrete model the default entry stands for. */
 export function defaultDetail(models: AgentModel[], followed: ModelBinding): string {
   if (followed.model) return followed.model;

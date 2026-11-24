@@ -11,8 +11,8 @@ import { t } from "../i18n";
 import { OverlayBoundary } from "./LazyOverlay";
 import type { DisconnectProblem } from "./DisconnectConfirm";
 
-// loaded once the browser is idle, so it opens at once
-const DisconnectConfirm = lazyPage(() => import("./DisconnectConfirm").then((m) => m.DisconnectConfirm), { idle: true });
+// Only a browser that is disconnecting needs the confirmation dialog.
+const DisconnectConfirm = lazyPage(() => import("./DisconnectConfirm").then((m) => m.DisconnectConfirm));
 
 export function useDisconnect(): { start: () => void; busy: boolean; dialog: React.ReactNode } {
   const [busy, setBusy] = useState(false);
@@ -42,7 +42,7 @@ export function useDisconnect(): { start: () => void; busy: boolean; dialog: Rea
     handleUnauthorized(() => {});
     signOutHere(problem?.id ?? "");
   };
-  // Keep both dialogs mounted after first opening so they can animate closed. They share the already-idle chunk.
+  // Both dialogs share the same chunk and stay mounted after first opening so they can animate closed.
   const dialog = asked && (
     <OverlayBoundary open={asking || problem !== null} onClose={() => { setAsking(false); setProblem(null); toast(t("pageboundary.chunk_body"), "error"); }}>
       <Suspense fallback={null}>

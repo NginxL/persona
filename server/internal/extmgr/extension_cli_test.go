@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -15,6 +16,7 @@ import (
 
 	"github.com/nwverse/persona/server/internal/connector"
 	"github.com/nwverse/persona/server/internal/extension"
+	"github.com/nwverse/persona/server/internal/extension/sandbox"
 )
 
 // personad plugin on the hub's machine: install (showing what it may do), list, configure, a secret from stdin,
@@ -342,5 +344,51 @@ func TestExtensionCommandUninstallWarnings(t *testing.T) {
 				t.Errorf("sent %d uninstall requests, want exactly one", got)
 			}
 		})
+	}
+}
+
+// The sandbox command says why a required sandbox is not running, instead of the old "only pointed at the proxy" that
+// read as if the program ran (#13540).
+func TestSandboxCommandReportsUnavailable(t *testing.T) {
+	t.Setenv("PERSONA_LANG", "en")
+	h, _ := extensionTestHub(t)
+	old := sandboxProbe
+	sandboxProbe = func() sandbox.Support { return sandbox.Support{OS: "linux", Why: "no bwrap"} }
+	t.Cleanup(func() { sandboxProbe = old })
+	h.extensions.sandboxes.noDefault = false
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := &http.Server{Handler: h.routes()}
+	go srv.Serve(ln)
+	t.Cleanup(func() { srv.Close() })
+	home := t.TempDir()
+	t.Setenv("PERSONA_HOME", home)
+	t.Setenv("PERSONA_LISTEN", "")
+	b, _ := json.Marshal(map[string]any{"listen": ln.Addr().String(), "token": h.cfg.Token})
+	if err := os.WriteFile(filepath.Join(home, "hub.json"), b, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	run := func(args ...string) string {
+		t.Helper()
+		var out, errOut bytes.Buffer
+		if err := ExtensionCommand(context.Background(), args, strings.NewReader(""), &out, &errOut); err != nil {
+			t.Fatalf("%v: %v\n%s", args, err, out.String())
+		}
+		return out.String()
+	}
+	mux := h.routes()
+	code, pv := call(t, mux, "POST", "/api/v1/extensions/-/preview", h.cfg.Token, `{"source": "dir:`+boxedPackage(t)+`"}`)
+	if code != 200 {
+		t.Fatalf("preview: %d %v", code, pv)
+	}
+	code, d := call(t, mux, "POST", "/api/v1/extensions/-/install", h.cfg.Token,
+		fmt.Sprintf(`{"preview_id": %q, "permissions_digest": %q}`, pv["preview_id"], pv["permissions_digest"]))
+	if code != 200 {
+		t.Fatalf("install: %d %v", code, d)
+	}
+	if got := run("sandbox", "boxed", "on"); !strings.Contains(got, "boxed: ") || !strings.Contains(got, "no bwrap") {
+		t.Fatalf("the refusal and its cause: %q", got)
 	}
 }

@@ -27,7 +27,7 @@ vi.mock("./ChatSearch", async load => {
 const captured = vi.hoisted(() => ({
   onSend: undefined as ((out: Outgoing) => Promise<boolean>) | undefined,
   session: { machine_id: "hub", session_id: "c1", title: "Conversation", cwd: "/code", status: "idle" } as Session | undefined,
-  composer: undefined as { placeholder?: string; disabled?: boolean; blocked?: { label: string }; onSendNow?: () => Promise<void> } | undefined,
+  composer: undefined as { placeholder?: string; disabled?: boolean; blocked?: { label: string }; onSendNow?: () => Promise<void>; top?: React.ReactNode } | undefined,
   // set: the hub answers the exact-session lookup (useRuntimeSession) and the page is connected
   features: [] as string[],
   // set: the computers the page knows (an Agent's computer away, #10661)
@@ -39,7 +39,7 @@ vi.mock("./Composer", async (importOriginal) => ({
   Composer: ({ onSend, ...props }: NonNullable<typeof captured.composer> & { onSend: (out: Outgoing) => Promise<boolean> }) => {
     captured.onSend = onSend;
     captured.composer = props;
-    return null;
+    return props.top;
   },
 }));
 // one transcript for every render: a new one each time would re-run the sending bubble's echo check forever
@@ -125,6 +125,8 @@ configureMessageFeedback({ getSession, send, onHubEvent, subscribe, receiptsAllo
 const { SESSIONS_LOOKUP_FEATURE } = await import("../../lib/runtime-list");
 // ChatView's own React.lazy notice must be ready before the missing-chat assertions, not only lazyPage's registry.
 await import("./NotFoundNotice");
+const { preloadQueuePanel } = await import("./QueueStrip");
+await preloadQueuePanel();
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 const json = (v: unknown, status = 200) => new Response(JSON.stringify(v), { status, headers: { "Content-Type": "application/json" } });
@@ -286,6 +288,251 @@ describe("message feedback before runtime execution", () => {
     expect(host.querySelector("[data-outbox]")).toBeNull();
     act(() => receiveMessageSend({ machine_id: "hub", session_id: "c1", client_msg_id: "peer-input", state: "failed", at: "2026-11-12T10:00:01Z" }));
     expect(host.querySelector("[data-message-feedback]")).toBeNull();
+  });
+});
+
+describe("the working chat's outgoing queue", () => {
+  const working = { machine_id: "hub", session_id: "c1", agent: "claude", state: "working", status: "working" } as Session;
+  const photos = ["iVBORw0KGgo=", "aW1hZ2U="].map((data) => ({ mime: "image/png", data }));
+  const rows = () => [...host.querySelectorAll("[data-queue-panel] [data-queue-row]")];
+  const sending = (row: Element) => row.querySelector('[role="status"]');
+  const previews = (row: Element) => [...row.querySelectorAll("[data-queue-photo-thumb]")].map((img) => img.getAttribute("src"));
+  const preview = (i: number) => `data:image/png;base64,${photos[i].data}`;
+  const bodies: { text: string; client_msg_id: string }[] = [];
+  const replies: ((r: Response) => void)[] = [];
+  const editQueue = vi.fn<(keep: number[]) => Response | Promise<Response>>();
+  let previousSession: Session | undefined;
+  const pushQueue = async (queued: string[]) => {
+    captured.session = { ...captured.session!, queued };
+    act(() => applyCompleteSessions([captured.session!])); await flush();
+  };
+  const open = async (session = working, assistant = false) => {
+    captured.session = session;
+    act(() => root.render(<ChatView mid="hub" sid="c1" assistant={assistant} />)); await flush();
+  };
+  const sendFromBox = (out: Outgoing) => {
+    let sent!: Promise<boolean>;
+    act(() => { sent = captured.onSend!(out); });
+    return sent;
+  };
+  const finish = async (i: number, sent: Promise<boolean>, response = json({})) => {
+    await act(async () => { replies[i](response); await sent; }); await flush();
+  };
+
+  beforeEach(() => {
+    previousSession = captured.session;
+    bodies.length = 0;
+    replies.length = 0;
+    editQueue.mockReset();
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input).endsWith("/messages")) {
+        bodies.push(JSON.parse(String(init?.body)));
+        return new Promise<Response>((resolve) => replies.push(resolve));
+      }
+      if (String(input).endsWith("/queue")) return Promise.resolve(editQueue(JSON.parse(String(init?.body)).keep));
+      return Promise.resolve(json({}));
+    }));
+  });
+  afterEach(() => {
+    captured.session = previousSession;
+  });
+
+  it.each(["push", "HTTP"] as const)("keeps one row when the %s arrives first", async (first) => {
+    await open();
+    const text = "Check the screenshot";
+    const sent = sendFromBox({ text, images: [] });
+    await flush();
+    const [row] = rows();
+    expect(row).toBeDefined();
+    expect(row.textContent).toContain(text);
+    expect(sending(row)?.textContent).toBe(t("chat-segmentview.sending"));
+    expect(host.querySelector('[data-user-bubble]')).toBeNull();
+    expect(host.querySelector('[data-message-feedback]')).toBeNull();
+    act(() => receiveMessageSend({ machine_id: "hub", session_id: "c1", client_msg_id: bodies[0].client_msg_id, state: "processing", at: "2026-11-12T10:00:00Z" }));
+    expect(sending(row)?.textContent).toBe(t("chat-segmentview.processing"));
+
+    if (first === "HTTP") {
+      await finish(0, sent);
+      expect(rows()).toEqual([row]);
+      expect(sending(row)).not.toBeNull();
+    }
+    await pushQueue([text]);
+    expect(rows()).toEqual([row]);
+    expect(sending(row)).toBeNull();
+    expect(host.querySelector('[data-user-bubble]')).toBeNull();
+    if (first === "push") await finish(0, sent);
+    await pushQueue([]);
+    expect(rows()).toEqual([]);
+    expect(host.querySelector('[data-user-bubble]')).toBeNull();
+  });
+
+  it("reveals a new send past the queue's fold and keeps it visible after confirmation", async () => {
+    const queued = ["First", "Second", "Third", "Fourth", "Fifth"];
+    await open({ ...working, queued });
+    expect(rows()).toHaveLength(3);
+    const sent = sendFromBox({ text: "Latest follow-up", images: [] });
+    await flush();
+    const row = rows().at(-1)!;
+    expect(rows()).toHaveLength(6);
+    expect(row.textContent).toContain("Latest follow-up");
+    expect(sending(row)).not.toBeNull();
+    await pushQueue([...queued, "Latest follow-up"]);
+    expect(rows().at(-1)).toBe(row);
+    expect(sending(row)).toBeNull();
+    await finish(0, sent);
+  });
+
+  const savedPhoto = (name: string) => `\n<attached_images>\npath: /tmp/${name}.png\n</attached_images>`;
+  const attached = '<persona-context kind="context" title="Excerpt">\nEarlier words\n</persona-context>\n> Quoted words\n<persona-file path="/tmp/notes.txt" kind="file" />';
+  it.each([
+    ["photo with text", "Please check this screen", "[Image #1]\n\nPlease check this screen" + savedPhoto("screen")],
+    ["photo only with a path", "", "[Image #1]" + savedPhoto("screen")],
+    ["photo only with stand-in words", "", "[Image #1] Please look at the image" + savedPhoto("screen")],
+    ["photo only with no paths in the queue", "", ""],
+    ["photo, file, quote and context", attached, "[Image #1]\n" + attached + savedPhoto("screen")],
+  ])("keeps the local preview and one row for a %s", async (_, text, raw) => {
+    await open();
+    const sent = sendFromBox({ text, images: [photos[0]] });
+    await flush();
+    const [row] = rows();
+    expect(previews(row)).toEqual([preview(0)]);
+    const thumb = row.querySelector("[data-queue-photo-thumb]");
+    if (text === attached) expect(row.querySelectorAll('[data-queue-mark="file"], [data-queue-mark="context"]')).toHaveLength(2);
+    await pushQueue([raw]);
+    expect(rows()).toEqual([row]);
+    expect(sending(row)).toBeNull();
+    expect(row.querySelector("[data-queue-photo-thumb]")).toBe(thumb);
+    expect(previews(row)).toEqual([preview(0)]);
+    expect(host.querySelector("[data-user-bubble]")).toBeNull();
+    await finish(0, sent);
+  });
+
+  it("does not borrow the local preview for queued entries with other attachments", async () => {
+    await open();
+    const sent = sendFromBox({ text: attached, images: [photos[0]] });
+    await flush();
+    const [local] = rows();
+    const other = "[Image #1]\n" + attached.replace("notes.txt", "other.txt") + savedPhoto("other");
+    await pushQueue([other]);
+    expect(rows()).toHaveLength(2);
+    expect(rows()[1]).toBe(local);
+    expect(sending(local)).not.toBeNull();
+    const actual = "[Image #1]\n" + attached + savedPhoto("screen");
+    await pushQueue([other, actual]);
+    expect(rows()).toHaveLength(2);
+    expect(rows()[1]).toBe(local);
+    expect(sending(local)).toBeNull();
+    expect(previews(local)).toEqual([preview(0)]);
+    await finish(0, sent);
+  });
+
+  it.each(["", "Same words"])("pairs one occurrence at a time for rapid identical sends (%j) and keeps the surviving photo", async (text) => {
+    await open({ ...working, queued: [text, text], queued_relayed: 1 });
+    const first = sendFromBox({ text, images: [photos[0]] });
+    const second = sendFromBox({ text, images: [photos[1]] });
+    await flush();
+    const [already, a, b] = rows();
+    expect(rows()).toHaveLength(3);
+    expect(bodies).toHaveLength(1);
+    expect(previews(already)).toEqual([]);
+    expect(previews(a)).toEqual([preview(0)]);
+    expect(previews(b)).toEqual([preview(1)]);
+    await pushQueue([text, text, text]);
+    expect(rows()).toEqual([already, a, b]);
+    expect(sending(a)).toBeNull();
+    expect(sending(b)).not.toBeNull();
+    await finish(0, first);
+    await pushQueue([text, text, text, text]);
+    await finish(1, second);
+    expect(rows()).toEqual([already, a, b]);
+    expect(sending(b)).toBeNull();
+
+    let editReply!: (r: Response) => void;
+    editQueue.mockImplementation(() => new Promise((resolve) => { editReply = resolve; }));
+    act(() => a.querySelector<HTMLButtonElement>("[data-queue-delete]")!.click()); await flush();
+    expect(editQueue).toHaveBeenCalledWith([0, 2]);
+    await pushQueue([text, text, text]);
+    await act(async () => editReply(json({ queue: [text, text, text] }))); await flush();
+    expect(rows()).toEqual([already, b]);
+    expect(previews(b)).toEqual([preview(1)]);
+    expect(host.querySelector("[data-user-bubble]")).toBeNull();
+  });
+
+  it("pulls a local follow-up back to the draft before its POST starts", async () => {
+    await open();
+    const { onDraftEvent } = await import("../../lib/drafts");
+    const restore = vi.fn();
+    const off = onDraftEvent("hub/c1", restore);
+    const first = sendFromBox({ text: "First", images: [] });
+    const second = sendFromBox({ text: "Pull this back", images: [photos[0]] });
+    try {
+      await flush();
+      act(() => rows()[1].querySelector<HTMLButtonElement>("[data-queue-edit]")!.click()); await flush();
+      expect(rows()).toHaveLength(1);
+      expect(restore.mock.calls.map(([event]) => event)).toEqual([
+        { type: "append", text: "Pull this back" },
+        { type: "image", image: { name: "photo-1.png", ...photos[0] } },
+      ]);
+      await finish(0, first);
+      await act(async () => { await second; });
+      expect(bodies.map((b) => b.text)).toEqual(["First"]);
+      expect(editQueue).not.toHaveBeenCalled();
+    } finally {
+      off();
+    }
+  });
+
+  it("honors Delete pressed during a POST once the queue push arrives, even if the HTTP reply fails late", async () => {
+    await open();
+    editQueue.mockReturnValue(json({ queue: ["Remove this"] }));
+    const sent = sendFromBox({ text: "Remove this", images: [] });
+    await flush();
+    act(() => rows()[0].querySelector<HTMLButtonElement>("[data-queue-delete]")!.click()); await flush();
+    expect(editQueue).not.toHaveBeenCalled();
+    await pushQueue(["Remove this"]);
+    await finish(0, sent, json({ error: "Late refusal" }, 400));
+    expect(editQueue).toHaveBeenCalledExactlyOnceWith([]);
+    await pushQueue([]);
+    expect(rows()).toEqual([]);
+    expect(host.querySelector("[data-user-bubble], [data-outbox]")).toBeNull();
+    expect(localStorage.getItem(`outbox-msg:hub/c1/${bodies[0].client_msg_id}`)).toBeNull();
+  });
+
+  it.each(["idle", "send now", "Codex steer"])("keeps direct sends in the transcript (%s)", async (mode) => {
+    await open(mode === "idle" ? { ...working, state: "idle" } : mode === "Codex steer" ? { ...working, agent: "codex" } : working);
+    const sent = sendFromBox({ text: "Direct follow-up", images: [], sendNow: mode === "send now" });
+    await flush();
+    expect(host.querySelector('[data-user-bubble][data-send-state="sending"]')?.textContent).toContain("Direct follow-up");
+    expect(rows()).toEqual([]);
+    await finish(0, sent);
+  });
+
+  it("hands a refused send back to the failed outbox with its payload", async () => {
+    await open();
+    const sent = sendFromBox({ text: "Follow-up while offline", images: [photos[0]] });
+    await flush();
+    expect(rows()).toHaveLength(1);
+    await finish(0, sent, json({ delivered: "none", error: "Computer offline" }, 503));
+    expect(rows()).toEqual([]);
+    expect(host.querySelector('[data-outbox] [data-send-state="failed"]')?.textContent).toContain("Follow-up while offline");
+    expect(getState().outbox["hub/c1"]).toMatchObject([{ images: [photos[0]], state: "failed" }]);
+  });
+
+  it("hands a kept follow-up to the session's undelivered copy", async () => {
+    await open({ ...working, assistant: true }, true);
+    const text = "Try this when it comes back";
+    const sent = sendFromBox({ text, images: [] });
+    await flush();
+    expect(rows()).toHaveLength(1);
+    const kept = { id: bodies[0].client_msg_id, text, at: "2026-11-17T10:00:00Z", state: "waiting" as const, attempts: 1 };
+    await finish(0, sent, json({ delivered: "later", undelivered: kept }, 202));
+    await act(async () => {
+      captured.session = { ...captured.session!, undelivered: [kept] };
+      applyCompleteSessions([captured.session]);
+    }); await flush();
+    expect(rows()).toEqual([]);
+    expect(host.querySelector("[data-outbox]")).toBeNull();
+    expect(host.querySelector('[data-user-bubble][data-send-state="failed"]')?.textContent).toContain(text);
   });
 });
 
@@ -1068,6 +1315,12 @@ describe("sending in order, and with no row yet", () => {
       history.replaceState(null, "", "/persona/nope-0000");
       act(() => root.render(<ChatView mid="hub" sid="nope-0000" assistant={assistant} />));
       await flush();
+      // The exact-session read and React.lazy resolution are asynchronous: wait for the visible notice, not a fixed
+      // number of event-loop turns (which still loses under a loaded full suite).
+      await vi.waitFor(async () => {
+        await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
+        expect(host.querySelector("[data-chat-not-found]")?.textContent).toContain(t("chat-notfoundnotice.body"));
+      });
       expect(host.querySelector("[data-chat-title]")?.textContent).toBe(t("chat-chatview.not_found_title"));
       expect(host.textContent).not.toContain("nope-0000");
       // The notice is a React.lazy chunk: it suspends once on its first render even when the module is in, so it is
@@ -1154,38 +1407,6 @@ describe("sending in order, and with no row yet", () => {
     } finally {
       transcript.firstRead = true;
     }
-  });
-});
-
-// A message Claude queued shows in the queue strip, not as a sending bubble too, a photo-only one included (#10871):
-// Claude's queue holds it as `[Image #1]` and its path, which no text matches.
-describe("a queued message is not drawn as a sending bubble too", () => {
-  const photo = { mime: "image/png", data: "iVBORw0KGgo=" };
-  const queued = (q: string[]) => ({ machine_id: "hub", session_id: "c1", title: "Conversation", cwd: "/code", state: "working", status: "working", queued: q }) as unknown as Session;
-  it.each([
-    ["with words", "Please check this screen", "[Image #1]\n\nPlease check this screen\n<attached_images>\npath: /tmp/a.png\n</attached_images>"],
-    ["a photo only", "", "[Image #1]\n<attached_images>\npath: /tmp/a.png\n</attached_images>"],
-    ["a photo only without paths", "", ""],
-  ])("%s", async (_, text, raw) => {
-    captured.session = queued([]);
-    reply = () => json({});
-    act(() => root.render(<ChatView mid="hub" sid="c1" />)); await flush();
-    await act(async () => void (await captured.onSend!({ text, images: [photo] }))); await flush();
-    expect(host.querySelector("[data-user-bubble][data-send-state]")).not.toBeNull(); // sending, until the queue says where it is
-    captured.session = queued([raw]);
-    act(() => root.render(<ChatView mid="hub" sid="c1" />)); await flush();
-    expect(host.querySelector("[data-user-bubble][data-send-state]")).toBeNull();
-  });
-  it("one queued photo hides one of two photo-only sends, not both", async () => {
-    captured.session = queued([]);
-    reply = () => json({});
-    act(() => root.render(<ChatView mid="hub" sid="c1" />)); await flush();
-    await act(async () => void (await captured.onSend!({ text: "", images: [photo] }))); await flush();
-    await act(async () => void (await captured.onSend!({ text: "", images: [photo] }))); await flush();
-    expect(host.querySelectorAll("[data-user-bubble][data-send-state]")).toHaveLength(2);
-    captured.session = queued(["[Image #1]\n<attached_images>\npath: /tmp/a.png\n</attached_images>"]);
-    act(() => root.render(<ChatView mid="hub" sid="c1" />)); await flush();
-    expect(host.querySelectorAll("[data-user-bubble][data-send-state]")).toHaveLength(1);
   });
 });
 
@@ -1363,6 +1584,8 @@ describe("a message to an Agent whose computer is away", () => {
     expect(line?.className).toContain("text-red");
     const buttons = [...bubble!.querySelectorAll<HTMLButtonElement>('[role="alert"] button')];
     expect(buttons.map((b) => b.textContent)).toEqual([t("chat-outboxbubbles.retry"), t("chat-outboxbubbles.delete")]);
+    // The lazy mode-changes watcher may issue its GET after Retry; let it finish before asserting the last request.
+    await act(async () => { await vi.dynamicImportSettled(); }); await flush();
     await act(async () => buttons[0].click()); await flush();
     expect(fetched().at(-1)).toEqual({ url: "/api/v1/sessions/hub/c1/held/k1/retry", method: "POST" });
     // without the manager's words: the plain line in the page's language

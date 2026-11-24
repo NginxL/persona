@@ -33,7 +33,7 @@ describe("blockView", () => {
 });
 
 describe("pendingOutgoing", () => {
-  const o = (clientId: string, text: string, status: Outgoing["status"], at = 10_000): Outgoing => ({ clientId, text, at, status });
+  const o = (clientId: string, text: string, status: Outgoing["status"], at = 10_000): Outgoing => ({ clientId, text, at, updatedAt: at, status });
   it("drops a sent bubble once the persisted user message shows up, keeps failed / unmatched ones", () => {
     const out = [o("1", "hello", "sent"), o("2", "hello", "sent"), o("3", "x", "failed"), o("4", "later", "sent")];
     const msgs = [m("t1", 1, "user", "hello", 11_000), m("t2", 2, "assistant", "later", 12_000)];

@@ -1,6 +1,7 @@
 package hub
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -43,5 +44,50 @@ func TestWindowsNodePackagesSurviveHubUpdateRetention(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(dir, "personad-linux-amd64.version")); !os.IsNotExist(err) {
 		t.Fatalf("a platform the new release supplies must not retain the old version: %v", err)
+	}
+}
+
+// With node updates on, the release's builds replace those of the platforms it carries. A build of a platform it does
+// not carry (Windows next to a release published without it, as up to 0.9.1) stayed unlabelled and passed for the new
+// hub's version: Redeploy sent it and the node refused it at its self-check (#12958). It goes aside, so the manager
+// fetches the build of the hub's version from its release, or says there is none.
+func TestUpdateNodesSetsAsideWhatTheReleaseDoesNotCarry(t *testing.T) {
+	nodes := t.TempDir()
+	t.Setenv("PERSONA_NODE_BINARIES", nodes)
+	write := func(dir, name, body string) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write(nodes, "personad-linux-amd64", "v1 linux")
+	write(nodes, "personad-windows-amd64.exe", "v1 windows")
+	write(nodes, "personad-windows-arm64", "older windows, named before .exe was kept")
+	write(nodes, "personad-darwin-arm64", "a release's build")
+	write(nodes, "personad-darwin-arm64.version", "v0-202611010000\n") // labelled: says what it is, stays
+	staged := t.TempDir()
+	write(staged, "personad-linux-amd64", "v2 linux")
+	h := newTestHub(t)
+	h.version = "v2"
+	h.cfg.AutoUpdateNodes = true
+
+	if err := h.upd.updateNodes(context.Background(), staged, "v1"); err != nil {
+		t.Fatal(err)
+	}
+	if b, _ := os.ReadFile(filepath.Join(nodes, "personad-linux-amd64")); string(b) != "v2 linux" {
+		t.Fatalf("the release's build: %q", b)
+	}
+	for _, name := range []string{"personad-windows-amd64.exe", "personad-windows-arm64"} {
+		if _, err := os.Stat(filepath.Join(nodes, name)); !os.IsNotExist(err) {
+			t.Errorf("%s of v1 still passes for v2: %v", name, err)
+		}
+		if _, err := os.Stat(filepath.Join(nodes, name+".prev")); err != nil {
+			t.Errorf("%s was not set aside: %v", name, err)
+		}
+	}
+	for _, kept := range []string{"personad-darwin-arm64", "personad-darwin-arm64.version"} {
+		if _, err := os.Stat(filepath.Join(nodes, kept)); err != nil {
+			t.Errorf("%s: %v", kept, err)
+		}
 	}
 }

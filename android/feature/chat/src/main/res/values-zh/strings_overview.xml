@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="chat_overview_title">会话概览</string>
+    <string name="chat_overview_section_environment">环境</string>
+    <string name="chat_overview_section_context">上下文</string>
+    <string name="chat_overview_section_subagents">子智能体</string>
+    <string name="chat_overview_section_background">后台任务</string>
+    <string name="chat_overview_computer">电脑</string>
+    <string name="chat_overview_subagents_running_count">%1$d 个运行中</string>
+    <string name="chat_overview_subagents_ended_count">%1$d 个已结束</string>
+    <string name="chat_overview_subagents_running_group">进行中 · %1$d</string>
+    <string name="chat_overview_subagents_ended_group">已结束 · %1$d</string>
+    <string name="chat_overview_subagents_needs_you">等你确认</string>
+    <string name="chat_overview_subagents_button_running">子智能体：%1$d 个运行中</string>
+    <string name="chat_overview_subagents_button_needs_you">子智能体：%1$d 个等你确认</string>
+    <string name="chat_overview_background_open_all">查看全部后台任务</string>
+    <string name="chat_subagent_view_full">查看完整</string>
+</resources>

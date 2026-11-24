@@ -16,7 +16,7 @@ class ExitJournal @Inject constructor(@ApplicationContext private val context: C
 
     @Synchronized
     fun capture() {
-        runCatching {
+        val _ = runCatching {
             val last = preferences.getLong("last_exit", 0)
             val exits = context.getSystemService(ActivityManager::class.java)
                 .getHistoricalProcessExitReasons(context.packageName, 0, 16)

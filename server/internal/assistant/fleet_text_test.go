@@ -179,6 +179,36 @@ func TestClaudeLiveTextInEachLanguage(t *testing.T) {
 	}
 }
 
+func TestCodexHistoryReadOnlyReasonsLocalizeInEachLanguage(t *testing.T) {
+	cases := []struct {
+		key  string
+		args i18n.Args
+	}{
+		{"codex-history.stalled_turn", i18n.Args{"holder": "Codex"}},
+		{"codex-history.stalled_turn", i18n.Args{"holder": "app-server"}},
+		{"codex-history.shared_socket_gone", nil},
+		{"codex-history.shared_endpoint_invalid", nil},
+		{"codex-history.shared_unreachable", nil},
+		{"codex-history.shared_home_mismatch", nil},
+		{"codex-history.shared_not_loaded", nil},
+	}
+	for _, tc := range cases {
+		zh := i18n.T(i18n.ZhHans, tc.key, tc.args)
+		enWant := i18n.T(i18n.En, tc.key, tc.args)
+		jaWant := i18n.T(i18n.Ja, tc.key, tc.args)
+		if zh == "" || enWant == "" || jaWant == "" || zh == enWant || zh == jaWant || enWant == jaWant {
+			t.Fatalf("%s translations not distinct: zh=%q en=%q ja=%q", tc.key, zh, enWant, jaWant)
+		}
+		for lang, want := range map[i18n.Lang]string{i18n.ZhHans: zh, i18n.En: enWant, i18n.Ja: jaWant} {
+			s := proto.Session{ReadOnlyReason: zh}
+			localizeSession(lang, &s)
+			if s.ReadOnlyReason != want {
+				t.Errorf("%s (%s): got %q, want %q", tc.key, lang, s.ReadOnlyReason, want)
+			}
+		}
+	}
+}
+
 // A computer-only dialog also tells the owner how to make it answerable from the phone next time (#5965).
 func TestClaudeComputerAttentionSuggestsTmuxOrPersona(t *testing.T) {
 	for _, c := range []struct {
@@ -211,5 +241,33 @@ func TestClaudeComputerAttentionSuggestsTmuxOrPersona(t *testing.T) {
 		if legacy.AttentionReason != current.AttentionReason {
 			t.Errorf("%s: legacy attention %q, want the localized current guidance %q", lang, legacy.AttentionReason, current.AttentionReason)
 		}
+	}
+}
+
+// A Claude Desktop session with Persona's permission plugin waiting on a computer-only safety check (e.g. Auto mode
+// personOnly review that bypassed hooks) gets accurate Desktop guidance and never tells the user to start in tmux.
+func TestClaudeDesktopComputerAttentionDoesNotSuggestTmux(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		lang i18n.Lang
+		want []string
+	}{
+		{"en", i18n.En, []string{"claude desktop", "computer"}},
+		{"zh-Hans", i18n.ZhHans, []string{"claude 桌面端", "电脑"}},
+		{"ja", i18n.Ja, []string{"claude デスクトップ", "コンピューター"}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			s := proto.Session{AttentionReason: proto.AttentionClaudeDesktopComputer}
+			localizeSession(c.lang, &s)
+			got := strings.ToLower(s.AttentionReason)
+			if strings.Contains(got, "tmux") {
+				t.Errorf("desktop attention reason %q must not suggest tmux", s.AttentionReason)
+			}
+			for _, want := range c.want {
+				if !strings.Contains(got, want) {
+					t.Errorf("desktop attention reason %q does not mention %q", s.AttentionReason, want)
+				}
+			}
+		})
 	}
 }

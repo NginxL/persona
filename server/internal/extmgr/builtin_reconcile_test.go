@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/nwverse/persona/server/internal/extension"
+	"github.com/nwverse/persona/server/internal/extmgr/imessageport"
 )
 
 // cua, ego and imessage are built-in programs on computers (node.command "builtin"): the hub never sends them a
@@ -14,7 +15,11 @@ import (
 // changes), and a machine that connects still gets what it always got from cua and ego.
 func TestBuiltinExtensionsAreBuiltinNodePrograms(t *testing.T) {
 	h, _ := extensionTestHub(t)
-	for _, id := range []string{cuaExtensionID, egoExtensionID, imessageExtensionID} {
+	ids := []string{cuaExtensionID, egoExtensionID}
+	if imessageport.Factory() != nil { // the iMessage extension is its module's: absent without it (persona_without_imessage, persona_core_only)
+		ids = append(ids, imessageExtensionID)
+	}
+	for _, id := range ids {
 		p := h.extensions.reg.Get(id)
 		if p == nil || !p.Manifest.Node.Builtin() || p.Manifest.NodeProgram() != nil {
 			t.Fatalf("%s: %+v", id, p)

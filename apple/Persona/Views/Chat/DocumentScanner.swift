@@ -4,7 +4,7 @@ import UIKit
 import VisionKit
 
 /// Scan Document in the composer's + (#3720): VisionKit's document camera, which finds the page, crops it and flattens
-/// it. The pages go to the next message as its photos when they fit (`MessagePhotos.limit`), else as one PDF uploaded to
+/// it. The pages go to the next message as its photos when they fit (the hub's pictures, `ImageLimits`), else as one PDF uploaded to
 /// the computer as a picked file is (`Delivery`). Shown where the device can scan (`isAvailable`).
 struct DocumentScanner: UIViewControllerRepresentable {
     var done: ([UIImage]) -> Void

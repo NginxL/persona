@@ -21,5 +21,6 @@
   "question_more_other": "{count} more questions",
   "usage_limit": "Usage limit reached; continue it once the limit resets: {error}",
   "private_card": "Persona needs your answer. Open Persona to see it.",
-  "registration_required": "This device is no longer registered for notifications. Open Settings › Notifications in Persona to see why."
+  "registration_required": "This device is no longer registered for notifications. Open Settings › Notifications in Persona to see why.",
+  "sealed_fallback": "New message"
 }

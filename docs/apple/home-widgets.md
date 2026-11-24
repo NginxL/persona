@@ -23,6 +23,9 @@ Each widget has one hero (a number, a ring, a chart, a button) and one color tha
 | **Computers** | green; a computer's agents color its ring | four rings, a computer each | four rings with names and states | how many online, then each computer with its load | circular, rectangular, inline | Computer |
 | **Record** | the system's recording red | one big button | the button and what the recording is named | — (one action does not fill it) | circular and rectangular buttons | none |
 | **Health** | pink | today's steps, big, against the 7-day average | + sleep and resting heart rate | + the week's steps as bars | circular gauge, rectangular, inline | none |
+| **Water** | Health's blue | today's amount in a ring, amount left | + seven days as bars and a goal line | — | circular gauge, rectangular, inline | none |
+| **Protein** | Health's amber | today's amount in a ring, amount left | + seven days as bars and a goal line | — | circular gauge, rectangular, inline | none |
+| **Today's Health** | blue name; each item's color | four cells in a 2 × 2 grid | four cells in a row, with values | — | — | First, Second, Third, Fourth Item |
 | **Inbox** | Needs You's blue | how many need you, big, and who sent the newest | + the newest message | the five newest | circular, rectangular, inline | none |
 
 A small widget never holds a list; lists start at medium. The Calendar widget was called Today until it had a week and a
@@ -86,7 +89,8 @@ holds a list.
 
 ## Lock Screen
 
-Every widget but Record comes in the Lock Screen's three families; Record in the circle and the rectangle (one action).
+Every widget but Record and Today's Health comes in the Lock Screen's three families; Record in the circle and the rectangle (one action).
+Water and Protein stay visible while locked. Today's Health has no Lock Screen family and is privacy sensitive in StandBy and the Smart Stack.
 
 - **Circular**: the hero alone. Agents: how many need you (the face when none). Calendar: the weekday and the day. To-dos,
   Inbox: the count under the widget's mark. Usage: the fullest window as a gauge. Computers: online of all. Health: a
@@ -102,7 +106,7 @@ content steps back, as on the Home Screen. Inbox and Health stay `privacySensiti
 
 ## Edit Widget
 
-Four widgets have choices, on the widget itself (touch and hold, Edit Widget); nothing about the widgets is in the
+Five widgets have choices, on the widget itself (touch and hold, Edit Widget); nothing about the widgets is in the
 app's Settings (principles 2 and 3). Every choice starts at a default that works on a fresh install.
 
 | Widget | Choice | Default | The others |
@@ -111,6 +115,7 @@ app's Settings (principles 2 and 3). Every choice starts at a default that works
 | Agents, Computers | Computer | Any Computer | each computer in the snapshot |
 | Calendar | View | Today | Week, Month: where the widget starts; its switch changes it from there |
 | Usage | Account | The Fullest | each subscription account in the snapshot (up to 8) |
+| Today's Health | First / Second / Third / Fourth Item | Water / Protein / Activity / Sleep | Water, Protein, Activity, Steps, Sleep; repeats are allowed |
 
 - The lists come from the snapshot the app last wrote (`HomeChoices`), so Edit Widget never calls the hub and names
   everything as the widgets do. The choices are `HomeWidgetEdit` intents whose entities (`HomeComputerEntity`,
@@ -162,8 +167,84 @@ The same definition as the app, from the same code (principle 4):
 | Health | steps, sleep, resting heart rate | Health's own numbers, with the user's permission | `HealthTool.daily` / `.summary` |
 | Inbox | Need You | open items the triage marks as yours, read ones included (`InboxStore.actionCount`). The snapshot also carries the unread ones among them (`InboxStore.unreadCount`, the Inbox badge's number), which no widget draws | `InboxStore` |
 
-**Private content**: Inbox and Health are `privacySensitive`. While the phone is locked the system blurs them on the
+**Private content**: Inbox, Health and Today's Health are `privacySensitive`. While the phone is locked the system blurs them on the
 Lock Screen, in StandBy and in the Smart Stack.
+
+## Water, Protein and Today's Health (#13275)
+
+### Apple Watch
+
+Water and Protein also have watch-face complications: circular, rectangular and inline, with no corner or four-item
+family. They show only Persona's intake, without Health permission or a new watch app page. Their stable WidgetKit
+kinds are `persona.watch.water` and `persona.watch.protein`. The circle uses the system capacity gauge; the rectangle
+adds the total, goal, unit and a short progress bar; inline shows the name, total and unit. Blue and amber come from
+the same `HealthIntakePalette` as the phone; single-color faces use the system accent group. VoiceOver reads the
+name, total, goal, unit and whether the value is cached. Standalone intake stays readable while locked.
+
+Edit Complication can choose a paired hub group. Without a choice, the default group is used, or the sole available
+group; an ambiguous or removed group asks for pairing rather than silently using another group's amounts.
+`WatchIntakeProvider` reads the watch-only App Group's `ExtensionSurfaceStore` credential directly, as extension
+complications do. It sends `GET /api/v1/assistant/health/intake?space=health&days=1`, with the watch's own answer-only
+token and no selected-manager header, using the existing redirect-refusing client. It never requests the full page,
+changes stream or a phone credential. This path was checked in the system-hosted watch widget process on a simulator
+with a synthetic credential and loopback server, including App Group write/readback.
+
+The timeline asks for another refresh after about 15 minutes; watchOS budgets decide the actual schedule. Every
+timeline request fetches again, so an accepted watch write can call `WatchIntakeKind.reloadTimelines()` immediately
+without waiting for cache expiry. That entry point reloads just the two stable kinds above. The Log Water intent
+belongs to its own change; this change provides the callable entry point, not the write action.
+
+Network/decoding failures retain the last matching pairing's projection in the separate `WatchIntake/snapshot.json`
+file. Cached amounts are identified in the rectangle and VoiceOver. A 403 from an older hub (also a missing route's
+404) shows Update the hub; it never revokes a credential, erases extension widget content or changes the extension
+catalog. A subsequent successful read removes that hint. Pairing generations fence late responses and offline reads;
+older requests cannot replace newer projections. The cache holds at most 32 groups, no tokens, records or notes.
+An extra entry at the hub's next day boundary clears today's amounts while keeping the goals, including across DST;
+another marks an unrefreshed value as cached. No watch app fetch job or extra background schedule is needed.
+If the hub returns an unresolved `Local` time-zone label, the next GET supplies its new day bucket; the complication
+keeps the cached authoritative amount instead of guessing the phone's or UTC's midnight and clearing it early.
+
+### iPhone and iPad
+
+Water and Protein show Persona's own intake from the default manager, without Health permission. Their stable kinds
+are `persona.home.water` and `persona.home.protein`; Today's Health is `persona.home.healthToday`. Every tap opens the
+Health home. The existing `persona.home.health` widget keeps its families, appearance and count definitions.
+
+Today's Health defaults to Water, Protein, Activity and Sleep. Edit Widget chooses each position independently from
+those four and Steps; two equal choices draw twice. Small uses four separate 50 pt cells; medium uses four 64 pt cells
+in one row and adds labels. Water and Protein use `HealthIntakePalette`, the same values as `Theme.Health`; Sleep
+keeps indigo. Steps uses `HomeWidgetTokens.healthTodaySteps` (purple), leaving the older Health widget's pink alone.
+Steps and Sleep fill a ring at their previous seven-day average, excluding today and missing days. Without an average,
+the track remains empty; the current value still shows.
+Sleep uses decimal hours inside the compact ring; the medium size names the unit, and VoiceOver reads the full duration.
+
+Activity is straight neutral bars, never rings or a UIKit view. Move, Exercise and Stand always keep that order; a
+missing Exercise or Stand goal removes that row, while a zero goal keeps it. Small shows the values; medium includes
+names, goals and units. Apple Move Time uses minutes. A paused summary says Paused. When Activity has not been requested
+or no summary can be read, the cell directs the owner to allow it on the Health home; the widget never requests access.
+
+The version 1 snapshot gains optional `intake` and `activity` fields, and Health gains an optional sleep average. Intake
+stores the hub's date, IANA time zone (UTC stays UTC), next day boundary, totals, goals and seven daily buckets. The
+timeline adds that boundary; its next entry clears today's totals while keeping goals and historical bars, even when
+the phone's date differs. A missing `health_intake` hello feature shows Update the hub, never a fabricated zero.
+
+A cold widget wake first obtains the installed configurations from WidgetCenter and restores the last snapshot off
+the main actor. Health and Activity survive a locked-store failure; intake restores only when its opaque hub scope
+matches the currently paired hub. The scope hashes the hub address and group, never a token. A successful empty Activity
+read clears the cached value and a later restore cannot revive it. Older snapshots without a scope remain readable,
+but their intake is not restored into a different process until a fresh read establishes its hub.
+
+The app reads intake only for a placed Water, Protein or Today's Health widget, every 15 minutes when refreshed, at
+once after a local accepted write or a default-manager `health_intake` event, and on a hub widget wake. Reads in flight
+coalesce invalidations and read again after a change. The existing hub wake mechanism coalesces remote changes to about
+15 minutes; iOS delivery and WidgetKit's budgets may delay them. No extension network or keychain access is added.
+Activity is read only for an installed Today's Health widget when Health is enabled. Failed or locked reads keep the
+last value; an empty successful read clears it. `parts` isolates Water, Protein and Activity changes, so Activity alone
+never reloads the old Health widget. Each bundle builder remains below ten children via `HealthWidgetBundle`.
+
+Screenshot pages use `-showHomeWidgets health:<page>`: water, protein, water-mono, protein-mono, lock, default, move,
+access, mono, vibrant, choices and largest. They use synthetic data; tinted, clear and vibrant are gallery approximations.
+The vibrant page previews Today's Health in monochrome without registering a Lock Screen family.
 
 ## Ticking off a to-do
 

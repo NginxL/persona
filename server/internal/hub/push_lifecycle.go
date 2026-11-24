@@ -8,10 +8,19 @@ import (
 	"github.com/nwverse/persona/server/internal/db"
 )
 
-const (
-	pushDeviceMaxIdle     = 90 * 24 * time.Hour
-	pushDeviceMaintenance = 5 * time.Minute
-)
+const pushDeviceMaxIdle = 90 * 24 * time.Hour
+
+// pushDeviceMaintenance is how often push maintenance runs (var for tests).
+var pushDeviceMaintenance = 5 * time.Minute
+
+func (p *Pusher) maintenanceChannel() chan struct{} {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.maintenanceWake == nil {
+		p.maintenanceWake = make(chan struct{}, 1)
+	}
+	return p.maintenanceWake
+}
 
 // maintenanceLoop is tied to hub shutdown. Acceptance timestamps are coalesced;
 // registration ownership and inactivity remain in Postgres across hub versions.
@@ -19,25 +28,70 @@ func (p *Pusher) maintenanceLoop(ctx context.Context) {
 	if p.store == nil {
 		return
 	}
+	wake := p.maintenanceChannel()
 	tick := time.NewTicker(pushDeviceMaintenance)
 	defer tick.Stop()
 	for {
 		select {
 		case <-ctx.Done():
 			return
+		case <-wake:
 		case <-tick.C:
-			if err := p.reconcileDevices(ctx); err != nil {
-				p.logf("push registration maintenance: %v", err)
-			}
-			p.mirrorSentIfDue(ctx) // the delivered pushes for a build from before hub_push_sent (push_grading.go)
+		}
+		if err := p.reconcileDevices(ctx); err != nil {
+			p.logf("push registration maintenance: %v", err)
+		}
+		p.mirrorSentIfDue(ctx) // the delivered pushes for a build from before hub_push_sent (push_grading.go)
+	}
+}
+
+// resumeWrites wakes push maintenance, held/sent push persistence, and deferred
+// dead-token removals after a snapshot pause ends (quiesce.go).
+func (p *Pusher) resumeWrites() {
+	if p == nil {
+		return
+	}
+	p.mu.Lock()
+	deferred := p.maintenanceDeferred
+	p.maintenanceDeferred = false
+	wake := p.maintenanceWake
+	forgets := p.pendingForgets
+	p.pendingForgets = nil
+	p.mu.Unlock()
+	if deferred && wake != nil {
+		select {
+		case wake <- struct{}{}:
+		default:
 		}
 	}
+	p.gradingMu.Lock()
+	if p.store != nil && !p.gradingWriting && (p.heldDirty || len(p.sentPending) > 0) {
+		p.gradingWriting = true
+		go p.saveIntercepts()
+	}
+	p.gradingMu.Unlock()
+	if len(forgets) > 0 {
+		go func() {
+			for _, d := range forgets {
+				p.forgetIfCurrent(d)
+			}
+		}()
+	}
+	p.web.resumeWrites()
 }
 
 func (p *Pusher) reconcileDevices(parent context.Context) error {
 	if p.store == nil {
 		return nil
 	}
+	if !p.quiesce.beginOrDefer(func() {
+		p.mu.Lock()
+		p.maintenanceDeferred = true
+		p.mu.Unlock()
+	}) {
+		return nil
+	}
+	defer p.quiesce.end()
 	// Skip a busy pass rather than waiting for network retries or an enrollment.
 	// No transport can start between flushing acceptance and retiring inactivity.
 	if !p.saveMu.TryLock() {
@@ -48,7 +102,7 @@ func (p *Pusher) reconcileDevices(parent context.Context) error {
 		return nil
 	}
 	defer p.sendMu.Unlock()
-	ctx, cancel := context.WithTimeout(parent, p.storeTimeout)
+	ctx, cancel := context.WithTimeout(withQuiesceHeld(parent), p.storeTimeout)
 	defer cancel()
 	p.mu.Lock()
 	dirty := map[string]Device{}

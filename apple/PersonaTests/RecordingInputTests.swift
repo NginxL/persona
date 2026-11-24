@@ -1,4 +1,3 @@
-#if os(iOS) || os(watchOS)
 import AVFoundation
 import Foundation
 import Testing
@@ -25,4 +24,3 @@ struct RecordingInputTests {
         #expect(RecordingInput.preferredIndex([], for: .bluetooth) == nil)
     }
 }
-#endif

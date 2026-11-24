@@ -8,6 +8,7 @@ import persona.core.contracts.DirectionCounts
 import persona.core.contracts.DirectionTask
 import persona.core.contracts.DirectionTaskState
 import persona.core.contracts.DirectionTree
+import persona.core.contracts.ExternalDirection
 import persona.core.contracts.Session
 import persona.core.contracts.SessionKey
 import persona.core.contracts.Todo
@@ -33,7 +34,7 @@ class DirectionTreeTest {
             DirectionTask("t1", "Ship login", DirectionTaskState.NeedsYou, listOf(agent("a1", agent("a1-child"), agent("a1@sub")))),
             DirectionTask("t2", "Write docs", DirectionTaskState.Working, listOf(agent("a2"))),
         )),
-        Direction("lead-b", "Ops"),
+        Direction("lead-b", "Ops", external = ExternalDirection("work", "outside-agent")),
         Direction("main", secretary = true, counts = DirectionCounts(review = 1), tasks = listOf(
             DirectionTask("t3", "Check invoices", DirectionTaskState.Review, listOf(agent("a1"))),
         )),
@@ -70,6 +71,7 @@ class DirectionTreeTest {
         val mapped = tree.mapMachines { "$it~g" }
         assertEquals(setOf("m~g"), mapped.directions.flatMap { d -> d.tasks.flatMap { t -> t.agents.flatMap { it.flatten() } } }.map { it.machineId }.toSet())
         assertEquals(tree.directions.map { it.id }, mapped.directions.map { it.id })
+        assertEquals(SessionKey("work~g", "outside-agent"), mapped.direction("lead-b")?.external?.target)
     }
 
     @Test fun unknownStatesReadAsWorking() {
@@ -140,7 +142,7 @@ class DirectionTreeTest {
         val result = TriageResult(
             TriageSection.entries.associateWith { emptyList<TriageGroup>() } + mapOf(TriageSection.Waiting to listOf(shared), TriageSection.Shelved to listOf(shelved)),
             TriageSection.entries.associateWith { 0 } + mapOf(TriageSection.Waiting to 1, TriageSection.Working to 1, TriageSection.Shelved to 1),
-            open = 2, shelved = 1, finished = 0)
+            open = 2, shelved = 1, finished = 0, cancelled = 0)
         val rest = result.without(setOf("t1"))
         assertTrue(rest.rows(TriageSection.Waiting).isEmpty())
         assertEquals(listOf("t2"), rest.rows(TriageSection.Working).map { it.lead.id })

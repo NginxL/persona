@@ -1,7 +1,7 @@
 # screen-udp
 
 The live screen's video over UDP (#7873, `docs/extensions/computer-use.md` "Video over UDP (#7873)"): the packets a
-phone and the node's `internal/screenlink` exchange on a UDP flow, how a video message is cut into Reed-Solomon blocks,
+phone and the node's `internal/modules/screen-share/screenlink` exchange on a UDP flow, how a video message is cut into Reed-Solomon blocks,
 and the parity itself. Both sides read the same cases, so they seal, number, cut and rebuild alike.
 
 ## Rules
@@ -49,6 +49,6 @@ made up.
 
 ## Checked by
 
-- Go: `server/internal/screenlink` `TestTheUDPWireMatchesTheSharedCases` (`go test ./internal/screenlink`).
+- Go: `server/internal/modules/screen-share/screenlink` `TestTheUDPWireMatchesTheSharedCases` (`go test ./internal/screenlink`).
   `PERSONA_WRITE_UDP_FIXTURES=1` writes `cases.json` from the test's cases.
 - iOS: `apple/Packages/PersonaScreenKit`, with the phone's side of the flow.

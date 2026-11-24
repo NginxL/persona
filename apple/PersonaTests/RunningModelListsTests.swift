@@ -12,6 +12,7 @@ import PersonaWire
         AgentModel(id: "claude-fable-5-1", name: "Fable 5.1", resolved: "claude-fable-5-1"),
         AgentModel(id: "claude-fable-5-2", name: "Fable 5.2", resolved: "claude-fable-5-2"),
         AgentModel(id: "claude-opus-4-8", name: "Opus 4.8"),
+        AgentModel(id: "claude-sonnet-5-5", name: "Sonnet 5.5", aliases: ["sonnet", "fable"]),
         AgentModel(id: "vendor/typed", name: "vendor/typed", custom: true),
     ]
 
@@ -40,6 +41,9 @@ import PersonaWire
         #expect(PromptItems.runningModelID("claude-fable-5-2", list: list) == "claude-fable-5-2")
         #expect(PromptItems.runningModelID("claude-opus-5-5", list: list) == "opus")
         #expect(PromptItems.runningModelID("claude-opus-4-8", list: list) == "claude-opus-4-8")
+        #expect(PromptItems.runningModelID("sonnet", list: list) == "claude-sonnet-5-5")
+        #expect(PromptItems.runningModelID("FABLE", list: list) == "claude-sonnet-5-5")
+        #expect(PromptItems.unlistedModel("sonnet", list: list) == nil, "a folded alias is not a second Current row")
         #expect(PromptItems.runningModelID(nil, list: list) == "default")
         #expect(PromptItems.runningModelID("<synthetic>", list: list) == "default")
         // One the list doesn't have is a row of its own, the one ticked.
@@ -54,6 +58,8 @@ import PersonaWire
         #expect(PromptItems.modelPick("opus", running: "claude-opus-5-5", list: list) == .keep)
         #expect(SessionModes.modelPatch("claude-opus-4-8", current: "claude-opus-5-5", list: list) == "claude-opus-4-8")
         #expect(SessionModes.modelPatch("opus", current: "claude-opus-5-5", list: list) == nil)
+        #expect(PromptItems.modelPick("claude-sonnet-5-5", running: "sonnet", list: list) == .keep)
+        #expect(SessionModes.modelPatch("claude-sonnet-5-5", current: "fable", list: list) == nil)
         #expect(SessionModes.modelPatch("default", current: "claude-fable-5-2", list: list) == "default")
     }
 

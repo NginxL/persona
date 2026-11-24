@@ -27,6 +27,7 @@ import { toolDisplayName } from "../../lib/turns";
 import type { SessionLive } from "../../lib/types";
 import { TICKING_DURATION, workDuration } from "../../lib/work-groups";
 import { workflowCounts, type BackgroundLine, type WaitLine } from "../../lib/workflows";
+import { stalledText } from "../../lib/background-work";
 import { stateName } from "../../lib/state-labels";
 import { useNow } from "../../ui/atoms";
 import { Icon, type IconName } from "../../ui/icons";
@@ -179,7 +180,8 @@ function BackgroundWords({ line }: { line: BackgroundLine }) {
   );
 }
 
-function BackgroundCommandWords({ line }: { line: WaitLine }) {
+function BackgroundCommandWords({ line, now }: { line: WaitLine; now: number }) {
+  const stalled = stalledText(line.stalled, now);
   return (
     <span className="flex min-w-0 items-center whitespace-pre" data-running-verb>
       <span className="shrink-0">{t("chat-runningstatusbar.background_task")}</span>
@@ -190,6 +192,7 @@ function BackgroundCommandWords({ line }: { line: WaitLine }) {
         </>
       )}
       {line.more > 0 && <span className="shrink-0">{` · ${t("chat-runningstatusbar.more_waits", { count: line.more })}`}</span>}
+      {stalled && <span className="min-w-0 truncate font-normal text-ink-3" data-running-stalled title={t("lib-state-labels.bg_stalled_hint")}>{` · ${stalled}`}</span>}
     </span>
   );
 }
@@ -224,7 +227,7 @@ export function RunningStatusView({ live, working, done: finished, startedAt, cl
   const commandTimed = Number.isFinite(commandStart) && commandStart > 0;
   // the turn's own work, measured: an Agent's, not the Persona conversation's, not background work's
   const own = !plain && !behind && !usage && !task;
-  const now = useNow(1000, phase === "on" && !offline && !usage && (!task || commandTimed));
+  const now = useNow(task?.stalled && !commandTimed ? 60_000 : 1000, phase === "on" && !offline && !usage && (!task || commandTimed || Boolean(task.stalled)));
   // from the run's start; a run that does not say when it started, from the turn's (not from when the bar appeared).
   // After the turn it stays as it last was (cindy): the turn's start and its status line are gone by then.
   const counted = useElapsed(behind || task ? null : shown, behind ? (bg.since ?? startedAt) : task ? undefined : startedAt, now);
@@ -270,7 +273,7 @@ export function RunningStatusView({ live, working, done: finished, startedAt, cl
       >
         <Icon name={icon} size={14} stroke={done ? 2.5 : undefined} className={`shrink-0 ${done ? "" : "-translate-y-px"}`} />
         {offline && <Disconnected />}
-        {behind ? <BackgroundWords line={bg} /> : task ? <BackgroundCommandWords line={task} /> : retry ? (
+        {behind ? <BackgroundWords line={bg} /> : task ? <BackgroundCommandWords line={task} now={now} /> : retry ? (
           <span className="flex min-w-0 flex-col" data-running-verb>
             <span className="truncate">{words}</span>
             <span className="truncate text-ink-3 font-normal" data-running-retry-detail>{retry.error}</span>

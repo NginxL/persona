@@ -1,5 +1,6 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
+import { t } from "../../i18n";
 import type { Session } from "../../lib/types";
 import type { UsageAccount } from "../../lib/usage-windows";
 import { AgentStatusLine, sessionQuota, workingLocation } from "./AgentStatusLine";
@@ -34,5 +35,35 @@ describe("Agent status line", () => {
     expect(sessionQuota([quota, { ...quota, id: "other" }], session, now)).toBeNull();
     expect(sessionQuota([claude], session, now)).toBeNull();
     expect(sessionQuota([{ ...quota, stale: true }], session, now)).toBeNull();
+  });
+
+  it("shows agy context before items load, with a progress bar only for a known window", () => {
+    const agy = { ...session, cwd: "", agent: "agy", model: "gemini-3.8-flash-high", context_tokens: 32_768 };
+    const known = renderToStaticMarkup(<AgentStatusLine session={{ ...agy, context_window: 131_072 }} />);
+    expect(known).toContain('role="progressbar"');
+    expect(known).toContain('aria-valuenow="25"');
+    expect(known).toContain(t("context.label", { percent: 25 }));
+    const unknown = renderToStaticMarkup(<AgentStatusLine session={{ ...agy, model: "custom", context_window: 0 }} />);
+    expect(unknown).toContain(t("context.current_tokens", { tokens: "32.8k" }));
+    expect(unknown).not.toMatch(/progressbar|%/);
+  });
+
+  it("shows ContextMeter in Assistant chats without folder/repo when context or item usage is known", () => {
+    const asst: Session = { ...session, assistant: true, context_tokens: 40_000, context_window: 200_000 };
+    const html = renderToStaticMarkup(<AgentStatusLine session={asst} assistant />);
+    expect(html).toContain("data-composer-usage");
+    expect(html).toContain('aria-valuenow="20"');
+    expect(html).not.toContain("data-composer-source");
+
+    const usageOnly = renderToStaticMarkup(
+      <AgentStatusLine
+        session={{ ...session, assistant: true }}
+        assistant
+        items={[{ id: "a1", seq: 1, role: "assistant", kind: "text", usage: [{ in: 1200, out: 800 }] }]}
+      />,
+    );
+    expect(usageOnly).toContain("2.0k tok");
+
+    expect(renderToStaticMarkup(<AgentStatusLine session={{ ...session, assistant: true }} assistant />)).toBe("");
   });
 });

@@ -37,6 +37,7 @@ import persona.core.domain.inbox.InboxItem
 import persona.core.navigation.AppTab
 import persona.core.navigation.Navigator
 import java.io.File
+import persona.core.inbox.*
 
 /**
  * The Inbox page at rest and with a row's swipe revealed, in each style, light and dark (#4210 T1): for the PR's

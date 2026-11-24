@@ -58,22 +58,33 @@ type Hub struct {
 	assistantProc assistantGate
 	// deviceFinishes: device sessions that ended while a snapshot paused
 	// writes, written on resume (devicesessions.go).
-	deviceFinishesMu sync.Mutex
-	deviceFinishes   []deviceSessionFinish
-	logger           *log.Logger
-	traffic          trafficLog // privacy-safe minute counters, flushed to the journal
-	machines         []*Machine
-	byID             map[string]*Machine
+	deviceFinishesMu      sync.Mutex
+	deviceFinishesFlushMu sync.Mutex
+	deviceFinishes        []deviceSessionFinish
+	deviceFinishesRunning bool
+	testAfterFinishAppend func()
+	testAfterFinishRefuse func()
+	clientOps             clientOpsWake
+	codexPendingMu        sync.Mutex
+	codexPending          map[string]*codexSaveEntry
+	looksGoneMu           sync.Mutex
+	looksGonePending      []string
+	assistantProfileSave  assistantProfileSaveState
+	logger                *log.Logger
+	traffic               trafficLog // privacy-safe minute counters, flushed to the journal
+	machines              []*Machine
+	byID                  map[string]*Machine
 	// fs.watch: generation fences stale node writes, and forced replays survive machine-ID recreation.
-	fsWatchGenMu     sync.Mutex
-	fsWatchGen       map[string]uint64
-	fsWatchEpoch     uint64
-	fsWatchForceMu   sync.Mutex
-	fsWatchForceByID map[string]bool
-	push             *Pusher
-	agentWork        agentWork    // whether the manager is there to ask (agents_link.go)
-	store            Store        // nil in unit tests: nothing is persisted
-	lockTests        lockTestWake // wakes the lock test dispatcher when a test is scheduled (locktest.go)
+	fsWatchGenMu         sync.Mutex
+	fsWatchGen           map[string]uint64
+	fsWatchEpoch         uint64
+	fsWatchEpochDeferred atomic.Bool
+	fsWatchForceMu       sync.Mutex
+	fsWatchForceByID     map[string]bool
+	push                 *Pusher
+	agentWork            agentWork    // whether the manager is there to ask (agents_link.go)
+	store                Store        // nil in unit tests: nothing is persisted
+	lockTests            lockTestWake // wakes the lock test dispatcher when a test is scheduled (locktest.go)
 
 	terms terminals  // the terminal tab's live streams (terminal.go)
 	fulls fullRelays // the web's full herdr views (herdrclient.go)
@@ -130,6 +141,7 @@ type Hub struct {
 	// deltas: the live text of each session's message being generated, as last relayed (machine, session -> text): a
 	// client subscribing in the middle of it gets it after the backlog instead of waiting for the next token.
 	deltas     map[[2]string]string
+	ttft       hubTTFTTracker
 	phoneTools map[string]db.PhoneToolRegistration
 	calls      map[string]chan proto.ToolResult
 	wokeAt     map[string]time.Time // device -> last silent push to wake it for a tool call
@@ -296,6 +308,9 @@ func runHub(ctx context.Context, b update.Build, cfg *Config, budget *shutdownBu
 	h.teeErrors()                  // the log's error lines become reports while an extension takes them (error_reports.go)
 	h.builtinLooks = builtinPersonaFS()
 	h.live = newLiveActivities(h)
+	if err := cfg.checkPrivateNetworkOnly(); err != nil {
+		return err // before anything starts that could reach past the private network
+	}
 	h.upd = newUpdater(h)
 	h.upd.confirmed = !updating // an update under way is confirmed by this process (its watchdog waits for that)
 	h.upd.logSource()
@@ -330,13 +345,17 @@ func runHub(ctx context.Context, b update.Build, cfg *Config, budget *shutdownBu
 		return err
 	}
 	h.push = newPusher(cfg.dir, h.store, h.logf)
+	h.push.quiesce = &h.quiesce
 	h.push.web = newWebPusher(h.store, h.logf) // browsers' subscriptions and the VAPID key, in the hub's settings (#7459)
+	h.push.web.quiesce = &h.quiesce
 	h.push.traffic = h.recordTraffic
 	h.push.desktopOnline = h.desktopOnline
 	h.push.desktopOpen = h.desktopOpen
 	h.push.hubID = h.hubID
 	h.push.userLang = h.userLang
 	h.push.userLoc = h.userLocation
+	h.push.attention = h.attentionMode
+	h.push.privateOnly = cfg.Security.PrivateNetworkOnly          // own APNs key only, sealed (push.go relayed, push_send.go)
 	h.push.devicesChanged = func() { go h.fleetClientsChanged() } // a phone that takes MCP forms by push (fleet_link.go)
 	go h.push.maintenanceLoop(ctx)
 	// The machines are the manager's to connect (devices_link.go); until it reports them they show as before a
@@ -701,11 +720,13 @@ var phoneConfirmedTools = map[string]bool{
 var phoneOnScreenTools = map[string]bool{
 	"phone_clipboard_get": true,
 	"phone_clipboard_set": true,
+	// The system's Health permission screen shows only over the app on screen (#13740).
+	"phone_health_request_access": true,
 }
 
 // phoneNotOnScreen is the answer to a phoneOnScreenTools call no connected phone can take.
 const phoneNotOnScreen = "Persona is not open on the user's phone, and the phone lets only the app on screen use the " +
-	"clipboard: ask the user to open Persona, then retry."
+	"clipboard or ask for Health access: ask the user to open Persona, then retry."
 
 // requestPhoneWake selects a provider and asks iOS to wake it without waiting for a connection.
 // It reports whether a provider can be woken, including when a recent request throttles this push.

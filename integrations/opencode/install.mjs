@@ -8,9 +8,9 @@
 // The default directory is $XDG_CONFIG_HOME/opencode (~/.config/opencode). A file of that name that this script did not
 // write is left alone unless --force.
 
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { dirname, join, resolve } from 'node:path'
+import { dirname, join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
 export const MARK = '// persona-opencode-runtime: written by integrations/opencode/install.mjs'
@@ -43,7 +43,16 @@ export function install({ configDir, entry, uninstall = false, force = false }) 
   return current === undefined ? 'installed' : 'updated'
 }
 
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+// Node loads the entry module by its real path; compare real paths so a symlinked directory still runs it (#12848).
+function isEntry() {
+  try {
+    return !!process.argv[1] && realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url))
+  } catch {
+    return false // no file behind argv[1]
+  }
+}
+
+if (isEntry()) {
   const arg = (n) => {
     const i = process.argv.indexOf(`--${n}`)
     return i > 0 ? process.argv[i + 1] : undefined

@@ -133,9 +133,6 @@ struct ProviderWizard: View {
                     #endif
                 }
             }
-            #if os(macOS)
-            .macSheet()
-            #endif
         }
     }
 

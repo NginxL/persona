@@ -1,9 +1,7 @@
 import CoreGraphics
 import Foundation
 import SwiftUI
-#if canImport(UIKit)
 import UIKit
-#endif
 
 // What the image editor (`ImageEditor`) did to a picture: turned it, cropped it, drew on it. Kept apart from the picture,
 // so a photo edited in the composer opens again with its crop and marks as they were, each still undoable, and the
@@ -315,26 +313,17 @@ enum ImageEditWork {
     /// (what is sent is no larger).
     static func pixels(_ image: UIImage) async -> CGImage? {
         let side = MessagePhotos.maxSide, sent = Sent(value: image)
-        #if canImport(UIKit)
         return await Task.detached(priority: .userInitiated) { Sent(value: upright(sent.value, maxSide: side)) }.value.value
-        #else
-        return upright(sent.value, maxSide: side)
-        #endif
     }
 
     /// `edits` drawn over `pixels` into a new picture.
     static func render(_ edits: ImageEdits, over pixels: CGImage) async -> UIImage? {
         let sent = Sent(value: pixels)
-        #if canImport(UIKit)
         let drawn = await Task.detached(priority: .userInitiated) { Sent(value: edits.render(sent.value)) }.value.value
-        #else
-        let drawn = edits.render(sent.value)
-        #endif
         return drawn.map { UIImage(cgImage: $0) }
     }
 
     nonisolated private static func upright(_ image: UIImage, maxSide: CGFloat) -> CGImage? {
-        #if canImport(UIKit)
         let pixels = CGSize(width: image.size.width * image.scale, height: image.size.height * image.scale)
         if image.imageOrientation == .up, let cg = image.cgImage, CGFloat(max(cg.width, cg.height)) <= maxSide { return cg }
         let fit = min(1, maxSide / max(pixels.width, pixels.height, 1))
@@ -342,17 +331,5 @@ enum ImageEditWork {
         let format = UIGraphicsImageRendererFormat.default()
         format.scale = 1
         return UIGraphicsImageRenderer(size: target, format: format).image { _ in image.draw(in: CGRect(origin: .zero, size: target)) }.cgImage
-        #else
-        guard let cg = image.cgImage else { return nil }
-        let side = CGFloat(max(cg.width, cg.height))
-        guard side > maxSide else { return cg }
-        let fit = maxSide / side
-        let w = Int((CGFloat(cg.width) * fit).rounded()), h = Int((CGFloat(cg.height) * fit).rounded())
-        guard let ctx = CGContext(data: nil, width: w, height: h, bitsPerComponent: 8, bytesPerRow: 0, space: CGColorSpace(name: CGColorSpace.sRGB)!,
-                                  bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return cg }
-        ctx.interpolationQuality = .high
-        ctx.draw(cg, in: CGRect(x: 0, y: 0, width: w, height: h))
-        return ctx.makeImage()
-        #endif
     }
 }

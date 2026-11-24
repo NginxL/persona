@@ -37,6 +37,9 @@ type updateSource struct {
 // updateSource is read again at every use: the tests give the hub its build after it was made.
 func (h *Hub) updateSource() updateSource {
 	s := updateSource{url: strings.TrimRight(strings.TrimSpace(h.build.UpdateURL), "/")}
+	if h.cfg != nil && h.cfg.Security.PrivateNetworkOnly {
+		s.url = "" // office network mode: only an update.url the organization gives (private_network.go)
+	}
 	if s.url != "" {
 		s.from = updateFromBuild
 	}

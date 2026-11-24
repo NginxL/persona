@@ -92,7 +92,7 @@ class PageSizedSettingsSheetTest {
                         SideEffect { marker = remembered; list = scroll }
                         DisposableEffect(Unit) { onDispose { disposals++ } }
                         LaunchedEffect(Unit) { effectStarts++; awaitCancellation() }
-                        LaunchedEffect(Unit) { runCatching { field.requestFocus() } }
+                        LaunchedEffect(Unit) { val _ = runCatching { field.requestFocus() } }
                         Column {
                             BasicTextField(draft, { draft = it }, Modifier.testTag("settings-draft").focusRequester(field))
                             LazyColumn(Modifier.height(Tokens.Size.box280), state = scroll) {
@@ -151,7 +151,7 @@ class PageSizedSettingsSheetTest {
                 PersonaTheme(darkTheme = false, reduceMotion = true) {
                     JSettingsSheet(onDismiss = {}) {
                         val second = remember { FocusRequester() }
-                        LaunchedEffect(Unit) { runCatching { second.requestFocus() } }
+                        LaunchedEffect(Unit) { val _ = runCatching { second.requestFocus() } }
                         Column {
                             BasicTextField("first", {}, Modifier.testTag("first-settings-field"))
                             BasicTextField("second", {}, Modifier.testTag("second-settings-field").focusRequester(second))

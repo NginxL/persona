@@ -9,8 +9,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/nwverse/persona/server/internal/botcard"
 	"github.com/nwverse/persona/server/internal/channel"
-	"github.com/nwverse/persona/server/internal/feishubot"
 	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/proto"
 )
@@ -568,7 +568,7 @@ func (s *Service) FeishuOwner(_ context.Context, p FeishuOwner) {
 			return
 		}
 		l := s.botLang(ctx)
-		card := feishubot.NewCard(i18n.T(l, "assistant-feishu.paired"), feishubot.Green, i18n.T(l, "assistant-feishu.paired")).Markdown(i18n.T(l, "assistant-feishu.paired_body") + botHelp(l, st.Features))
+		card := botcard.NewCard(i18n.T(l, "assistant-feishu.paired"), botcard.Green, i18n.T(l, "assistant-feishu.paired")).Markdown(i18n.T(l, "assistant-feishu.paired_body") + botHelp(l, st.Features))
 		if _, err := s.botPost(ctx, "", card, ""); err != nil {
 			s.logf("bots: paired note: %v", err)
 		}

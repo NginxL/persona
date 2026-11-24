@@ -21,6 +21,7 @@
   "fixed_launcher_unhealthy": "固定电脑 {machine} 上的启动器 {launcher} 不可用：{reason}。任务仍留在该电脑，请在健康恢复后重试。",
   "launcher_not_on_machine": "{machine} 上没有启动器 {launcher}，没有启动任何 Agent。这台电脑能用的启动器：{launchers}",
   "launcher_swapped": "{launcher} 不在 {machine} 上，改用 {to}（它的默认模型）",
+  "launcher_swapped_model": "{launcher} 不在 {machine} 上，改用 {to}，并保留你选择的模型 {model}",
   "speed_type": "speed 必须是字符串：standard、fast 或 ultrafast。",
   "speed_invalid": "Agent speed {speed} 无效：请使用 standard、fast 或 ultrafast。",
   "speed_resume": "speed {speed} 只能用于新的 Agent 启动，不能用于恢复；请留空以使用 launcher 自己的设置。",
@@ -98,5 +99,6 @@
   "start_link_lost": "和「{machine}」的连接断了，重连后也没看到任务起来：{reason}",
   "start_machine_busy": "「{machine}」一直连着，但在等待时间内没回应（电脑可能太忙）：{reason}",
   "start_link_down": "和「{machine}」的连接断了，等了一阵也没重连上：{reason}",
+  "codex_effort_terminal": "为使用指定的推理强度，Codex 将通过终端启动。审批和提问将通过终端画面处理。",
   "start_goal_skipped": "启动时没能设开始目标：{reason}"
 }

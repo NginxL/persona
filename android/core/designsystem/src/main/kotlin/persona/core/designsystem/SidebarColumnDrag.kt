@@ -508,7 +508,7 @@ internal fun ColumnDragController.recordModifier(progress: Float): Modifier {
         fun take(layer: GraphicsLayer): Still {
             layer.record { this@drawWithContent.drawContent() }
             val still = stillImage(layer)
-            if (still is Still.Failed) runCatching { layer.record { } }
+            if (still is Still.Failed) { val _ = runCatching { layer.record { } } }
             return still
         }
         if (shareBeside) {

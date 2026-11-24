@@ -3,6 +3,7 @@ package assistant
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -119,6 +120,145 @@ func TestInboxDisabledReleasesAgents(t *testing.T) {
 	}
 }
 
+// Re-enabling the twin resumes only work that its off transition interrupted. The marker and the single resume survive
+// reload; repeated enabled passes and genuine failures do not produce another turn (#11219).
+func TestInboxReenabledResumesOnlyDisabledInterruption(t *testing.T) {
+	for _, tc := range []struct {
+		name, handling, agent, session string
+	}{
+		{name: "queued", handling: HandlingLooking, agent: AgentQueued},
+		{name: "running", handling: HandlingLooking, agent: AgentRunning, session: "existing-session"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := agentHub(t)
+			it := disabledTwinItem(h, "interrupted", tc.handling, tc.agent, tc.session)
+			h.setConfig(func(c *assistantwire.InboxConfig) { c.Agent.Enabled = false })
+			h.handPass(context.Background())
+			checkTwinReleased(t, it, i18n.Default)
+			if it.Agent == nil || !it.Agent.InterruptedByDisable {
+				t.Fatalf("the off transition did not mark its interruption: %+v", it.Agent)
+			}
+			before := inboxProcessingStarts(h) + len(h.f.sentToAgents())
+			h.handPass(context.Background())
+			if got := inboxProcessingStarts(h) + len(h.f.sentToAgents()); got != before {
+				t.Fatalf("disabled pass started work: %d -> %d", before, got)
+			}
+
+			reloaded := New(Options{Hub: h.f, Store: func() Store { return h.st }, Logf: testLogf(t)})
+			if err := reloaded.inboxReady(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+			got := reloaded.inbox.items[it.ID]
+			if got == nil {
+				t.Fatal("the interrupted item was lost on reload")
+			}
+			checkTwinReleased(t, got, i18n.Default)
+			if got.Agent == nil || !got.Agent.InterruptedByDisable {
+				t.Fatalf("the interruption marker was lost on reload: %+v", got.Agent)
+			}
+			if listed := got.listed(); listed.Agent == nil || listed.Agent.InterruptedByDisable {
+				t.Fatalf("the internal interruption marker escaped into the listed item: %+v", listed.Agent)
+			}
+			h.setConfig(func(c *assistantwire.InboxConfig) { c.Agent.Enabled = true })
+			reloaded.inbox.cfgMu.Lock()
+			reloaded.inbox.cfgAt = time.Time{}
+			reloaded.inbox.cfgMu.Unlock()
+			reloaded.handPass(context.Background())
+			got = reloaded.inbox.items[it.ID]
+			if got.Handling == nil || got.Handling.State != HandlingLooking {
+				t.Fatalf("re-enabled twin did not resume its interrupted item: %+v", got.Handling)
+			}
+			resumed := inboxProcessingStarts(h) + len(h.f.sentToAgents())
+			if resumed != before+1 {
+				t.Fatalf("re-enabled twin produced %d work items, want exactly one", resumed-before)
+			}
+			reloaded.handPass(context.Background())
+			if got := inboxProcessingStarts(h) + len(h.f.sentToAgents()); got != resumed {
+				t.Fatalf("a repeated enabled pass duplicated the resume: %d -> %d", resumed, got)
+			}
+
+			now := time.Now().UTC()
+			genuine := &InboxItem{ID: "genuine-failure", Source: "example", Kind: KindDM, Tier: TierAction,
+				Last: "1", TriagedAt: "1", Context: "Please review this request", UpdatedAt: now,
+				Agent:    &InboxAgent{State: AgentRunning, MachineID: "server", SessionID: "failed-session", Of: "1", StartedAt: &now},
+				Handling: &InboxHandling{Owner: HandlingOwner, State: HandlingLooking, MachineID: "server", SessionID: "failed-session", Since: &now}}
+			reloaded.inbox.mu.Lock()
+			reloaded.inbox.items[genuine.ID] = genuine
+			reloaded.inbox.failHandling(genuine, "a genuine processing failure", now)
+			reloaded.inbox.mu.Unlock()
+			reloaded.handPass(context.Background())
+			if genuine.Handling == nil || genuine.Handling.State != HandlingFailed {
+				t.Fatalf("a genuine failure was resumed: %+v", genuine.Handling)
+			}
+			if got := inboxProcessingStarts(h) + len(h.f.sentToAgents()); got != resumed {
+				t.Fatalf("a genuine failure produced more work: %d -> %d", resumed, got)
+			}
+		})
+	}
+}
+
+func TestInboxReenabledKeepsFailureAfterDisabledInterruption(t *testing.T) {
+	h := agentHub(t)
+	it := disabledTwinItem(h, "interrupted-then-failed", HandlingLooking, AgentRunning, "existing-session")
+	h.setConfig(func(c *assistantwire.InboxConfig) { c.Agent.Enabled = false })
+	h.handPass(context.Background())
+	checkTwinReleased(t, it, i18n.Default)
+	h.inbox.mu.Lock()
+	h.inbox.failHandling(it, "a later genuine processing failure", time.Now())
+	h.inbox.mu.Unlock()
+	h.setConfig(func(c *assistantwire.InboxConfig) { c.Agent.Enabled = true })
+	h.handPass(context.Background())
+	if it.Handling == nil || it.Handling.State != HandlingFailed || it.Handling.Error != "a later genuine processing failure" {
+		t.Fatalf("a genuine failure after the off transition was resumed: %+v", it.Handling)
+	}
+	checkNoTwinWork(t, h)
+}
+
+func TestInboxReenabledDoesNotResumeClosedInterruption(t *testing.T) {
+	h := agentHub(t)
+	it := disabledTwinItem(h, "closed-interruption", HandlingLooking, AgentRunning, "existing-session")
+	h.setConfig(func(c *assistantwire.InboxConfig) { c.Agent.Enabled = false })
+	h.handPass(context.Background())
+	checkTwinReleased(t, it, i18n.Default)
+	h.inbox.mu.Lock()
+	h.inbox.closeHandling(it, "user", time.Now())
+	h.inbox.mu.Unlock()
+	if !it.open() || it.Handling == nil || it.Handling.State != HandlingDone {
+		t.Fatalf("the close fixture did not leave a settled open item: %+v", it.Handling)
+	}
+	h.setConfig(func(c *assistantwire.InboxConfig) { c.Agent.Enabled = true })
+	h.handPass(context.Background())
+	if !it.open() || it.Handling == nil || it.Handling.State != HandlingDone {
+		t.Fatalf("a settled item resumed after re-enable: %+v", it.Handling)
+	}
+	checkNoTwinWork(t, h)
+}
+
+func TestInboxReenabledInstructionConsumesInterruption(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		h := agentHub(t)
+		it := disabledTwinItem(h, "interrupted", HandlingLooking, AgentRunning, "existing-session")
+		h.setConfig(func(c *assistantwire.InboxConfig) { c.Agent.Enabled = false })
+		h.handPass(context.Background())
+		checkTwinReleased(t, it, i18n.Default)
+		h.setConfig(func(c *assistantwire.InboxConfig) { c.Agent.Enabled = true })
+		words := "Continue with the deadline first"
+		if _, err := h.actOnSuggestion(context.Background(), it.ID, suggestionReq{Version: 0, Action: suggestInstruct, Text: &words}, true); err != nil {
+			t.Fatal(err)
+		}
+		synctest.Wait()
+		sent := h.f.sentToAgents()
+		if len(sent) != 1 || !strings.Contains(sent[0], words) {
+			t.Fatalf("one explicit instruction produced %d processing deliveries: %q", len(sent), sent)
+		}
+		h.handPass(context.Background())
+		synctest.Wait()
+		if got := len(h.f.sentToAgents()); got != 1 {
+			t.Fatalf("the next enabled pass duplicated the explicit resume: %d deliveries", got)
+		}
+	})
+}
+
 func TestInboxDisabledPreservesSettledItems(t *testing.T) {
 	h := agentHub(t)
 	h.setConfig(func(c *assistantwire.InboxConfig) { c.Agent.Enabled = false })
@@ -129,23 +269,34 @@ func TestInboxDisabledPreservesSettledItems(t *testing.T) {
 	suggestion := disabledTwinItem(h, "suggestion", HandlingDone, AgentDrafted, "suggestion-session")
 	suggestion.Suggestion = &InboxSuggestion{Version: 1, Kind: SuggestReply, Text: "Please send the details", At: now}
 	suggestion.Agent.Draft = suggestion.Suggestion.Text
-	h.handPass(context.Background())
-	if waiting.Handling.State != HandlingWaiting || waiting.status() != StatusWorking || !waiting.open() {
-		t.Fatalf("an already confirmed action changed: %+v", waiting)
-	}
-	if done.open() || done.Handling.State != HandlingDone || done.DoneBy != "user" {
-		t.Fatalf("a filed item was reopened: %+v", done)
-	}
-	if suggestion.Suggestion == nil || suggestion.Suggestion.Text != "Please send the details" || suggestion.Agent.Draft != suggestion.Suggestion.Text ||
-		suggestion.Handling.State != HandlingDone || suggestion.status() != StatusAction {
-		t.Fatalf("an existing suggestion was discarded: %+v", suggestion)
-	}
-	for _, it := range []*InboxItem{waiting, done, suggestion} {
-		if len(it.Agent.Pending) != 0 || it.Agent.Wake || it.Agent.Back != "" || it.Agent.RetryAfter != nil {
-			t.Fatalf("settled item %s retained pending work: %+v", it.ID, it.Agent)
+	failed := disabledTwinItem(h, "failed", HandlingFailed, AgentFailed, "failed-session")
+	failed.Handling.Error, failed.Agent.Error = "a genuine processing failure", "a genuine processing failure"
+	checkSettled := func() {
+		if waiting.Handling.State != HandlingWaiting || waiting.status() != StatusWorking || !waiting.open() {
+			t.Fatalf("an already confirmed action changed: %+v", waiting)
 		}
+		if done.open() || done.Handling.State != HandlingDone || done.DoneBy != "user" {
+			t.Fatalf("a filed item was reopened: %+v", done)
+		}
+		if suggestion.Suggestion == nil || suggestion.Suggestion.Text != "Please send the details" || suggestion.Agent.Draft != suggestion.Suggestion.Text ||
+			suggestion.Handling.State != HandlingDone || suggestion.status() != StatusAction {
+			t.Fatalf("an existing suggestion was discarded: %+v", suggestion)
+		}
+		if failed.Handling.State != HandlingFailed || failed.Handling.Error != "a genuine processing failure" {
+			t.Fatalf("a genuine failure was resumed: %+v", failed.Handling)
+		}
+		for _, it := range []*InboxItem{waiting, done, suggestion, failed} {
+			if len(it.Agent.Pending) != 0 || it.Agent.Wake || it.Agent.Back != "" || it.Agent.RetryAfter != nil {
+				t.Fatalf("settled item %s retained pending work: %+v", it.ID, it.Agent)
+			}
+		}
+		checkNoTwinWork(t, h)
 	}
-	checkNoTwinWork(t, h)
+	h.handPass(context.Background())
+	checkSettled()
+	h.setConfig(func(c *assistantwire.InboxConfig) { c.Agent.Enabled = true })
+	h.handPass(context.Background())
+	checkSettled()
 }
 
 func TestInboxDisabledSuggestionActions(t *testing.T) {
@@ -174,6 +325,11 @@ func TestInboxDisabledSuggestionActions(t *testing.T) {
 					if len(out.Chain) < 2 || out.Chain[len(out.Chain)-2].Kind != kind {
 						t.Fatalf("the user's action was not recorded: %+v", out.Chain)
 					}
+					synctest.Wait()
+					checkTwinReleased(t, it, i18n.Default)
+					checkNoTwinWork(t, h)
+					h.setConfig(func(c *assistantwire.InboxConfig) { c.Agent.Enabled = true })
+					h.handPass(context.Background())
 					synctest.Wait()
 					checkTwinReleased(t, it, i18n.Default)
 					checkNoTwinWork(t, h)
@@ -283,6 +439,17 @@ func TestInboxDisabledConfirmAgent(t *testing.T) {
 		}
 		if !linked {
 			t.Fatal("the confirmed Agent has no link in the item's history")
+		}
+		h.setConfig(func(c *assistantwire.InboxConfig) { c.Agent.Enabled = true })
+		h.handPass(context.Background())
+		synctest.Wait()
+		checkTwinReleased(t, it, i18n.Default)
+		checkNoTwinWork(t, h)
+		h.f.mu.Lock()
+		starts = len(h.f.starts)
+		h.f.mu.Unlock()
+		if starts != 1 {
+			t.Fatalf("re-enabling started another Agent: %d", starts)
 		}
 	})
 }

@@ -10,7 +10,7 @@ import (
 
 	"github.com/nwverse/persona/server/internal/assistantwire"
 	"github.com/nwverse/persona/server/internal/kb"
-	"github.com/nwverse/persona/server/internal/mail"
+	"github.com/nwverse/persona/server/internal/mailwire"
 )
 
 type inboxOnlyMail struct{ Mail }
@@ -29,7 +29,7 @@ func (m *folderMail) IntakeMailboxes(context.Context, string) ([]string, error) 
 	return []string{"INBOX", "GitHub"}, m.listErr
 }
 
-func (m *folderMail) ListMessages(ctx context.Context, opts mail.ListOptions) (*mail.ListResult, error) {
+func (m *folderMail) ListMessages(ctx context.Context, opts mailwire.ListOptions) (*mailwire.ListResult, error) {
 	if opts.Mailbox == "" {
 		opts.Mailbox = "INBOX"
 	}
@@ -40,8 +40,8 @@ func (m *folderMail) ListMessages(ctx context.Context, opts mail.ListOptions) (*
 	return page.ListMessages(ctx, opts)
 }
 
-func (m *folderMail) GetMessage(_ context.Context, account string, uid uint32, box string) (*mail.MailMessage, error) {
-	return &mail.MailMessage{Text: fmt.Sprintf("%s/%s/%d", account, box, uid)}, nil
+func (m *folderMail) GetMessage(_ context.Context, account string, uid uint32, box string) (*mailwire.MailMessage, error) {
+	return &mailwire.MailMessage{Text: fmt.Sprintf("%s/%s/%d", account, box, uid)}, nil
 }
 
 // A rule puts the second message straight into GitHub. Its UID and sender happen to match the INBOX mail.
@@ -54,7 +54,7 @@ func TestInboxAndArchiveReadMailFolders(t *testing.T) {
 	ctx := t.Context()
 	h := newTestManager(t)
 	h.mail = m
-	page, err := h.readMailAccount(ctx, mail.MailAccount{ID: "acc", Email: "me@example.test"})
+	page, err := h.readMailAccount(ctx, mailwire.MailAccount{ID: "acc", Email: "me@example.test"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -62,7 +62,7 @@ func TestInboxAndArchiveReadMailFolders(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var old struct{ Messages []mail.MailSummary }
+	var old struct{ Messages []mailwire.MailSummary }
 	if err := json.Unmarshal(raw, &old); err != nil {
 		t.Fatal(err)
 	}
@@ -92,8 +92,8 @@ func TestInboxAndArchiveReadMailFolders(t *testing.T) {
 func TestMailFolderArchiveRecovery(t *testing.T) {
 	now := time.Now().UTC().Add(-time.Hour).Truncate(time.Second)
 	inbox, github := &pagedMail{validity: 3}, &pagedMail{validity: 8}
-	inbox.msgs = []mail.MailSummary{receiptMail("acc", 1, now, "inbox")}
-	github.msgs = []mail.MailSummary{receiptMail("acc", 1, now, "first build")}
+	inbox.msgs = []mailwire.MailSummary{receiptMail("acc", 1, now, "inbox")}
+	github.msgs = []mailwire.MailSummary{receiptMail("acc", 1, now, "first build")}
 	m := &folderMail{pagedMail: inbox, boxes: map[string]*pagedMail{"INBOX": inbox, "GitHub": github}}
 	c := mailConnector{h: &Manager{mail: m}}
 	e := &kb.Engine{Store: openMailStore(t, t.TempDir())}
@@ -110,7 +110,7 @@ func TestMailFolderArchiveRecovery(t *testing.T) {
 	// A temporarily unreadable INBOX does not prevent the rule folder from advancing.
 	delete(m.boxes, "INBOX")
 	github.validity = 9
-	github.msgs = []mail.MailSummary{receiptMail("acc", 1, now.Add(time.Minute), "next build")}
+	github.msgs = []mailwire.MailSummary{receiptMail("acc", 1, now.Add(time.Minute), "next build")}
 	gen, next := receiptChanges(t, c, cursor, 1)
 	if gen[0].Messages[0].ID == first[1].Messages[0].ID {
 		t.Fatal("renumbered folder reused a receipt")
@@ -131,7 +131,7 @@ func TestMailFolderPartialReads(t *testing.T) {
 	m := &folderMail{pagedMail: inbox, boxes: map[string]*pagedMail{"GitHub": github}}
 	h := newTestManager(t)
 	h.mail = m
-	account := mail.MailAccount{ID: "acc"}
+	account := mailwire.MailAccount{ID: "acc"}
 	read := func() *assistantwire.InboxMailAccount {
 		t.Helper()
 		a, err := h.readMailAccount(t.Context(), account)

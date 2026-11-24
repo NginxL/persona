@@ -5,6 +5,7 @@ import persona.core.designsystem.operationFeedback
 import persona.core.hub.HubError
 import persona.core.hub.HubFailure
 import java.io.IOException
+import persona.core.inbox.*
 
 /**
  * Why something did not go through, for "Couldn't draft: …", "Couldn't hand off: …": the hub's own words when it gave a reason

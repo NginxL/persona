@@ -50,10 +50,10 @@ class AssistantNameTest {
 
     @After fun cleanup() = AssistantManagerChoice.reset()
 
-    private fun drawer(roster: ManagerRoster?) {
+    private fun drawer(roster: () -> ManagerRoster?) {
         rule.setContent {
             PersonaTheme(darkTheme = false, reduceMotion = true) {
-                CompositionLocalProvider(LocalManagerRoster provides roster, LocalHomeDrawer provides true) {
+                CompositionLocalProvider(LocalManagerRoster provides roster(), LocalHomeDrawer provides true) {
                     Box(Modifier.width(380.dp).height(1100.dp).background(PersonaTheme.palette.background)) {
                         AssistantDrawer("", {}, ConversationGroups(main), active = null, hasMain = true,
                             onEnd = null, onMain = {}, onOpen = {}, onInfo = {}, onNew = {}, onSettings = {},
@@ -64,12 +64,22 @@ class AssistantNameTest {
         }
     }
 
-    @Test fun headUsesTheManagersNameOnceWithSeveralAssistants() {
+    @Test fun renamingTheCurrentManagerUpdatesTheHeadButNotTheFixedMainRow() {
         AssistantManagerChoice.choose("hub", null, "assistant")
-        drawer(multi)
+        val roster = androidx.compose.runtime.mutableStateOf(multi)
+        drawer { roster.value }
         rule.onAllNodesWithText("团子").assertCountEquals(1)
         rule.onAllNodesWithText("主对话").assertCountEquals(1)
         rule.onAllNodesWithText("Persona").assertCountEquals(0)
+        rule.runOnIdle {
+            roster.value = roster.value.copy(managers = roster.value.managers.map {
+                if (it.id == "assistant") it.copy(name = "糯米") else it
+            })
+        }
+        rule.onAllNodesWithText("糯米").assertCountEquals(1)
+        rule.onAllNodesWithText("团子").assertCountEquals(0)
+        rule.onAllNodesWithText("主对话").assertCountEquals(1)
+        rule.onAllNodesWithText("糯米的主对话").assertCountEquals(0)
     }
 
     @Test fun aSingleAssistantOrAHubWithoutARosterKeepsThePersonaPacksName() {

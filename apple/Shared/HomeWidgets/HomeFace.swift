@@ -1,9 +1,7 @@
 #if os(iOS)
 import SwiftUI
 import WidgetKit
-#if canImport(UIKit)
 import UIKit
-#endif
 
 /// How the persona looks in a widget: the app's states (docs/apple/persona.md「States」) and Done, which only the
 /// widgets draw: an agent finished and you have not looked yet.
@@ -45,7 +43,6 @@ nonisolated enum HomeMood: String, CaseIterable, Sendable {
 /// A package's pictures at the size a widget draws them (the app writes them into `Widgets/faces/`, as it does the
 /// Live Activity's): one a state, the avatar for the states without one.
 nonisolated struct HomeFacePictures: @unchecked Sendable {
-    #if canImport(UIKit)
     var states: [String: UIImage] = [:]
     var avatar: UIImage?
 
@@ -55,7 +52,6 @@ nonisolated struct HomeFacePictures: @unchecked Sendable {
         if let other = avatar ?? states[PersonaState.idle.rawValue] { return (other, false) }
         return nil
     }
-    #endif
 }
 
 /// The persona in a widget, in every way the system draws a widget:
@@ -75,15 +71,11 @@ struct HomeFace: View {
 
     var body: some View {
         ZStack {
-            #if canImport(UIKit)
             if let found = pictures?.picture(mood.personaState) {
                 packageFace(found.0, own: found.own)
             } else {
                 mochi
             }
-            #else
-            mochi
-            #endif
         }
         .frame(width: size, height: size)
         .overlay(alignment: .bottomTrailing) {
@@ -113,7 +105,6 @@ struct HomeFace: View {
         #endif
     }
 
-    #if canImport(UIKit)
     private func packageFace(_ image: UIImage, own: Bool) -> some View {
         let ring = max(PersonaFace.ringMin, size * PersonaFace.ringShare)
         return Group {
@@ -137,7 +128,6 @@ struct HomeFace: View {
                 }
             }
     }
-    #endif
 }
 
 /// Done's check: a filled disc with the mark knocked out of it, so it still reads where the system paints the disc in

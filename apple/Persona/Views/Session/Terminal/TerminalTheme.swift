@@ -1,8 +1,4 @@
-#if canImport(UIKit)
 import UIKit
-#else
-import AppKit
-#endif
 
 /// The terminal's colors: background, text, cursor, selection and the 16 ANSI colors (16–255 are the standard xterm
 /// cube and grays). Each theme has a light and a dark side and follows the system unless it is dark-only.

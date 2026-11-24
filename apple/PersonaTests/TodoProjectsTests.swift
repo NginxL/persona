@@ -43,6 +43,21 @@ struct TodoProjectsTests {
         #expect(TodoProjectLogic.sections([TodoItem(id: "1", title: "A", project: "home")], projects: list).count == 1, "no empty Unsorted")
     }
 
+    @Test func cancelledToDosStayOutOfProjectsAndInTheirOwnFold() {
+        let now = Date()
+        let open = TodoItem(id: "open", title: "Open", project: "weather")
+        var cancelled = TodoItem(id: "cancelled", title: "Cancelled", project: "weather")
+        cancelled.cancelledAt = now
+        let done = TodoItem(id: "done", title: "Done", doneAt: now, project: "weather")
+        let result = TodoTriageLogic.triageTodos([open, cancelled, done], lookup: nil, now: now)
+        let projectInput = TodoSection.allCases.filter { $0 != .done }.flatMap { result.groups($0).flatMap(\.members) }
+
+        #expect(TodoProjectLogic.sections(projectInput, projects: []).flatMap(\.todos).map(\.id) == ["open"])
+        #expect(result.groups(.done).flatMap(\.members).map(\.id) == ["done"])
+        #expect(result.groups(.cancelled).flatMap(\.members).map(\.id) == ["cancelled"])
+        #expect(TodoSection.cancelled.startsFolded)
+    }
+
     @Test func aProjectIsSetOrClearedOnItsOwn() throws {
         let enc = JSONEncoder()
         enc.outputFormatting = .sortedKeys

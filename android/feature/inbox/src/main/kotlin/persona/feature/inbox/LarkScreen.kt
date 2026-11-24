@@ -49,6 +49,7 @@ import persona.core.chatlist.*
 import persona.core.navigation.Navigator
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
+import persona.core.inbox.*
 
 /** The host sets this while an in-app sheet or overlay covers the conversation. */
 val LocalLarkReadOccluded = staticCompositionLocalOf { false }
@@ -144,7 +145,7 @@ private fun LarkConversationScreen(repository: InboxRepository, route: LarkRoute
     val confirmedReads by repository.messageReads.collectAsStateWithLifecycle()
     val displayed = remember(conversation.messages, timelineVersion, timeline, confirmedReads, inbox.contentSource) {
         timeline.items(conversation.messages).map { message ->
-            if (message.position != null && InboxMessageRead(inbox.contentSource?.scope.orEmpty(), route.feedId, message.id, message.position) in confirmedReads)
+            if (message.position?.let { InboxMessageRead(inbox.contentSource?.scope.orEmpty(), route.feedId, message.id, it) in confirmedReads } == true)
                 message.copy(isRead = true) else message
         }
     }
@@ -246,7 +247,7 @@ private fun LarkConversationScreen(repository: InboxRepository, route: LarkRoute
             if (atNewerEdge && latestConversation.hasNewer && !latestConversation.loadingNewer) try {
                 repository.loadNewer(route.feedId)
             } catch (e: CancellationException) { throw e }
-            catch (_: Exception) { error = res.getString(R.string.inbox_lark_messages_failed) }
+            catch (_: Exception) { error = res.getString(persona.core.inbox.R.string.inbox_lark_messages_failed) }
         }
     }
     // Not keyed on the list: a change while a request is out must not cancel it (its answer would be lost and the next
@@ -688,10 +689,10 @@ internal fun LarkPartContent(
                     open?.invoke(part.text, part.source)
                 })
             } else {
-                LarkRichInlineText(part.text, source = part.source, onOpenProfile = onOpenProfile)
+                ReadingContent { LarkRichInlineText(part.text, source = part.source, onOpenProfile = onOpenProfile) }
             }
         }
-        is LarkPart.Code -> LarkCodeBlock(part.code, part.language)
+        is LarkPart.Code -> ReadingContent { LarkCodeBlock(part.code, part.language) }
         is LarkPart.Audio -> LarkVoiceView(part)
         is LarkPart.Video -> LarkVideoView(part, onPlay = { onPlayVideo?.invoke(part.ref) })
         is LarkPart.Sticker -> LarkStickerView(part)

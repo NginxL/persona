@@ -79,6 +79,9 @@ func (ps *extensions) extensionSkills() []ExtensionSkill {
 		if !p.Record.Enabled || p.Problem != "" {
 			continue
 		}
+		if extension.DeclaresMemorySources(p) {
+			continue // its data skills are text it writes, an outlet around the hub's filter (memory_sources.go)
+		}
 		skills, _ := ps.dataSkillsOf(p)
 		for _, s := range skills {
 			add(s)
@@ -117,7 +120,9 @@ func (ps *extensions) extensionInstructions(ctx context.Context, base string) st
 	data := ps.dataInstructions(ctx, base)
 	var b strings.Builder
 	for _, p := range ps.reg.List() {
-		if !p.Record.Enabled || p.Problem != "" {
+		// An extension that declares memory_sources gives its memory through the hub's filter, not here
+		// (memory_sources.go).
+		if !p.Record.Enabled || p.Problem != "" || extension.DeclaresMemorySources(p) {
 			continue
 		}
 		for _, a := range p.Manifest.AssistantParts() { // with the declarative instructions (contributes.prompts)
@@ -166,6 +171,10 @@ func (ps *extensions) assistantGates(ctx context.Context, userRules func(connect
 			g := proto.CommandGate{Plugin: p.Record.ID, Command: gf.Command, Script: gf.Script, Title: gf.Title, BaseEnv: gf.BaseEnv,
 				Secret: gf.Secret, AllowedEnv: gf.AllowedEnv, Headers: gf.Headers, PathPrefix: gf.PathPrefix, Actions: gf.Actions, Tool: gf.Tool,
 				Auth: gf.ProxyAuth()}
+			if gf.SocketEnv != "" {
+				// Relayed (#12904): no Auth, so a node from before still runs it on the socket where that is here.
+				g.Relay, g.SocketEnv, g.Auth = true, gf.SocketEnv, nil
+			}
 			if gf.Connector != "" && userRules != nil {
 				g.Rules = append(g.Rules, userRules(gf.Connector)...)
 			}
@@ -226,7 +235,7 @@ func (ps *extensions) assistantCredentials(ctx context.Context, id, contribution
 	out := map[string]string{}
 	for _, n := range names {
 		if v, ok := res.Env[n]; ok {
-			out[n] = v
+			out[n] = extension.HostLoopbackURL(v) // a sandboxed program says host.persona.internal; a gate outside it dials 127.0.0.1 (#13540)
 		}
 	}
 	return out
@@ -283,7 +292,11 @@ func (h *Manager) assistantLark(ctx context.Context) (proto.AssistantLark, error
 	larkRules := append(connector.LarkRules(h.cfg.ConnectorGate, h.cfg.LarkGate), connector.LarkRules(h.connectors.UserRules(), nil)...)
 	out := proto.AssistantLark{Rules: larkRules, Prefer: lc.Prefer}
 	if lc.CLI != nil {
-		out.CLI = &proto.LarkCLI{Bin: lc.CLI.Bin, Profile: h.effectiveLarkCLIProfile(ctx)}
+		profile, err := h.larkCLIExecutionProfile(ctx)
+		if err != nil {
+			return proto.AssistantLark{}, err
+		}
+		out.CLI = &proto.LarkCLI{Bin: lc.CLI.Bin, Profile: profile}
 	}
 	out.Gates = h.extensions.assistantGates(ctx, func(id string) []proto.LarkRule {
 		if id == connector.Lark {
@@ -304,6 +317,11 @@ func (ps *extensions) assistantMCPServers() []proto.AssistantMCPServer {
 	seen := map[string]bool{}
 	for _, p := range ps.reg.List() {
 		if !p.Record.Enabled || p.Problem != "" {
+			continue
+		}
+		if extension.DeclaresMemorySources(p) && len(p.Manifest.MCPServers()) > 0 {
+			// Its own MCP servers could recall its entries around the hub's filter (memory_sources.go).
+			ps.logf("plugin %s: mcp servers withheld from the assistant: it declares memory_sources", p.Record.ID)
 			continue
 		}
 		for _, m := range p.Manifest.MCPServers() {

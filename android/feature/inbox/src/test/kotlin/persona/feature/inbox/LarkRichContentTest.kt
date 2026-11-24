@@ -3,6 +3,7 @@ package persona.feature.inbox
 import kotlinx.serialization.json.*
 import org.junit.Assert.*
 import org.junit.Test
+import persona.core.inbox.*
 
 class LarkRichContentTest {
     private fun json(value: String) = Json.parseToJsonElement(value).jsonObject

@@ -29,13 +29,14 @@ import { Tag, textareaClass } from "../assistant/parts";
 import { PersonaAvatar, usePersona } from "../assistant/Persona";
 import { TaskTrust } from "./TaskTrust";
 import { DirectionNotes, directionNotesDeps } from "./DirectionNotes";
+import { CacheKeepaliveSettings, type CacheKeepaliveState } from "./CacheKeepaliveSettings";
 import { PageBoundary } from "../PageBoundary";
 
 const StandingAuthorizations = lazyPage(() => import("./StandingAuthorizations").then((m) => m.StandingAuthorizations));
 const Repositories = lazyPage(() => import("./Repositories").then((m) => m.Repositories));
 const WorkspaceNaming = lazyPage(() => import("../../ui/WorkspaceNaming").then((m) => m.WorkspaceNaming));
 
-interface AssistantState extends AgentAutoNamingState {
+interface AssistantState extends AgentAutoNamingState, CacheKeepaliveState {
   manager?: string;
   default_permission_mode?: string;
   readonly_mode?: "sandbox" | "prompt";
@@ -76,6 +77,9 @@ interface AssistantState extends AgentAutoNamingState {
   /** "Tell supervisors about new messages" (#4293, docs/assistant/unified-entry.md "Supervision (#3124)"): off
    *  by default; unset from a hub before it. */
   inbox_signals?: boolean;
+  /** Deterministic opt-in auto-forwarding of PR/Issue Inbox events to the bound open to-do's Agent (#12492): off by
+   *  default; unset from a hub before it. */
+  inbox_todo_forward?: boolean;
   /** "The main chat supervises its own tasks" (#4927, #5082, docs/assistant/unified-entry.md "Background supervisor"):
    *  off by default, which means the built-in background supervisor follows up the tasks no leader supervises; unset
    *  from a hub before it. */
@@ -331,17 +335,17 @@ function AssistantSettingsForManager({ manager, owner, bare }: { manager: string
   };
 
   const [agentsBusy, setAgentsBusy] = useState(false);
-  // One field of the Agents group (#3617, #3618, #4293, #5082): shown as chosen at once, taken back with the reason when the hub refuses.
-  const setAgents = async (patch: { agent_tasks: boolean } | { close_ended_terminals: boolean } | { inbox_signals: boolean } | { main_supervises_own_tasks: boolean } | { archive_closed_days: number } | { idle_close_hours: number }) => {
+  // One field of the Agents group (#3617, #3618, #4293, #5082, #12492): shown as chosen at once, taken back with the reason when the hub refuses.
+  const setAgents = async (patch: { agent_tasks: boolean } | { close_ended_terminals: boolean } | { inbox_signals: boolean } | { inbox_todo_forward: boolean } | { main_supervises_own_tasks: boolean } | { archive_closed_days: number } | { idle_close_hours: number }) => {
     const before = info;
     setAgentsBusy(true);
     setInfo((i) => (i ? { ...i, ...patch } : i));
     try {
       const r = await scopedApi<AssistantState>("/assistant", { method: "PUT", json: patch });
       // what the hub saved, when it says
-      setInfo((i) => (i ? { ...i, agent_tasks: r.agent_tasks ?? i.agent_tasks, close_ended_terminals: r.close_ended_terminals ?? i.close_ended_terminals, inbox_signals: r.inbox_signals ?? i.inbox_signals, main_supervises_own_tasks: r.main_supervises_own_tasks ?? i.main_supervises_own_tasks, archive_closed_days: r.archive_closed_days ?? i.archive_closed_days, idle_close_hours: r.idle_close_hours ?? i.idle_close_hours } : i));
+      setInfo((i) => (i ? { ...i, agent_tasks: r.agent_tasks ?? i.agent_tasks, close_ended_terminals: r.close_ended_terminals ?? i.close_ended_terminals, inbox_signals: r.inbox_signals ?? i.inbox_signals, inbox_todo_forward: r.inbox_todo_forward ?? i.inbox_todo_forward, main_supervises_own_tasks: r.main_supervises_own_tasks ?? i.main_supervises_own_tasks, archive_closed_days: r.archive_closed_days ?? i.archive_closed_days, idle_close_hours: r.idle_close_hours ?? i.idle_close_hours } : i));
     } catch (e) {
-      setInfo((i) => (i && before ? { ...i, agent_tasks: before.agent_tasks, close_ended_terminals: before.close_ended_terminals, inbox_signals: before.inbox_signals, main_supervises_own_tasks: before.main_supervises_own_tasks, archive_closed_days: before.archive_closed_days, idle_close_hours: before.idle_close_hours } : i));
+      setInfo((i) => (i && before ? { ...i, agent_tasks: before.agent_tasks, close_ended_terminals: before.close_ended_terminals, inbox_signals: before.inbox_signals, inbox_todo_forward: before.inbox_todo_forward, main_supervises_own_tasks: before.main_supervises_own_tasks, archive_closed_days: before.archive_closed_days, idle_close_hours: before.idle_close_hours } : i));
       toast(t("settings-assistantsettings.save_failed", { error: errorText(e) }), "error");
     } finally {
       setAgentsBusy(false);
@@ -479,7 +483,7 @@ function AssistantSettingsForManager({ manager, owner, bare }: { manager: string
       </Group>
 
       {/* Who follows up the main chat's tasks (#5082), delivery closeout gate (#12034), following up agents, their tasks' new messages, stopping idle ones and tidying closed ones (#3617, #4293, #4754, #3618): each row only from a hub that has its setting */}
-      {(supportsAgentAutoNaming(info) || typeof info?.main_supervises_own_tasks === "boolean" || typeof info?.delivery_gate === "string" || typeof info?.agent_tasks === "boolean" || typeof info?.close_ended_terminals === "boolean" || typeof info?.inbox_signals === "boolean" || typeof info?.idle_close_hours === "number" || typeof info?.archive_closed_days === "number") && info && (
+      {(supportsAgentAutoNaming(info) || typeof info?.main_supervises_own_tasks === "boolean" || typeof info?.delivery_gate === "string" || typeof info?.agent_tasks === "boolean" || typeof info?.close_ended_terminals === "boolean" || typeof info?.inbox_signals === "boolean" || typeof info?.inbox_todo_forward === "boolean" || typeof info?.idle_close_hours === "number" || typeof info?.archive_closed_days === "number") && info && (
         <Group anchor="agents" title={t("settings-assistantsettings.agents_title")}>
           {supportsAgentAutoNaming(info) && <AgentAutoNaming info={info} manager={manager} owner={owner}
             onSaved={(patch) => setInfo((current) => current ? { ...current, ...patch } : current)} />}
@@ -513,6 +517,11 @@ function AssistantSettingsForManager({ manager, owner, bare }: { manager: string
           {typeof info.inbox_signals === "boolean" && (
             <Row label={t("settings-assistantsettings.inbox_signals")} hint={t("settings-assistantsettings.inbox_signals_hint")} wrapHint>
               <Switch on={info.inbox_signals} onChange={(on) => void setAgents({ inbox_signals: on })} disabled={agentsBusy} label={t("settings-assistantsettings.inbox_signals")} />
+            </Row>
+          )}
+          {typeof info.inbox_todo_forward === "boolean" && (
+            <Row anchor="inbox-todo-forward" label={t("settings-assistantsettings.inbox_todo_forward")} hint={t("settings-assistantsettings.inbox_todo_forward_hint")} wrapHint>
+              <Switch on={info.inbox_todo_forward} onChange={(on) => void setAgents({ inbox_todo_forward: on })} disabled={agentsBusy} label={t("settings-assistantsettings.inbox_todo_forward")} />
             </Row>
           )}
           {typeof info.idle_close_hours === "number" && (
@@ -636,7 +645,11 @@ function AssistantSettingsForManager({ manager, owner, bare }: { manager: string
         )}
       </Group>
 
-      <DirectionNotes deps={directionNotes} />
+      <DirectionNotes deps={directionNotes} onOpenPermissions={() => {
+        const select = document.querySelector<HTMLSelectElement>('[data-settings-row="default-permissions"] select');
+        select?.scrollIntoView?.({ block: "center" });
+        select?.focus({ preventScroll: true });
+      }} />
 
       {/* Learning from finished tasks (#12295): off by default, only from a hub that has it; the lessons are on each
           project's page in Knowledge */}
@@ -680,6 +693,12 @@ function AssistantSettingsForManager({ manager, owner, bare }: { manager: string
         </Row>
         {info?.timezone && <Row label={t("settings-assistantsettings.timezone")}>{info.timezone}</Row>}
       </Group>
+
+      {info && <CacheKeepaliveSettings value={info} save={async (patch) => {
+        const r = await scopedApi<AssistantState>("/assistant", { method: "PUT", json: patch });
+        if (r.manager !== manager || Object.entries(patch).some(([key, v]) => r[key as keyof CacheKeepaliveState] !== v)) throw new Error(t("settings-cachekeepalive.unconfirmed"));
+        setInfo((current) => current ? { ...current, cache_keepalive: r.cache_keepalive, cache_keepalive_minutes: r.cache_keepalive_minutes, cache_keepalive_max: r.cache_keepalive_max } : current);
+      }} />}
 
       {/* Interactive Claude Code instead of claude -p (#10058): an advanced, off-by-default switch, only from a hub that has it */}
       {typeof info?.claude_interactive === "boolean" && (

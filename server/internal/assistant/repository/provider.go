@@ -287,7 +287,7 @@ func CheckLinkAnswer(repo Identity, in LinkInput, a LinkAnswer) (TaskLink, error
 	if !underRepository(repo, a.CanonicalURL) {
 		return TaskLink{}, &AnswerError{Why: "canonical_url is not an https address under the repository's"}
 	}
-	return TaskLink{Kind: a.Kind, Number: a.Number, CanonicalURL: a.CanonicalURL, Title: clipBytes(oneLine(a.Title, 1024), 1024)}, nil
+	return TaskLink{Kind: a.Kind, Number: a.Number, CanonicalURL: a.CanonicalURL, Title: ObservedLinkTitle(a.Title)}, nil
 }
 
 // underRepository: link is an https address strictly below repo's canonical URL, with plain segments and no
@@ -306,7 +306,12 @@ func CheckDescribeAnswer(title, state string) Description {
 	if state != "open" && state != "closed" && state != "merged" {
 		state = ""
 	}
-	return Description{Title: clipBytes(oneLine(title, 1024), 1024), State: state}
+	return Description{Title: ObservedLinkTitle(title), State: state}
+}
+
+// ObservedLinkTitle fits a forge's display title on one line within the stored link's UTF-8 byte limit.
+func ObservedLinkTitle(title string) string {
+	return strings.TrimSpace(clipBytes(oneLine(title, 1024), 1024))
 }
 
 // oneLine is s with its words joined by single spaces and control characters dropped, cut to most runes with "…".

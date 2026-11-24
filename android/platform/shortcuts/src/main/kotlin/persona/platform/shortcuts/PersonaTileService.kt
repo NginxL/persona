@@ -73,7 +73,7 @@ class PersonaTileService : TileService() {
 
         /** Asks the system to redraw the tile: it calls onStartListening while the shade shows it. */
         fun refresh(context: Context) {
-            runCatching { requestListeningState(context, ComponentName(context, PersonaTileService::class.java)) }
+            val _ = runCatching { requestListeningState(context, ComponentName(context, PersonaTileService::class.java)) }
         }
     }
 }

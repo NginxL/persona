@@ -14,6 +14,7 @@ import dagger.Provides
 import javax.inject.Singleton
 import persona.core.data.HubDataStore
 import persona.core.contracts.api.DraftSnapshot
+import persona.core.contracts.api.HubManagers
 import persona.core.contracts.api.MainConversationSender
 import persona.core.contracts.SessionKey
 import persona.core.contracts.api.AssistantManagement
@@ -36,9 +37,14 @@ data class AssistantHostBindings(
     val conversations: persona.core.contracts.api.AssistantRepository,
     val mainSender: MainConversationSender,
     val chatContent: @Composable (SessionKey, AssistantChatOptions) -> Unit,
+    /** The selected hub's hello: pages that read on their own (the spaces, #13500) read again on each one. */
+    val hello: kotlinx.coroutines.flow.StateFlow<persona.core.contracts.api.SocketHello?>? = null,
 )
 
 val LocalAssistantHost = staticCompositionLocalOf<AssistantHostBindings?> { null }
+
+/** The selected hub's manager API, available to assistant-owned pages such as Details. */
+val LocalAssistantManagers = staticCompositionLocalOf<HubManagers?> { null }
 
 @Composable
 internal fun assistantComposerService(): ChatComposerService? {

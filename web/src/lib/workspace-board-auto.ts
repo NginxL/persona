@@ -3,8 +3,8 @@
 // Needs you → Working → To review → Idle; reviewing and clearing a card is the existing Archive action.
 import { stateOf } from "./format";
 import { justFinished } from "./agent-groups";
-import { sameDirectory } from "./workspace-board";
-import { acceptedAtRest, awaitsReview, todoStatus, type SessionLookup, type Todo } from "./todos";
+import { sameDirectory } from "./workspace-directory";
+import { acceptedAtRest, awaitsReview, shownStatus, todoStatus, type SessionLookup, type Todo } from "./todos";
 import type { BoardCard } from "./workspace-board";
 import type { Session } from "./types";
 
@@ -88,7 +88,7 @@ export function sessionItem(s: Session): WorkItem {
 
 /** A to-do waits for review only while its owner review or finished-unseen result stands; accepted and closed work is history. */
 export function todoItem(t: Todo, lookup?: SessionLookup): WorkItem {
-  const st = todoStatus(t, lookup);
+  const st = shownStatus(t, todoStatus(t, lookup));
   const lane: WorkLane =
     st === "needs_you" || st === "interrupted" || st === "usage_limit" || st === "failed" ? "needs_you"
     : st === "working" ? "working"

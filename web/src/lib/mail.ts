@@ -47,15 +47,47 @@ export function newDraft(accountID: string): ComposeDraft {
   return { accountID, to: "", cc: "", bcc: "", subject: "", body: "" };
 }
 
+function splitAddressEntries(s: string): string[] {
+  const out: string[] = [];
+  let cur = "";
+  let inQuotes = false;
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i];
+    if (inQuotes) {
+      if (ch === "\\" && i + 1 < s.length) {
+        cur += ch + s[++i];
+        continue;
+      }
+      if (ch === '"') inQuotes = false;
+      cur += ch;
+      continue;
+    }
+    if (ch === '"') {
+      inQuotes = true;
+      cur += ch;
+    } else if (/[,，;；\n]/.test(ch)) { // i18n-ignore: full-width separators people type
+      out.push(cur);
+      cur = "";
+    } else {
+      cur += ch;
+    }
+  }
+  out.push(cur);
+  return out;
+}
+
 /** Addresses typed into one field: separated by commas (either width), semicolons or new lines; `Name <a@b>` keeps the name. */
 export function parseAddresses(s: string): MailAddress[] {
-  return s
-    .split(/[,，;；\n]/) // i18n-ignore: full-width separators people type
+  return splitAddressEntries(s)
     .map((x) => x.trim())
     .filter(Boolean)
     .map((x) => {
       const m = /^(.*?)\s*<([^<>\s]+)>$/.exec(x);
-      if (m) return m[1].replace(/^"|"$/g, "").trim() ? { name: m[1].replace(/^"|"$/g, "").trim(), email: m[2] } : { email: m[2] };
+      if (m) {
+        const raw = m[1].trim();
+        const name = (raw.startsWith('"') && raw.endsWith('"') && raw.length >= 2 ? raw.slice(1, -1).replace(/\\(.)/g, "$1") : raw.replace(/^"|"$/g, "")).trim();
+        return name ? { name, email: m[2] } : { email: m[2] };
+      }
       return { email: x };
     });
 }

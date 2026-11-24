@@ -582,12 +582,16 @@ function points(el: Element | null): string[] {
   const cache = kid(kid(el, "strRef"), "strCache") ?? kid(kid(el, "numRef"), "numCache") ?? kid(el, "strLit") ?? kid(el, "numLit") ?? kid(kid(el, "multiLvlStrRef"), "multiLvlStrCache");
   if (!cache) return [];
   const out: string[] = [];
-  const count = num(kid(cache, "ptCount"), "val") ?? 0;
+  const count = Math.min(10000, Math.max(0, Math.trunc(num(kid(cache, "ptCount"), "val") ?? 0)));
   for (let i = 0; i < count; i++) out.push("");
   const pts = kid(cache, "lvl") ? kids(kid(cache, "lvl"), "pt") : kids(cache, "pt");
   for (const pt of pts) {
-    const i = num(pt, "idx") ?? out.length;
-    if (i < 10000) out[i] = kid(pt, "v")?.textContent ?? "";
+    const raw = num(pt, "idx");
+    const i = raw === undefined ? out.length : Math.trunc(raw);
+    if (i >= 0 && i < 10000) {
+      while (out.length <= i) out.push("");
+      out[i] = kid(pt, "v")?.textContent ?? "";
+    }
   }
   return out;
 }
@@ -629,7 +633,7 @@ export function readChart(doc: Document, scheme: Scheme): Chart | null {
       for (const dPt of kids(ser, "dPt")) {
         const j = num(kid(dPt, "idx"), "val");
         const pc = colorOf(path(dPt, "spPr", "solidFill"), scheme);
-        if (j !== undefined && pc && j < out.pointColors.length) out.pointColors[j] = pc;
+        if (j !== undefined && Number.isInteger(j) && j >= 0 && pc && j < out.pointColors.length) out.pointColors[j] = pc;
       }
     }
     return out;
@@ -795,7 +799,7 @@ export function chartSVG(c: Chart, w: number, h: number): string {
   const min = Math.floor(lo / step) * step;
   const max = Math.max(min + step, Math.ceil(Math.max(...all, 0) / step) * step);
   const horizontal = c.kind === "bar";
-  const left = horizontal ? Math.min(w * 0.3, (12 + Math.max(...c.cats.map((x) => x.length)) * 11) * k) : (14 + Math.max(...[min, max].map((v) => fmtNum(v).length)) * 7) * k;
+  const left = horizontal ? Math.min(w * 0.3, (12 + Math.max(0, ...c.cats.map((x) => x.length)) * 11) * k) : (14 + Math.max(...[min, max].map((v) => fmtNum(v).length)) * 7) * k;
   const plot = { x: left, y: top, w: Math.max(10, w - left - 14), h: Math.max(10, bottom - top - 20 * k) };
   const scale = (v: number) => (v - min) / (max - min);
   // grid and value labels

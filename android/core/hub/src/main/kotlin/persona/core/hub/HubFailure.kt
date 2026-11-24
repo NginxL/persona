@@ -66,7 +66,8 @@ class HubFailure(
 
         private const val MaxErrorBodyBytes = 64L * 1024
 
-        internal fun from(response: Response, requireReadableBody: Boolean = false): HubFailure {
+        /** The failure a refused [response] stands for; public for modules' own hub calls (`:module:*`, #13433). */
+        fun from(response: Response, requireReadableBody: Boolean = false): HubFailure {
             val raw = if (requireReadableBody) {
                 val error = response.peekBody(MaxErrorBodyBytes + 1)
                 if (error.contentLength() > MaxErrorBodyBytes)

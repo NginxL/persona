@@ -17,12 +17,8 @@ import (
 	"github.com/nwverse/persona/server/internal/textfmt"
 )
 
-// ItemSource lists documents, meetings and calendar events (Feishu through the Lark extension).
-type ItemSource interface {
-	Items(ctx context.Context) ([]kbwire.Item, error)
-	// DocTitle looks up a document's title by its link ("" when it cannot).
-	DocTitle(ctx context.Context, url string) string
-}
+// ItemSource is defined in the contract package kbwire; the old name stays.
+type ItemSource = kbwire.ItemSource
 
 // CollectItems stores new meetings and events and fills in titles of documents seen in chats. With a selection
 // (Engine.Selection), a document is stored only when it selects it (Selection.DocSelected): one it does not select is

@@ -214,6 +214,34 @@ describe("chatLines", () => {
     expect(kinds(ls)).toEqual(["segment", "notice"]);
   });
 
+  it("classifies a settled whitespace reply without changing live, answered, or queued turns", () => {
+    const first = u(1, "Check this");
+    const thinking: Item = { id: "t2#0", seq: 2, role: "assistant", kind: "thinking", text: "Considering it" };
+    const blank = a(3, " \n\t");
+    const empty = (items: Item[], live = false) => {
+      const [line] = chatLines(items, { live });
+      return line.kind === "segment" && line.seg.emptyResponse === true;
+    };
+    expect(empty([first, thinking, blank])).toBe(true);
+    expect(empty([first, thinking, blank], true)).toBe(false);
+    expect(empty([first, thinking, a(3, "An answer")])).toBe(false);
+    expect(empty([first, thinking, a(3, "API Error: 503 Unavailable")])).toBe(false);
+    expect(empty([thinking, blank])).toBe(false);
+    expect(empty([u(1, "Queued", { queued: true }), blank])).toBe(false);
+    expect(empty([first, thinking, blank, notice(4, "Interrupted")])).toBe(false);
+    expect(empty([first, thinking, blank, notice(4, "中断しました")])).toBe(false);
+    expect(empty([first, thinking, blank, notice(4, "已中断")])).toBe(false);
+  });
+
+  it("omits the empty-response fallback after a silent supervision finish", () => {
+    const finish = { ...tool(2, "finish"), tool_name: "mcp__persona__supervision_finish", tool_input: { visibility: "silent" } };
+    const receipt = { ...res(3, "finish"), text: '{"visibility":"silent"}' };
+    for (const tools of [[finish], [finish, receipt]]) {
+      const [line] = chatLines([u(1, "Check this"), ...tools, a(4, "\n")]);
+      expect(line.kind === "segment" && line.seg.emptyResponse).toBeUndefined();
+    }
+  });
+
   // #3428: the node's notices for switching ultracode (transcript/ultracode.go) are ordinary notices
   it("keeps the ultracode on / off notices as notices", () => {
     for (const text of ["已开启 ultracode（只对本会话）", "已关闭 ultracode"]) {

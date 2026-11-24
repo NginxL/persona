@@ -231,7 +231,8 @@ class ContinuityOperationTest {
                 ItemsResponse(listOf(item(2)), history = "h", more = true)
             }
             val first = h.scope.async { h.repository.expandFold(key, 2, 4) }
-            h.frames.run() // OpenFold's frame runs the first HTTP page, but not Range's next frame.
+            // OpenFold's applied Ack can need a later frame in Release; bound the wait for its first HTTP page.
+            pump(h.frames) { ranges == listOf(2) }
             assertEquals(listOf(2), ranges)
             assertEquals(emptyList<Item>(), withTimeout(4_000) { first.await() })
             val cancelled = h.scope.async { h.repository.expandFold(key, 2, 4) }

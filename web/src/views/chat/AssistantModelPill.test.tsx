@@ -290,6 +290,32 @@ describe("a Persona chat's pill on a hub that keeps picks", () => {
     await flush();
     expect(assistantReads()).toBe(afterMount + 1);
   });
+
+  it("holds those re-reads while a turn streams and reads once when it ends", async () => {
+    let s = chat({ status: "working", state: "working", rev: 1 });
+    await show(s);
+    const reads = () => {
+      const l = calls.filter((c) => c.url.includes("/launchers?purpose="));
+      return [l.filter((c) => c.url.includes("purpose=assistant.main")).length, l.filter((c) => /purpose=assistant(&|$)/.test(c.url)).length];
+    };
+    const afterMount = reads();
+    // every write of the turn moves the revision: none of them reads again
+    for (let rev = 2; rev <= 21; rev++) {
+      s = { ...s, rev };
+      await show(s);
+    }
+    expect(reads()).toEqual(afterMount);
+    // the turn ends: one read of each, then nothing more until the revision moves again
+    s = { ...s, status: "idle", state: "idle", rev: 22 };
+    await show(s);
+    expect(reads()).toEqual([afterMount[0] + 1, afterMount[1] + 1]);
+    await show({ ...s });
+    expect(reads()).toEqual([afterMount[0] + 1, afterMount[1] + 1]);
+    // a move after the turn (a hub-side change) reads at once
+    s = { ...s, rev: 23 };
+    await show(s);
+    expect(reads()).toEqual([afterMount[0] + 2, afterMount[1] + 2]);
+  });
 });
 
 describe("an older hub and the new-conversation page", () => {

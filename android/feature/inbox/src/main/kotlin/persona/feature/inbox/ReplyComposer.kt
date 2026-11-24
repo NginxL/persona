@@ -32,6 +32,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import persona.core.inbox.*
 
 data class ReplyComposerState(
     val draft: ReplyDraft = ReplyDraft(""),

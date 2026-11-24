@@ -48,8 +48,11 @@ nonisolated enum StartFailureWords {
             text = text[prefix.upperBound...].trimmingCharacters(in: .whitespacesAndNewlines)
         }
         guard !text.isEmpty else { return nil }
-        if let cause = cause(text) { return words(cause) }
-        return readsAsSentence(text) ? text : nil
+        let sentence = readsAsSentence(text)
+        // Quoted file paths in an actionable error can contain words like "timeout".
+        let causeText = sentence ? text.replacingOccurrences(of: #""(?:[^"\\]|\\.)*""#, with: "", options: .regularExpression) : text
+        if let cause = cause(causeText) { return words(cause) }
+        return sentence ? text : nil
     }
 
     /// The hand-off card's line: "Didn't start: <why>", or that the details say why.

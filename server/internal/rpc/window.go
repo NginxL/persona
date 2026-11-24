@@ -72,9 +72,10 @@ func newCreditWindow() creditWindow { return creditWindow{cwnd: windowInit} }
 
 // rateMark is a sample the next delivery rate is measured from: bytes acknowledged through the frame, read at recv.
 type rateMark struct {
-	acked int64
-	recv  uint32
-	set   bool
+	acked     int64
+	recv      uint32
+	set       bool
+	saturated bool // forward queue was busy at this mark and stayed in flight, so the next sample reflects bottleneck rate
 }
 
 type rateSample struct {
@@ -149,9 +150,11 @@ func (w *creditWindow) acked(seq uint64, recv uint32, now time.Time) {
 	w.inFlight -= freed
 	w.done += int64(freed)
 	if at.IsZero() { // the frame it names is not one of these: no sample
+		if w.inFlight == 0 {
+			w.mark.saturated = false
+		}
 		return
 	}
-	w.noteRate(recv, now)
 	rtt := max(now.Sub(at), 0)
 	w.rtt = rtt
 	base := &w.base[0]
@@ -162,6 +165,7 @@ func (w *creditWindow) acked(seq uint64, recv uint32, now time.Time) {
 	base.add(delay, now)
 	queued := time.Duration(int32(delay-base.min())) * time.Millisecond
 	w.queued = queued
+	w.noteRate(recv, now, queued, w.inFlight > 0)
 	// need: what the other side reads in the time its bytes wait to be acknowledged (pathSample). The
 	// acknowledgements wait behind what the other side sends (a busy other direction), and how long changes from one
 	// to the next (one waits behind a whole frame, the next gets through between two): the longest of the last
@@ -223,21 +227,36 @@ func (w *creditWindow) acked(seq uint64, recv uint32, now time.Time) {
 }
 
 // noteRate measures the rate the other side reads at, between this sample and the last one far enough before it by
-// its clock: the spacing of its reads, which acknowledgements bunched on the way back do not change.
-func (w *creditWindow) noteRate(recv uint32, now time.Time) {
+// its clock: the spacing of its reads, which acknowledgements bunched on the way back do not change. When the forward
+// queue stayed continuously busy across the sample and queueing is severe (queued > 4*queueTarget), a lower delivery
+// rate proves an earlier higher peak (e.g. compressible data over permessage-deflate) is no longer achievable, so stale
+// higher samples are lowered immediately (#13761).
+func (w *creditWindow) noteRate(recv uint32, now time.Time, queued time.Duration, inFlight bool) {
 	m := &w.mark
+	busy := queued > queueTarget && inFlight
 	if !m.set || before(recv, m.recv) {
-		*m = rateMark{acked: w.done, recv: recv, set: true}
+		*m = rateMark{acked: w.done, recv: recv, set: true, saturated: busy}
 		return
 	}
 	span := recv - m.recv
 	if span < rateSpan {
+		if !busy {
+			m.saturated = false
+		}
 		return
 	}
 	r := float64(w.done-m.acked) / (float64(span) / 1000)
-	*m = rateMark{acked: w.done, recv: recv, set: true}
+	saturated := m.saturated && busy
+	*m = rateMark{acked: w.done, recv: recv, set: true, saturated: busy}
 	copy(w.rates[1:], w.rates[:rateSlots-1])
 	w.rates[0] = rateSample{rate: r, at: now}
+	if saturated && queued > 4*queueTarget && r < w.rate {
+		for i := range w.rates {
+			if !w.rates[i].at.IsZero() && w.rates[i].rate > r {
+				w.rates[i].rate = r
+			}
+		}
+	}
 	w.rate = 0
 	for _, s := range w.rates {
 		if !s.at.IsZero() && now.Sub(s.at) < rateFor {

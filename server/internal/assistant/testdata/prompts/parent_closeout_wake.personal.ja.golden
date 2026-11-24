@@ -1,0 +1,4 @@
+配下の part_of 子 To-Do 1 件がすべて完了しました。
+   完了した子 To-Do：
+   - 「Implement API」（todo_child_1；PR：https://github.com/example/app/pull/101）
+   クローズ方針：子タスクをまとめるだけの集約用親 To-Do であれば todo_complete で完了にしてオーナーへ要約報告してください。この親 To-Do には担当会話がありません（個人の普通 To-Do）：オーナーの確認待ちであれば自動で閉じず、完了した成果物を提示して未完了のまま残してください。

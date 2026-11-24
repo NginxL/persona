@@ -14,6 +14,7 @@ import (
 // no gateway token to hand out (asking the Lark gateway would fail: it is not configured). A node's assistant.lark is the
 // assistant's (its fleet_tools.go gives it to its own machine only); what it hands over is the extensions' answer.
 func TestAssistantLarkWithLarkCLIOnly(t *testing.T) {
+	needsLarkCLI(t)
 	h := newTestManager(t)
 	h.cfg.Lark = lark.Config{CLI: &lark.CLIConfig{Bin: "/opt/lark/bin/lark-cli", Profile: "work"}, Prefer: "cli"}
 	h.cfg.ConnectorGate = []connector.Rule{{Connector: "lark", Action: "CLI /im/+messages-send", Decision: "allow"}}

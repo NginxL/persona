@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -175,5 +176,45 @@ func TestOwnLauncherCountsOnlyTheUsersOwn(t *testing.T) {
 	list = append(list, proto.Launcher{Name: "cc_work", Source: "zshrc"}, proto.Launcher{Name: "cx", Agent: "codex", Source: "zshrc"})
 	if !ownLauncher(list, "claude") || !ownLauncher(list, "codex") {
 		t.Fatal("an rc-file launcher is a service of one's own")
+	}
+}
+
+// An agy provider delivered on demand is still pulled ahead: the Antigravity companion runs all the time and takes the
+// launcher's key when it starts, so without the pull it stayed on agy's own sign-in (#13871).
+func TestOnDemandAgyProviderIsPulledForTheCompanion(t *testing.T) {
+	n := &Node{bin: "/usr/local/bin/personad"}
+	h := &pullHub{answer: func(name string) (any, error) {
+		return map[string]any{"launcher": proto.ManagedLauncher{Name: name, Agent: "agy", BaseURL: "https://gw.example.com", Model: "m1", APIKey: "agy-pulled-key"}}, nil
+	}}
+	withPullHub(t, n, h)
+	entry := proto.ManagedLauncher{Name: "agy-gw", Agent: "agy", BaseURL: "https://gw.example.com", Model: "m1", Delivery: proto.DeliveryOnDemand, Rev: "r1"}
+	n.setCatalog([]proto.ManagedLauncher{entry.Public()})
+	pulledAgy := func(n *Node) func() bool {
+		return func() bool {
+			return strings.Contains(strings.Join(n.agyProviderEnv(), "\n"), "GEMINI_API_KEY=agy-pulled-key")
+		}
+	}
+	waitWithin(t, 5*time.Second, "an on-demand agy provider in the companion's env", pulledAgy(n))
+	// A Claude provider on demand still waits for a start. Listed before an agy one, it would be pulled before it (one
+	// goroutine pulls ahead in list order): once the agy one is in, the Claude one was never asked for.
+	other := &Node{bin: "/usr/local/bin/personad"}
+	var mu sync.Mutex
+	var asked []string
+	h2 := &pullHub{answer: func(name string) (any, error) {
+		mu.Lock()
+		asked = append(asked, name)
+		mu.Unlock()
+		if name == entry.Name {
+			return map[string]any{"launcher": proto.ManagedLauncher{Name: name, Agent: "agy", BaseURL: "https://gw.example.com", Model: "m1", APIKey: "agy-pulled-key"}}, nil
+		}
+		return nil, errors.New("not expected")
+	}}
+	withPullHub(t, other, h2)
+	other.setCatalog([]proto.ManagedLauncher{{Name: "box", Model: "m1", Delivery: proto.DeliveryOnDemand, Withheld: true, Rev: "1"}, entry.Public()})
+	waitWithin(t, 5*time.Second, "the agy provider pulled after the Claude one's place", pulledAgy(other))
+	mu.Lock()
+	defer mu.Unlock()
+	if !slices.Equal(asked, []string{entry.Name}) {
+		t.Fatalf("an on-demand Claude provider was pulled ahead: asked for %v", asked)
 	}
 }

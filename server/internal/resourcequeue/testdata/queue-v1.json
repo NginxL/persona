@@ -1,0 +1,124 @@
+{
+  "v": 1,
+  "slots": 3,
+  "now": "2026-11-22T10:00:00Z",
+  "running": [
+    {
+      "ticket": "t1",
+      "project": "example",
+      "ref": "main",
+      "commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "groups": [
+        "scripts",
+        "web"
+      ],
+      "tag": "",
+      "future_field": "ignored",
+      "slot": 1,
+      "started_at": "2026-11-22T09:55:00Z",
+      "run": "example-run-1"
+    },
+    {
+      "ticket": "t2",
+      "project": "example",
+      "ref": "main",
+      "commit": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "groups": [
+        "scripts",
+        "web"
+      ],
+      "tag": "",
+      "future_field": "ignored",
+      "slot": 2,
+      "started_at": "2026-11-22T09:55:00Z",
+      "run": "example-run-2"
+    },
+    {
+      "ticket": "t3",
+      "project": "example",
+      "ref": "main",
+      "commit": "cccccccccccccccccccccccccccccccccccccccc",
+      "groups": [
+        "scripts",
+        "web"
+      ],
+      "tag": "",
+      "future_field": "ignored",
+      "slot": 3,
+      "started_at": "2026-11-22T09:55:00Z",
+      "run": "example-run-3"
+    }
+  ],
+  "waiting": [
+    {
+      "ticket": "t4",
+      "project": "example",
+      "ref": "main",
+      "commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "groups": [
+        "scripts",
+        "web"
+      ],
+      "tag": "",
+      "future_field": "ignored",
+      "position": 1,
+      "enqueued_at": "2026-11-22T09:58:00Z"
+    },
+    {
+      "ticket": "t5",
+      "project": "example",
+      "ref": "main",
+      "commit": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+      "groups": [
+        "scripts",
+        "web"
+      ],
+      "tag": "",
+      "future_field": "ignored",
+      "position": 2,
+      "enqueued_at": "2026-11-22T09:58:00Z"
+    },
+    {
+      "ticket": "t6",
+      "project": "example",
+      "ref": "main",
+      "commit": "ffffffffffffffffffffffffffffffffffffffff",
+      "groups": [
+        "scripts",
+        "web"
+      ],
+      "tag": "",
+      "future_field": "ignored",
+      "position": 3,
+      "enqueued_at": "2026-11-22T09:58:00Z"
+    },
+    {
+      "ticket": "t7",
+      "project": "example",
+      "ref": "main",
+      "commit": "gggggggggggggggggggggggggggggggggggggggg",
+      "groups": [
+        "scripts",
+        "web"
+      ],
+      "tag": "",
+      "future_field": "ignored",
+      "position": 4,
+      "enqueued_at": "2026-11-22T09:58:00Z"
+    },
+    {
+      "ticket": "t8",
+      "project": "example",
+      "ref": "main",
+      "commit": "hhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhh",
+      "groups": [
+        "scripts",
+        "web"
+      ],
+      "tag": "",
+      "future_field": "ignored",
+      "position": 5,
+      "enqueued_at": "2026-11-22T09:58:00Z"
+    }
+  ]
+}

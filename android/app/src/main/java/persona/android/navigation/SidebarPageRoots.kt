@@ -15,12 +15,13 @@ import persona.core.navigation.InboxRoute
 import persona.core.navigation.InteractionRoute
 import persona.core.navigation.LarkMessagesRoute
 import persona.core.navigation.MachinesRoute
+import persona.core.navigation.StarredMessagesRoute
 import persona.core.navigation.TerminalRoute
 import persona.core.navigation.TodoDetailRoute
 import persona.core.navigation.TodosRoute
 import persona.feature.assistant.AssistantSidebarShade
-import persona.feature.knowledge.KnowledgeKindRoute
-import persona.feature.knowledge.KnowledgeRoute
+import persona.core.navigation.KnowledgeKindRoute
+import persona.core.navigation.KnowledgeRoute
 
 /**
  * The roots of the Assistant page beside the sidebar column, and the drill-down each was left with (#9667, iOS #8359).
@@ -113,14 +114,14 @@ internal class SidebarPageRoots {
  * is in front. iOS keeps paths, not live views (docs/design/sidebar-navigation.md).
  */
 internal fun retainsSidebarComposition(root: NavKey): Boolean = when (root) {
-    AssistantRoute, InboxRoute, TodosRoute, KnowledgeRoute, MachinesRoute, LarkMessagesRoute, SidebarScheduleRoute -> true
+    AssistantRoute, StarredMessagesRoute, InboxRoute, TodosRoute, KnowledgeRoute, MachinesRoute, LarkMessagesRoute, SidebarScheduleRoute -> true
     is KnowledgeKindRoute -> true
     else -> false
 }
 
 /** A sidebar place that is its own root at regular width. A pushed extension page (`depth > 0`) is a drill-down. */
 internal fun isSidebarPlaceRoot(key: NavKey): Boolean = when (key) {
-    InboxRoute, TodosRoute, KnowledgeRoute, MachinesRoute, LarkMessagesRoute, SidebarScheduleRoute -> true
+    StarredMessagesRoute, InboxRoute, TodosRoute, KnowledgeRoute, MachinesRoute, LarkMessagesRoute, SidebarScheduleRoute -> true
     is KnowledgeKindRoute -> true
     is TodoDetailRoute -> true
     is ExtensionUiRoute -> key.depth == 0
@@ -133,6 +134,7 @@ internal fun isSidebarPlaceRoot(key: NavKey): Boolean = when (key) {
  */
 internal fun sidebarShadeKey(root: NavKey): String = when (root) {
     AssistantRoute -> AssistantSidebarShade.Conversation
+    StarredMessagesRoute -> AssistantSidebarShade.Starred
     InboxRoute -> AssistantSidebarShade.Inbox
     LarkMessagesRoute -> AssistantSidebarShade.Messages
     TodosRoute -> AssistantSidebarShade.Todos
@@ -236,6 +238,7 @@ internal fun regularPromotion(stack: List<NavKey>, openedAsRoot: (NavKey) -> Boo
  * conversation is not a place route (item 6).
  */
 internal fun placeRootFor(key: NavKey): NavKey? = when {
+    key == StarredMessagesRoute -> StarredMessagesRoute
     key == LarkMessagesRoute -> LarkMessagesRoute
     isInboxDestination(key) -> InboxRoute
     key == TodosRoute -> TodosRoute
@@ -248,6 +251,7 @@ internal fun placeRootFor(key: NavKey): NavKey? = when {
 /** Stable id for the NavDisplay that keeps [root] composed while another root is in front. */
 internal fun sidebarHostId(root: NavKey): String = when (root) {
     AssistantRoute -> SidebarRootHosts.CONVERSATION
+    StarredMessagesRoute -> "starred"
     InboxRoute -> "inbox"
     LarkMessagesRoute -> "lark-messages"
     TodosRoute -> "todos"

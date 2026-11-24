@@ -2,20 +2,20 @@
 // or from inside another page (a to-do, a knowledge project, a meeting, #12055): "Came from <conversation or page> ·
 // click to return", with ✕ to put it away. Returning goes back in the history, so the conversation's chat is where it was
 // left (lib/handoff.ts).
-import { type HandoffFrom } from "../../lib/handoff";
+import { handoffFrom } from "../../lib/handoff";
 import { sessionTitle } from "../../lib/format";
-import { navigate, parse, type Route } from "../../lib/router";
+import { navigate, parse, useRoute, type Route } from "../../lib/router";
 import { useStore, type State } from "../../lib/store";
 import { IconButton } from "../../ui/atoms";
 import { Icon } from "../../ui/icons";
 import { conversationTitle } from "../assistant/conversations";
 import { t } from "../../i18n";
+import { moduleNavItem } from "../../core/module-host";
 
 /** A page the strip names by its row in the sidebar when it has no title of its own to say (#12055). */
 const PAGE_NAMES: Partial<Record<Route["name"], string>> = {
   home: "sidebar.nav_home",
   inbox: "sidebar.nav_inbox",
-  health: "sidebar.nav_health",
   "workspace-board": "sidebar.nav_board",
   todos: "sidebar.nav_todos",
   routines: "sidebar.nav_routines",
@@ -40,6 +40,8 @@ export function fromTitle(s: Pick<State, "assistant"> & Partial<Pick<State, "tod
   if (todo?.title.trim()) return todo.title.trim();
   const agent = r.name === "session" ? s.sessions?.[r.mid]?.find((x) => x.session_id === r.sid) : undefined;
   if (agent) return sessionTitle(agent);
+  // a feature module's page: its sidebar entry's name (core/module-host.ts)
+  if (r.name === "module") return moduleNavItem(r)?.label();
   const name = PAGE_NAMES[r.name];
   return name ? t(name) : undefined;
 }
@@ -62,8 +64,12 @@ export function BackStrip({ label, dismissLabel, onBack, onDismiss, inbox = fals
   );
 }
 
-export function HandoffBack({ from, onDismiss }: { from: HandoffFrom; onDismiss: () => void }) {
-  const title = useStore((s) => fromTitle(s, from.path));
+export function HandoffBack({ onDismiss }: { onDismiss: () => void }) {
+  // The origin can be replaced at the same address when the open Agent is reselected as a root (#12055).
+  useRoute();
+  const from = handoffFrom();
+  const title = useStore((s) => from ? fromTitle(s, from.path) : undefined);
+  if (!from) return null;
   // the entry before this one is the conversation or page (the card or row pushed this one); a page opened on its own has
   // none to go to
   const back = () => (history.length > 1 ? history.back() : navigate(from.path));

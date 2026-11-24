@@ -1,5 +1,7 @@
 package persona.core.domain.tasks
 
+import java.time.Instant
+import java.time.ZoneId
 import persona.core.contracts.AssistantTaskCard
 import persona.core.contracts.FeedItem
 import persona.core.contracts.TaskPlan
@@ -163,9 +165,21 @@ object AssistantTaskCards {
         }.sortedWith(compareBy({ AssistantLines.time(it.identity.at) }, { it.identity.id }))
     }
 
-    /** [inline]: the records drawn among the lines ([isBackgroundEvent]). */
-    fun lines(lines: List<ChatLine>, feed: List<FeedItem>, plans: Map<String, TaskPlan>, todos: List<Todo>,
-        projected: List<AssistantTaskCard> = emptyList(), inline: Boolean = false): List<ChatLine> {
+    /**
+     * [inline]: the records drawn among the lines ([isBackgroundEvent]).
+     * [earliest]: while older transcript pages remain unloaded, holds back older feed items and dispatched task cards
+     * (and their day dividers) until those pages load.
+     */
+    fun lines(
+        lines: List<ChatLine>,
+        feed: List<FeedItem>,
+        plans: Map<String, TaskPlan>,
+        todos: List<Todo>,
+        projected: List<AssistantTaskCard> = emptyList(),
+        inline: Boolean = false,
+        earliest: Instant? = null,
+        zone: ZoneId = ZoneId.systemDefault(),
+    ): List<ChatLine> {
         val cards = merge(feed, plans, todos, projected)
         val dispatched = cards.groupBy { it.identity.planId ?: it.identity.id }.filterValues { group ->
             group.any { it.todo != null || it.plan?.state == "started" || it.records.any { record -> record.kind == "task" } }
@@ -185,9 +199,14 @@ object AssistantTaskCards {
         val drawn = if (inline) drawnPlans(feed, plans, dispatched.keys) else emptySet()
         val visible = drawnFeed(feed)
         val combined = visible.filterNot { isBackgroundEvent(it, inline) && it.id !in drawn } + dispatched.map { (id, group) ->
-            FeedItem(id, at = group.first().identity.at, kind = "unknown")
+            val at = group.firstNotNullOfOrNull { card ->
+                sequenceOf(card.identity.at, card.plan?.createdAt, card.todo?.createdAt, card.records.firstOrNull()?.at)
+                    .firstOrNull { AssistantLines.time(it) != null }
+            } ?: group.first().identity.at
+            FeedItem(id, at = at, kind = "unknown")
         }
-        return AssistantLines.lines(lines, combined.sortedWith(compareBy({ AssistantLines.time(it.at) }, { it.id }))).map { line ->
+        return AssistantLines.lines(lines, combined.sortedWith(compareBy({ AssistantLines.time(it.at) }, { it.id })),
+            zone = zone, earliest = earliest).map { line ->
             val id = ((line as? ChatLine.Extra)?.payload as? AssistantExtra.Feed)?.item?.id
             payloads[id]?.let { ChatLine.Extra("dispatch-$id", it) } ?: line
         }

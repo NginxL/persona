@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/nwverse/persona/server/internal/assistantwire"
@@ -27,6 +28,9 @@ func (h olderTaskNodeHub) DeviceCall(ctx context.Context, call DeviceCall) (json
 		if call.Method == assistantwire.DeviceAssistantDirectory || string(params["task_execution"]) == "true" && string(params[devicewire.LegacyTaskExecution]) != "true" {
 			return nil, &rpc.Error{Code: proto.CodeNodeOutdated, Message: "node lacks scheduled task execution"}
 		}
+		if string(params["task_execution"]) == "true" && string(params[devicewire.LegacyTaskExecution]) == "true" {
+			devicewire.MarkLegacyTaskExecution(ctx)
+		}
 		delete(params, "task_execution")
 		delete(params, devicewire.LegacyTaskExecution)
 		if len(params["session_id"]) != 0 {
@@ -41,6 +45,7 @@ func TestTaskExecutionStrictContextsRefuseAnOlderNode(t *testing.T) {
 	for _, name := range []string{"directory", "computer", "launcher", "model", "effort", "health", "strict snapshot"} {
 		t.Run(name, func(t *testing.T) {
 			f := readyHub()
+			f.hello.Assistant.TaskExecutionWaitSeconds = ptr(1)
 			st := &memStore{}
 			s := withSettings(t, f, New(Options{Hub: olderTaskNodeHub{f}, Store: func() Store { return st }, Logf: testLogf(t)}))
 			task := Task{ID: "job", Title: "Check", Prompt: "Check files", Repeat: repeatInterval, EveryMinutes: 30, Enabled: true}
@@ -72,10 +77,23 @@ func TestTaskExecutionStrictContextsRefuseAnOlderNode(t *testing.T) {
 				task.RunExecution = &ex
 			}
 			setTasks(s, task)
-			r := request(s, "POST", "/api/v1/assistant/tasks/job/run", `{}`)
-			if r.Code == http.StatusOK || !strings.Contains(r.Body.String(), "node lacks scheduled task execution") || f.sent() != 0 {
-				t.Fatalf("strict task used old-node dispatch: %d %s, sent %d", r.Code, r.Body, f.sent())
-			}
+			synctest.Test(t, func(t *testing.T) {
+				type response struct {
+					code int
+					body string
+				}
+				done := make(chan response, 1)
+				go func() {
+					r := request(s, "POST", "/api/v1/assistant/tasks/job/run", `{}`)
+					done <- response{code: r.Code, body: r.Body.String()}
+				}()
+				<-time.After(2 * time.Second)
+				synctest.Wait()
+				r := <-done
+				if r.code == http.StatusOK || !strings.Contains(r.body, "task_execution_wait_timeout") || f.sent() != 0 {
+					t.Fatalf("strict task used old-node dispatch: %d %s, sent %d", r.code, r.body, f.sent())
+				}
+			})
 		})
 	}
 }
@@ -148,6 +166,11 @@ func TestTaskExecutionUndiscoveredCatalogSaveAndDispatch(t *testing.T) {
 						t.Fatal(err)
 					}
 					id = saved.Task.ID
+					// Only the saved task, as the stored case has: runDue below looks half an hour ahead, and the
+					// built-in morning routine (weekdays 09:00, machine time) would run too when this starts at 08:30
+					// (#13630).
+					saved.Task, _ = taskByID(s, id)
+					setTasks(s, saved.Task)
 				}
 				if r := request(s, "POST", "/api/v1/assistant/tasks/"+id+"/run", `{}`); r.Code != http.StatusOK {
 					t.Fatalf("manual undiscovered launcher: %d %s", r.Code, r.Body.String())

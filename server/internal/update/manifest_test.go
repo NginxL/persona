@@ -1,6 +1,7 @@
 package update
 
 import (
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -53,5 +54,33 @@ func TestManifestLinkFile(t *testing.T) {
 	}
 	if f, ok := (&Manifest{}).LinkFile("linux-amd64"); ok { // a release from before links
 		t.Errorf("no links: %+v", f)
+	}
+}
+
+func TestBuildManifestHelperWindowsExePlatform(t *testing.T) {
+	dir := t.TempDir()
+	writeGz(t, filepath.Join(dir, "personad-linux-amd64.gz"), []byte("personad"))
+	writeGz(t, filepath.Join(dir, "persona-iphone-bridge-darwin-arm64.gz"), []byte("macOS helper"))
+	writeGz(t, filepath.Join(dir, "persona-iphone-bridge-windows-amd64.exe.gz"), []byte("Windows amd64 helper"))
+	writeGz(t, filepath.Join(dir, "persona-iphone-bridge-windows-arm64.exe.gz"), []byte("Windows arm64 helper"))
+
+	m, err := BuildManifest(dir, Manifest{Version: "v1", Build: 202611030000})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		plat, want string
+	}{
+		{"darwin-arm64", "persona-iphone-bridge-darwin-arm64.gz"},
+		{"windows-amd64", "persona-iphone-bridge-windows-amd64.exe.gz"},
+		{"windows-arm64", "persona-iphone-bridge-windows-arm64.exe.gz"},
+	} {
+		f, ok := m.HelperFile("persona-iphone-bridge", tc.plat)
+		if !ok || f.Name != tc.want || f.BinarySHA256 == "" {
+			t.Errorf("HelperFile(%q) = %+v, %v; want %s", tc.plat, f, ok, tc.want)
+		}
+	}
+	if _, ok := m.Helpers["persona-iphone-bridge"]["windows-amd64.exe"]; ok {
+		t.Fatalf("Windows helper indexed under .exe platform key: %+v", m.Helpers)
 	}
 }

@@ -73,15 +73,10 @@ struct AlwaysGrantsSection: View {
                 } else {
                     ProgressView().frame(maxWidth: .infinity)
                 }
-                #if os(macOS)
-                scope.font(Theme.Font.caption).foregroundStyle(.secondary) // a Mac list's footer stops at one line
-                #endif
             } header: {
                 Text("Always allowed in this conversation")
             } footer: {
-                #if !os(macOS)
                 scope
-                #endif
             }
         }
     }

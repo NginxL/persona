@@ -126,6 +126,16 @@ internal class AgentOperationsState(private val api: AgentOperations, private va
         } finally { mutable.value = mutable.value.copy(busy = false) }
     }
 
+    suspend fun fork(session: Session): String = mutex.withLock {
+        val before = mutable.value
+        mutable.value = before.copy(busy = true)
+        try {
+            api.forkSession(session.key)
+        } finally {
+            mutable.value = mutable.value.copy(busy = false)
+        }
+    }
+
     suspend fun renameSpace(session: Session, requestedName: String) = mutex.withLock {
         val name = requestedName.trim()
         if (name.isEmpty() || name == session.spaceName) return@withLock

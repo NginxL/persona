@@ -2,12 +2,14 @@ package hub
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/nwverse/persona/server/internal/assistantwire"
 	"github.com/nwverse/persona/server/internal/proto"
@@ -41,7 +43,7 @@ var managerMessageTypes = map[string]bool{
 	"saved_agent_searches": true, "assistant_feed": true, "assistant_saved_prompts": true, "assistant_starred": true, "assistant_schedule": true, "assistant_view": true, "assistant_view_action": true,
 	"assistant_view_block": true, "agents.triage": true, "direction_offer": true, "directions": true, "interaction_reanswered": true, "kb_selection": true, "launcher_health": true,
 	"model_profile": true, "navigation": true, "task_plan": true, "todos": true, "workspace_board": true, "workspace_board_settings": true,
-	"meeting_live": true, "urgent_call": true,
+	"resources": true, "meeting_live": true, "urgent_call": true, "health_intake": true,
 	// its extensions' manager
 	"agents": true, "agents.prefs": true, "inbox": true, "mail_accounts": true, "messaging": true,
 	"extension_auth": true, "extension_operation": true, "extension_ui": true, "plugin_ui": true,
@@ -120,7 +122,19 @@ func (h *Hub) relayBroadcastFrom(from string, message json.RawMessage) error {
 	if typ == "inbox" { // before the apps hear it: the list they ask for then is fetched afresh (inbox_answers.go)
 		h.inboxAnswers.changed(from)
 	}
+	var intake uint64 // the widget revision this event carries to the open apps (widget_wake.go)
+	if typ == "health_intake" && h.live != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		owner, err := h.defaultOwnerOrErr(ctx)
+		cancel()
+		if err == nil && from == owner {
+			intake = h.live.intakeChanged()
+		}
+	}
 	h.broadcastRaw(typ, out)
+	if intake != 0 {
+		h.live.intakeSent(intake)
+	}
 	return nil
 }
 

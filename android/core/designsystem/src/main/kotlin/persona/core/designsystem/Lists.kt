@@ -695,7 +695,7 @@ fun JCodeBlock(
     if (header == null) text(modifier.then(box))
     else Column(modifier.then(box)) {
         // the title bar is not code: a selection of the message leaves its language and Copy out
-        DisableSelection { header() }
+        DisableSelection { InterfaceContent { header() } }
         text(Modifier.fillMaxWidth())
     }
 }

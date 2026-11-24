@@ -6,6 +6,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/nwverse/persona/server/internal/lazyre"
 	"github.com/nwverse/persona/server/internal/proto"
 )
 
@@ -16,11 +17,8 @@ const (
 	changeDiffMaxEdits = 6_000
 )
 
-// clippedNote matches clipNoteFormat at the end of a string: a tool input clipJSON cut for good.
-var clippedNote = func() *regexp.Regexp {
-	before, after, _ := strings.Cut(clipNoteFormat, "%d")
-	return regexp.MustCompile(regexp.QuoteMeta(before) + `\d+` + regexp.QuoteMeta(after) + "$")
-}()
+// clippedNote matches the exact and approximate byte counts at the end of clipped tool input.
+var clippedNote = lazyre.New(regexp.QuoteMeta(clipNotePrefix) + `≈?\d+` + regexp.QuoteMeta(clipNoteSuffix) + "$")
 
 var editTools = map[string]bool{"Edit": true, "Write": true, "MultiEdit": true}
 

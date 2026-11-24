@@ -215,7 +215,7 @@ internal fun RequestDetail(
 }
 
 @Composable
-private fun RequestDeliveryStatus(delivery: RequestDelivery, live: Boolean = true) {
+internal fun RequestDeliveryStatus(delivery: RequestDelivery, live: Boolean = true) {
     // A live region, so a screen reader hears "Sending" / "Delivered" after an answer without looking for it.
     Box(if (live) Modifier.semantics(mergeDescendants = true) { liveRegion = LiveRegionMode.Polite } else Modifier) {
         when (delivery) {
@@ -227,7 +227,7 @@ private fun RequestDeliveryStatus(delivery: RequestDelivery, live: Boolean = tru
     }
 }
 
-private val Interaction.decisionKind: DecisionKind get() = when (kind) {
+internal val Interaction.decisionKind: DecisionKind get() = when (kind) {
     "permission" -> if (toolName == "Bash" || isSecretRun) DecisionKind.Command else DecisionKind.Tool
     "plan" -> DecisionKind.Plan
     "question" -> DecisionKind.Question

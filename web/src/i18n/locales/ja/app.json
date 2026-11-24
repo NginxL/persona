@@ -32,5 +32,7 @@
   "new_version": "新しいバージョンがあります",
   "new_version_reload": "再読み込み",
   "title_request": "リクエスト",
-  "title_compare_runs": "実行を比較"
+  "title_compare_runs": "実行を比較",
+  "title_space": "スペース",
+  "title_new_space": "新しいスペース"
 }

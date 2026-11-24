@@ -38,6 +38,7 @@ import persona.core.designsystem.AppStyle
 import persona.core.designsystem.PersonaTheme
 import persona.core.domain.inbox.InboxItem
 import persona.core.navigation.Navigator
+import persona.core.inbox.*
 
 /** The failed handling line and instruction sheet in every style, light / dark and at 1x / 2x. */
 @RunWith(AndroidJUnit4::class)

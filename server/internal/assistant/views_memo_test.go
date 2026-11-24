@@ -190,6 +190,12 @@ func TestViewsMemoEvicts(t *testing.T) {
 // Budget: a snapshot of 200 unchanged cards decodes nothing. Measured 12 allocations with Go 1.27 (the snapshot map and
 // the fake store's key list); reading every card makes about 1,900.
 func TestViewsMemoHitAllocations(t *testing.T) {
+	// AllocsPerRun counts the process's allocations: in a package run, earlier tests' leftover work (timers,
+	// callbacks) is counted too. Measured in a process that runs only this test, as internal/hub's allocation
+	// budgets are (#2063, #13788).
+	if !isolated(t) {
+		return
+	}
 	st := &keyedViewsStore{}
 	at := time.Now().UTC()
 	for i := 0; i < 200; i++ {

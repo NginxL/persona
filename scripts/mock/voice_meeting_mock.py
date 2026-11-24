@@ -192,9 +192,9 @@ class MeetingCall(voice_mock.Call):
             self._state("idle")
             self.left_working = False
             self.run_frame(run, "done")
+            LOG["answers"] += 1  # before the caption: a test reads the log as soon as the caption arrives
             self.caption(aid, "assistant", reply)
             self.speak(True)
-            LOG["answers"] += 1
 
         steps += [(SENDING, lambda: self.run_frame(run, "sending", task=question)), (SENT, sent), (DONE, done),
                   (QUIET, lambda: self.speak(False))]

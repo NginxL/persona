@@ -20,7 +20,7 @@ let screenshots = 0;
 
 async function run(theme, lang, large = false) {
   const strings = async (name) => JSON.parse(await readFile(new URL(`../src/i18n/locales/${lang}/${name}.json`, import.meta.url), "utf8"));
-  const s = await strings("settings-assistantsettings"), k = await strings("knowledge-kbdetail");
+  const s = await strings("settings-assistantsettings"), k = await strings("recording");
   const context = await browser.newContext({ viewport: { width: 1000, height: 1500 }, colorScheme: theme, reducedMotion: "reduce" });
   await context.addInitScript(({ theme, lang, large }) => {
     localStorage.setItem("persona.token", "fixture-token");

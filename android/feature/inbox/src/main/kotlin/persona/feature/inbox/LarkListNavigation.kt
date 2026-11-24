@@ -3,6 +3,7 @@ package persona.feature.inbox
 import persona.core.chatlist.*
 import persona.core.contracts.api.InboxAssistantTransport
 import kotlinx.serialization.json.*
+import persona.core.inbox.*
 
 internal data class LarkListNavigation(val readPosition: Long? = null, val unread: Boolean = false, val mention: Long? = null)
 internal data class LarkListTarget(val around: Long?, val entry: Long?, val restore: Boolean = false, val request: Int = 0)
@@ -57,5 +58,5 @@ internal class LarkListWindow {
 }
 
 internal fun larkListEntry(messages: List<LarkMessage>, position: Long?): ChatListEntry? = position?.let { start ->
-    messages.firstOrNull { it.position != null && it.position >= start }?.let { ChatListEntry(it.listKey(), alignTop = true) }
+    messages.firstOrNull { (it.position ?: Long.MIN_VALUE) >= start }?.let { ChatListEntry(it.listKey(), alignTop = true) }
 }

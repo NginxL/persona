@@ -16,7 +16,6 @@ import (
 	"github.com/nwverse/persona/server/internal/ai"
 	"github.com/nwverse/persona/server/internal/assistantwire"
 	"github.com/nwverse/persona/server/internal/i18n"
-	"github.com/nwverse/persona/server/internal/mail"
 )
 
 func TestForeignScript(t *testing.T) {
@@ -311,7 +310,7 @@ func TestTranslateMailUnknownAccount(t *testing.T) {
 	bridge := &failingMailHub{Hub: h.Service.hub}
 	setHub(h.Service, bridge)
 	const req = `{"account_id":"none","uid":1,"target":"zh-Hans"}`
-	unknown := &mail.UnknownAccountError{Account: "none"}
+	unknown := unknownMailAccount("none") // the mail module's error for an account no longer connected
 	for _, err := range []error{unknown, fmt.Errorf("read mail: %w", unknown)} {
 		bridge.err = err
 		status, body := serveJSON(t, h.Service, "POST", "/api/v1/translate/mail", "ja", req)
@@ -358,3 +357,14 @@ func TestGoldenTranslationLanguage(t *testing.T) {
 		})
 	}
 }
+
+// unknownMailAccount stands for the mail module's UnknownAccountError: the core reaches it only through its code,
+// status and localized text.
+type unknownMailAccount string
+
+func (u unknownMailAccount) Error() string { return u.Text(i18n.En) }
+func (u unknownMailAccount) Text(l i18n.Lang) string {
+	return i18n.T(l, "mail-errors.account_unknown", i18n.Args{"account": string(u)})
+}
+func (unknownMailAccount) Code() string    { return "mail_account_unknown" }
+func (unknownMailAccount) HTTPStatus() int { return http.StatusNotFound }

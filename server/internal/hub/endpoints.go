@@ -173,7 +173,8 @@ func collectEndpoints(cfg *Config, tlsPort int, addrs []localAddress, now time.T
 			(bound.IsValid() && !bound.IsUnspecified() && bound.Unmap() != a.Addr.Unmap()) {
 			continue
 		}
-		if (kind == "ipv6" && cfg.Public.AdvertiseIPv6 != nil && !*cfg.Public.AdvertiseIPv6) ||
+		// Office network mode hands out no global IPv6 address unless asked to (the start refuses one asked for).
+		if (kind == "ipv6" && ((cfg.Public.AdvertiseIPv6 != nil && !*cfg.Public.AdvertiseIPv6) || (cfg.Public.AdvertiseIPv6 == nil && cfg.Security.PrivateNetworkOnly))) ||
 			(kind == "lan" && cfg.Public.AdvertiseLAN != nil && !*cfg.Public.AdvertiseLAN) {
 			continue
 		}

@@ -1,6 +1,5 @@
 // What the chat page shows, as a spec/fixtures/sync view (spec/fixtures/sync/README.md "Views"): the user's messages
-// and each turn's answer in screen order, the cards and whether they can be answered, the streamed text. The page
-// marks its bubbles and cards for this (data-user-bubble / data-send-state, data-answer, data-card, data-answered).
+// and each turn's answer in screen order, queued messages, cards and whether they can be answered, and streamed text.
 import type { Message, View } from "./fake-hub";
 
 const text = (el: Element) => (el.textContent ?? "").replace(/\s+/g, " ").trim();
@@ -10,10 +9,15 @@ const text = (el: Element) => (el.textContent ?? "").replace(/\s+/g, " ").trim()
 export function project(root: HTMLElement, sent: string[]): Required<Pick<View, "messages" | "cards" | "live">> {
   const messages: Message[] = [];
   let live: string | null = null;
-  for (const el of root.querySelectorAll<HTMLElement>("[data-user-bubble], [data-answer]")) {
+  for (const el of root.querySelectorAll<HTMLElement>("[data-user-bubble], [data-answer], [data-queue-row]")) {
     if (el.hasAttribute("data-answer")) {
       if (el.dataset.answer === "streaming") live = text(el);
       else messages.push({ from: "agent", text: text(el) });
+      continue;
+    }
+    if (el.hasAttribute("data-queue-row")) {
+      const words = el.querySelector("[data-queue-row-body]")!;
+      messages.push({ from: "user", text: text(words), state: "pending" });
       continue;
     }
     const state = el.dataset.sendState;

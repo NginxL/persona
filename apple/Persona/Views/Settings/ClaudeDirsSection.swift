@@ -90,11 +90,7 @@ struct ClaudeDirsSection: View {
     @State private var loading = false
 
     private typealias L = ClaudeDirsLogic
-    #if os(macOS)
-    private static var fieldTitle: String { String(localized: "Folder to Block") }
-    #else
     private static var fieldTitle: String { String(localized: "~/.automation/* or a path") }
-    #endif
 
     var body: some View {
         Section {
@@ -169,11 +165,7 @@ struct ClaudeDirsSection: View {
         let problem = L.problem(input, existing: state.blocked)
         VStack(alignment: .leading, spacing: Theme.Space.xs) {
             HStack(spacing: Theme.Space.m) {
-                // A Mac form would show the title as the row's label, the field empty beside it (#1221).
                 TextField(Self.fieldTitle, text: $input, prompt: Text("~/.automation/* or a path"))
-                    #if os(macOS)
-                    .labelsHidden()
-                    #endif
                     .font(Theme.Font.code)
                     .autocorrectionDisabled()
                     #if os(iOS) || os(visionOS)

@@ -597,3 +597,104 @@ func jsonNum(f float64) string {
 	b, _ := json.Marshal(f)
 	return string(b)
 }
+
+func TestUpstreamErrorStreakAndCode(t *testing.T) {
+	const (
+		err503  = "API Error: 503 Service Unavailable"
+		errPool = "API Error: 503 no eligible upstream account is currently available"
+		loopHit = `{"type":"system","subtype":"scheduled_task_fire","uuid":"lf","timestamp":"2026-01-01T12:05:00Z","prompt":"check build"}`
+	)
+	fail503 := func(id string) string {
+		return apiErrorLine(t, id, err503, map[string]any{"error": "server_error", "apiErrorStatus": 503})
+	}
+	failPool := func(id string) string {
+		return apiErrorLine(t, id, errPool, map[string]any{"error": "server_error", "apiErrorStatus": 503})
+	}
+
+	// 1. Single transient 503 stays at streak 1 with empty TurnErrorCode; duplicate error record in same turn does not double-count.
+	var m Meta
+	for i, l := range []string{prompt("u1", "go"), fail503("e1"), fail503("e1b"), turnEndLine} {
+		ParseLine(i, []byte(l), &m)
+	}
+	if m.UpstreamErrorStreak != 1 || m.TurnErrorCode != "" {
+		t.Fatalf("single 503: streak=%d code=%q, want 1 / empty", m.UpstreamErrorStreak, m.TurnErrorCode)
+	}
+
+	// 2. Second consecutive 503 after a /loop wake crosses threshold >= 2 and marks TurnErrorUpstreamUnavailable.
+	for i, l := range []string{loopHit, fail503("e2"), turnEndLine} {
+		ParseLine(10+i, []byte(l), &m)
+	}
+	if m.UpstreamErrorStreak != 2 || m.TurnErrorCode != proto.TurnErrorUpstreamUnavailable {
+		t.Fatalf("second 503 after /loop wake: streak=%d code=%q", m.UpstreamErrorStreak, m.TurnErrorCode)
+	}
+
+	// 3. Substantive reply resets the streak so a single 503 afterwards is unmarked again.
+	for i, l := range []string{prompt("u3", "retry"), replyLine, turnEndLine, prompt("u4", "next"), fail503("e4"), turnEndLine} {
+		ParseLine(20+i, []byte(l), &m)
+	}
+	if m.UpstreamErrorStreak != 1 || m.TurnErrorCode != "" {
+		t.Fatalf("after recovery + single 503: streak=%d code=%q, want 1 / empty", m.UpstreamErrorStreak, m.TurnErrorCode)
+	}
+
+	// 4. A turn that did work before failing resets the streak instead of triggering >= 2.
+	for i, l := range []string{prompt("u5", "work"), thinkingLine, fail503("e5"), turnEndLine} {
+		ParseLine(30+i, []byte(l), &m)
+	}
+	if m.UpstreamErrorStreak != 0 || m.TurnErrorCode != "" || !m.TurnErrorAfterWork {
+		t.Fatalf("503 after work: streak=%d code=%q afterWork=%v", m.UpstreamErrorStreak, m.TurnErrorCode, m.TurnErrorAfterWork)
+	}
+
+	// 5. Explicit account-pool exhaustion marks TurnErrorUpstreamUnavailable on the first turn.
+	var pool Meta
+	for i, l := range []string{prompt("up", "go"), failPool("ep"), turnEndLine} {
+		ParseLine(i, []byte(l), &pool)
+	}
+	if pool.TurnErrorCode != proto.TurnErrorUpstreamUnavailable {
+		t.Fatalf("pool exhaustion on turn 1: code=%q", pool.TurnErrorCode)
+	}
+
+	// 6. Tail.Settle rewind drops a rewound second 503 turn back to streak 1 and empty code.
+	var rm Meta
+	var tail Tail
+	end2 := strings.Replace(strings.Replace(turnEndLine, `"uuid":"d"`, `"uuid":"d2"`, 1), `"parentUuid":"x"`, `"parentUuid":"e2"`, 1)
+	for i, l := range []string{prompt("u1", "A"), fail503("e1"), turnEndLine} {
+		tail.Line(&rm, ParseLine(i, []byte(l), &rm))
+	}
+	tail.Rewound([]string{"u2", "e2", "d2"})
+	for i, l := range []string{prompt("u2", "B"), fail503("e2"), end2} {
+		tail.Line(&rm, ParseLine(10+i, []byte(l), &rm))
+	}
+	if !tail.Settle(&rm) {
+		t.Fatal("rewind of second 503 did not settle")
+	}
+	if rm.UpstreamErrorStreak != 1 || rm.TurnErrorCode != "" {
+		t.Fatalf("after rewinding second 503: streak=%d code=%q, want 1 / empty", rm.UpstreamErrorStreak, rm.TurnErrorCode)
+	}
+
+	// 7. Codex rollout: single 503 stays unmarked, second consecutive 503 marks upstream_unavailable, AgentMessage resets.
+	var cx Meta
+	cxStart := func(id string) string {
+		return `{"timestamp":"2026-01-01T12:00:01Z","type":"event_msg","payload":{"type":"task_started","turn_id":"` + id + `"}}`
+	}
+	cxFail := func(id string) string {
+		return `{"timestamp":"2026-01-01T12:00:02Z","type":"event_msg","payload":{"type":"task_complete","turn_id":"` + id + `","error":{"message":"unexpected status 503 Service Unavailable","codex_error_info":"other"}}}`
+	}
+	cxMsg := `{"timestamp":"2026-01-01T12:00:05Z","type":"event_msg","payload":{"type":"item_completed","item":{"type":"AgentMessage","id":"am1","content":[{"type":"text","text":"fixed"}]}}}`
+	cxOK := `{"timestamp":"2026-01-01T12:00:06Z","type":"event_msg","payload":{"type":"task_complete","turn_id":"t3"}}`
+	ParseLine(0, []byte(cxStart("t1")), &cx)
+	ParseLine(1, []byte(cxFail("t1")), &cx)
+	if cx.UpstreamErrorStreak != 1 || cx.TurnErrorCode != "" {
+		t.Fatalf("codex turn 1: streak=%d code=%q", cx.UpstreamErrorStreak, cx.TurnErrorCode)
+	}
+	ParseLine(2, []byte(cxStart("t2")), &cx)
+	ParseLine(3, []byte(cxFail("t2")), &cx)
+	if cx.UpstreamErrorStreak != 2 || cx.TurnErrorCode != proto.TurnErrorUpstreamUnavailable {
+		t.Fatalf("codex turn 2: streak=%d code=%q", cx.UpstreamErrorStreak, cx.TurnErrorCode)
+	}
+	ParseLine(4, []byte(cxStart("t3")), &cx)
+	ParseLine(5, []byte(cxMsg), &cx)
+	ParseLine(6, []byte(cxOK), &cx)
+	if cx.UpstreamErrorStreak != 0 || cx.TurnErrorCode != "" {
+		t.Fatalf("codex recovery: streak=%d code=%q", cx.UpstreamErrorStreak, cx.TurnErrorCode)
+	}
+}

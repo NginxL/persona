@@ -3,6 +3,8 @@ package assistant
 import (
 	"cmp"
 	"context"
+	"encoding/json"
+	"slices"
 	"strings"
 	"time"
 
@@ -33,10 +35,47 @@ const (
 // spawnedConv is a conversation conversation_new opened: by which conversation and when; whether it reported back
 // with conversation_send, and whether its parent was told it did not (or that it failed).
 type spawnedConv struct {
-	Parent   string    `json:"parent"`
-	At       time.Time `json:"at"`
-	Reported bool      `json:"reported,omitempty"`
-	Noticed  bool      `json:"noticed,omitempty"`
+	Parent     string    `json:"parent"`
+	PinMachine string    `json:"pin_machine,omitempty"` // request owner approval once the first turn ends
+	At         time.Time `json:"at"`
+	Reported   bool      `json:"reported,omitempty"`
+	Noticed    bool      `json:"noticed,omitempty"`
+}
+
+// spawnPinAfterTurn consumes the request once. Waiting for the owner must not block turn-end processing.
+func (s *Service) spawnPinAfterTurn(ctx context.Context, machine, sid string) {
+	b := &s.relays
+	b.mu.Lock()
+	if !s.relayLocked(ctx) {
+		b.mu.Unlock()
+		return
+	}
+	c := b.st.Spawned[sid]
+	if c.PinMachine == "" || c.PinMachine != machine {
+		b.mu.Unlock()
+		return
+	}
+	c.PinMachine = ""
+	b.st.Spawned[sid] = c
+	if err := s.saveRelayLocked(); err != nil {
+		c.PinMachine = machine
+		b.st.Spawned[sid] = c
+		b.mu.Unlock()
+		return
+	}
+	b.mu.Unlock()
+
+	go func() {
+		ctx := context.WithoutCancel(ctx)
+		// Build both sides of the approval from the same settings revision. An intervening pin makes the card stale.
+		setting := ownSetting{Setting: Setting{Key: "assistant.leaders"}, set: func(ctx context.Context, _ json.RawMessage) (*ownChange, error) {
+			cfg := s.settings(ctx)
+			return s.leadersChange(ctx, cfg, append(slices.Clone(cfg.Leaders), sid))
+		}}
+		if _, err := s.ownSettingAction(ctx, ToolCall{MachineID: machine, SessionID: c.Parent}, setting, "set", nil); err != nil {
+			s.logf("request pin for conversation %s: %v", short(sid), err)
+		}
+	}()
 }
 
 // spawnReported: conversation from sent a message to to; when from is a conversation to opened, it reported back.

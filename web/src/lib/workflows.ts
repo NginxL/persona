@@ -423,6 +423,8 @@ export interface WaitLine {
   what: string;
   more: number;
   since?: string;
+  /** Since when its commands used no CPU and wrote no output (#13744): a Working line that says it looks stuck. */
+  stalled?: string;
 }
 
 function backgroundCommands(s: Session): NonNullable<Session["background"]> {
@@ -445,7 +447,8 @@ export function backgroundWaitLine(s: Session | undefined): WaitLine | null {
 export function backgroundCommandLine(s: Session | undefined): WaitLine | null {
   if (s?.background_working !== true) return null;
   const tasks = backgroundCommands(s);
-  return commandLine(tasks, tasks[0]?.started_at);
+  const line = commandLine(tasks, tasks[0]?.started_at);
+  return s.background_stalled_since && !s.background_waiting ? { ...line, stalled: s.background_stalled_since } : line;
 }
 
 /** The hub says the agent's turn is over and a workflow it launched keeps it working: the chat draws that turn finished. */

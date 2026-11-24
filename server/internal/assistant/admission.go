@@ -15,15 +15,9 @@ import (
 	"github.com/nwverse/persona/server/internal/proto"
 )
 
-// The execution-agent admission gate. The hub machine once ran 40+ claude processes at load 160 and timed out, so an
-// execution Agent can no longer start on a computer just because a plan named it: before every session.start for an
-// execution Agent the hub checks the target's reported resources and how many Agents the task's direction already has
-// running. The assistant's own conversations (main, leaders, scheduled) start through assistant.send and never pass
-// this gate. Thresholds live in the assistant.admission setting; code defaults mirror the guard script the operators
-// ran by hand. Fail-closed applies to a machine the resource layer DOES retain whose metrics are missing or stale;
-// a computer it does not retain, or a hub without a devices manager, is skipped (nothing to read),
-// and a direction that cannot be resolved skips only the direction line. A fresh sample missing one optional reading
-// (a load average on Windows, a claude process count on an older node) skips just that condition, not the machine.
+// The built-in resource lines for Agent placement. Plan and tool starts enforce
+// them. Other pinned starts record the same readings without claiming a slot.
+// A retained machine needs fresh metrics. An absent optional reading skips its line.
 
 // admissionMessage builds an *i18n.Message; i18n.Err always returns one, so the gate can keep its typed reasons and
 // render them in the request's language without re-looking the key up.
@@ -314,24 +308,32 @@ func (s *Service) machineViolation(ctx context.Context, machineID string, lim ad
 	s.admission.mu.Lock()
 	claims := s.admission.machineClaims[machineID]
 	s.admission.mu.Unlock()
-	return s.machineViolationWith(machineID, lim, claims)
+	return s.machineViolationWith(placementOf(ctx), machineID, lim, claims)
 }
 
 // machineViolationWith applies the lines to facts plus an explicit claim count. The shared facts read happens outside
 // the admission lock; only the claim count is shared state and is passed in by the caller that holds the lock.
-func (s *Service) machineViolationWith(machineID string, lim admissionLimits, claims int) *i18n.Message {
+func (s *Service) machineViolationWith(p *placement, machineID string, lim admissionLimits, claims int) *i18n.Message {
 	facts, managed, why := s.machineFacts(machineID)
 	if !managed {
 		return nil
 	}
 	if why != nil {
+		p.violation(machineID, why)
 		return why
+	}
+	var first *i18n.Message
+	hit := func(msg *i18n.Message) {
+		p.violation(machineID, msg)
+		if first == nil {
+			first = msg
+		}
 	}
 	if facts.available < lim.minMemory {
 		// Memory is the measured available bytes, not a reservation counter: several in-flight starts read the same
 		// sample, so claims deliberately do not decrement it the way they do the process and direction caps.
-		return admissionMessage("assistant-tasks.admission_memory", i18n.Args{
-			"available": humanBytes(facts.available), "limit": humanBytes(lim.minMemory)})
+		hit(admissionMessage("assistant-tasks.admission_memory", i18n.Args{
+			"available": humanBytes(facts.available), "limit": humanBytes(lim.minMemory)}))
 	}
 	// The line bounds agents actually working a turn, not OS processes: a session that finished, parks or stays idle
 	// keeps its claude process alive for hours, and counting those fills the machine while nothing runs. The fleet's
@@ -341,14 +343,14 @@ func (s *Service) machineViolationWith(machineID string, lim admissionLimits, cl
 		facts.claudeProcs = &working
 	}
 	if facts.claudeProcs != nil && *facts.claudeProcs+claims >= lim.maxProcs {
-		return admissionMessage("assistant-tasks.admission_procs", i18n.Args{
-			"count": *facts.claudeProcs + claims, "limit": lim.maxProcs})
+		hit(admissionMessage("assistant-tasks.admission_procs", i18n.Args{
+			"count": *facts.claudeProcs + claims, "limit": lim.maxProcs}))
 	}
 	if facts.load1 != nil && *facts.load1 > float64(facts.cores)*lim.loadPerCore {
-		return admissionMessage("assistant-tasks.admission_load", i18n.Args{
-			"load": fmt.Sprintf("%.1f", *facts.load1), "cores": facts.cores, "multiplier": lim.loadPerCore})
+		hit(admissionMessage("assistant-tasks.admission_load", i18n.Args{
+			"load": fmt.Sprintf("%.1f", *facts.load1), "cores": facts.cores, "multiplier": lim.loadPerCore}))
 	}
-	return nil
+	return first
 }
 
 // recommendMachine names the reachable computer best able to take work now: fresh metrics, every machine line
@@ -365,14 +367,27 @@ func (s *Service) recommendMachine(ctx context.Context, except string, suitable 
 	}
 	var candidates []candidate
 	for _, d := range s.devices(ctx) {
-		if d.ID == except || !d.Reachable {
+		if d.ID == except {
+			continue
+		}
+		p := placementOf(ctx)
+		if p != nil {
+			p.candidate(d.ID)
+		}
+		if !d.Reachable {
+			p.hit(d.ID, "offline", nil)
 			continue
 		}
 		if suitable != nil && !suitable(d) {
 			continue
 		}
 		facts, managed, why := s.machineFacts(d.ID)
-		if !managed || why != nil {
+		if !managed {
+			p.hit(d.ID, "no_resources", nil)
+			continue
+		}
+		if why != nil {
+			p.violation(d.ID, why)
 			continue
 		}
 		if s.machineViolation(ctx, d.ID, s.limitsFor(ctx, d.ID, "", "", cfg)) != nil {
@@ -383,6 +398,10 @@ func (s *Service) recommendMachine(ctx context.Context, except string, suitable 
 		loadRate := 0.0
 		if facts.load1 != nil {
 			loadRate = *facts.load1 / float64(facts.cores)
+		}
+		if p != nil {
+			c := p.candidate(d.ID)
+			c.LoadPerCore, c.FreeBytes = &loadRate, &facts.available
 		}
 		candidates = append(candidates, candidate{d: d, loadRate: loadRate, free: facts.available})
 	}
@@ -404,37 +423,7 @@ func (s *Service) recommendMachine(ctx context.Context, except string, suitable 
 // is idempotent and must run once the agent is linked into its todo or the start has failed for good — not when the
 // session.start RPC returns — so the slot stays counted through the metrics/ledger gap.
 func (s *Service) admitTaskStart(ctx context.Context, t *PlanTask) (func(), error) {
-	if s.devs == nil || !s.admissionEnabled(ctx) {
-		return func() {}, nil
-	}
-	cfg := s.admissionSettings(ctx)
-	direction := s.taskDirection(ctx, t)
-	launcher := s.startLauncher(ctx, t.Launcher)
-	lim := s.limitsFor(ctx, t.Machine, direction, t.Project, cfg).withLauncher(cfg, launcher)
-	// A full launcher group is checked first: no machine frees a slot in it, so the task waits on the group (with no
-	// queue time limit) rather than on a machine line it might also hit, and a flexible task is not moved for nothing.
-	if violation := s.groupViolation(lim); violation != nil {
-		return nil, s.admissionRefused(ctx, t.Machine, direction, violation)
-	}
-	if violation := s.machineViolation(ctx, t.Machine, lim); violation != nil {
-		if t.MachinePolicy != machineFlexible {
-			return nil, s.admissionRefused(ctx, t.Machine, direction, violation)
-		}
-		alt, ok := s.rerouteTarget(ctx, t)
-		if !ok {
-			return nil, s.admissionRefused(ctx, t.Machine, direction, violation)
-		}
-		from, _ := s.machineByName(ctx, t.Machine)
-		s.reroutePlanTask(ctx, t, from, alt, violation.Text(s.lang(ctx)))
-		lim = s.limitsFor(ctx, t.Machine, direction, t.Project, cfg).withLauncher(cfg, launcher)
-	}
-	// Atomic decision: evaluate against the current claims and reserve the slot in one critical section, so two
-	// concurrent starts cannot both observe room and both take the last slot.
-	release, violation := s.claimIfAllowed(ctx, t.Machine, direction, lim)
-	if violation != nil {
-		return nil, s.admissionRefused(ctx, t.Machine, direction, violation)
-	}
-	return release, nil
+	return s.placeStart(ctx, t, placementPlan)
 }
 
 // rerouteTarget finds a reachable machine that passes the gate and actually has the task's directory (a leader never
@@ -446,11 +435,13 @@ func (s *Service) rerouteTarget(ctx context.Context, t *PlanTask) (Device, bool)
 	}
 	return s.recommendMachine(ctx, t.Machine, func(alt Device) bool {
 		if t.Role == roleLeader && s.isWorkMachine(alt.ID) {
+			placementOf(ctx).hit(alt.ID, "leader_work_machine", nil)
 			return false
 		}
 		// A reroute must land where the task's launcher can actually run, or fitTaskLauncher later turns a detour into a
 		// hard failure on a machine the plan never named.
 		if !s.launcherOn(ctx, alt.ID, s.startLauncher(ctx, t.Launcher)) {
+			placementOf(ctx).hit(alt.ID, "launcher_missing", nil)
 			return false
 		}
 		return s.taskDirectoryExists(ctx, alt.ID, rehome(t.Cwd, from, alt))
@@ -459,11 +450,16 @@ func (s *Service) rerouteTarget(ctx context.Context, t *PlanTask) (Device, bool)
 
 // reroutePlanTask moves t to alt and records the trail, the same fields healthyPlace writes.
 func (s *Service) reroutePlanTask(ctx context.Context, t *PlanTask, from, alt Device, reason string) {
+	if p := placementOf(ctx); p != nil {
+		p.ReasonKey = "lowest_load"
+	}
 	note := i18n.T(s.lang(ctx), "assistant-tasks.admission_reroute", i18n.Args{
 		"from": firstNonEmpty(from.Name, from.ID), "to": firstNonEmpty(alt.Name, alt.ID), "reason": reason})
 	if t.Reroute == nil {
 		t.Reroute = &PlanReroute{FromMachine: firstNonEmpty(from.Name, from.ID)}
 	}
+	reroute := *t.Reroute
+	t.Reroute = &reroute
 	t.Reroute.ToMachine = firstNonEmpty(alt.Name, alt.ID)
 	t.Reroute.Reason = note
 	t.Machine, t.Cwd = alt.ID, rehome(t.Cwd, from, alt)
@@ -494,6 +490,10 @@ func isAdmissionDenied(err error) bool {
 // only the machine id, the direction id (empty for an agent_start check), the reason's stable i18n key and its numeric
 // args; the user-facing sentence stays in the returned error.
 func (s *Service) admissionRefused(ctx context.Context, machineID, direction string, reason *i18n.Message) error {
+	if p := placementOf(ctx); p != nil && reason != nil {
+		p.ReasonKey = reason.Key
+		p.violation(machineID, reason)
+	}
 	if reason != nil {
 		if direction != "" {
 			s.logf("admission: refused: machine=%s direction=%s reason=%s args=%v", machineID, direction, reason.Key, reason.Args)
@@ -507,9 +507,14 @@ func (s *Service) admissionRefused(ctx context.Context, machineID, direction str
 	}
 	recommend := ""
 	// Another computer frees no slot in a launcher group, so a group refusal names none.
-	if alt, ok := s.recommendMachine(ctx, machineID, nil); ok && (reason == nil || reason.Key != admissionGroupFullKey) {
-		recommend = i18n.T(s.lang(ctx), "assistant-tasks.admission_recommend", i18n.Args{
-			"machine": firstNonEmpty(alt.Name, alt.ID)})
+	if reason == nil || reason.Key != admissionGroupFullKey {
+		if alt, ok := s.recommendMachine(ctx, machineID, nil); ok {
+			if p := placementOf(ctx); p != nil {
+				p.Recommendation = alt.ID
+			}
+			recommend = i18n.T(s.lang(ctx), "assistant-tasks.admission_recommend", i18n.Args{
+				"machine": firstNonEmpty(alt.Name, alt.ID)})
+		}
 	}
 	return &admissionDeniedError{
 		msg: admissionMessage("assistant-tasks.admission_refused", i18n.Args{
@@ -522,34 +527,14 @@ func (s *Service) admissionRefused(ctx context.Context, machineID, direction str
 // phone confirmation card so the user is never asked to approve a start that will be refused. launcher is the one the
 // start runs (startLauncher already applied).
 func (s *Service) checkAgentStart(ctx context.Context, machineID, launcher string) error {
-	if s.devs == nil || !s.admissionEnabled(ctx) {
-		return nil
-	}
-	cfg := s.admissionSettings(ctx)
-	lim := s.limitsFor(ctx, machineID, "", "", cfg).withLauncher(cfg, launcher)
-	if violation := s.groupViolation(lim); violation != nil {
-		return s.admissionRefused(ctx, machineID, "", violation)
-	}
-	if violation := s.machineViolation(ctx, machineID, lim); violation != nil {
-		return s.admissionRefused(ctx, machineID, "", violation)
-	}
-	return nil
+	_, err := s.placeStart(ctx, &PlanTask{Machine: machineID, Launcher: launcher}, placementPreflight)
+	return err
 }
 
 // admitAgentStart re-checks the (possibly rerouted) target and atomically reserves its machine slot. The release runs
-// once the session.start attempt ends: an agent_start tool call is not linked to a todo, so there is no later ledger
-// to carry the count. A full launcher group refuses it at once: a tool call cannot wait in the admission queue.
+// when the tool call ends, after the start attempt. A full launcher group refuses it at once: a tool call cannot wait in the admission queue.
 func (s *Service) admitAgentStart(ctx context.Context, machineID, launcher string) (func(), error) {
-	if s.devs == nil || !s.admissionEnabled(ctx) {
-		return func() {}, nil
-	}
-	cfg := s.admissionSettings(ctx)
-	lim := s.limitsFor(ctx, machineID, "", "", cfg).withLauncher(cfg, launcher)
-	release, violation := s.claimIfAllowed(ctx, machineID, "", lim)
-	if violation != nil {
-		return nil, s.admissionRefused(ctx, machineID, "", violation)
-	}
-	return release, nil
+	return s.placeStart(ctx, &PlanTask{Machine: machineID, Launcher: launcher}, placementReserve)
 }
 
 // claimIfAllowed evaluates every line against the current claims and, only when they all pass, reserves one slot on
@@ -561,20 +546,8 @@ func (s *Service) claimIfAllowed(ctx context.Context, machineID, direction strin
 	release := func() {}
 	s.admission.mu.Lock()
 	defer s.admission.mu.Unlock()
-	if violation := s.groupViolationLocked(lim); violation != nil {
+	if violation := s.placementViolationLocked(placementOf(ctx), machineID, direction, lim); violation != nil {
 		return release, violation
-	}
-	if violation := s.machineViolationWith(machineID, lim, s.admission.machineClaims[machineID]); violation != nil {
-		return release, violation
-	}
-	if direction != "" {
-		// The ledger count is read under admission.mu (directionCountLocked takes the todo read lock, never a write
-		// lock; no caller holds a todo lock when entering the gate), so a concurrent todo change can at most lag by one
-		// update, which the held claim covers for the start in progress.
-		if running := s.directionCountLocked(direction) + s.admission.directionClaims[direction]; running >= lim.directionCap {
-			return release, admissionMessage("assistant-tasks.admission_direction_full", i18n.Args{
-				"running": running, "limit": lim.directionCap})
-		}
 	}
 	if s.admission.machineClaims == nil {
 		s.admission.machineClaims = map[string]int{}
@@ -612,6 +585,27 @@ func (s *Service) claimIfAllowed(ctx context.Context, machineID, direction strin
 			s.admission.groupClaims[group]--
 		}
 	}, nil
+}
+
+// placementViolationLocked runs the same lines for a reservation and a report. The
+// first refusal still determines the queue and the error seen by the caller.
+func (s *Service) placementViolationLocked(p *placement, machine, direction string, lim admissionLimits) *i18n.Message {
+	first := s.groupViolationLocked(lim)
+	p.violation(machine, first)
+	if why := s.machineViolationWith(p, machine, lim, s.admission.machineClaims[machine]); first == nil {
+		first = why
+	}
+	if direction != "" {
+		running := s.directionCountLocked(direction) + s.admission.directionClaims[direction]
+		if running >= lim.directionCap {
+			why := admissionMessage("assistant-tasks.admission_direction_full", i18n.Args{"running": running, "limit": lim.directionCap})
+			p.violation(machine, why)
+			if first == nil {
+				first = why
+			}
+		}
+	}
+	return first
 }
 
 // admissionGroupFullKey is the refusal of a full launcher group. The admission queue waits it out without a time

@@ -16,6 +16,7 @@ import persona.core.navigation.Navigator
 import persona.core.contracts.api.ManagerPins
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import persona.core.inbox.*
 
 /** The shell supplies the chat Markdown renderer and its existing image viewer for external thread pictures. */
 typealias InboxPictureMarkdown = @Composable (String, ReplyImageSource, Modifier) -> Unit
@@ -25,8 +26,10 @@ internal val LocalInboxPictureMarkdown = staticCompositionLocalOf<InboxPictureMa
 internal fun InboxPictureText(text: String, source: ReplyImageSource?) {
     val pictures = LocalInboxPictureMarkdown.current
     if ("![" in text && source != null && pictures != null) pictures(text, source, Modifier)
-    else androidx.compose.material3.Text(text, style = persona.core.designsystem.PersonaTheme.type.body,
-        color = persona.core.designsystem.PersonaTheme.palette.ink)
+    else persona.core.designsystem.ReadingContent {
+        androidx.compose.material3.Text(text, style = persona.core.designsystem.PersonaTheme.type.body,
+            color = persona.core.designsystem.PersonaTheme.palette.ink)
+    }
 }
 
 val LocalInboxRepository = staticCompositionLocalOf<InboxRepository?> { null }

@@ -231,10 +231,11 @@ func TestAvailabilityReplyWaitWithoutQueue(t *testing.T) {
 	ft, ref, list := availConv(t)
 	s := ft.s
 	oldFor := availInputFor
-	availInputFor = time.Millisecond // the message is noted long before the round it waits behind ends
 	t.Cleanup(func() { availInputFor = oldFor })
 	superviseRound(t, ft, list, "earlier")
+	availInputFor = time.Millisecond // only the owner's input is rushed; expiring supervision's input would misattribute its round
 	s.UserSpoke(t.Context(), ref)
+	availInputFor = oldFor
 	at, _ := availWaitTimes(s)
 	availAfter(t, at.Add(5*time.Millisecond))
 	list(proto.StatusWorking, "Checking the PR.")

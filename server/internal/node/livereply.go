@@ -334,14 +334,27 @@ func (n *Node) displayHook(raw json.RawMessage) {
 	mu := n.pushLock(in.SessionID)
 	mu.Lock()
 	defer mu.Unlock()
-	if n.live.take(in, time.Now()) {
+	now := time.Now()
+	if in.Delta != "" {
+		n.ttft.firstToken(in.SessionID, now, in.PromptID)
+	}
+	if n.live.take(in, now) {
 		n.showLive(in.SessionID)
 	}
 }
 
 // liveTurnHook is what UserPromptSubmit and Stop, from Persona's own hooks, mean for the live text.
 func (n *Node) liveTurnHook(in hookInput) {
-	if in.AgentID != "" || !n.live.has(in.SessionID) {
+	if in.AgentID != "" {
+		return
+	}
+	switch in.HookEventName {
+	case "UserPromptSubmit":
+		n.ttft.arm(in.SessionID, time.Now(), in.PromptID)
+	case "Stop":
+		n.ttft.clearPending(in.SessionID)
+	}
+	if !n.live.has(in.SessionID) {
 		return
 	}
 	switch in.HookEventName {

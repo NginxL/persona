@@ -11,6 +11,7 @@ import kotlinx.coroutines.test.setMain
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertSame
 import org.junit.Test
+import persona.core.inbox.*
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class LarkMessagesViewModelTest {

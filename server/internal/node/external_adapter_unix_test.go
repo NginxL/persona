@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -32,7 +33,9 @@ type externalAdapterHelperState struct {
 	Payload   json.RawMessage `json:"payload"`
 	RawOutput string          `json:"raw_output"`
 	BlockAddr string          `json:"block_addr"`
-	Calls     string          `json:"calls"`
+	// Holders: the file a fake adapter adds the pid of each process that is to dial BlockAddr to, one per line.
+	Holders string `json:"holders"`
+	Calls   string `json:"calls"`
 }
 
 type externalAdapterHelperCall struct {
@@ -58,7 +61,9 @@ func TestExternalAdapterHelperProcess(t *testing.T) {
 	}
 	args := os.Args[3:]
 	if args[0] == "hold-child" {
-		externalAdapterHelperHold(state.BlockAddr)
+		// Fd 3 is the parent's: one byte there once in the hold, so the parent leaves only a child that holds.
+		entered := os.NewFile(3, "entered")
+		externalAdapterHelperHold(state.BlockAddr, func() { _, _ = entered.Write([]byte{1}); _ = entered.Close() })
 		os.Exit(0)
 	}
 	input, err := io.ReadAll(os.Stdin)
@@ -83,12 +88,26 @@ func TestExternalAdapterHelperProcess(t *testing.T) {
 	}
 	switch state.Mode {
 	case "hold":
-		externalAdapterHelperHold(state.BlockAddr)
+		externalAdapterHelperHolder(state.Holders, os.Getpid())
+		externalAdapterHelperHold(state.BlockAddr, nil)
 	case "child":
+		// The parent leaves a child that holds: it waits until the child is in the hold, then answers and exits. Left
+		// without that, a child the machine started late was swept with the parent's group before it ever connected
+		// (the registry allows the parent's pipes externalAdapterPipeGrace), and the test waited for a hold that never came.
+		entered, signal, err := os.Pipe()
+		if err != nil {
+			os.Exit(96)
+		}
 		child := exec.Command(os.Args[0], externalAdapterHelperFlag, os.Args[2], "hold-child")
-		child.Stdout, child.Stderr = os.Stdout, os.Stderr
+		child.Stdout, child.Stderr, child.ExtraFiles = os.Stdout, os.Stderr, []*os.File{signal}
 		if child.Start() != nil {
 			os.Exit(96)
+		}
+		externalAdapterHelperHolder(state.Holders, child.Process.Pid) // before this parent leaves
+		_ = signal.Close()
+		var in [1]byte
+		if _, err := entered.Read(in[:]); err != nil {
+			os.Exit(89) // the child left without entering the hold
 		}
 	case "secret-stderr":
 		_, _ = io.WriteString(os.Stderr, strings.Repeat("EXAMPLE_SECRET_NEVER_REPORT ", externalAdapterStderrLimit))
@@ -105,12 +124,27 @@ func TestExternalAdapterHelperProcess(t *testing.T) {
 	os.Exit(0)
 }
 
-func externalAdapterHelperHold(address string) {
+// externalAdapterHelperHolder adds pid, a process that is to dial the hold socket, to path.
+func externalAdapterHelperHolder(path string, pid int) {
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
+	if err != nil {
+		os.Exit(98)
+	}
+	_, _ = fmt.Fprintln(f, pid)
+	_ = f.Close()
+}
+
+// externalAdapterHelperHold connects to the test's hold socket, says ready, calls entered (when not nil) and waits for
+// the test to release it.
+func externalAdapterHelperHold(address string, entered func()) {
 	c, err := net.DialTimeout("unix", address, 2*time.Second)
 	if err != nil {
 		os.Exit(97)
 	}
 	_, _ = io.WriteString(c, "ready\n")
+	if entered != nil {
+		entered()
+	}
 	var release [1]byte
 	_, _ = c.Read(release[:])
 	_ = c.Close()
@@ -128,14 +162,43 @@ type externalAdapterFixture struct {
 func newExternalAdapterFixture(t *testing.T) *externalAdapterFixture {
 	t.Helper()
 	dir := t.TempDir()
+	if err := os.Chmod(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
 	self, err := os.Executable()
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Keep the helper below the same owned root as its configuration. A hard link
+	// avoids copying the test binary; the copy fallback covers separate filesystems.
+	helper := filepath.Join(dir, "adapter-helper")
+	if err := os.Link(self, helper); err != nil {
+		source, openErr := os.Open(self)
+		if openErr != nil {
+			t.Fatal(openErr)
+		}
+		destination, createErr := os.OpenFile(helper, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o700)
+		if createErr != nil {
+			_ = source.Close()
+			t.Fatal(createErr)
+		}
+		_, copyErr := io.Copy(destination, source)
+		closeErr := destination.Close()
+		_ = source.Close()
+		if copyErr != nil || closeErr != nil {
+			t.Fatalf("copy helper: %v %v", copyErr, closeErr)
+		}
+	}
+	if err := os.Chmod(helper, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	previousRoot := externalAdapterTrustRoot
+	externalAdapterTrustRoot = dir
+	t.Cleanup(func() { externalAdapterTrustRoot = previousRoot })
 	f := &externalAdapterFixture{dir: dir, configPath: filepath.Join(dir, "registry.json"),
 		statePath: filepath.Join(dir, "fixture.json"), callsPath: filepath.Join(dir, "calls.jsonl")}
 	f.config = externalAdapterConfig{Version: 1, ID: "local",
-		Command: []string{self, externalAdapterHelperFlag, f.statePath}, NativeProgram: self}
+		Command: []string{helper, externalAdapterHelperFlag, f.statePath}, NativeProgram: helper}
 	f.state = externalAdapterHelperState{Payload: externalAdapterTestJSON(t, externalAdapterTestInventory()), Calls: f.callsPath}
 	f.saveState(t)
 	f.saveConfig(t)
@@ -204,17 +267,39 @@ func (f *externalAdapterFixture) hold(t *testing.T, mode string) *net.UnixListen
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = l.Close() })
-	_ = l.SetDeadline(time.Now().Add(5 * time.Second))
-	f.state.Mode, f.state.BlockAddr = mode, l.Addr().String()
+	f.state.Mode, f.state.BlockAddr, f.state.Holders = mode, l.Addr().String(), filepath.Join(dir, "holders")
 	f.saveState(t)
 	return l
 }
 
-func externalAdapterAccept(t *testing.T, l *net.UnixListener) net.Conn {
+// externalAdapterAccept waits for the fake adapter to enter its hold: until it connects, or, at once, until every
+// process that was to connect has exited without connecting. How long a loaded machine takes to start the test binary
+// again is no part of what these tests check (a full server run once took longer than a fixed 5 s), so there is no
+// fixed limit: the test's own deadline bounds the wait.
+func externalAdapterAccept(t *testing.T, f *externalAdapterFixture, l *net.UnixListener) net.Conn {
 	t.Helper()
-	c, err := l.Accept()
-	if err != nil {
-		t.Fatalf("fake adapter did not enter hold: %v", err)
+	deadline, bounded := t.Deadline()
+	var c net.Conn
+	for c == nil {
+		_ = l.SetDeadline(time.Now().Add(100 * time.Millisecond))
+		conn, err := l.Accept()
+		switch {
+		case err == nil:
+			c = conn
+		case !errors.Is(err, os.ErrDeadlineExceeded):
+			t.Fatalf("fake adapter did not enter hold: %v", err)
+		case bounded && time.Now().After(deadline):
+			t.Fatal("fake adapter did not enter hold before the test's deadline")
+		default:
+			if pids := f.holders(t); len(pids) > 0 && !slices.ContainsFunc(pids, externalAdapterHolderAlive) {
+				_ = l.SetDeadline(time.Now().Add(100 * time.Millisecond)) // one that connected just before it left
+				if conn, err := l.Accept(); err == nil {
+					c = conn
+					break
+				}
+				t.Fatalf("fake adapter exited without entering hold (pids %v)", pids)
+			}
+		}
 	}
 	t.Cleanup(func() { _ = c.Close() })
 	_ = c.SetDeadline(time.Now().Add(5 * time.Second))
@@ -222,6 +307,33 @@ func externalAdapterAccept(t *testing.T, l *net.UnixListener) net.Conn {
 		t.Fatalf("fake hold handshake = %q, %v", line, err)
 	}
 	return c
+}
+
+// holders are the pids the fake adapter recorded as dialing the hold socket, none while it has not started yet.
+func (f *externalAdapterFixture) holders(t *testing.T) []int {
+	t.Helper()
+	data, err := os.ReadFile(f.state.Holders)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	var pids []int
+	for _, field := range strings.Fields(string(data)) {
+		var pid int
+		if _, err := fmt.Sscan(field, &pid); err != nil || pid <= 0 {
+			t.Fatalf("invalid holder pid %q", field)
+		}
+		pids = append(pids, pid)
+	}
+	return pids
+}
+
+// externalAdapterHolderAlive says whether pid still exists (a zombie not yet reaped counts as alive).
+func externalAdapterHolderAlive(pid int) bool {
+	err := syscall.Kill(pid, 0)
+	return err == nil || errors.Is(err, syscall.EPERM)
 }
 
 func externalAdapterWait[T any](t *testing.T, ch <-chan T) T {
@@ -276,6 +388,14 @@ func TestExternalAdapterRejectsInvalidLocalConfig(t *testing.T) {
 		"relative registry": func(t *testing.T, _ *externalAdapterFixture) { t.Setenv(externalAdapterConfigEnv, "registry.json") },
 		"missing registry": func(t *testing.T, f *externalAdapterFixture) {
 			t.Setenv(externalAdapterConfigEnv, filepath.Join(f.dir, "missing.json"))
+		},
+		"registry outside fixture root": func(t *testing.T, f *externalAdapterFixture) {
+			outside := filepath.Join(filepath.Dir(f.dir), "outside-registry.json")
+			if err := os.WriteFile(outside, externalAdapterTestJSON(t, f.config), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			t.Setenv(externalAdapterConfigEnv, outside)
+			t.Cleanup(func() { _ = os.Remove(outside) })
 		},
 		"directory registry": func(t *testing.T, f *externalAdapterFixture) { t.Setenv(externalAdapterConfigEnv, f.dir) },
 		"FIFO registry": func(t *testing.T, f *externalAdapterFixture) {
@@ -412,6 +532,50 @@ func TestExternalAdapterTrustedLinksAndDirectories(t *testing.T) {
 	}
 }
 
+func TestExternalAdapterFixtureRootMayUseHostAliases(t *testing.T) {
+	f := newExternalAdapterFixture(t)
+	alias := filepath.Join(filepath.Dir(f.dir), "fixture-root-alias")
+	if err := os.Symlink(f.dir, alias); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Remove(alias) })
+	externalAdapterTrustRoot = alias
+	// Keep every configured path behind the alias too. On macOS t.TempDir is
+	// commonly under /var, whose canonical path is /private/var.
+	helper := filepath.Join(alias, "adapter-helper")
+	f.config.Command = []string{helper, externalAdapterHelperFlag, filepath.Join(alias, filepath.Base(f.statePath))}
+	f.config.NativeProgram = helper
+	f.saveConfig(t)
+	t.Setenv(externalAdapterConfigEnv, filepath.Join(alias, filepath.Base(f.configPath)))
+	r := f.load(t)
+	if got := r.launchers(context.Background(), true); len(got) != 1 {
+		t.Fatal("a fixture root behind a host alias was not trusted")
+	}
+}
+
+func TestExternalAdapterFixtureRejectsExecutableEscape(t *testing.T) {
+	f := newExternalAdapterFixture(t)
+	self, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(f.dir, "outside-helper")
+	if err := os.Symlink(self, link); err != nil {
+		t.Fatal(err)
+	}
+	f.config.Command[0], f.config.NativeProgram = link, link
+	f.saveConfig(t)
+	r, err := loadExternalAdapterRegistry()
+	if r != nil {
+		r.Close()
+		t.Fatal("an executable link escaped the fixture root")
+	}
+	externalAdapterTestCode(t, err, "adapter_config_conflict")
+	if len(f.calls(t)) != 0 {
+		t.Fatal("an escaped executable ran")
+	}
+}
+
 type externalAdapterFakeFileInfo struct {
 	os.FileInfo
 	stat syscall.Stat_t
@@ -489,7 +653,7 @@ func TestExternalAdapterCacheColdReadAndSingleFlight(t *testing.T) {
 	if got := r.launchers(context.Background(), false); len(got) != 0 {
 		t.Fatal("cold cache unexpectedly has an entry")
 	}
-	c := externalAdapterAccept(t, l)
+	c := externalAdapterAccept(t, f, l)
 	var wg sync.WaitGroup
 	for range 24 {
 		wg.Go(func() {
@@ -582,7 +746,7 @@ func TestExternalAdapterRefreshStaleRecoveryAndNotifications(t *testing.T) {
 	if len(fast) != 1 || !fast[0].External.Stale {
 		t.Fatal("expired cache did not return immediately as stale")
 	}
-	c := externalAdapterAccept(t, l)
+	c := externalAdapterAccept(t, f, l)
 	_, _ = c.Write([]byte{'r'})
 	externalAdapterWait(t, changed)
 	if fresh, _ := r.lookup(name); fresh.Stale {
@@ -824,7 +988,7 @@ func TestExternalAdapterCanceledWaiterDoesNotCancelOtherReaders(t *testing.T) {
 	firstDone, secondDone := make(chan error, 1), make(chan error, 1)
 	name := proto.ExternalLauncherName(f.config.ID, externalAdapterTestInventory().Targets[0].ID)
 	go func() { _, err := r.models(first, name, true); firstDone <- err }()
-	c := externalAdapterAccept(t, l)
+	c := externalAdapterAccept(t, f, l)
 	externalAdapterWait(t, first.entered)
 	go func() { _, err := r.models(second, name, true); secondDone <- err }()
 	externalAdapterWait(t, second.entered)
@@ -894,7 +1058,7 @@ func TestExternalAdapterCancellationAndCloseReapInventory(t *testing.T) {
 			} else {
 				go func() { _, err := r.models(ctx, "missing", true); done <- err }()
 			}
-			c := externalAdapterAccept(t, l)
+			c := externalAdapterAccept(t, f, l)
 			switch operation {
 			case "cancel waiter":
 				cancel()

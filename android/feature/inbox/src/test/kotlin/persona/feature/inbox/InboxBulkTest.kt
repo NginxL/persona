@@ -12,6 +12,7 @@ import persona.core.contracts.api.InboxDoneTarget
 import persona.core.domain.inbox.InboxItem
 import persona.core.domain.inbox.InboxListSettings
 import persona.core.domain.inbox.buildInboxList
+import persona.core.inbox.*
 
 @RunWith(AndroidJUnit4::class)
 @Config(sdk = [35])

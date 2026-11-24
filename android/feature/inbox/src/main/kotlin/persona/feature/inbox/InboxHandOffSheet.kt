@@ -18,6 +18,7 @@ import persona.core.navigation.Navigator
 import persona.core.navigation.RouteSource
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
+import persona.core.inbox.*
 
 /**
  * "Hand to AI" (iOS `InboxHandOffSheet`, the old app's sheet): what to do with the item (three presets or the user's own

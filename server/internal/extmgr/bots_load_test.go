@@ -1,0 +1,464 @@
+package extmgr
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"errors"
+	"net/http"
+	"reflect"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/nwverse/persona/server/internal/assistantwire"
+	"github.com/nwverse/persona/server/internal/channel"
+)
+
+// botLoadStore uses the same found/error and JSON decoding contract as db.Setting.
+// Its read outage is independent of writes, so a missing read guard really overwrites the saved record.
+type botLoadStore struct {
+	*botStore
+	readMu        sync.Mutex
+	unavailable   bool
+	reads, writes int
+}
+
+func (s *botLoadStore) Setting(ctx context.Context, key string, out any) (bool, error) {
+	if key == botSettingsKey {
+		s.readMu.Lock()
+		s.reads++
+		unavailable := s.unavailable
+		s.readMu.Unlock()
+		if unavailable {
+			return false, errors.New("synthetic settings unavailable")
+		}
+	}
+	return s.botStore.Setting(ctx, key, out)
+}
+
+func (s *botLoadStore) PutSetting(ctx context.Context, key string, value any) error {
+	if key == botSettingsKey {
+		s.readMu.Lock()
+		s.writes++
+		s.readMu.Unlock()
+	}
+	return s.botStore.PutSetting(ctx, key, value)
+}
+
+func (s *botLoadStore) recover() {
+	s.readMu.Lock()
+	defer s.readMu.Unlock()
+	s.unavailable = false
+}
+
+func (s *botLoadStore) counts() (int, int) {
+	s.readMu.Lock()
+	defer s.readMu.Unlock()
+	return s.reads, s.writes
+}
+
+func (s *botLoadStore) raw() []byte {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return bytes.Clone(s.vals[botSettingsKey])
+}
+
+type botLoadWorld struct {
+	h      *Manager
+	store  *botLoadStore
+	api    *fakeOpenAPI
+	routes http.Handler
+	token  string
+	now    time.Time
+	ctx    context.Context
+	cancel context.CancelFunc
+}
+
+func newBotLoadWorld(t *testing.T, outage bool, saved bool) *botLoadWorld {
+	t.Helper()
+	st := &botLoadStore{botStore: newBotStore(), unavailable: outage}
+	dir := t.TempDir()
+	// New receives the fake store before the same bot initialization used by Manager.Run.
+	h := New(Options{Dir: dir, Config: &Config{Token: "synthetic-load-token", PublicURL: "http://hub.example", dir: dir}, Store: st})
+	w := &botLoadWorld{h: h, store: st, now: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)}
+	h.bots.now = func() time.Time { return w.now }
+	if saved {
+		api := newFakeOpenAPI(t)
+		w.api = api
+		secret, err := h.sealKey("synthetic-secret")
+		if err != nil {
+			t.Fatal(err)
+		}
+		nudge, delay := 0, 2
+		set := FeishuBotSettings{Enabled: true, AppID: "cli_test", SecretEnc: secret, Domain: api.srv.URL,
+			Owner:      &BotOwner{OpenID: "ou_owner", ChatID: "oc_owner", Name: "Owner", At: w.now.Add(-time.Hour)},
+			Pairing:    &botPairing{Code: "123456", Expires: w.now.Add(time.Minute)},
+			Features:   BotFeatures{Agents: true, ReadGroup: true, Reports: true},
+			TopicChats: []BotChat{{ChatID: "oc_topic", Home: true, RequireOwnerMention: true, At: w.now}},
+			NudgeAfter: &nudge, SourceReportDelayMinutes: &delay, LarkCLIProfile: "saved-profile"}
+		if err := st.botStore.PutSetting(context.Background(), botSettingsKey, set); err != nil {
+			t.Fatal(err)
+		}
+	}
+	w.ctx, w.cancel = context.WithCancel(context.Background())
+	t.Cleanup(w.cancel)
+	h.startBots(w.ctx)
+	close(h.started)
+	w.routes = h.routes()
+	w.token = deviceToken("load-client", roleFull)
+	return w
+}
+
+func (w *botLoadWorld) advance() {
+	w.h.bots.mu.Lock()
+	defer w.h.bots.mu.Unlock()
+	w.now = w.now.Add(botSettingsRetry)
+}
+
+func (w *botLoadWorld) status() (assistantwire.FeishuStatus, error) {
+	out, err := w.h.feishuCall(w.ctx, assistantwire.FeishuStatusGet, nil)
+	if err != nil {
+		return assistantwire.FeishuStatus{}, err
+	}
+	return out.(assistantwire.FeishuStatus), nil
+}
+
+func TestBotInitialReadRecovery(t *testing.T) {
+	needsLarkModule(t)
+	for _, entry := range []string{"status", "settings", "transport"} {
+		t.Run(entry, func(t *testing.T) {
+			w := newBotLoadWorld(t, true, true)
+			before := w.store.raw()
+			if _, err := w.status(); !errors.Is(err, errBotSettingsUnread) {
+				t.Fatalf("unread status must fail: %v", err)
+			}
+			w.store.recover()
+			w.advance()
+			switch entry {
+			case "status":
+				if _, err := w.status(); err != nil {
+					t.Fatal(err)
+				}
+			case "settings":
+				if code, out := call(t, w.routes, "GET", "/api/v1/bots/feishu", w.token, ""); code != 200 || out["owner"] == nil {
+					t.Fatalf("GET: %d %v", code, out)
+				}
+			case "transport":
+				if api, _ := w.h.botAPI(); api == nil {
+					t.Fatal("transport lookup did not start the recovered bot")
+				}
+			}
+			status, err := w.status()
+			if err != nil || !status.Ready || !status.Enabled || status.Owner != "ou_owner" || !status.Features.ReadGroup || !status.Features.Agents || status.Features.Main {
+				t.Fatalf("saved pairing did not recover: %+v err=%v", status, err)
+			}
+			eventually(t, time.Second, "recovered connection endpoint request", func() bool {
+				return w.api.count("POST /callback/ws/endpoint") > 0
+			})
+			_, set := w.h.botAPI()
+			var saved FeishuBotSettings
+			if err := json.Unmarshal(before, &saved); err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(set, saved) {
+				t.Fatal("recovery changed saved settings")
+			}
+			if !botChatAllowed(set, "oc_owner") || !botChatAllowed(set, "oc_topic") || botChatAllowed(set, "oc_other") {
+				t.Fatal("recovery changed chat permissions")
+			}
+			api, _ := w.h.botAPI()
+			w.h.botView(w.ctx)
+			again, _ := w.h.botAPI()
+			if api != again {
+				t.Fatal("an already loaded read restarted the connection")
+			}
+			if reads, writes := w.store.counts(); reads != 2 || writes != 0 {
+				t.Fatalf("reads=%d writes=%d", reads, writes)
+			}
+			if !bytes.Equal(before, w.store.raw()) {
+				t.Fatal("read recovery rewrote stored settings")
+			}
+		})
+	}
+}
+
+func TestBotInitialReadFailureBlocksWrite(t *testing.T) {
+	needsLarkModule(t)
+	w := newBotLoadWorld(t, true, true)
+	before := w.store.raw()
+	for _, r := range []struct{ method, path, body string }{
+		{"GET", "/api/v1/bots/feishu", ""},
+		{"PUT", "/api/v1/bots/feishu", `{"enabled":false,"features":{"agents":true},"nudge_after":30}`},
+		{"POST", "/api/v1/bots/feishu/pair", "{}"},
+		{"DELETE", "/api/v1/bots/feishu/owner", ""},
+	} {
+		code, _ := call(t, w.routes, r.method, r.path, w.token, r.body)
+		if code != http.StatusServiceUnavailable {
+			t.Errorf("%s %s: HTTP %d", r.method, r.path, code)
+		}
+	}
+	if _, err := w.h.feishuCall(w.ctx, assistantwire.FeishuConfigure, json.RawMessage(`{"features":{"agents":true}}`)); !errors.Is(err, errBotSettingsUnread) {
+		t.Errorf("configure: %v", err)
+	}
+	if _, err := w.h.bindFeishu(w.ctx, "", nil); !errors.Is(err, errBotSettingsUnread) {
+		t.Errorf("bind: %v", err)
+	}
+	if _, err := w.h.pollFeishuRegistration(w.ctx, nil); !errors.Is(err, errBotSettingsUnread) {
+		t.Errorf("registration poll: %v", err)
+	}
+	if _, ok := w.h.beginFeishuRegistration(w.ctx, ""); ok {
+		t.Error("started registration while unread")
+	}
+	w.h.putRegistration(&botRegistration{AppID: "cli_other"})
+	if err := w.h.setLarkCLIProfile(w.ctx, "other-profile"); !errors.Is(err, errBotSettingsUnread) {
+		t.Errorf("profile: %v", err)
+	}
+	if err := w.h.setTopicChats(w.ctx, nil, false, nil); !errors.Is(err, errBotSettingsUnread) {
+		t.Errorf("topics: %v", err)
+	}
+	delay := 3
+	if err := w.h.setSourceReportSettings(w.ctx, &delay, nil); !errors.Is(err, errBotSettingsUnread) {
+		t.Errorf("report delay: %v", err)
+	}
+	w.h.setNudgeAfter(w.ctx, 30)
+	if v := w.h.feishuChannel(w.ctx); v.State != channel.StateError || v.Error == "" {
+		t.Errorf("unread channel: %+v", v)
+	}
+	if !bytes.Equal(before, w.store.raw()) {
+		t.Error("unread settings were overwritten")
+	}
+	if reads, writes := w.store.counts(); reads != 1 || writes != 0 {
+		t.Errorf("reads=%d writes=%d", reads, writes)
+	}
+	if rows := w.store.takeAudit(); len(rows) != 0 {
+		t.Errorf("unread writes produced success audits: %v", rows)
+	}
+	w.h.bots.mu.Lock()
+	if !reflect.DeepEqual(w.h.bots.set, FeishuBotSettings{}) {
+		t.Error("failed reads or writes published partial settings")
+	}
+	w.h.bots.mu.Unlock()
+	// A fresh authorized retry after recovery keeps unrelated fields, including explicit zero nudges.
+	w.store.recover()
+	w.advance()
+	if code, _ := call(t, w.routes, "PUT", "/api/v1/bots/feishu", w.token, `{"features":{"agents":false}}`); code != 200 {
+		t.Fatal(code)
+	}
+	var set FeishuBotSettings
+	_, _ = w.store.botStore.Setting(w.ctx, botSettingsKey, &set)
+	if set.Owner == nil || !set.Features.ReadGroup || set.Features.Agents || set.NudgeAfter == nil || *set.NudgeAfter != 0 {
+		t.Fatalf("recovered PUT lost saved settings: %+v", set)
+	}
+}
+
+func TestBotInitialReadDecodeFailureAndRepair(t *testing.T) {
+	needsLarkModule(t)
+	w := newBotLoadWorld(t, true, true)
+	good := w.store.raw()
+	bad := []byte(`{"enabled":true,"app_id":"cli_partial","owner":{"open_id":"ou_wrong"},"features":{"agents":"invalid"}}`)
+	w.store.mu.Lock()
+	w.store.vals[botSettingsKey] = bad
+	w.store.mu.Unlock()
+	w.store.recover()
+	w.advance()
+	if _, err := w.status(); !errors.Is(err, errBotSettingsUnread) {
+		t.Fatalf("decode: %v", err)
+	}
+	// encoding/json can fill several fields before returning a type error. None may become authoritative.
+	w.h.bots.mu.Lock()
+	if w.h.bots.loaded || w.h.bots.set.Enabled || w.h.bots.set.Owner != nil || w.h.bots.api != nil {
+		t.Error("partially decoded settings were published")
+	}
+	w.h.bots.mu.Unlock()
+	for range 3 {
+		for range 100 {
+			_, _ = w.status()
+		}
+		w.advance()
+		_, _ = w.status()
+	}
+	if reads, writes := w.store.counts(); reads != 5 || writes != 0 {
+		t.Fatalf("bad data retry storm: reads=%d writes=%d", reads, writes)
+	}
+	if !bytes.Equal(w.store.raw(), bad) {
+		t.Fatal("bad record was replaced with defaults")
+	}
+	w.store.mu.Lock()
+	w.store.vals[botSettingsKey] = good
+	w.store.mu.Unlock()
+	w.advance()
+	if st, err := w.status(); err != nil || !st.Ready || st.Owner != "ou_owner" {
+		t.Fatalf("repair did not recover: %+v %v", st, err)
+	}
+}
+
+func TestBotInitialReadConcurrentRetry(t *testing.T) {
+	needsLarkModule(t)
+	w := newBotLoadWorld(t, true, true)
+	w.advance()
+	var wg sync.WaitGroup
+	for range 30 {
+		wg.Add(1)
+		go func() { defer wg.Done(); _, _ = w.status() }()
+	}
+	wg.Wait()
+	if reads, _ := w.store.counts(); reads != 2 {
+		t.Fatalf("concurrent callers retried %d reads", reads)
+	}
+	w.store.recover()
+	w.advance()
+	for range 30 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if st, err := w.status(); err != nil && !errors.Is(err, errBotSettingsUnread) || err == nil && !st.Ready {
+				t.Errorf("recovery: %+v %v", st, err)
+			}
+		}()
+	}
+	wg.Wait()
+	if st, err := w.status(); err != nil || !st.Ready {
+		t.Fatalf("completed recovery: %+v %v", st, err)
+	}
+	if reads, writes := w.store.counts(); reads != 3 || writes != 0 {
+		t.Fatalf("reads=%d writes=%d", reads, writes)
+	}
+}
+
+func TestBotInitialReadFreshAndDisabled(t *testing.T) {
+	needsLarkModule(t)
+	for _, saved := range []bool{false, true} {
+		w := newBotLoadWorld(t, false, saved)
+		if saved {
+			if code, _ := call(t, w.routes, "PUT", "/api/v1/bots/feishu", w.token, `{"enabled":false}`); code != 200 {
+				t.Fatal(code)
+			}
+		}
+		for range 5 {
+			w.advance()
+			if _, err := w.status(); err != nil {
+				t.Fatal(err)
+			}
+		}
+		st, err := w.status()
+		if err != nil || st.Ready || st.Enabled {
+			t.Fatalf("off bot started: %+v %v", st, err)
+		}
+		if !saved && st.Features != assistantwire.FeishuFeatures(defaultBotFeatures) {
+			t.Fatal("fresh defaults changed")
+		}
+		if saved && st.Owner != "ou_owner" {
+			t.Fatal("turning off discarded pairing")
+		}
+		if reads, _ := w.store.counts(); reads != 1 {
+			t.Fatalf("successful read repeated: %d", reads)
+		}
+		if saved {
+			if code, _ := call(t, w.routes, "PUT", "/api/v1/bots/feishu", w.token, `{"enabled":true}`); code != 200 {
+				t.Fatal(code)
+			}
+			if st, err := w.status(); err != nil || !st.Ready || st.Owner != "ou_owner" {
+				t.Fatalf("reenable: %+v %v", st, err)
+			}
+		}
+	}
+}
+
+func TestBotInitialReadRecoveryAfterShutdownOrOnMember(t *testing.T) {
+	needsLarkModule(t)
+	for _, member := range []bool{false, true} {
+		w := newBotLoadWorld(t, true, true)
+		if member {
+			w.h.isMemberNow.Store(true)
+		} else {
+			w.cancel()
+		}
+		w.store.recover()
+		w.advance()
+		if st, err := w.status(); err != nil || st.Ready || !st.Enabled || st.Owner != "ou_owner" {
+			t.Fatalf("inactive manager started transport: %+v %v", st, err)
+		}
+	}
+}
+
+func TestBotInitialReadMissingAfterOutage(t *testing.T) {
+	needsLarkModule(t)
+	w := newBotLoadWorld(t, true, false)
+	w.store.recover()
+	w.advance()
+	st, err := w.status()
+	if err != nil || st.Enabled || st.Ready || st.Owner != "" || st.Features != assistantwire.FeishuFeatures(defaultBotFeatures) {
+		t.Fatalf("missing record: %+v %v", st, err)
+	}
+	if code, _ := call(t, w.routes, "PUT", "/api/v1/bots/feishu", w.token, `{"enabled":true}`); code != 200 {
+		t.Fatal(code)
+	}
+	st, err = w.status()
+	if err != nil || !st.Enabled || st.Ready {
+		t.Fatalf("unconfigured bot: %+v %v", st, err)
+	}
+	if v := w.h.botView(w.ctx); v.HasSecret || v.Error == "" {
+		t.Fatalf("unconfigured view: %+v", v)
+	}
+}
+
+func TestBotInitialReadExistingDecodeDefaults(t *testing.T) {
+	needsLarkModule(t)
+	// The existing storage contract accepts both JSON null and an empty object without a decode error.
+	for _, raw := range []string{"null", "{}"} {
+		t.Run(raw, func(t *testing.T) {
+			w := newBotLoadWorld(t, true, false)
+			w.store.mu.Lock()
+			w.store.vals[botSettingsKey] = []byte(raw)
+			w.store.mu.Unlock()
+			w.store.recover()
+			w.advance()
+			st, err := w.status()
+			if err != nil || st.Enabled || st.Ready || st.Features != assistantwire.FeishuFeatures(defaultBotFeatures) {
+				t.Fatalf("decode defaults: %+v %v", st, err)
+			}
+			w.advance()
+			_, _ = w.status()
+			if reads, writes := w.store.counts(); reads != 2 || writes != 0 {
+				t.Fatalf("reads=%d writes=%d", reads, writes)
+			}
+		})
+	}
+	h := New(Options{Dir: t.TempDir(), Config: &Config{}})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	h.startBots(ctx)
+	if api, set := h.botAPI(); api != nil || set.Enabled || set.Features != defaultBotFeatures {
+		t.Fatalf("no store: %+v", set)
+	}
+}
+
+func TestBotInitialReadAuthorizationAndConfigFallback(t *testing.T) {
+	needsLarkModule(t)
+	w := newBotLoadWorld(t, true, false)
+	api := newFakeOpenAPI(t)
+	w.h.cfg.Bots.Feishu = FeishuBotConfig{AppID: "cli_fallback", AppSecret: "synthetic-secret", Domain: api.srv.URL}
+	for _, method := range []string{"GET", "PUT"} {
+		if code, _ := call(t, w.routes, method, "/api/v1/bots/feishu", "", `{"enabled":true}`); code != http.StatusUnauthorized {
+			t.Fatalf("unauthenticated %s: %d", method, code)
+		}
+	}
+	if id, secret, _ := w.h.botAppCredentials(w.ctx); id != "" || secret != "" {
+		t.Fatal("unread settings fell back to another credential identity")
+	}
+	if api, _ := w.h.botAPI(); api != nil {
+		t.Fatal("fallback started while unread")
+	}
+	w.store.recover()
+	w.advance()
+	if code, _ := call(t, w.routes, "PUT", "/api/v1/bots/feishu", w.token, `{"enabled":true}`); code != 200 {
+		t.Fatal(code)
+	}
+	w.h.bots.mu.Lock()
+	connected := w.h.bots.api != nil
+	w.h.bots.mu.Unlock()
+	if !connected {
+		t.Fatal("configured fallback did not start after a successful missing-record read")
+	}
+}

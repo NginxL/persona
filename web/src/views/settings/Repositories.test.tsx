@@ -6,6 +6,8 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 vi.hoisted(() => { window.matchMedia ??= ((query: string) => ({ matches: false, media: query, onchange: null, addEventListener() {}, removeEventListener() {} })) as typeof window.matchMedia; });
 import { initI18n } from "../../i18n";
 import { credentialOwner, handleUnauthorized, setToken } from "../../lib/api";
+import { onDraftEvent, storeDraft, storedPageDraft } from "../../lib/drafts";
+import { chooseManager, resetManagerChoice, shownManager } from "../../lib/manager-choice";
 import { Toasts } from "../../ui/atoms";
 import { Repositories } from "./Repositories";
 
@@ -26,6 +28,9 @@ const acmeIdentity = { provider: acme.id, instance_url: "https://code.acme.test"
 const acmeBinding = { ...acmeIdentity, id: "repo_acme", name: "Acme app", provider_name: "Acme Code", verified_at: "2026-11-12T00:00:00Z" };
 const text = () => document.body.textContent ?? "";
 const dialogText = () => document.querySelector('[role="dialog"]')?.textContent ?? "";
+const connect = "Ask assistant to connect";
+const addSource = "Ask assistant to add a source";
+const assistantDraft = () => storedPageDraft("persona-new");
 const button = (label: string) => [...document.querySelectorAll<HTMLButtonElement>("button")].find((b) =>
   (b.textContent?.trim() === label || (["Edit", "Unbind"].includes(label) && b.textContent?.startsWith(`${label} `))) && !b.closest("[data-closing]"))!;
 const click = async (label: string) => act(async () => { expect(button(label), label).toBeTruthy(); button(label).click(); });
@@ -54,6 +59,8 @@ const writes = () => calls.filter((c) => c.path !== PROVIDERS && (c.init.method 
 
 beforeEach(async () => {
   await initI18n("en"); setToken("synthetic-repository-session"); calls = [];
+  history.replaceState(null, "", "/settings?tab=persona");
+  storeDraft("persona-new", "");
   host = document.createElement("div"); document.body.append(host); root = createRoot(host);
   vi.stubGlobal("fetch", vi.fn((url: RequestInfo | URL, init: RequestInit = {}) => new Promise<Response>((resolve, reject) => {
     init.signal?.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")), { once: true });
@@ -65,7 +72,100 @@ beforeEach(async () => {
 });
 afterEach(async () => {
   act(() => { document.querySelectorAll<HTMLButtonElement>('[aria-live="polite"] button[aria-label]').forEach((b) => b.click()); });
-  act(() => root.unmount()); host.remove(); document.body.innerHTML = ""; handleUnauthorized(() => {}); vi.useRealTimers(); vi.unstubAllGlobals(); setToken(""); await initI18n("zh-Hans");
+  act(() => root.unmount()); host.remove(); document.body.innerHTML = ""; handleUnauthorized(() => {}); vi.useRealTimers(); vi.unstubAllGlobals(); setToken("");
+  resetManagerChoice(); storeDraft("persona-new", ""); await initI18n("zh-Hans");
+});
+
+it("hands an unsupported repository and its form details to a new assistant draft", async () => {
+  await open(); await click("Bind repository");
+  expect(button(connect)).toBeUndefined();
+  const url = "https://code.example.test/Example/Project";
+  await input("Repository URL", url);
+  expect(button(connect).closest('[role="dialog"]')).toBeTruthy();
+  expect(button("Check existence and save").disabled).toBe(true);
+  await input("Name (optional)", "Example project");
+  await input("Aliases (comma-separated, optional)", "example, project");
+  await input("Purpose (optional)", "Review changes");
+  await act(async () => { document.querySelector<HTMLButtonElement>('[role="dialog"] button[aria-expanded]')!.click(); });
+  await act(async () => { document.querySelectorAll<HTMLButtonElement>('[role="radio"]')[1].click(); });
+
+  storeDraft("persona-new", "Previous draft");
+  await click(connect);
+  expect(document.querySelector('[role="dialog"][aria-modal="true"]')).toBeNull();
+  expect(location.pathname + location.search).toBe("/persona/new");
+  const draft = assistantDraft();
+  expect(draft).toContain("local repository_providers extension");
+  expect(draft).toContain("docs/extensions/repository-providers.md");
+  expect(draft).toContain("future repositories on the same host");
+  for (const line of [
+    "Repository URL: " + url, "Host: code.example.test", "Name: Example project",
+    "Aliases: example, project", "Purpose: Review changes", "Task follow-up: shared_branch",
+  ]) expect(draft.split("\n")).toContain(line);
+  expect(draft).not.toContain("Previous draft");
+  expect(writes()).toHaveLength(0);
+});
+
+it("strips userinfo and signed URL parameters before storing the assistant draft", async () => {
+  await open(); await click("Bind repository");
+  await input("Repository URL", "https://sample-login:sample-secret@" + "github.com/example/project?signature=sample-signature#sample-fragment");
+  await click(connect);
+  expect(assistantDraft()).toContain("Repository URL: https://github.com/example/project");
+  expect(assistantDraft()).not.toMatch(/sample-(login|secret|signature|fragment)/);
+  expect(location.pathname).toBe("/persona/new");
+  expect(writes()).toHaveLength(0);
+});
+
+it.each(["unsafe_target", "authentication", "unavailable", "inconclusive", "network"])("offers the handoff after a %s check failure", async (code) => {
+  await open(); await click("Bind repository");
+  await input("Repository URL", identity.canonical_url);
+  expect(button(connect)).toBeUndefined();
+  await click("Check existence and save");
+  expect(button(connect)).toBeUndefined();
+  await answer(pending(LIST, "POST"), { code: `repository_${code}`, error: "The repository check failed." }, 422);
+  expect(button(connect).parentElement?.querySelector('[role="alert"]')?.textContent).toBe("The repository check failed.");
+  await input("Repository URL", "https://gitlab.com/example/other");
+  expect(button(connect)).toBeUndefined();
+});
+
+it("opens a generic onboarding draft from the expanded panel without extension sources", async () => {
+  await render();
+  expect(button(addSource)).toBeUndefined();
+  await click("Manage repositories");
+  await answer(pending(LIST), { manager: "assistant", repositories: [] });
+  await click(addSource);
+  expect(location.pathname).toBe("/persona/new");
+  expect(assistantDraft()).toContain("local repository_providers extension");
+  expect(assistantDraft()).toContain("bind repositories");
+  expect(assistantDraft()).not.toContain("Repository URL:");
+  expect(writes()).toHaveLength(0);
+});
+
+it("opens a new draft for the selected manager from the Sources list", async () => {
+  chooseManager("work");
+  await render("work"); await click("Manage repositories");
+  await answer(pending(LIST), { manager: "work", repositories: [] });
+  await answer(pending(PROVIDERS), { manager: "work", providers: [...builtins, acme] });
+  expect(button(addSource).closest("[data-repository-sources]")).toBeTruthy();
+  await click(addSource);
+  expect(location.pathname + location.search).toBe("/persona/new");
+  expect(shownManager()).toBe("work");
+  expect(assistantDraft()).toContain("local repository_providers extension");
+  expect(assistantDraft()).not.toContain("code.acme.test");
+});
+
+it("replaces the open new-chat composer's draft without adding a history entry", async () => {
+  history.replaceState(null, "", "/persona/new");
+  const entries = history.length;
+  const listener = vi.fn();
+  const off = onDraftEvent("persona-new", listener);
+  try {
+    await open(); await click(addSource);
+    expect(location.pathname).toBe("/persona/new");
+    expect(history.length).toBe(entries);
+    expect(listener).toHaveBeenCalledExactlyOnceWith({
+      type: "replace", text: expect.stringContaining("local repository_providers extension"),
+    });
+  } finally { off(); }
 });
 
 it("loads only on demand and previews locally before existence-check/save", async () => {
@@ -234,6 +334,7 @@ it("asks an extension's source to read its address, detected by host, and saves 
   await input("Repository URL", "git@" + "code.acme.test:acme-code/acme.git");
   // The reading shows at once; nothing is sent until typing pauses, and Save waits for the identity.
   expect(dialogText()).toContain("Reading the address with Acme Code…");
+  expect(button(connect)).toBeUndefined();
   expect(calls.some((c) => c.path === PREVIEW)).toBe(false);
   expect(button("Check existence and save").disabled).toBe(true);
   await input("Repository URL", "https://code.acme.test/acme-code/acme/reviews/3");
@@ -248,6 +349,7 @@ it("asks an extension's source to read its address, detected by host, and saves 
   expect(preview.textContent).toContain("Acme Code · https://code.acme.test");
   expect(preview.textContent).toContain(acmeIdentity.canonical_url);
   expect(preview.textContent).toContain("Read by Acme Code; existence not yet checked");
+  expect(button(connect)).toBeUndefined();
   expect(preview.textContent).not.toContain("ext:");
   expect(dialogText()).toContain("Acme Code checks that the repository exists, with its own sign-in.");
   await click("Check existence and save");
@@ -270,10 +372,12 @@ it("shows the source's refusal and retires a read for an address that changed", 
     await act(async () => { await vi.advanceTimersByTimeAsync(400); });
     await answer(pending(PREVIEW, "POST"), { code: "repository_provider_not_found", error: "Acme Code can't find this repository." }, 422);
     expect(dialogText()).toContain("Acme Code can't find this repository.");
+    expect(button(connect)).toBeTruthy();
     expect(button("Check existence and save").disabled).toBe(true);
     // An address on another host is never sent to the source picked.
     await input("Repository URL", "https://code.elsewhere.test/acme-code/app");
     expect(dialogText()).toContain("Use an address on code.acme.test for Acme Code, without credentials.");
+    expect(button(connect)).toBeTruthy();
     await act(async () => { await vi.advanceTimersByTimeAsync(1_000); });
     expect(calls.filter((c) => c.path === PREVIEW)).toHaveLength(2);
   } finally { vi.useRealTimers(); }
@@ -292,6 +396,7 @@ it("edits a saved extension repository's details with no preview, even with its 
   expect(select.selectedOptions[0].disabled).toBe(false);
   expect(select.selectedOptions[0].textContent).toBe("Acme Code (unavailable)");
   expect(document.querySelector("[data-repository-preview]")!.textContent).toContain("Only a changed repository identity is checked again.");
+  expect(button(connect)).toBeTruthy();
   await input("Name (optional)", "Renamed");
   await click("Save changes");
   expect(text()).toContain("Saving repository details");
@@ -314,6 +419,7 @@ it("keeps a repository whose source was uninstalled readable by its saved name, 
   expect(document.querySelector<HTMLSelectElement>('[role="dialog"] select')!.selectedOptions[0].textContent).toBe("Acme Code (unavailable)");
   await input("Repository URL", "https://code.acme.test/acme-code/other");
   expect(dialogText()).toContain("Acme Code is unavailable, so it can't read this address now.");
+  expect(button(connect)).toBeTruthy();
   expect(button("Save changes").disabled).toBe(true);
   expect(calls.some((c) => c.path === PREVIEW)).toBe(false);
 });
@@ -338,6 +444,7 @@ it("claims no state for an extension row while its sources could not be read, an
   expect(JSON.parse(preview.init.body as string)).toEqual({ url: "https://code.acme.test/acme-code/other", provider: acme.id });
   await answer(preview, { code: "repository_provider_off", error: "Acme Code is switched off." }, 409);
   expect(dialogText()).toContain("Acme Code is switched off.");
+  expect(button(connect)).toBeTruthy();
   expect(button("Save changes").disabled).toBe(true);
 });
 
@@ -382,6 +489,7 @@ it("asks a source again after it failed: Try again, or the address typed back", 
     expect(dialogText()).toContain("Extensions are still starting. Try again in a moment.");
     await click("Try again");
     expect(dialogText()).toContain("Reading the address with Acme Code…");
+    expect(button(connect)).toBeUndefined();
     await act(async () => { await vi.advanceTimersByTimeAsync(400); });
     await answer(pending(PREVIEW, "POST"), { code: "repository_provider_failed", error: "Acme Code failed: timed out." }, 422);
     expect(dialogText()).toContain("Acme Code failed: timed out.");
@@ -396,4 +504,49 @@ it("asks a source again after it failed: Try again, or the address typed back", 
   await answer(pending(PREVIEW, "POST"), { manager: "assistant", identity: acmeIdentity, provider_name: "Acme Code" });
   expect(document.querySelector("[data-repository-preview]")!.textContent).toContain(acmeIdentity.canonical_url);
   expect(button("Check existence and save").disabled).toBe(false);
+});
+
+it("folds the optional task follow-up preference by default, saves shared_branch, and reverts cleanly", async () => {
+  await open([binding]);
+  // Default (unset) row shows no workflow line.
+  expect(document.querySelector('[data-repository="repo_sample"] [data-repository-workflow]')).toBeNull();
+  await click("Edit");
+  const toggle = () => [...document.querySelectorAll<HTMLButtonElement>('[role="dialog"] button[aria-expanded]')].find((b) =>
+    b.textContent?.includes("Task follow-up (optional)"))!;
+  expect(toggle()).toBeTruthy();
+  expect(toggle().getAttribute("aria-expanded")).toBe("false");
+  // Folded by default: radio choices are not rendered yet.
+  expect(document.querySelector('[role="dialog"] [role="radiogroup"]')).toBeNull();
+  await act(async () => { toggle().click(); });
+  expect(toggle().getAttribute("aria-expanded")).toBe("true");
+  const radios = [...document.querySelectorAll<HTMLButtonElement>('[role="dialog"] [role="radio"]')];
+  expect(radios).toHaveLength(2);
+  expect(radios[0].getAttribute("aria-checked")).toBe("true");
+  expect(radios[1].getAttribute("aria-checked")).toBe("false");
+  // Plain language only: no engineering jargon.
+  const copy = dialogText().toLowerCase();
+  expect(copy).not.toContain("worktree");
+  expect(copy).not.toContain("continues");
+  expect(copy).not.toContain("part_of");
+  // Pick shared feature branch and save.
+  await act(async () => { radios[1].click(); });
+  expect(radios[1].getAttribute("aria-checked")).toBe("true");
+  await click("Save changes");
+  const save = pending(`${LIST}/repo_sample`, "PUT");
+  expect(JSON.parse(save.init.body as string)).toMatchObject({ url: identity.canonical_url, task_workflow: "shared_branch" });
+  await answer(save, { manager: "assistant", repository: { ...binding, task_workflow: "shared_branch" } });
+  expect(document.querySelector('[data-repository="repo_sample"] [data-repository-workflow]')!.textContent).toBe("Task follow-up: Shared feature branch");
+  // Re-opening starts folded again, showing the current non-default choice on the header badge, and can revert to default.
+  await click("Edit");
+  expect(toggle().getAttribute("aria-expanded")).toBe("false");
+  expect(toggle().textContent).toContain("Shared feature branch");
+  await act(async () => { toggle().click(); });
+  const editRadios = [...document.querySelectorAll<HTMLButtonElement>('[role="dialog"] [role="radio"]')];
+  expect(editRadios[1].getAttribute("aria-checked")).toBe("true");
+  await act(async () => { editRadios[0].click(); });
+  await click("Save changes");
+  const revert = pending(`${LIST}/repo_sample`, "PUT");
+  expect(JSON.parse(revert.init.body as string)).not.toHaveProperty("task_workflow");
+  await answer(revert, { manager: "assistant", repository: binding });
+  expect(document.querySelector('[data-repository="repo_sample"] [data-repository-workflow]')).toBeNull();
 });

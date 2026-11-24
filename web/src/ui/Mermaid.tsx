@@ -7,9 +7,15 @@ import { copyText, cx } from "./atoms";
 import { t } from "../i18n";
 import { Icon } from "./icons";
 import { useDark } from "./use-dark";
-import { MermaidViewer } from "./MermaidViewer";
+import { lazyOverlay } from "../views/LazyOverlay";
 
 const SETTLE_MS = 350;
+
+// The zoomed view only opens on a click: its pan and pinch code loads then, from a chunk of its own, not with every
+// first screen that can draw a reply (LazyOverlay.tsx).
+export const MermaidViewer = lazyOverlay(() => import("./MermaidViewer").then((m) => m.MermaidViewer));
+// Reaching "Enlarge" (the pointer, the focus) starts the chunk, so the click opens it at once.
+const preloadViewer = () => void MermaidViewer.preload().catch(() => {});
 
 export function MermaidBlock({ code }: { code: string }) {
   const dark = useDark();
@@ -73,7 +79,7 @@ export function MermaidBlock({ code }: { code: string }) {
           </button>
         )}
         {svg && !showSource && (
-          <button type="button" aria-label={t("ui-mermaid.zoom")} title={t("ui-mermaid.zoom")} onClick={() => setBig(true)} className={tool}>
+          <button type="button" aria-label={t("ui-mermaid.zoom")} title={t("ui-mermaid.zoom")} onClick={() => setBig(true)} onPointerEnter={preloadViewer} onFocus={preloadViewer} className={tool}>
             <Icon name="external" size={13} />
           </button>
         )}

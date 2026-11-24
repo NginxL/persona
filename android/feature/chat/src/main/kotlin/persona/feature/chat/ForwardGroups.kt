@@ -130,8 +130,10 @@ internal fun ForwardBubbleGroup(group: List<MessageContext>, id: String) {
                 Text(if (time == null) author else stringResource(R.string.chat_forward_meta, author, time),
                     style = PersonaTheme.type.caption, color = palette.ink2)
                 val bodyModifier = if (expanded) Modifier.heightIn(max = ChatContextBodyMaxHeight).verticalScroll(rememberScrollState()) else Modifier
-                Text(if (expanded) message.body.ifBlank { summary } else summary, bodyModifier, style = PersonaTheme.type.callout,
-                    color = palette.ink, maxLines = if (expanded) Int.MAX_VALUE else 2, overflow = TextOverflow.Ellipsis)
+                if (expanded) ReadingContent {
+                    Text(message.body.ifBlank { summary }, bodyModifier, style = PersonaTheme.type.callout, color = palette.ink)
+                } else Text(summary, bodyModifier, style = PersonaTheme.type.callout, color = palette.ink, maxLines = 2,
+                    overflow = TextOverflow.Ellipsis)
             }
         }
         if (!all && group.size > PREVIEW_LINES) JTextButton(stringResource(R.string.chat_forward_group_more, group.size - PREVIEW_LINES), { all = true })

@@ -88,7 +88,7 @@ internal fun HtmlFile(file: SessionFileContent, policy: HtmlPreview.Policy, modi
     val html = file.text.orEmpty()
     val document = remember(html, policy) { HtmlPreview.document(html, policy) }
     val links = LocalUriHandler.current
-    val open by rememberUpdatedState<(String) -> Unit>({ runCatching { links.openUri(it) } })
+    val open by rememberUpdatedState<(String) -> Unit>({ val _ = runCatching { links.openUri(it) } })
     val background = PersonaTheme.palette.background.toArgb()
     Column(modifier) {
         Notice(HtmlPreview.notice(LocalResources.current, policy, remember(html) { HtmlPreview.relativeRefs(html) }))

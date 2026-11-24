@@ -69,12 +69,12 @@ func (u *updater) begin(ctx context.Context, now bool) error {
 	// Reserve the selected object before returning, so a settings write or second
 	// trigger cannot change the candidate between acceptance and goroutine start.
 	u.running = true
+	u.opGen++
 	if r.Development != nil {
-		u.state = "building"
+		u.setLocked("building", "", "")
 	} else {
-		u.state = "downloading"
+		u.setLocked("downloading", "", "")
 	}
-	u.progress, u.errText = "", ""
 	u.now = now
 	u.mu.Unlock()
 	go u.installCandidate(ctx, false, r)
@@ -89,6 +89,7 @@ func (u *updater) install(ctx context.Context, auto bool) {
 		return
 	}
 	u.running = true
+	u.opGen++
 	r := u.release
 	u.mu.Unlock()
 	u.installCandidate(ctx, auto, r)
@@ -115,18 +116,19 @@ func (u *updater) installCandidate(ctx context.Context, auto bool, candidate *up
 		if !recoveryRetained {
 			u.removeDownloads(staged)
 		}
+		why := i18n.Localize(err, u.h.userLang())
+		if recoveryRetained {
+			why += "; " + su(u.h.userLang(), "err_development_recovery")
+		}
 		u.mu.Lock()
 		u.running, u.now = false, false
 		u.busy = nil
 		if r.Development != nil && r.Development.BackupID != "" {
 			u.release = nil // A failed restore is not the latest main candidate.
 		}
+		u.setLocked("failed", "", why)
 		u.mu.Unlock()
-		why := i18n.Localize(err, u.h.userLang())
-		if recoveryRetained {
-			why += "; " + su(u.h.userLang(), "err_development_recovery")
-		}
-		u.set("failed", "", why)
+		u.h.broadcast(map[string]any{"type": "hub_update", "update": u.view()})
 		u.record(ctx, updateRecord{FromVersion: u.h.version, ToVersion: r.Manifest.Version, ToBuild: r.Manifest.Build,
 			Started: started, Ended: time.Now(), Result: "failed", Reason: why, Auto: auto, Source: pendingSource(update.Pending{Development: r.Development}), Commit: r.Manifest.Commit, Backup: backup})
 		u.h.logf("update to %s: %v", r.Manifest.Version, err)
@@ -198,6 +200,10 @@ func (u *updater) installCandidate(ctx context.Context, auto bool, candidate *up
 		// Every program and Node package has an independent verified copy in
 		// staged. Only the disposable checkout/build output is removed here;
 		// staged survives idle waiting and exec until confirmation/rollback.
+		if err := u.stageDevelopmentPackages(r, staged); err != nil {
+			fail(err)
+			return
+		}
 		u.removeDevelopmentBuild(r)
 		u.mu.Lock()
 		r.Source = ""

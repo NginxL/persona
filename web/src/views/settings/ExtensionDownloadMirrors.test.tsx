@@ -4,7 +4,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { t } from "../../i18n";
 import { resetManagerChoice, setRosterDefault } from "../../lib/manager-choice";
-import { TAB_INFO, openedFromList, type Tab } from "./nav";
+import { tabInfo, openedFromList, type Tab } from "./nav";
 
 type Pending = { path: string; method: string; json?: unknown; resolve: (value: unknown) => void; reject: (error: unknown) => void };
 const pending: Pending[] = [];
@@ -174,7 +174,7 @@ describe("independent extension download mirror settings", () => {
     await changeManager();
     await answer(mirrors()[1], empty);
     const pick = (tab: Tab) => act(async () => {
-      [...host.querySelectorAll<HTMLButtonElement>("nav button")].find((b) => b.textContent?.trim() === TAB_INFO[tab].label)!.click();
+      [...host.querySelectorAll<HTMLButtonElement>("nav button")].find((b) => b.textContent?.trim() === tabInfo(tab).label)!.click();
     });
     await pick("devices");
     await pick("hub");
@@ -203,7 +203,7 @@ describe("independent extension download mirror settings", () => {
       await pop;
     });
     const pick = (tab: Tab) => act(async () => {
-      [...host.querySelectorAll<HTMLButtonElement>("nav button")].find((b) => b.textContent?.startsWith(TAB_INFO[tab].label))!.click();
+      [...host.querySelectorAll<HTMLButtonElement>("nav button")].find((b) => b.textContent?.startsWith(tabInfo(tab).label))!.click();
     });
     await back();
     await pick("devices");
@@ -218,7 +218,7 @@ describe("independent extension download mirror settings", () => {
   it("does not add an owner to unselected Settings screens", async () => {
     history.replaceState(null, "", "/settings?tab=devices");
     await act(async () => root.render(<Settings onToggleSidebar={() => {}} />));
-    const hub = [...host.querySelectorAll<HTMLButtonElement>("nav button")].find((b) => b.textContent?.trim() === TAB_INFO.hub.label)!;
+    const hub = [...host.querySelectorAll<HTMLButtonElement>("nav button")].find((b) => b.textContent?.trim() === tabInfo("hub").label)!;
     await act(async () => hub.click());
     expect(location.search).toBe("?tab=hub");
     await answer(mirrors()[0], empty);

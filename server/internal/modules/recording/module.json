@@ -1,0 +1,8 @@
+{
+  "$schema": "../../../../schema/module.schema.json",
+  "id": "recording",
+  "api": 1,
+  "origin": "builtin",
+  "title": "Meeting recording",
+  "feature": "module.recording"
+}

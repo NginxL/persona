@@ -30,6 +30,7 @@ import kotlinx.coroutines.delay
 import persona.core.designsystem.*
 import persona.core.designsystem.Tokens
 import persona.core.designsystem.icons.PhIcons
+import persona.core.inbox.*
 
 /** Merge-forward card shown in message flow. */
 @Composable
@@ -133,15 +134,17 @@ fun LarkForwardedSheet(
                                 )
                             }
                         }
-                        if (msg.parts.isNotEmpty()) {
-                            msg.parts.forEach { p ->
-                                when (p) {
-                                    is LarkPart.Text -> Text(p.text, style = PersonaTheme.type.body, color = palette.ink)
-                                    else -> Text(msg.text, style = PersonaTheme.type.body, color = palette.ink)
+                        ReadingContent {
+                            if (msg.parts.isNotEmpty()) {
+                                msg.parts.forEach { p ->
+                                    when (p) {
+                                        is LarkPart.Text -> Text(p.text, style = PersonaTheme.type.body, color = palette.ink)
+                                        else -> Text(msg.text, style = PersonaTheme.type.body, color = palette.ink)
+                                    }
                                 }
+                            } else {
+                                Text(msg.text, style = PersonaTheme.type.body, color = palette.ink)
                             }
-                        } else {
-                            Text(msg.text, style = PersonaTheme.type.body, color = palette.ink)
                         }
                     }
                 }
@@ -307,10 +310,12 @@ fun LarkVideoPlayerDialog(
     onDismiss: () -> Unit,
 ) {
     val palette = PersonaTheme.palette
+    val densities = currentTextDensities()
     Dialog(
         onDismissRequest = onDismiss,
         properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)
     ) {
+        RetainedTextDensity(densities) {
         Box(Modifier.fillMaxSize().background(palette.mediaBackdrop)) {
             AndroidView(
                 factory = { ctx ->
@@ -333,6 +338,7 @@ fun LarkVideoPlayerDialog(
             ) {
                 JButton(stringResource(R.string.inbox_close), onClick = onDismiss, kind = JButtonKind.Secondary, size = JButtonSize.Small)
             }
+        }
         }
     }
 }

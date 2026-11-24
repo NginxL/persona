@@ -8,5 +8,6 @@
   "remove": "削除",
   "workspace": "ワークスペース",
   "repository": "リポジトリ",
-  "skill": "スキル"
+  "skill": "スキル",
+  "file": "ファイル"
 }

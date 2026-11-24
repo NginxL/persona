@@ -912,9 +912,6 @@ struct NewWorktreeSheet: View {
                 }
                 .disabled(busy)
                 .themedPage()
-                #if os(macOS)
-                .formStyle(.grouped)
-                #endif
                 .navigationTitle(workspace == nil ? String(localized: "New Worktree") : String(localized: "workspace.newChildTitle", defaultValue: "New Worktree"))
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar {
@@ -939,9 +936,6 @@ struct NewWorktreeSheet: View {
             .task(id: workspaceID) { await prepare() }
             .presentationDetents(workspace == nil ? [.medium, .large] : [.large])
             .interactiveDismissDisabled(busy)
-            #if os(macOS)
-            .macSheet()
-            #endif
         }
     }
 
@@ -1062,11 +1056,7 @@ struct WorktreeInput: View {
 
     var body: some View {
         Group {
-            #if os(macOS)
-            TextField(title, text: $text).textFieldStyle(.roundedBorder).controlSize(.large)
-            #else
             TextField(title, text: $text, axis: multiline ? .vertical : .horizontal).textInputAutocapitalization(.never)
-            #endif
         }
             .font(Theme.Font.code).autocorrectionDisabled()
             .labelsHidden()

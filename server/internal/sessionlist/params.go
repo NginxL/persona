@@ -15,7 +15,7 @@ import (
 // machine_id filtering. Presence matters: malformed new parameters must be
 // parsed and rejected rather than silently falling back to the legacy API.
 func Enabled(v url.Values) bool {
-	for _, key := range []string{"search", "limit", "cursor", "since", "summary", "state", "project", "group", "counts", "pane_source", "roots", "parent_session_id", "place", "space", "catalog", "todo", "waiting", "exclude_pane_source", "include_hidden", "agents_only", "just_finished"} {
+	for _, key := range []string{"search", "limit", "cursor", "since", "summary", "state", "project", "group", "counts", "pane_source", "roots", "cross_machine_hierarchy", "parent_session_id", "parent_machine_id", "place", "space", "catalog", "todo", "waiting", "exclude_pane_source", "include_hidden", "agents_only", "just_finished"} {
 		if _, exists := v[key]; exists {
 			return true
 		}
@@ -52,7 +52,7 @@ func parse(v url.Values, providerSet bool) (Options, error) {
 			}
 		}
 	}
-	for _, key := range []string{"search", "limit", "cursor", "since", "summary", "state", "machine_id", "project", "group", "source", "provider", "q", "counts", "with_counts", "pane_source", "roots", "parent_session_id", "catalog", "todo", "waiting", "exclude_pane_source", "include_hidden", "agents_only", "just_finished"} {
+	for _, key := range []string{"search", "limit", "cursor", "since", "summary", "state", "machine_id", "project", "group", "source", "provider", "q", "counts", "with_counts", "pane_source", "roots", "cross_machine_hierarchy", "parent_session_id", "parent_machine_id", "catalog", "todo", "waiting", "exclude_pane_source", "include_hidden", "agents_only", "just_finished"} {
 		if values, exists := v[key]; exists && len(values) != 1 && (key != "provider" || !providerSet) {
 			return Options{}, failure("invalid_query", key+" must have exactly one value")
 		}
@@ -92,6 +92,13 @@ func parse(v url.Values, providerSet bool) (Options, error) {
 		}
 		o.Roots = b
 	}
+	if values, exists := v["cross_machine_hierarchy"]; exists {
+		b, err := boolean(values[0])
+		if err != nil {
+			return Options{}, err
+		}
+		o.CrossMachineHierarchy = b
+	}
 	if values, exists := v["agents_only"]; exists {
 		b, err := boolean(values[0])
 		if err != nil {
@@ -104,6 +111,12 @@ func parse(v url.Values, providerSet bool) (Options, error) {
 			return Options{}, failure("invalid_query", "parent_session_id must not be empty")
 		}
 		o.Under = values[0]
+	}
+	if values, exists := v["parent_machine_id"]; exists {
+		if values[0] == "" {
+			return Options{}, failure("invalid_query", "parent_machine_id must not be empty")
+		}
+		o.UnderMachine = values[0]
 	}
 	o.Cursor, o.Since = v.Get("cursor"), v.Get("since")
 	if _, exists := v["cursor"]; exists && o.Cursor == "" {
@@ -238,8 +251,11 @@ func validate(o Options) (Options, error) {
 	if o.Limit < 1 || o.Limit > maxLimit {
 		return Options{}, failure("invalid_query", "limit must be between 1 and 200")
 	}
-	if o.Under != "" && o.Machine == "" {
-		return Options{}, failure("invalid_query", "parent_session_id requires machine_id")
+	if o.UnderMachine != "" && o.Under == "" {
+		return Options{}, failure("invalid_query", "parent_machine_id requires parent_session_id")
+	}
+	if o.Under != "" && o.UnderMachine == "" && o.Machine == "" {
+		return Options{}, failure("invalid_query", "parent_session_id requires parent_machine_id or machine_id")
 	}
 	if o.Under != "" && o.Roots {
 		// The rows folded under a session are never roots: together they would always select nothing.
@@ -305,8 +321,15 @@ func validate(o Options) (Options, error) {
 func normalizeQ(s string) string { return strings.ToLower(s) }
 
 func (o Options) filters() filters {
-	return filters{ID: o.ID, State: o.State, Machine: o.Machine, Project: o.Project, Group: o.Group, Source: o.Source, Provider: o.Provider, Providers: providersKey(o.Providers), Q: o.Q, PaneSource: o.PaneSource, Manager: o.Manager,
-		Roots: o.Roots, IncludeHidden: o.IncludeHidden, Under: o.Under, NoPrivate: o.NoPrivate, AgentsOnly: o.AgentsOnly, Places: placesKey(o.Places), Spaces: placesKey(o.Spaces), Todo: o.Todo, Waiting: o.Waiting, ExcludePaneSource: o.ExcludePaneSource, JustFinished: o.JustFinished}
+	machine, underMachine := o.Machine, o.UnderMachine
+	if o.Under != "" && underMachine == "" {
+		underMachine = machine
+		if o.CrossMachineHierarchy {
+			machine = ""
+		}
+	}
+	return filters{ID: o.ID, State: o.State, Machine: machine, Project: o.Project, Group: o.Group, Source: o.Source, Provider: o.Provider, Providers: providersKey(o.Providers), Q: o.Q, PaneSource: o.PaneSource, Manager: o.Manager,
+		Roots: o.Roots, CrossMachineHierarchy: o.CrossMachineHierarchy, IncludeHidden: o.IncludeHidden, Under: o.Under, UnderMachine: underMachine, NoPrivate: o.NoPrivate, AgentsOnly: o.AgentsOnly, Places: placesKey(o.Places), Spaces: placesKey(o.Spaces), Todo: o.Todo, Waiting: o.Waiting, ExcludePaneSource: o.ExcludePaneSource, JustFinished: o.JustFinished}
 }
 
 func (o Options) binding() binding {

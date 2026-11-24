@@ -347,15 +347,17 @@ func TestTaskSpawnStartsWithTheParentsLaunchModel(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, tc := range []struct {
-		name       string
-		requested  *string
-		assignment string
-		spawned    bool
-		catalog    []proto.AgentModel
-		want       string
+		name              string
+		requested         *string
+		assignment        string
+		assignmentDefault bool
+		spawned           bool
+		catalog           []proto.AgentModel
+		want              string
 	}{
 		{name: "node records the requested id", requested: &requested, want: requested},
 		{name: "node records the launcher default", requested: &launcherDefault},
+		{name: "older node uses the assignment launcher default", assignmentDefault: true},
 		{name: "spawned agent keeps its own request", requested: &requested, assignment: "relay/someone-else", spawned: true, want: requested},
 		{name: "original assignment wins", requested: &requested, assignment: "relay/planned", want: "relay/planned"},
 		{name: "older node reports a unique resolution", catalog: []proto.AgentModel{row}, want: row.ID},
@@ -382,6 +384,7 @@ func TestTaskSpawnStartsWithTheParentsLaunchModel(t *testing.T) {
 				PermissionMode: "plan", Model: reply, RequestedModel: tc.requested, Effort: "high", Status: proto.StatusWorking})
 			if err := s.patchPlanTask(ctx, todo.PlanID, 0, func(task *PlanTask) {
 				task.Launcher, task.Model = "claude", tc.assignment
+				task.LauncherDefaultModel = tc.assignmentDefault
 			}); err != nil {
 				t.Fatal(err)
 			}
@@ -393,7 +396,7 @@ func TestTaskSpawnStartsWithTheParentsLaunchModel(t *testing.T) {
 			if got, _ := start["model"].(string); got != tc.want || start["launcher"] != "claude" || start["permission_mode"] != "plan" {
 				t.Fatalf("child model=%q launcher=%v permissions=%v; want %q, claude, plan", got, start["launcher"], start["permission_mode"], tc.want)
 			}
-			if tc.requested == &launcherDefault {
+			if tc.assignmentDefault || tc.requested == &launcherDefault {
 				want := map[string]any{}
 				if err := s.finishModel(ctx, "agent.new", want, ModelBinding{Provider: "launcher.claude", Effort: "high"}); err != nil {
 					t.Fatal(err)

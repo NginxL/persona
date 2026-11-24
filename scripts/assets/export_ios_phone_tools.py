@@ -10,7 +10,7 @@ PhoneToolCatalogTest compares against.
     python3 scripts/assets/export_ios_phone_tools.py --check   # exit 1 if the fixture is out of date
 
 Tools of iOS-only sources (reminders and the iPhone system integrations: alarms, messages, shortcuts, media, home),
-write-only health tools (phone_health_write_sample), and the iPhone-only maps and place-search tools are left
+write-only health tools (phone_health_write_sample), the locked-iPhone health snapshot (phone_health_watch), and the iPhone-only maps and place-search tools are left
 out. Descriptions are exported verbatim: any sentence an iPhone declares that Android does not yet is listed by name
 in PhoneToolCatalogTest, never trimmed here.
 """
@@ -26,6 +26,8 @@ FIXTURE = os.path.join(ROOT, "android", "platform", "phonetools", "src", "test",
 IOS_ONLY = {"reminders", "alarms", "messages", "shortcuts", "media", "home"}
 IOS_ONLY_TOOLS = {
     "phone_health_write_sample",
+    # The on-device snapshot of watched types (#13740): the hub never wakes an Android phone, so it has nothing to keep.
+    "phone_health_watch",
     "phone_maps_search_nearby", "phone_maps_navigate", "phone_maps_route",
     # Android has no place search yet (the fixture never had it; --check failed on main before #2281).
     "phone_location_search",

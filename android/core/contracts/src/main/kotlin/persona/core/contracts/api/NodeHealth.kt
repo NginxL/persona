@@ -34,6 +34,11 @@ data class UsageWindow(
     @SerialName("resets_at") val resetsAt: String? = null,
     /** An allowance a provider keeps for one model next to the plan's own (#2595). */
     @SerialName("model") val model: String? = null,
+    /**
+     * The use, 0 to 100, from which the scheduler stops sending work to this account for this window (#13173); it can differ per
+     * account and per window. Absent while the hub does not say: nothing is drawn then.
+     */
+    @SerialName("protect_percent") val protectPercent: Double? = null,
 )
 
 /** An account the machines' agents are signed in to, from `GET /api/v1/usage/windows`. */

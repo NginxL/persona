@@ -19,6 +19,7 @@ func TestTodoSupervision(t *testing.T) {
 	if err := d.PutTodoSupervision(ctx, r); err != nil {
 		t.Fatal(err)
 	}
+	r.SupervisorSource = "explicit"
 	r.State, r.Round, r.Reviews = "rework", 1, json.RawMessage(`[{"verdict":"rework"}]`)
 	if err := d.PutTodoSupervision(ctx, r); err != nil {
 		t.Fatal(err)
@@ -28,7 +29,7 @@ func TestTodoSupervision(t *testing.T) {
 		t.Fatalf("list = %+v, %v", list, err)
 	}
 	got := list[0]
-	if got.Supervisor != "main" || len(got.DoneWhen) != 2 || got.DoneWhen[1] != "线上验证" || got.ExpectMinutes != 30 ||
+	if got.SupervisorSource != "explicit" || got.Supervisor != "main" || len(got.DoneWhen) != 2 || got.DoneWhen[1] != "线上验证" || got.ExpectMinutes != 30 ||
 		got.State != "rework" || got.Round != 1 || !json.Valid(got.Reviews) || !got.UpdatedAt.Equal(now) {
 		t.Fatalf("row = %+v (%s)", got, got.Reviews)
 	}

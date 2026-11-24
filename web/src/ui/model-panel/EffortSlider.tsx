@@ -7,12 +7,13 @@
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent, type PointerEvent as ReactPointerEvent } from "react";
 import { t } from "../../i18n";
 import { effortColor, effortColorAt } from "../../lib/model-panel";
+import { effortTitle } from "../../lib/session-actions";
 import { cx } from "../atoms";
 
 const MOVE = "var(--effort-move) var(--effort-ease)";
 const RESIZE = "var(--effort-resize) var(--effort-ease)";
 
-export function EffortSlider({ stops, value, recommended, labelOf, unsetLabel, onChange, disabled = false }: {
+export function EffortSlider({ stops, value, recommended, unsetLabel, onChange, disabled = false }: {
   /** The levels, weakest first; two at least (one level is no choice: the flyout draws no slider). */
   stops: string[];
   /** The level now; one not among the stops sits at the first, or with `unsetLabel` "" is none at all. */
@@ -22,7 +23,6 @@ export function EffortSlider({ stops, value, recommended, labelOf, unsetLabel, o
   unsetLabel?: string;
   /** The model's default level: its bubble says "Recommended". */
   recommended?: string;
-  labelOf: (effort: string) => string;
   onChange: (effort: string) => void;
   disabled?: boolean;
 }) {
@@ -38,6 +38,7 @@ export function EffortSlider({ stops, value, recommended, labelOf, unsetLabel, o
   const unset = Boolean(unsetLabel) && !value && drag === null;
   const index = drag === null ? valueIndex : Math.round(drag);
   const level = stops[Math.min(last, Math.max(0, index))] ?? stops[0] ?? "";
+  const label = unset ? unsetLabel : effortTitle(level);
   const percent = unset ? 0 : last > 0 ? ((drag ?? valueIndex) / last) * 100 : 0;
   const color = unset ? "var(--line-strong)" : drag === null ? effortColor(level) : effortColorAt(stops, drag);
 
@@ -113,7 +114,7 @@ export function EffortSlider({ stops, value, recommended, labelOf, unsetLabel, o
         aria-valuemin={0}
         aria-valuemax={last}
         aria-valuenow={unset ? undefined : index}
-        aria-valuetext={unset ? unsetLabel : labelOf(level)}
+        aria-valuetext={label}
         aria-disabled={disabled || undefined}
         data-dragging={dragging || undefined}
         onPointerDown={down}
@@ -146,7 +147,7 @@ export function EffortSlider({ stops, value, recommended, labelOf, unsetLabel, o
             )}
           >
             {!unset && <span aria-hidden className="size-1.5 shrink-0 rounded-full" style={{ backgroundColor: effortColor(level) }} />}
-            <span>{unset ? unsetLabel : labelOf(level)}</span>
+            <span>{label}</span>
             {!unset && recommended && level === recommended && <span className="opacity-70">· {t("ui-modelpanel.recommended")}</span>}
           </div>
         </div>

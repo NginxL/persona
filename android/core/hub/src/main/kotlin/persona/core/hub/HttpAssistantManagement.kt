@@ -86,6 +86,60 @@ class HttpAssistantManagement private constructor(
         // One path segment, so a slash or a question mark in an id cannot change the route.
         assistant("DELETE", "standing-authorizations", id)
     }
+
+    // Domain spaces (#13500, docs/web/web.md "Domain spaces (#13500)"): a slug or id is one path segment, so a slash in it cannot
+    // change the route. A hub before tracks answers 404 / 405, or a list without `tracks`.
+    override suspend fun tracks(): List<Track> {
+        val answer = try { assistant("GET", "tracks") } catch (failure: HubFailure) {
+            if (failure.status == 404 || failure.status == 405) throw TracksUnsupported() else throw failure
+        }
+        if (answer["tracks"] !is JsonArray) throw TracksUnsupported()
+        return answer.list("tracks")
+    }
+    override suspend fun trackKinds(): List<TrackKind> = assistant("GET", "track-kinds").list("kinds")
+    override suspend fun createTrack(track: TrackCreate): Track = JsonCodec.decodeFromJsonElement(
+        assistant("POST", "tracks", body = JsonCodec.encodeToJsonElement(TrackCreate.serializer(), track)))
+    override suspend fun changeTrack(slug: String, change: TrackChange): Track {
+        require(slug.isNotBlank())
+        return JsonCodec.decodeFromJsonElement(
+            assistant("PUT", "tracks", slug, body = JsonCodec.encodeToJsonElement(TrackChange.serializer(), change)))
+    }
+    override suspend fun spaceMd(slug: String): SpaceMd {
+        require(slug.isNotBlank())
+        return JsonCodec.decodeFromJsonElement(assistant("GET", "tracks", slug, "space-md"))
+    }
+    override suspend fun writeSpaceMd(slug: String, content: String, baseDigest: String): SpaceMd {
+        require(slug.isNotBlank())
+        return JsonCodec.decodeFromJsonElement(assistant("PUT", "tracks", slug, "space-md", body = buildJsonObject {
+            put("content", content)
+            put("base_digest", baseDigest)
+        }))
+    }
+    override suspend fun conversationCategories(session: SessionKey): ConversationCategories {
+        require(session.sessionId.isNotBlank())
+        return JsonCodec.decodeFromJsonElement(assistant("GET", "conversations", session.sessionId, "categories"))
+    }
+    override suspend fun changeConversationCategories(session: SessionKey, add: List<String>, remove: List<String>): ConversationCategories {
+        require(session.sessionId.isNotBlank())
+        return JsonCodec.decodeFromJsonElement(assistant("PUT", "conversations", session.sessionId, "categories", body = buildJsonObject {
+            if (add.isNotEmpty()) put("add", JsonArray(add.map { JsonPrimitive(it) }))
+            if (remove.isNotEmpty()) put("remove", JsonArray(remove.map { JsonPrimitive(it) }))
+        }))
+    }
+    override suspend fun extensionTrust(): List<ExtensionTrust>? {
+        val answer = try { assistant("GET", "extension-trust") } catch (failure: HubFailure) {
+            if (failure.status == 404 || failure.status == 405) return null else throw failure
+        }
+        if (answer["items"] !is JsonArray) return null
+        return answer.list("items")
+    }
+    override suspend fun setExtensionTrust(id: String, trust: ExtensionTrust): ExtensionTrust {
+        require(id.isNotBlank())
+        return JsonCodec.decodeFromJsonElement(assistant("PUT", "extension-trust", id, body = buildJsonObject {
+            put("trust", trust.trust)
+            put("categories", JsonArray(trust.categories.map { JsonPrimitive(it) }))
+        }))
+    }
     // The hub waits up to 12 s for the computer's self-check, and a probe runs a real one-word turn on top of it.
     override suspend fun readiness(probe: Boolean): AssistantReadiness = JsonCodec.decodeFromJsonElement(
         request("GET", listOf("api", "v1", "assistant", "readiness"), client = if (probe) runHttp else http,

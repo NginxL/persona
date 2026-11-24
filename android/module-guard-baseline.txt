@@ -1,0 +1,2 @@
+# The module guard's baseline (docs/android/android.md "Modules", ./gradlew :app:moduleGuard): today's violations, one per line.
+# It only shrinks: a new violation fails the guard, and so does a line here that no longer happens (delete it then).

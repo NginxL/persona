@@ -10,7 +10,7 @@ import (
 	"sync/atomic"
 
 	"github.com/nwverse/persona/server/internal/assistantwire"
-	"github.com/nwverse/persona/server/internal/connector/imessage"
+	"github.com/nwverse/persona/server/internal/imessagewire"
 	"github.com/nwverse/persona/server/internal/kb"
 )
 
@@ -299,7 +299,7 @@ func (h *Manager) kbArchiveFenceCall(ctx context.Context, p assistantwire.AppCal
 	if err := json.Unmarshal(p.Params, &req); err != nil {
 		return nil, true, err
 	}
-	if req.ID != imessage.ID || len(req.Generation) != 32 || len(req.Token) != 32 {
+	if req.ID != imessagewire.ID || len(req.Generation) != 32 || len(req.Token) != 32 {
 		return nil, true, errors.New("invalid archive reservation")
 	}
 	if _, err := hex.DecodeString(req.Generation); err != nil {

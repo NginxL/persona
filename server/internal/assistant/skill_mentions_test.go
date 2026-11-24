@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/nwverse/persona/server/internal/assistantskills"
+	"github.com/nwverse/persona/server/internal/proto"
 )
 
 func TestSkillCatalogUsesConversationExecutionAndRejectsForeignSessions(t *testing.T) {
@@ -61,5 +62,34 @@ func TestSkillCatalogDoesNotTreatLegacyNodeInventoryAsExecutableCatalog(t *testi
 	w := appRequest(t, s, "GET", "/api/v1/assistant/skills?machine_id=server&session_id=side", "", "en")
 	if w.Code == 200 {
 		t.Fatalf("legacy inventory accepted as an effective runtime catalog: %s", w.Body.String())
+	}
+}
+
+func TestSkillCatalogAndSelectionSupportRuntimeBackedAgySession(t *testing.T) {
+	s, f := pickFixture(t)
+	s.id = "helper-a"
+	f.setSessions("server",
+		proto.Session{SessionID: "main", Assistant: true, Launcher: "gw"},
+		proto.Session{SessionID: "agy-chat-1", Assistant: true, Launcher: "agy", SourceKind: proto.SourceRuntime, Cwd: "/assistant-agy"},
+	)
+	var requests []map[string]any
+	f.answerNode("skills.list", func(_ string, raw json.RawMessage) (any, error) {
+		var req map[string]any
+		_ = json.Unmarshal(raw, &req)
+		requests = append(requests, req)
+		return assistantskills.Catalog{Version: 1, Skills: []assistantskills.Entry{{ID: "agy-ref-1", Name: "review", Source: "project · ."}}}, nil
+	})
+	w := appRequest(t, s, "GET", "/api/v1/assistant/skills?machine_id=server&session_id=agy-chat-1", "", "en")
+	if w.Code != 200 || len(requests) != 1 || requests[0]["session_id"] != "agy-chat-1" || requests[0]["cwd"] != "/assistant-agy" || requests[0]["skill_owner"] != "helper-a" {
+		t.Fatalf("agy /assistant/skills: %d %s %+v", w.Code, w.Body.String(), requests)
+	}
+	block := `<persona-context kind="skill" ref="agy-ref-1">review</persona-context>`
+	out, err := s.SendParams(context.Background(), SendParams{
+		MachineID: "server",
+		SessionID: "agy-chat-1",
+		Params:    map[string]any{"text": block + "\nCheck this"},
+	})
+	if err != nil || out["skill_owner"] != "helper-a" || len(requests) != 2 {
+		t.Fatalf("agy SendParams with selected skill: %+v %v reqs=%d", out, err, len(requests))
 	}
 }

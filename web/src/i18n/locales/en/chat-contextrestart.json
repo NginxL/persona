@@ -1,0 +1,11 @@
+{
+  "main": "This chat still has a lot of context after compaction. Start a new main chat with a summary.",
+  "regular": "This chat still has a lot of context after compaction. Continue in a new chat with its background.",
+  "continue": "Continue in a new chat",
+  "dismiss": "Dismiss context notice",
+  "starting": "Starting new chat…",
+  "started": "The new chat is ready. You can archive the previous one.",
+  "archive": "Archive previous chat",
+  "archived": "Previous chat archived.",
+  "unknown": "We couldn’t confirm that the new chat opened. Check your recent chats before trying again."
+}

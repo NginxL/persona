@@ -83,8 +83,8 @@ class RecoveryValidation(unittest.TestCase):
         work = self.root / "prepare"
         work.mkdir()
         original = webdev.digest
-        def change_after_hash(path):
-            result = original(path)
+        def change_after_hash(path, on_read=None):
+            result = original(path, on_read)
             if path.parent.name == "artifacts":
                 path.write_bytes(gzip.compress(b"changed after compressed checksum"))
             return result

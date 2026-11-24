@@ -104,3 +104,9 @@ func (d *DB) LinkTaskBriefTodo(ctx context.Context, l TaskBriefTodoRow) (bool, e
 	}
 	return true, nil
 }
+
+// UnlinkTaskBriefTodo removes todoID's brief link when a continuation is aborted before its Agent can take over.
+func (d *DB) UnlinkTaskBriefTodo(ctx context.Context, todoID string) error {
+	_, err := d.pool.Exec(ctx, `DELETE FROM task_brief_todos WHERE todo_id = $1`, todoID)
+	return err
+}

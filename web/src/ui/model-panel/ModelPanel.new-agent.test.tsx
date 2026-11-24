@@ -140,8 +140,11 @@ describe("the model panel for a new Agent", () => {
   it("a launcher that failed its check: rows off, its reason once, How to fix handed to the caller", async () => {
     const { onHelp, onPick } = await open();
     const section = [...document.body.querySelectorAll<HTMLElement>("[data-panel-section]")].find((g) => g.getAttribute("aria-label") === "work_gw")!;
-    expect(section.textContent).toContain("这台电脑的终端里用不了");
+    // folded, the reason is the launcher's mark and tooltip (#12315); opened, a line above its rows
+    expect(section.querySelector("[data-panel-launcher]")!.getAttribute("aria-description")).toBe("这台电脑的终端里用不了");
+    expect(section.textContent).not.toContain("这台电脑的终端里用不了");
     act(() => section.querySelector<HTMLButtonElement>("[data-panel-launcher]")!.click());
+    expect(section.textContent).toContain("这台电脑的终端里用不了");
     const r = section.querySelector<HTMLElement>("[data-panel-row]")!;
     expect(r.getAttribute("aria-disabled")).toBe("true");
     act(() => r.click());

@@ -25,5 +25,8 @@
   "error_not_sent": "新しい回答をエージェントに送れませんでした：{error}",
   "error_assistant_offline": "アシスタントがオフラインです。しばらくしてからもう一度お試しください",
   "error_unsupported": "この hub はまだ回答の変更に対応していません。先に hub を更新してください",
-  "error_failed": "回答を変更できませんでした：{error}"
+  "error_failed": "回答を変更できませんでした：{error}",
+  "supervisor_held": "監督者が対応中",
+  "supervisor_held_hint": "このカードはタスクの監督者が判断します。あなたの判断が必要なときは回されます。",
+  "supervisor_held_refused": "このカードはタスクの監督者が対応しています。あなたの判断が必要なときは回されます"
 }

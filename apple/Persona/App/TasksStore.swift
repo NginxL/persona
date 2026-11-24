@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import PersonaWire
 
 /// Task presentation for the hub-level group's assistant conversations (docs/assistant/unified-entry.md): todos come from
 /// TodoStore's shared index; plans and each conversation's feed stay here. Feeds refresh when shown and on
@@ -298,9 +299,45 @@ final class TasksStore {
     }
 
     private func planError(_ todo: TodoItem) -> String? {
-        guard let plan = todo.planID.flatMap({ plans[$0] }),
-              let error = plan.tasks.first(where: { $0.todoID == todo.id })?.error, !error.isEmpty else { return nil }
+        guard let error = planTask(todo)?.error, !error.isEmpty else { return nil }
         return error
+    }
+
+    /// The plan task behind this to-do, including one a plan took over without leaving `plan_id` on the to-do.
+    func planTask(_ todo: TodoItem) -> PlanTask? { TaskStartRemedy.planTask(of: todo, in: plans) }
+
+    func retryLauncher(_ todo: TodoItem, features: Set<String> = AppModel.shared.hubFeatures) -> String? {
+        TaskStartRemedy.retryLauncher(planTask(todo), features: features)
+    }
+
+    func startQuestion(_ todo: TodoItem, features: Set<String> = AppModel.shared.hubFeatures, now: Date = .now) -> ShellQuestion? {
+        TaskStartRemedy.taskQuestion(planTask(todo), features: features, now: now)
+    }
+
+    func startFailureRow(_ todo: TodoItem) -> String? {
+        let task = planTask(todo)
+        if let line = TaskStartRemedy.failureLine(code: task?.errorCode, args: task?.errorArgs) { return line }
+        return startFailure(todo).map(StartFailureWords.rowLine)
+    }
+
+    func startFailureCard(_ todo: TodoItem, canOpen: Bool) -> String? {
+        let task = planTask(todo)
+        if let line = TaskStartRemedy.failureLine(code: task?.errorCode, args: task?.errorArgs) {
+            return String(localized: "Didn't start: \(line) [Tasks Store 38bbb7]")
+        }
+        return startFailure(todo).map { StartFailureWords.cardLine($0, canOpen: canOpen) }
+    }
+
+    /// The detail page leads with the coded short line; its raw hub error remains available under Details.
+    func startFailureSummary(_ todo: TodoItem) -> String? {
+        let task = planTask(todo)
+        return TaskStartRemedy.failureLine(code: task?.errorCode, args: task?.errorArgs) ?? startFailure(todo)
+    }
+
+    /// A direct to-do link may arrive before its conversation's feed; read it so the coded remedy fields can appear.
+    func loadStartRemedy(_ todo: TodoItem) async {
+        guard planTask(todo) == nil, startFailure(todo) != nil, let origin = todo.origin, !origin.isEmpty else { return }
+        await load(origin, refreshTodos: false)?.value
     }
 
     /// What a waiting task waits for (#3274): the first of its agents that waits to be woken, in its own words.
@@ -427,9 +464,23 @@ final class TasksStore {
     // MARK: Decisions (Later / Don't handle on a decision row)
 
     /// One round of one task's decision, as the web keys it (`decisionLaterKey`): a new round is a new question, so
-    /// Later and Don't handle do not follow the task to it. Nil without a round to name.
+    /// Later and Don't handle do not follow the task to it. Nil without a round to name. All timestamp sources use the
+    /// same round-trip token, so a snapshot gaining latestReview does not rename the same round. Invalid old strings
+    /// remain usable as-is; API requests still send the hub's original `review_at` string.
     nonisolated static func decisionKey(_ todo: TodoItem) -> String? {
-        guard let round = todo.decisionReview?.reviewAt ?? todo.ask?.askedAt, !round.isEmpty else { return nil }
+        func canonical(_ raw: String) -> String {
+            JSON.parseDate(raw).map { String($0.timeIntervalSince1970) } ?? raw
+        }
+        let round: String
+        if let at = todo.supervision?.latestReview?.at {
+            round = String(at.timeIntervalSince1970)
+        } else if let raw = todo.decisionReview?.reviewAt, !raw.isEmpty {
+            round = canonical(raw)
+        } else if let raw = todo.ask?.askedAt, !raw.isEmpty {
+            round = canonical(raw)
+        } else {
+            return nil
+        }
         return "decision:\(todo.manager ?? ""):\(todo.id):\(round)"
     }
 
@@ -443,7 +494,7 @@ final class TasksStore {
     /// Whether Needs You leaves this decision out: put off, or dismissed (here, or elsewhere: the hub's `dismissal_id`).
     func decisionHidden(_ todo: TodoItem) -> Bool {
         guard let key = Self.decisionKey(todo) else { return false }
-        return laterDecisions.contains(key) || dismissedDecisions[key] != nil || todo.decisionReview?.dismissed == true
+        return laterDecisions.contains(key) || dismissedDecisions[key] != nil || todo.decisionDismissed
     }
 
     /// Don't handle: the hub keeps the round dismissed and the task open (`POST /todos/{id}/decision-dismiss`); a toast
@@ -500,16 +551,22 @@ final class TasksStore {
     }
 
     /// Retry on a task whose agent did not start, Continue on one a model error cut off: `POST /todos/{id}/retry`.
+    /// An alternative launcher is sent only to a hub that advertises it; both variants share one busy ticket.
     @discardableResult
-    func retry(_ todo: TodoItem, api injected: APIClient? = nil) async -> Bool {
+    func retry(_ todo: TodoItem, launcher: String? = nil, features: Set<String> = AppModel.shared.hubFeatures,
+               api injected: APIClient? = nil) async -> Bool {
         guard !busyRetries.contains(todo.id), let api = (injected ?? AppModel.shared.api)?.manager(todoStore.named(todo.id)) else { return false }
+        if launcher != nil, !features.contains(TaskStartRemedy.retryLauncherFeature) {
+            showToast(Toast(String(localized: "This hub can't start it on another launcher yet. Update Persona on the hub, or Retry."), style: .error))
+            return false
+        }
         busyRetries.insert(todo.id)
         defer { busyRetries.remove(todo.id) }
         let ticket = generation
         do {
-            _ = try await api.retryTodo(todo.id)
+            let result = try await api.retryTodo(todo.id, launcher: launcher)
             guard generation == ticket else { return false }
-            reloadTodos(api: injected)
+            try await todoStore.applyConfirmed(result, api: api)
             Haptics.success()
             return true
         } catch {
@@ -518,6 +575,20 @@ final class TasksStore {
             if let e = error as? APIError, e.status == 409 { reloadTodos(api: injected) }
             return false
         }
+    }
+
+    /// Answers the task's startup question. The hub restarts the task itself, so no chat message is resent here.
+    func answerStart(_ todo: TodoItem, choice: String, features: Set<String> = AppModel.shared.hubFeatures,
+                     api injected: APIClient? = nil) async throws {
+        guard features.contains(TaskStartRemedy.answerFeature) else {
+            throw APIError(status: 0, message: String(localized: "This hub can't answer this startup question yet."))
+        }
+        guard let api = (injected ?? AppModel.shared.api)?.manager(todoStore.named(todo.id)) else {
+            throw APIError(status: 0, message: String(localized: "Not connected to a hub [Todo Store 04f822]"))
+        }
+        let result = try await api.answerTaskStart(todo.id, choice: choice)
+        if let result { try await todoStore.applyConfirmed(result, api: api) } else { reloadTodos(api: injected) }
+        Haptics.success()
     }
 
     enum MessageState { case open, sent, filed, dismissed }

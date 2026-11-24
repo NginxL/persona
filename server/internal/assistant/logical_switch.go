@@ -65,6 +65,15 @@ func (s *Service) logicalTarget(ctx context.Context, machine, launcher string) (
 	}
 	return target, nil
 }
+
+// sessionEngineAgent is the agent a session row runs: an empty agent outside a runtime is Claude Code, as the node
+// lists a native Claude Code session without one (proto.Session.Agent). A runtime's empty agent stays unknown.
+func sessionEngineAgent(row proto.Session) string {
+	if row.Agent == "" && row.SourceKind != proto.SourceRuntime {
+		return "claude"
+	}
+	return row.Agent
+}
 func (s *Service) segmentsEnabled(ctx context.Context) bool {
 	if s.store() == nil {
 		return false
@@ -195,6 +204,19 @@ func (s *Service) logicalRoleRequired(ctx context.Context, machine, id string) (
 	return policy != "" || slices.Contains(cfg.Leaders, id) || id == cfg.BackgroundSupervisor || id == cfg.Main && cfg.MainSupervisesOwnTasks != nil && *cfg.MainSupervisesOwnTasks, nil
 }
 
+func (s *Service) conversationSwitchBusy(machine, id string, row proto.Session) bool {
+	if row.Starting || row.Status == proto.StatusWorking || row.Status == proto.StatusBlocked || row.PendingInteractions > 0 ||
+		backgroundRunning(row) || len(row.Queued) > 0 || (row.Compaction != nil && row.Compaction.State == proto.CompactionRunning) {
+		return true
+	}
+	for _, ix := range s.pendingInteractions() {
+		if ix.SessionID == id && ix.MachineID == machine {
+			return true
+		}
+	}
+	return false
+}
+
 func (s *Service) beginLogicalSwitch(ctx context.Context, machine, id string, p logicalSwitchRequest) (any, error) {
 	st, ok := s.store().(logicalSwitchStore)
 	if !ok {
@@ -229,13 +251,8 @@ func (s *Service) beginLogicalSwitch(ctx context.Context, machine, id string, p 
 	if !known || !row.Assistant || row.PaneID != "" || s.isWorkMachine(p.MachineID) {
 		return nil, logicalRefusal(ctx, "unavailable")
 	}
-	if row.Starting || row.Status == proto.StatusWorking || row.Status == proto.StatusBlocked || row.PendingInteractions > 0 || backgroundRunning(row) || len(row.Queued) > 0 || (row.Compaction != nil && row.Compaction.State == proto.CompactionRunning) {
+	if s.conversationSwitchBusy(machine, id, row) {
 		return nil, logicalRefusal(ctx, "busy")
-	}
-	for _, ix := range s.pendingInteractions() {
-		if ix.SessionID == id && ix.MachineID == machine {
-			return nil, logicalRefusal(ctx, "busy")
-		}
 	}
 	target, err := s.logicalTarget(ctx, p.MachineID, p.Launcher)
 	if err != nil {
@@ -249,7 +266,7 @@ func (s *Service) beginLogicalSwitch(ctx context.Context, machine, id string, p 
 		return nil, s.supervisionRuntimeRefusal(ctx, p.MachineID)
 	}
 	if c == nil {
-		if p.ExpectedEpoch != 1 || assistantKind(row.Agent) == "" {
+		if p.ExpectedEpoch != 1 || assistantKind(sessionEngineAgent(row)) == "" {
 			return nil, logicalRefusal(ctx, "unknown_engine")
 		}
 		var page historyPage
@@ -259,7 +276,7 @@ func (s *Service) beginLogicalSwitch(ctx context.Context, machine, id string, p 
 		if page.History == "" {
 			return nil, logicalRefusal(ctx, "missing_generation")
 		}
-		sourceEngine := proto.AssistantExecutionIdentity(row.Agent, row.SourceKind, row.SourceInstanceID, row.Launcher)
+		sourceEngine := proto.AssistantExecutionIdentity(sessionEngineAgent(row), row.SourceKind, row.SourceInstanceID, row.Launcher)
 		if sourceEngine == "" {
 			return nil, logicalRefusal(ctx, "unknown_engine")
 		}
@@ -441,6 +458,18 @@ func (s *Service) advanceLogicalConversation(ctx context.Context, st logicalSwit
 				return err
 			}
 			params["cwd"] = cwd
+			// The role's policy goes with the preparation, as the manager makes it (never from the app's request): the
+			// first input carries the same policy, so the prepared process is kept. A Codex thread with no turn yet
+			// cannot be resumed, so a restart for a policy arriving only with that input started a new thread under
+			// another id and lost the segment (a direction supervisor switched to Codex, live 2026-11-22).
+			policy, err := s.supervisionInstructions(ctx, c.MachineID, c.SessionID)
+			if err != nil {
+				_ = st.ResolveConversationSwitch(ctx, c.MachineID, c.SessionID, op.OperationID, "rejected", "preparation unavailable")
+				return err
+			}
+			if policy != "" {
+				params["supervision_instructions"] = policy
+			}
 		}
 		var raw json.RawMessage
 		err = st.WithConversationEpoch(ctx, c.MachineID, c.SessionID, c.Epoch, func(current *db.LogicalConversation) error {
@@ -621,6 +650,20 @@ func (s *Service) drainLogicalInput(ctx context.Context, st logicalSwitchStore, 
 			delete(queued.Params, key)
 		}
 		queued.Params["launcher"], queued.Params["model"], queued.Params["effort"], queued.Params["permission_mode"] = a.Launcher, a.Model, a.Effort, a.PermissionMode
+		// The active segment's mode is inherited state, not the queued caller's explicit choice. A Claude segment uses
+		// the current default; non-Claude and external segments keep their legacy generic mode without a resume default.
+		delete(queued.Params, assistantwire.PermissionModeExplicitParam)
+		defaultMode, _ := queued.Params[assistantwire.DefaultPermissionModeParam].(string)
+		useDefault := defaultMode != "" && !proto.IsExternalLauncher(a.Launcher) && s.startPermissionModeSupported(ctx, a.MachineID, a.Launcher, defaultMode)
+		if useDefault && a.Launcher != "" && a.Launcher != "claude" {
+			agent := s.launcherAgent(withUnhidden(ctx, a.Launcher), a.MachineID, a.Launcher)
+			useDefault = agent == "" || agent == "claude"
+		}
+		if useDefault {
+			delete(queued.Params, "permission_mode")
+		} else {
+			delete(queued.Params, assistantwire.DefaultPermissionModeParam)
+		}
 	}
 	if c.Switch != nil {
 		raw, _, err := st.ConversationPreparation(ctx, c.MachineID, c.SessionID, c.Switch.OperationID)
@@ -753,7 +796,7 @@ func (s *Service) logicalSwitchHandoff(ctx context.Context, st logicalSwitchStor
 	if err != nil {
 		return h, err
 	}
-	result, err := waitLogicalSummary(ctx, func() (assistantwire.ModelCompleteResult, error) {
+	h, fellBack, err := summarizeLogicalHandoff(ctx, h, previousSummary, func() (assistantwire.ModelCompleteResult, error) {
 		out, err := s.runModelCall(ctx, "kb", "conversation handoff", "conversation handoff", call)
 		if err != nil {
 			return assistantwire.ModelCompleteResult{}, err
@@ -767,8 +810,30 @@ func (s *Service) logicalSwitchHandoff(ctx context.Context, st logicalSwitchStor
 	if err != nil {
 		return h, err
 	}
-	h.Summary = result.Text
+	if fellBack {
+		s.logf("assistant: conversation handoff for %s/%s continues without a new summary: the knowledge-processing model is unavailable", c.MachineID, c.SessionID)
+	}
 	return h, nil
+}
+
+// summarizeLogicalHandoff asks run for the handoff's summary. A paused model is waited out (waitLogicalSummary).
+// A model that is not set up (model_unavailable) does not recover by retrying: the sweep would retry the switch
+// every few seconds and leave it preparing until someone changed Settings. The switch goes ahead with the recent
+// turns already in h, the earlier summary if there was one, and Partial set so the new session is told some
+// history is missing; fellBack reports that. Any other failure is returned for the sweep to retry.
+func summarizeLogicalHandoff(ctx context.Context, h mainHandoff, previousSummary string, run func() (assistantwire.ModelCompleteResult, error)) (mainHandoff, bool, error) {
+	result, err := waitLogicalSummary(ctx, run)
+	if err != nil {
+		var re *rpc.Error
+		if errors.As(err, &re) && re.Code == assistantwire.CodeModelUnavailable {
+			h.Summary = previousSummary
+			h.Partial = true
+			return h, true, nil
+		}
+		return h, false, err
+	}
+	h.Summary = result.Text
+	return h, false, nil
 }
 
 func waitLogicalSummary(ctx context.Context, run func() (assistantwire.ModelCompleteResult, error)) (assistantwire.ModelCompleteResult, error) {

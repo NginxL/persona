@@ -470,6 +470,36 @@ func (s *Service) taskSupervisorOf(t *PlanTask) string {
 	return sup
 }
 
+// taskDirectionOf is the conversation whose direction notes accompany the task's first prompt. Direction notes are
+// prompt context; acceptance follows the current supervisor. A leader's own plan takes its
+// origin; a worker takes the legacy direction label from its parent task's saved plan (#10623).
+func (s *Service) taskDirectionOf(ctx context.Context, t *PlanTask) string {
+	if t.Supervisor != "" {
+		return t.Supervisor
+	}
+	todoID := t.TodoID
+	if t.Parent != "" {
+		todoID = t.Parent
+	}
+	if todoID != "" {
+		if todo, ok := s.todoNow(todoID); ok {
+			if s.isLeader(ctx, todo.Origin) {
+				return todo.Origin
+			}
+			if t.Parent != "" && todo.PlanID != "" {
+				if p, err := s.loadPlan(ctx, todo.PlanID); err == nil {
+					for _, planned := range p.Tasks {
+						if planned.TodoID == todoID && planned.Supervisor != "" {
+							return planned.Supervisor
+						}
+					}
+				}
+			}
+		}
+	}
+	return s.taskSupervisorOf(t)
+}
+
 // roleOf is the task's role as a fact: roleLeader for a task leader, else worker.
 func roleOf(t *PlanTask) string {
 	if t.Role == roleLeader {

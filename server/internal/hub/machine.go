@@ -829,6 +829,7 @@ func (m *Machine) onEvent(event string, params json.RawMessage) {
 		}
 		m.mu.Unlock()
 		p.Items = m.hub.withInjected(p.Items)
+		m.hub.ttft.annotate(m.cfg.ID, p.SessionID, p.Items, true)
 		m.hub.itemsToSubscribers(m.cfg.ID, p.SessionID, p.Items, p.itemSpan, p.MoreAfter)
 	case "session.screen":
 		var p struct {
@@ -879,6 +880,9 @@ func (m *Machine) onEvent(event string, params json.RawMessage) {
 			Text      string `json:"text"`
 		}
 		if json.Unmarshal(params, &p) == nil {
+			if p.Text != "" {
+				m.hub.ttft.firstToken(m.cfg.ID, p.SessionID, time.Now())
+			}
 			m.hub.rememberLiveText(m.cfg.ID, p.SessionID, p.Text)
 			m.hub.toSubscribers(m.cfg.ID, p.SessionID, deltaPush{Type: "delta", MachineID: m.cfg.ID, SessionID: p.SessionID, Text: p.Text})
 		}

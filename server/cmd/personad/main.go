@@ -10,9 +10,11 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 
 	"github.com/nwverse/persona/server/internal/agentsend"
+	"github.com/nwverse/persona/server/internal/builtinext"
 	"github.com/nwverse/persona/server/internal/chatexport"
 	"github.com/nwverse/persona/server/internal/extmgr"
 	"github.com/nwverse/persona/server/internal/identity"
@@ -30,8 +32,6 @@ import (
 	"github.com/nwverse/persona/server/internal/shareproxy"
 	"github.com/nwverse/persona/server/internal/supervise"
 	"github.com/nwverse/persona/server/internal/update"
-	"github.com/nwverse/persona/server/internal/voice"
-	"github.com/nwverse/persona/server/internal/volc"
 )
 
 // What the build wrote in (-X): the version for people, and for updates (docs/operations/hub-update.md) the channel
@@ -53,7 +53,7 @@ func buildInfo() update.Build {
 	return b
 }
 
-const usage = `usage:
+var usage = `usage:
 ` + nodecmd.LaunchUsage + `
 ` + hubcli.Usage + `
   personad hub tailcat-key  print the built-in manager's tailcat key (created the first time), for "node tailcat init --hub"
@@ -69,7 +69,7 @@ const usage = `usage:
                            another manager made in the app: trade its install code, run it, install it as a service
                            (docs/assistant/managers.md; personad manager for the details)
 ` + nodecmd.NodeUsage + `
-` + nodecmd.Usage + `
+` + nodecmd.Usage() + `
   personad share-http --listen <address> --upstream <loopback HTTP origin> --public-origin <HTTP sharing origin> --hub-config <private configuration>
                            isolated anonymous sharing ingress on a separate unprivileged port (docs/server/agent-sharing.md)
   personad relay [config]   run the push relay (config ~/.persona/relay.json): pushes for hubs without the app's APNs
@@ -77,8 +77,6 @@ const usage = `usage:
   personad supervise [--manager-only [--hub <hub address>]]
                            the hub and the built-in manager side by side in one container, each started again when it
                            stops (the hub image runs it; docs/operations/docker.md)
-  personad voice            the built-in voice extension: the hub runs it (hub.json extensions, docs/extensions/extensions.md "Built-in voice extension")
-  personad volc             the built-in Volcengine speech extension: the hub runs it (docs/extensions/volcengine-speech.md)
   personad extension …      extensions on the hub's machine: list, install, upgrade, rollback, enable, disable, config,
                            secret, uninstall, markets (docs/extensions/extensions.md "Command line"; personad extension for the details;
                            also personad ext …, and personad plugin … as before)
@@ -94,14 +92,22 @@ const usage = `usage:
                            the watchdog the hub starts over its own update (docs/operations/hub-update.md "Updating")
   personad version [-v]     the version; -v adds the channel and build number`
 
+// usageText is usage with the lines of the built-in modules' programs this build has (internal/builtinext), before
+// the extension commands.
+func usageText() string {
+	const at = "  personad extension …"
+	head, tail, _ := strings.Cut(usage, at)
+	return head + builtinext.ProgramUsage("personad") + at + tail
+}
+
 func main() {
 	modelhttp.SetVersion(version)
 	if len(os.Args) < 2 {
-		fmt.Fprintln(os.Stderr, named(usage))
+		fmt.Fprintln(os.Stderr, named(usageText()))
 		os.Exit(2)
 	}
 	if nodecmd.IsHelpArg(os.Args[1]) || os.Args[1] == "help" { // asked for: stdout and exit 0, as persona-hub and persona-manager
-		fmt.Println(named(usage))
+		fmt.Println(named(usageText()))
 		return
 	}
 	if os.Args[1] == sandbox.ValidationRunCommand {
@@ -166,14 +172,16 @@ func main() {
 		if err = supervise.Run(ctx, os.Args[2:], os.Stderr); errors.Is(err, supervise.ErrStopped) {
 			os.Exit(1) // it said why in its log
 		}
-	case "voice":
-		err = voice.Run(ctx)
-	case "volc": // the built-in Volcengine speech extension's program (docs/extensions/volcengine-speech.md)
-		err = volc.Run(ctx, version)
 	case "extension", "ext", "plugin": // plugin: its name before #1844
 		err = extmgr.ExtensionCommand(ctx, os.Args[2:], os.Stdin, os.Stdout, os.Stderr)
 	default:
-		fmt.Fprintln(os.Stderr, named(usage))
+		// A built-in module's extension program (`personad volc`), when this build has the module
+		// (internal/builtinext; docs/architecture/core-and-modules.md "Provider seams").
+		if run, ok := builtinext.LookupProgram(os.Args[1]); ok {
+			err = run(ctx, version)
+			break
+		}
+		fmt.Fprintln(os.Stderr, named(usageText()))
 		os.Exit(2)
 	}
 	finish(err)

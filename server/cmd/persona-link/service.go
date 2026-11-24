@@ -170,8 +170,11 @@ func install(e *env, args []string) error {
 	if flags.any() && (passive || len(addrs) > 0) {
 		return link.NewTextError("link-cli.install_listen_ssh", nil)
 	}
-	if flags.proxy.set && (passive || len(addrs) > 0) {
+	if flags.proxy.any() && (passive || len(addrs) > 0) {
 		return link.NewTextError("link-cli.listen_proxy", nil)
+	}
+	if err := flags.check(); err != nil {
+		return err
 	}
 	switch e.goos {
 	case "linux", "darwin", "windows":
@@ -181,27 +184,33 @@ func install(e *env, args []string) error {
 	if e.goos == "windows" && nodeBinAny && personad != "" && e.programOf(personad) != programPersonad {
 		return link.NewTextError("link-cli.windows_personad_required", nil, i18n.Args{"path": personad})
 	}
-	if err := flags.proxy.save(e); err != nil {
-		return err
-	}
 	if pairing {
 		c, err := pairWithSSH(e, pairLink, machine, flags)
 		if err != nil {
 			return err
 		}
 		fmt.Fprintln(e.stdout, terminalText("link-cli.install_pair_success", i18n.Args{"machine": c.Machine, "path": e.configPath()}))
-	} else if flags.any() {
-		if strings.TrimSpace(flags.server) == "" {
-			return link.NewTextError("link-cli.ssh_flags_require_server", nil)
-		}
-		always := flags.always
-		if !flags.alwaysSet {
-			if c, err := link.Read(e.configPath()); err == nil {
-				always = link.AllLoopback(c.Endpoints)
+	} else {
+		var ssh *link.SSH
+		if flags.any() {
+			if strings.TrimSpace(flags.server) == "" {
+				return link.NewTextError("link-cli.ssh_flags_require_server", nil)
 			}
+			always := flags.always
+			if !flags.alwaysSet {
+				if c, err := link.Read(e.configPath()); err == nil {
+					always = link.AllLoopback(c.Endpoints)
+				}
+			}
+			ssh = &link.SSH{Server: flags.server, Target: flags.target, Always: always}
 		}
-		if _, err := link.SetSSH(e.configPath(), &link.SSH{Server: flags.server, Target: flags.target, Always: always}); err != nil {
+		if err := flags.saveProxy(e, ssh); err != nil {
 			return err
+		}
+		if ssh != nil {
+			if _, err := link.SetSSH(e.configPath(), ssh); err != nil {
+				return err
+			}
 		}
 	}
 	var invite *link.PairInvite

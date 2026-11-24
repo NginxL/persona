@@ -42,7 +42,8 @@ func (s *Service) openTaskPlans(ctx context.Context) ([]*TaskPlan, error) {
 	return out, nil
 }
 
-// Main belongs to the ordinary Assistant space; Health keeps its own decisions.
+// Main's Needs you has every open plan but Health's: Health keeps its own decisions (what they say stays in the health
+// space); a domain space's plan waits on the owner like any other conversation's and is decided from Main too.
 func (s *Service) mainPendingPlans(ctx context.Context) ([]*TaskPlan, error) {
 	plans, err := s.openTaskPlans(ctx)
 	if err != nil {
@@ -59,7 +60,7 @@ func (s *Service) mainPendingPlans(ctx context.Context) ([]*TaskPlan, error) {
 	}
 	out := make([]*TaskPlan, 0, len(plans))
 	for _, p := range plans {
-		if space := spaces[p.Conversation]; space.known && space.space != "" {
+		if space := spaces[p.Conversation]; space.known && space.space == SpaceHealth {
 			continue
 		}
 		if _, hidden := archived[p.Conversation]; hidden {

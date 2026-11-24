@@ -23,17 +23,19 @@ func pairingFingerprint(c *Config) string {
 	proxy, noProxy := proxySettings(c)
 	// Include the configured proxy as well as the selected one so switching between an explicit URL and the
 	// same environment URL resets the hint. Hub-supplied names and addresses can change on every connection.
+	// ProxyAlways is left out while off, so hints saved before it existed still match.
 	return routeFingerprint(struct {
 		Hub, Machine, Token, FP, Trust, ConfigProxy, Proxy, NoProxy string
 		SSH                                                         *SSH
+		ProxyAlways                                                 bool `json:",omitempty"`
 	}{
 		Hub: c.Hub, Machine: c.Machine, Token: c.Token, FP: c.FP, Trust: c.Trust,
-		ConfigProxy: c.Proxy, Proxy: proxy, NoProxy: noProxy, SSH: c.SSH,
+		ConfigProxy: c.Proxy, Proxy: proxy, NoProxy: noProxy, SSH: c.SSH, ProxyAlways: c.ProxyAlways,
 	})
 }
 
 func routeFingerprint(value any) string {
-	data, _ := json.Marshal(value) // only strings and SSH's string and bool fields
+	data, _ := json.Marshal(value) // only strings and bools, SSH's included
 	sum := sha256.Sum256(data)
 	return hex.EncodeToString(sum[:])
 }

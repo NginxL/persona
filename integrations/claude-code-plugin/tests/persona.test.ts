@@ -1,28 +1,58 @@
 import type { On } from 'claude-code'
 import { describe, expect, mock, test } from 'claude-code/testing'
-import { applyStepOverride, homeDir, mergeOverride, nextBackoff, readPoll, socketPath, verdict } from '../hooks/bridge'
+import {
+  applyStepOverride,
+  canonicalJson,
+  clearAgentPreTools,
+  createPreToolCache,
+  extractPreToolUse,
+  hasPermissionDecision,
+  homeDir,
+  isToolCompleted,
+  markToolCompleted,
+  mergeOverride,
+  nextBackoff,
+  readPermissionAnswer,
+  readPoll,
+  recordPreTool,
+  socketPath,
+  takePreTool,
+  verdict,
+} from '../hooks/bridge'
+import { register } from '../hooks/register'
 
 const SESSION = '11111111-2222-3333-4444-555555555555'
 
 type Answer = { status: number; body: unknown } | { fail: true }
+type PermResponder = (body: Record<string, unknown>, call: number) => Answer | Promise<Answer>
 
 // The engine beneath the plugin: a session, its manifest, and a node that answers polls in the order given (then
 // none: a node that went away), recording every request and every prompt the plugin submits.
-function world(on: On, polls: Answer[], env: Record<string, string> = { HOME: '/home/me' }) {
+function world(
+  on: On,
+  polls: Answer[],
+  env: Record<string, string> = { HOME: '/home/me' },
+  opts: {
+    onPermission?: PermResponder
+    corePermission?: (e: Record<string, unknown>) => unknown | Promise<unknown>
+  } = {},
+) {
   const requests: { url: string; socketPath?: string; body: Record<string, unknown> }[] = []
   const submitted: { text: string; origin: unknown }[] = []
   const aborted: string[] = []
   const steps: { model: string; effort?: string | number; agentId?: string }[] = []
   let holdSubmit = false
+  let settleSubmit: ((outcome: 'reject' | 'drop') => void) | undefined
   let abortError: string | undefined
   let sessionModel = 'claude-sonnet-5-5'
+  let permCalls = 0
   mock.env(on, env)
   const clock = mock.clock(on, { now: 1_000 })
   on('session.start', (_$, e) => ({ cwd: e.cwd }))
   on('session.id', () => ({ value: SESSION }))
   on('session.model', () => ({ value: sessionModel }))
-  on('session.version', () => ({ value: { version: '2.1.326', base: '2.1.326' } }))
-  on('fs.read', () => ({ value: '{"name":"persona","version":"0.2.0"}' }))
+  on('session.version', () => ({ value: { version: '2.1.330', base: '2.1.330' } }))
+  on('fs.read', () => ({ value: '{"name":"persona","version":"0.3.0"}' }))
   on('ui.log', () => ({ value: undefined }))
   on('turn.start', (_$, e) => ({ turnId: e.turnId }))
   on('turn.complete', () => ({ text: 'done' }))
@@ -31,19 +61,42 @@ function world(on: On, polls: Answer[], env: Record<string, string> = { HOME: '/
     aborted.push(e.turnId)
     return { value: undefined }
   })
+  on('tool.call', () => ({ result: 'ok' }) as never)
+  on('classic.PostToolUse', () => ({}))
+  on('classic.PermissionDenied', () => ({}))
+  on('classic.PermissionRequest', (_$, e) => {
+    if (opts.corePermission !== undefined) return opts.corePermission(e as unknown as Record<string, unknown>) as Record<string, unknown>
+    return {}
+  })
   on('prompt.submit', (_$, e) => {
     submitted.push({ text: e.text, origin: e.origin })
-    if (holdSubmit) return new Promise(() => {})
+    if (holdSubmit) {
+      return new Promise<{ drop: string }>((resolve, reject) => {
+        settleSubmit = outcome => {
+          settleSubmit = undefined
+          if (outcome === 'reject') reject(new Error('submit failed'))
+          else resolve({ drop: 'dropped' })
+        }
+      })
+    }
     return { text: e.text }
   })
   on('turn.step', async function* (_$, e) {
     steps.push({ model: e.model, ...(e.effort !== undefined ? { effort: e.effort } : {}), ...(e.agentId !== undefined ? { agentId: e.agentId } : {}) })
     return { turnId: e.turnId, index: e.index, answer: 'ok', toolUses: [], stopReason: 'end_turn' as const, usage: null }
   })
-  on('http.fetch', (_$, e) => {
+  on('http.fetch', async (_$, e) => {
     const rawBody = typeof e.init?.body === 'string' ? e.init.body : '{}'
-    requests.push({ url: e.url, socketPath: e.init?.socketPath, body: JSON.parse(rawBody) })
-    if (e.url.endsWith('/ack')) return { value: { status: 200, ok: true, headers: {}, text: '{"ok":true}' } }
+    const parsed = JSON.parse(rawBody) as Record<string, unknown>
+    requests.push({ url: e.url, socketPath: e.init?.socketPath, body: parsed })
+    if (e.url.endsWith('/ack') || e.url.endsWith('/permission-done')) {
+      return { value: { status: 200, ok: true, headers: {}, text: '{"ok":true}' } }
+    }
+    if (e.url.endsWith('/permission')) {
+      const next = opts.onPermission !== undefined ? await opts.onPermission(parsed, ++permCalls) : { fail: true as const }
+      if ('fail' in next) throw new Error('connection refused')
+      return { value: { status: next.status, ok: next.status === 200, headers: {}, text: JSON.stringify(next.body) } }
+    }
     const next = polls.shift() ?? { fail: true }
     if ('fail' in next) throw new Error('connection refused')
     return { value: { status: next.status, ok: next.status === 200, headers: {}, text: JSON.stringify(next.body) } }
@@ -57,6 +110,11 @@ function world(on: On, polls: Answer[], env: Record<string, string> = { HOME: '/
     setHoldSubmit(v: boolean) {
       holdSubmit = v
     },
+    finishSubmit(outcome: 'reject' | 'drop') {
+      const settle = settleSubmit
+      if (settle === undefined) throw new Error('no held prompt.submit')
+      settle(outcome)
+    },
     setAbortError(err: string | undefined) {
       abortError = err
     },
@@ -68,7 +126,25 @@ function world(on: On, polls: Answer[], env: Record<string, string> = { HOME: '/
 
 const start = { cwd: '/work', surface: 'desktop', isInteractive: true } as const
 
+function permEvent(overrides: Record<string, unknown> = {}) {
+  return {
+    session_id: SESSION,
+    transcript_path: '/home/me/.claude/projects/work/s.jsonl',
+    cwd: '/work',
+    prompt_id: 'prompt-1',
+    permission_mode: 'default',
+    hook_event_name: 'PermissionRequest',
+    tool_name: 'Bash',
+    tool_input: { command: 'echo hello', description: 'print greeting' },
+    ...overrides,
+  }
+}
+
 describe('persona plugin', () => {
+  test('loads the module and exports its registration hook', () => {
+    expect(typeof register).toBe('function')
+  })
+
   test('submits the node’s message as the person’s words and says so', async ($, on) => {
     const w = world(on, [{ status: 200, body: { messages: [{ id: 'm1', text: 'go ahead and merge', deadline_ms: 9_000 }] } }])
     await $.session.start(start)
@@ -80,9 +156,9 @@ describe('persona plugin', () => {
     expect(poll?.socketPath).toBe('/home/me/.persona/node.sock')
     expect(poll?.body).toEqual({
       session_id: SESSION,
-      plugin_version: '0.2.0',
-      engine_version: '2.1.326',
-      capabilities: ['busy_input', 'interrupt', 'settings'],
+      plugin_version: '0.3.0',
+      engine_version: '2.1.330',
+      capabilities: ['busy_input', 'interrupt', 'settings', 'permissions'],
       wait_ms: 25_000,
     })
     expect(ack?.url).toBe('http://persona/claude-plugin/v1/ack')
@@ -101,18 +177,43 @@ describe('persona plugin', () => {
     await $.session.start(start)
     await w.clock.settle()
 
-    // While prompt.submit waits behind the running turn, advancing the settle window acks the queued message and polls on.
+    // The settle window releases polling, but cannot prove delivery or produce a final message ack.
     await w.clock.advance(250)
     await w.clock.settle()
 
     expect(w.submitted).toEqual([{ text: 'also check edge cases', origin: { kind: 'plugin', name: 'persona', asUser: true } }])
     expect(w.aborted).toEqual(['turn-main-1'])
     expect(w.requests.filter(r => r.url.endsWith('/ack')).map(r => r.body)).toEqual([
-      { session_id: SESSION, id: 'm-busy', submitted: true },
       { session_id: SESSION, id: 'int-1', submitted: true },
       { session_id: SESSION, id: 'int-2', submitted: false, reason: 'no_turn' },
     ])
   })
+
+  for (const busy of [false, true]) {
+    for (const outcome of ['reject', 'drop'] as const) {
+      const state = busy ? 'busy' : 'idle'
+      const result = outcome === 'reject' ? 'rejection' : 'drop'
+      const reason = outcome === 'reject' ? 'failed' : 'dropped'
+      test(`reports a delayed ${state} submit ${result} only as ${reason}`, async ($, on) => {
+        const w = world(on, [
+          { status: 200, body: { messages: [{ id: 'm-delayed', text: 'delayed owner follow-up', deadline_ms: 9_000 }] } },
+        ])
+        w.setHoldSubmit(true)
+        if (busy) await $.turn.start({ text: 'initial task', turnId: 'turn-main-delayed' })
+        await $.session.start(start)
+        await w.clock.settle()
+        await w.clock.advance(250)
+        await w.clock.settle()
+
+        w.finishSubmit(outcome)
+        await w.clock.settle()
+
+        expect(w.requests.filter(r => r.url.endsWith('/ack')).map(r => r.body)).toEqual([
+          { session_id: SESSION, id: 'm-delayed', submitted: false, reason },
+        ])
+      })
+    }
+  }
 
   test('applies session-only model and effort switches on main-loop turn.step and yields when desktop changes model', async ($, on) => {
     const w = world(on, [
@@ -201,6 +302,483 @@ describe('persona plugin', () => {
     await w.clock.settle()
     expect(w.requests[0]?.socketPath).toBe('C:\\Users\\me\\persona-data\\node.sock')
   })
+
+  test('passes PermissionRequest straight through with zero HTTP calls when unauthorized', async ($, on) => {
+    const w = world(on, [{ status: 200, body: { messages: [], retry_ms: 60_000 } }])
+    await $.session.start(start)
+    await w.clock.settle()
+
+    const out = await $.classic.PermissionRequest(permEvent() as never)
+    expect(out).toEqual({})
+    expect(w.requests.filter(r => r.url.endsWith('/permission'))).toEqual([])
+  })
+
+  test('pairs flat PreToolUse tool_use_id, renews long polls with stable req_id, and returns phone allow/deny decisions', async ($, on) => {
+    const w = world(
+      on,
+      [{ status: 200, body: { messages: [], permissions: true, retry_ms: 60_000 } }],
+      { HOME: '/home/me' },
+      {
+        onPermission: (_body, call) => {
+          if (call < 3) return { status: 200, body: { action: 'renew' } }
+          return {
+            status: 200,
+            body: {
+              action: 'decide',
+              decision: {
+                behavior: 'allow',
+                updatedInput: { command: 'echo hello', description: 'print greeting' },
+                updatedPermissions: [{ type: 'addRules', rules: [{ toolName: 'Bash' }], behavior: 'allow', destination: 'session' }],
+              },
+            },
+          }
+        },
+      },
+    )
+    await $.session.start(start)
+    await w.clock.settle()
+
+    // Flat PreToolUse structure from Claude Code 2.1.330 with different key order than PermissionRequest.
+    await $.tool.call({
+      tool: 'Bash',
+      tool_use_id: 'toolu_bash_1',
+      description: 'print greeting',
+      command: 'echo hello',
+    } as never)
+
+    const out = await $.classic.PermissionRequest(permEvent() as never)
+    expect(out).toEqual({
+      decision: {
+        behavior: 'allow',
+        updatedInput: { command: 'echo hello', description: 'print greeting' },
+        updatedPermissions: [{ type: 'addRules', rules: [{ toolName: 'Bash' }], behavior: 'allow', destination: 'session' }],
+      },
+    })
+
+    const permReqs = w.requests.filter(r => r.url.endsWith('/permission'))
+    expect(permReqs.length).toBe(3)
+    const reqId = permReqs[0]?.body.req_id
+    expect(typeof reqId).toBe('string')
+    expect(permReqs.every(r => r.body.req_id === reqId)).toBe(true)
+    expect(permReqs[0]?.body.tool_use_id).toBe('toolu_bash_1')
+    expect(permReqs[0]?.body.wait_ms).toBe(25_000)
+
+    // Subsequent PostToolUse for the already-decided tool does not call /permission-done.
+    await $.classic.PostToolUse({ tool_use_id: 'toolu_bash_1', tool_name: 'Bash', tool_input: { command: 'echo hello' } } as never)
+    expect(w.requests.filter(r => r.url.endsWith('/permission-done'))).toEqual([])
+  })
+
+  test('lets a fast local hook decide during the grace window with zero /permission calls', async ($, on) => {
+    const w = world(
+      on,
+      [{ status: 200, body: { messages: [], permissions: true, retry_ms: 60_000 } }],
+      { HOME: '/home/me' },
+      {
+        corePermission: () => ({ decision: { behavior: 'allow' } }),
+      },
+    )
+    await $.session.start(start)
+    await w.clock.settle()
+
+    const out = await $.classic.PermissionRequest(permEvent() as never)
+    expect(out).toEqual({ decision: { behavior: 'allow' } })
+    expect(w.requests.filter(r => r.url.endsWith('/permission'))).toEqual([])
+  })
+
+  test('races a slow local hook against /permission and withdraws the card if the local hook later decides', async ($, on) => {
+    let finishCore!: (val: unknown) => void
+    let releasePerm!: (ans: Answer) => void
+    const w = world(
+      on,
+      [{ status: 200, body: { messages: [], permissions: true, retry_ms: 60_000 } }],
+      { HOME: '/home/me' },
+      {
+        corePermission: () =>
+          new Promise(resolve => {
+            finishCore = resolve
+          }),
+        onPermission: () =>
+          new Promise<Answer>(resolve => {
+            releasePerm = resolve
+          }),
+      },
+    )
+    await $.session.start(start)
+    await w.clock.settle()
+
+    await $.tool.call({ tool: 'Bash', tool_use_id: 'toolu_slow', command: 'echo hello', description: 'print greeting' } as never)
+    const permP = $.classic.PermissionRequest(permEvent() as never)
+    await w.clock.settle()
+    expect(w.requests.filter(r => r.url.endsWith('/permission')).length).toBe(0)
+
+    await w.clock.advance(500)
+    await w.clock.settle()
+    expect(w.requests.filter(r => r.url.endsWith('/permission')).length).toBe(1)
+
+    // Slow local hook decides before the phone answers.
+    finishCore({ decision: { behavior: 'allow' } })
+    const out = await permP
+    await w.clock.settle()
+    releasePerm({ status: 200, body: { action: 'passthrough' } })
+
+    expect(out).toEqual({ decision: { behavior: 'allow' } })
+    const dones = w.requests.filter(r => r.url.endsWith('/permission-done'))
+    expect(dones.length).toBe(1)
+    expect(dones[0]?.body.tool_use_id).toBe('toolu_slow')
+    expect(dones[0]?.body.reason).toBe('local_hook')
+  })
+
+  test('withdraws the card immediately via /permission-done when computer answers first (PostToolUse) and isolates concurrent requests', async ($, on) => {
+    const pending = new Map<string, (ans: Answer) => void>()
+    const w = world(
+      on,
+      [{ status: 200, body: { messages: [], permissions: true, retry_ms: 60_000 } }],
+      { HOME: '/home/me' },
+      {
+        onPermission: body =>
+          new Promise<Answer>(resolve => {
+            pending.set(String(body.tool_use_id), resolve)
+          }),
+      },
+    )
+    await $.session.start(start)
+    await w.clock.settle()
+
+    // Two concurrent distinct commands (Also waiting) each pair their exact tool_use_id.
+    await $.tool.call({ tool: 'Bash', tool_use_id: 'toolu_first', command: 'echo one', description: 'first' } as never)
+    await $.tool.call({ tool: 'Bash', tool_use_id: 'toolu_second', command: 'echo two', description: 'second' } as never)
+
+    const p1 = $.classic.PermissionRequest(permEvent({ tool_input: { command: 'echo one', description: 'first' } }) as never)
+    const p2 = $.classic.PermissionRequest(permEvent({ tool_input: { command: 'echo two', description: 'second' } }) as never)
+    await w.clock.settle()
+    expect(pending.has('toolu_first')).toBe(true)
+    expect(pending.has('toolu_second')).toBe(true)
+
+    // Computer allows toolu_first -> PostToolUse cancels only toolu_first.
+    await $.classic.PostToolUse({ session_id: SESSION, tool_use_id: 'toolu_first', tool_name: 'Bash', tool_input: { command: 'echo one', description: 'first' } } as never)
+    expect(await p1).toEqual({})
+    await w.clock.settle()
+    const dones = w.requests.filter(r => r.url.endsWith('/permission-done'))
+    expect(dones.length).toBe(1)
+    expect(dones[0]?.body.tool_use_id).toBe('toolu_first')
+    expect(dones[0]?.body.reason).toBe('post_tool_use')
+
+    // Phone denies toolu_second while it is still active.
+    pending.get('toolu_second')?.({
+      status: 200,
+      body: { action: 'decide', decision: { behavior: 'deny', message: 'denied from phone', interrupt: true } },
+    })
+    pending.get('toolu_first')?.({ status: 200, body: { action: 'passthrough' } })
+    expect(await p2).toEqual({
+      decision: { behavior: 'deny', message: 'denied from phone', interrupt: true },
+    })
+  })
+
+  test('does not guess tool_use_id for ambiguous concurrent identical calls and isolates PreToolUse by agent_id', async ($, on) => {
+    const pending: { body: Record<string, unknown>; resolve: (ans: Answer) => void }[] = []
+    const w = world(
+      on,
+      [{ status: 200, body: { messages: [], permissions: true, retry_ms: 60_000 } }],
+      { HOME: '/home/me' },
+      {
+        onPermission: body =>
+          new Promise<Answer>(resolve => {
+            pending.push({ body, resolve })
+          }),
+      },
+    )
+    await $.session.start(start)
+    await w.clock.settle()
+
+    // Two overlapping identical calls on the same main agent -> ambiguous: leave tool_use_id unset rather than guessing.
+    await $.tool.call({ tool: 'Bash', tool_use_id: 'toolu_dup_1', command: 'echo same' } as never)
+    await $.tool.call({ tool: 'Bash', tool_use_id: 'toolu_dup_2', command: 'echo same' } as never)
+    // Identical command on a distinct subagent stays isolated and keeps its exact tool_use_id.
+    await $.tool.call({ tool: 'Bash', tool_use_id: 'toolu_sub_same', agent_id: 'sub-a', command: 'echo same' } as never)
+
+    const p1 = $.classic.PermissionRequest(permEvent({ tool_input: { command: 'echo same' } }) as never)
+    const p2 = $.classic.PermissionRequest(permEvent({ tool_input: { command: 'echo same' } }) as never)
+    const pSub = $.classic.PermissionRequest(permEvent({ tool_input: { command: 'echo same' }, agent_id: 'sub-a' }) as never)
+    await w.clock.settle()
+
+    expect(pending.length).toBe(3)
+    expect(pending[0]?.body.tool_use_id).toBe(undefined)
+    expect(pending[1]?.body.tool_use_id).toBe(undefined)
+    expect(pending[2]?.body.tool_use_id).toBe('toolu_sub_same')
+
+    // Completing toolu_dup_1 must NOT withdraw either ambiguous main card via fallback guessing.
+    await $.classic.PostToolUse({ session_id: SESSION, tool_use_id: 'toolu_dup_1', tool_name: 'Bash', tool_input: { command: 'echo same' } } as never)
+    await w.clock.settle()
+    expect(w.requests.filter(r => r.url.endsWith('/permission-done'))).toEqual([])
+
+    // Phone approves p1 first (removing p1 from activePerms so only p2 remains), then PostToolUse fires for call 1:
+    // because p2 is marked ambiguous, handleToolDone must NOT mis-withdraw p2 by toolKey fallback!
+    pending[0]?.resolve({ status: 200, body: { action: 'decide', decision: { behavior: 'allow', updatedInput: { command: 'echo same' } } } })
+    expect(await p1).toEqual({ decision: { behavior: 'allow', updatedInput: { command: 'echo same' } } })
+    await $.classic.PostToolUse({ session_id: SESSION, tool_use_id: 'toolu_dup_1', tool_name: 'Bash', tool_input: { command: 'echo same' } } as never)
+    await w.clock.settle()
+    expect(w.requests.filter(r => r.url.endsWith('/permission-done'))).toEqual([])
+
+    // Completing toolu_sub_same cancels ONLY the subagent card.
+    await $.classic.PostToolUse({ session_id: SESSION, tool_use_id: 'toolu_sub_same', agent_id: 'sub-a', tool_name: 'Bash', tool_input: { command: 'echo same' } } as never)
+    expect(await pSub).toEqual({})
+    await w.clock.settle()
+    const dones = w.requests.filter(r => r.url.endsWith('/permission-done'))
+    expect(dones.length).toBe(1)
+    expect(dones[0]?.body.tool_use_id).toBe('toolu_sub_same')
+
+    // p2 is still alive and can still be approved from the phone.
+    pending[1]?.resolve({ status: 200, body: { action: 'decide', decision: { behavior: 'allow', updatedInput: { command: 'echo same' } } } })
+    pending[2]?.resolve({ status: 200, body: { action: 'passthrough' } })
+    expect(await p2).toEqual({ decision: { behavior: 'allow', updatedInput: { command: 'echo same' } } })
+  })
+
+  test('retains a 2-minute reconnect window for already-registered requests during node restarts and keeps socket path for /permission-done', async ($, on) => {
+    let calls = 0
+    const w = world(
+      on,
+      [
+        { status: 200, body: { messages: [], permissions: true, retry_ms: 1_000 } },
+        // Second /poll fails -> clears permissionAuth while the card is active.
+        { fail: true },
+      ],
+      { HOME: '/home/me' },
+      {
+        onPermission: () => {
+          calls++
+          if (calls === 1) return { status: 200, body: { action: 'renew' } }
+          if (calls <= 12) return { fail: true } // 11 transient failures (~11 s node restart)
+          return { status: 200, body: { action: 'decide', decision: { behavior: 'allow', updatedInput: { command: 'echo survive' } } } }
+        },
+      },
+    )
+    await $.session.start(start)
+    await w.clock.settle()
+
+    const permP = $.classic.PermissionRequest(permEvent({ tool_input: { command: 'echo survive' } }) as never)
+    await w.clock.settle()
+    // Advance across 11 seconds of node restart (> initial 3-error limit, well under 2-minute reconnect window).
+    for (let i = 0; i < 12; i++) {
+      await w.clock.advance(1_000)
+      await w.clock.settle()
+    }
+    expect(await permP).toEqual({
+      decision: { behavior: 'allow', updatedInput: { command: 'echo survive' } },
+    })
+    expect(calls).toBe(13)
+  })
+
+  test('still delivers /permission-done using the request socket even after /poll fails and clears permissionAuth', async ($, on) => {
+    let releasePerm!: (ans: Answer) => void
+    const w = world(
+      on,
+      [
+        { status: 200, body: { messages: [], permissions: true, retry_ms: 100 } },
+        { fail: true }, // clears permissionAuth after 100 ms
+      ],
+      { HOME: '/home/me' },
+      {
+        onPermission: () =>
+          new Promise<Answer>(resolve => {
+            releasePerm = resolve
+          }),
+      },
+    )
+    await $.session.start(start)
+    await w.clock.settle()
+
+    await $.tool.call({ tool: 'Bash', tool_use_id: 'toolu_offline_poll', command: 'echo hi' } as never)
+    const permP = $.classic.PermissionRequest(permEvent({ tool_input: { command: 'echo hi' } }) as never)
+    await w.clock.settle()
+
+    // Let the second /poll fail and clear permissionAuth.
+    await w.clock.advance(100)
+    await w.clock.settle()
+
+    // Computer answers -> PostToolUse must still send /permission-done to the request's captured socketPath.
+    await $.classic.PostToolUse({ session_id: SESSION, tool_use_id: 'toolu_offline_poll', tool_name: 'Bash', tool_input: { command: 'echo hi' } } as never)
+    expect(await permP).toEqual({})
+    releasePerm({ status: 200, body: { action: 'passthrough' } })
+    await w.clock.settle()
+
+    const dones = w.requests.filter(r => r.url.endsWith('/permission-done'))
+    expect(dones.length).toBe(1)
+    expect(dones[0]?.socketPath).toBe('/home/me/.persona/node.sock')
+    expect(dones[0]?.body.tool_use_id).toBe('toolu_offline_poll')
+  })
+
+  test('falls back to passthrough when a connected request stays disconnected for the full 2-minute reconnect window', async ($, on) => {
+    let calls = 0
+    const w = world(
+      on,
+      [{ status: 200, body: { messages: [], permissions: true, retry_ms: 60_000 } }],
+      { HOME: '/home/me' },
+      {
+        onPermission: () => {
+          calls++
+          if (calls === 1) return { status: 200, body: { action: 'renew' } }
+          return { fail: true }
+        },
+      },
+    )
+    await $.session.start(start)
+    await w.clock.settle()
+
+    const permP = $.classic.PermissionRequest(permEvent() as never)
+    await w.clock.settle()
+    for (let i = 0; i < 121; i++) {
+      await w.clock.advance(1_000)
+      await w.clock.settle()
+    }
+    expect(await permP).toEqual({})
+    expect(calls).toBeGreaterThanOrEqual(120)
+  })
+
+  test('cancels pending main-turn requests on turn.complete without cancelling an active subagent request', async ($, on) => {
+    const pending = new Map<string, (ans: Answer) => void>()
+    const w = world(
+      on,
+      [{ status: 200, body: { messages: [], permissions: true, retry_ms: 60_000 } }],
+      { HOME: '/home/me' },
+      {
+        onPermission: body =>
+          new Promise<Answer>(resolve => {
+            pending.set(String(body.tool_use_id), resolve)
+          }),
+      },
+    )
+    await $.session.start(start)
+    await w.clock.settle()
+
+    await $.tool.call({ tool: 'Bash', tool_use_id: 'toolu_main', command: 'echo main' } as never)
+    await $.tool.call({ tool: 'Bash', tool_use_id: 'toolu_sub', agent_id: 'sub-1', command: 'echo sub' } as never)
+    const pMain = $.classic.PermissionRequest(permEvent({ tool_input: { command: 'echo main' } }) as never)
+    const pSub = $.classic.PermissionRequest(permEvent({ tool_input: { command: 'echo sub' }, agent_id: 'sub-1' }) as never)
+    await w.clock.settle()
+
+    await $.turn.complete({ turnId: 'turn-1', answer: 'done' } as never)
+    expect(await pMain).toEqual({})
+    await w.clock.settle()
+
+    const dones = w.requests.filter(r => r.url.endsWith('/permission-done'))
+    expect(dones.length).toBe(1)
+    expect(dones[0]?.body.reason).toBe('turn_complete')
+    expect(Array.isArray(dones[0]?.body.req_ids)).toBe(true)
+    expect((dones[0]?.body.req_ids as string[]).length).toBe(1)
+
+    // Subagent request is unaffected and can still be approved from the phone.
+    pending.get('toolu_sub')?.({
+      status: 200,
+      body: { action: 'decide', decision: { behavior: 'allow', updatedInput: { command: 'echo sub' } } },
+    })
+    pending.get('toolu_main')?.({ status: 200, body: { action: 'passthrough' } })
+    expect(await pSub).toEqual({
+      decision: { behavior: 'allow', updatedInput: { command: 'echo sub' } },
+    })
+  })
+
+  test('withdraws card on PermissionDenied and bridges AskUserQuestion and ExitPlanMode decisions', async ($, on) => {
+    let releaseDenied!: (ans: Answer) => void
+    const w = world(
+      on,
+      [{ status: 200, body: { messages: [], permissions: true, retry_ms: 60_000 } }],
+      { HOME: '/home/me' },
+      {
+        onPermission: body => {
+          if (body.tool_name === 'AskUserQuestion') {
+            return {
+              status: 200,
+              body: {
+                action: 'decide',
+                decision: {
+                  behavior: 'allow',
+                  updatedInput: { ...(body.tool_input as Record<string, unknown>), answers: { 'Color?': 'Crimson' } },
+                },
+              },
+            }
+          }
+          if (body.tool_name === 'ExitPlanMode') {
+            return {
+              status: 200,
+              body: {
+                action: 'decide',
+                decision: {
+                  behavior: 'allow',
+                  updatedInput: body.tool_input as Record<string, unknown>,
+                  updatedPermissions: [{ type: 'setMode', mode: 'acceptEdits', destination: 'session' }],
+                },
+              },
+            }
+          }
+          return new Promise<Answer>(resolve => {
+            releaseDenied = resolve
+          })
+        },
+      },
+    )
+    await $.session.start(start)
+    await w.clock.settle()
+
+    // AskUserQuestion allow + updatedInput.answers.
+    await $.tool.call({ tool: 'AskUserQuestion', tool_use_id: 'toolu_ask', questions: [{ question: 'Color?' }] } as never)
+    const askOut = await $.classic.PermissionRequest(
+      permEvent({ tool_name: 'AskUserQuestion', tool_input: { questions: [{ question: 'Color?' }] } }) as never,
+    )
+    expect(askOut).toEqual({
+      decision: {
+        behavior: 'allow',
+        updatedInput: { questions: [{ question: 'Color?' }], answers: { 'Color?': 'Crimson' } },
+      },
+    })
+
+    // ExitPlanMode allow + updatedInput + setMode.
+    const planOut = await $.classic.PermissionRequest(
+      permEvent({ tool_name: 'ExitPlanMode', tool_input: { plan: 'Step 1' } }) as never,
+    )
+    expect(planOut).toEqual({
+      decision: {
+        behavior: 'allow',
+        updatedInput: { plan: 'Step 1' },
+        updatedPermissions: [{ type: 'setMode', mode: 'acceptEdits', destination: 'session' }],
+      },
+    })
+
+    // PermissionDenied cancels active request and sends /permission-done.
+    await $.tool.call({ tool: 'Bash', tool_use_id: 'toolu_denied', command: 'rm -rf /' } as never)
+    const deniedP = $.classic.PermissionRequest(permEvent({ tool_input: { command: 'rm -rf /' } }) as never)
+    await w.clock.settle()
+    await $.classic.PermissionDenied({ session_id: SESSION, tool_use_id: 'toolu_denied', tool_name: 'Bash' } as never)
+    expect(await deniedP).toEqual({})
+    releaseDenied({ status: 200, body: { action: 'passthrough' } })
+    await w.clock.settle()
+    const dones = w.requests.filter(r => r.url.endsWith('/permission-done'))
+    expect(dones.length).toBe(1)
+    expect(dones[0]?.body.tool_use_id).toBe('toolu_denied')
+    expect(dones[0]?.body.reason).toBe('permission_denied')
+  })
+
+  test('falls back to passthrough after repeated transient fetch failures on /permission', async ($, on) => {
+    const w = world(
+      on,
+      [{ status: 200, body: { messages: [], permissions: true, retry_ms: 60_000 } }],
+      { HOME: '/home/me' },
+      {
+        onPermission: () => ({ fail: true }),
+      },
+    )
+    await $.session.start(start)
+    await w.clock.settle()
+
+    const permP = $.classic.PermissionRequest(permEvent() as never)
+    await w.clock.settle()
+    await w.clock.advance(1_000)
+    await w.clock.settle()
+    await w.clock.advance(1_000)
+    await w.clock.settle()
+
+    expect(await permP).toEqual({})
+    expect(w.requests.filter(r => r.url.endsWith('/permission')).length).toBe(3)
+  })
 })
 
 describe('protocol helpers', () => {
@@ -217,16 +795,18 @@ describe('protocol helpers', () => {
   })
 
   test('poll answers and override helpers', () => {
-    expect(readPoll(200, '{"messages":[{"id":"a","text":"hi","deadline_ms":5}],"interrupt":{"id":"i1","deadline_ms":9},"settings":{"id":"s1","model":"opus","effort":"high"},"retry_ms":10}')).toEqual({
+    expect(readPoll(200, '{"messages":[{"id":"a","text":"hi","deadline_ms":5}],"interrupt":{"id":"i1","deadline_ms":9},"settings":{"id":"s1","model":"opus","effort":"high"},"permissions":true,"retry_ms":10}')).toEqual({
       kind: 'messages',
       messages: [{ id: 'a', text: 'hi', deadlineMs: 5 }],
       interrupt: { id: 'i1', deadlineMs: 9 },
       settings: { id: 's1', model: 'opus', effort: 'high' },
+      permissions: true,
       retryMs: 10,
     })
     expect(readPoll(200, '{"messages":[],"settings":{"id":"s2","model":"-bad"}}')).toEqual({
       kind: 'messages',
       messages: [],
+      permissions: false,
       retryMs: 0,
     })
     const ov = mergeOverride(undefined, SESSION, { id: 's1', model: 'opus', effort: 'auto' }, 'claude-sonnet-5-5')
@@ -239,5 +819,49 @@ describe('protocol helpers', () => {
     expect(verdict({ id: 'a', text: 'x'.repeat(200_001), deadlineMs: 10 }, 0)).toBe('invalid')
     expect(nextBackoff(0)).toBe(2_000)
     expect(nextBackoff(40_000)).toBe(60_000)
+  })
+
+  test('permission helpers and PreToolUse FIFO cache', () => {
+    expect(readPermissionAnswer(200, '{"action":"renew"}')).toEqual({ action: 'renew' })
+    expect(readPermissionAnswer(200, '{"action":"passthrough"}')).toEqual({ action: 'passthrough' })
+    expect(readPermissionAnswer(403, '{}')).toEqual({ action: 'refused' })
+    expect(readPermissionAnswer(404, '{}')).toEqual({ action: 'passthrough' })
+    expect(readPermissionAnswer(500, '')).toEqual({ action: 'unavailable' })
+    expect(readPermissionAnswer(200, '{"action":"decide","decision":{"behavior":"allow","updatedInput":{"a":1}}}')).toEqual({
+      action: 'decide',
+      decision: { behavior: 'allow', updatedInput: { a: 1 } },
+    })
+    expect(readPermissionAnswer(200, '{"action":"decide","decision":{"behavior":"deny","message":"no","interrupt":true}}')).toEqual({
+      action: 'decide',
+      decision: { behavior: 'deny', message: 'no', interrupt: true },
+    })
+    expect(hasPermissionDecision({ decision: { behavior: 'allow' } })).toBe(true)
+    expect(hasPermissionDecision({})).toBe(false)
+    expect(canonicalJson({ b: 2, a: 1 })).toBe('{"a":1,"b":2}')
+
+    expect(extractPreToolUse({ tool: 'Bash', tool_use_id: 't1', agent_id: 'sub-1', command: 'ls' })).toEqual({
+      agentId: 'sub-1',
+      toolName: 'Bash',
+      toolUseId: 't1',
+      toolInput: { command: 'ls' },
+    })
+    const cache = createPreToolCache()
+    // Sequential identical calls pair cleanly once the first completes.
+    recordPreTool(cache, { tool: 'Bash', tool_use_id: 't1', command: 'ls' })
+    expect(takePreTool(cache, 'Bash', { command: 'ls' })).toEqual({ id: 't1', ambiguous: false })
+    markToolCompleted(cache, 't1')
+    expect(isToolCompleted(cache, 't1')).toBe(true)
+    recordPreTool(cache, { tool: 'Bash', tool_use_id: 't2', command: 'ls' })
+    expect(takePreTool(cache, 'Bash', { command: 'ls' })).toEqual({ id: 't2', ambiguous: false })
+
+    // Concurrent identical calls on the same agent mark ambiguous and refuse to guess.
+    recordPreTool(cache, { tool: 'Bash', tool_use_id: 't3', command: 'pwd' })
+    recordPreTool(cache, { tool: 'Bash', tool_use_id: 't4', command: 'pwd' })
+    recordPreTool(cache, { tool: 'Bash', tool_use_id: 't_sub', agent_id: 'sub-1', command: 'pwd' })
+    expect(takePreTool(cache, 'Bash', { command: 'pwd' })).toEqual({ id: '', ambiguous: true })
+    expect(takePreTool(cache, 'Bash', { command: 'pwd' }, 'sub-1')).toEqual({ id: 't_sub', ambiguous: false })
+    clearAgentPreTools(cache, '')
+    recordPreTool(cache, { tool: 'Bash', tool_use_id: 't5', command: 'pwd' })
+    expect(takePreTool(cache, 'Bash', { command: 'pwd' })).toEqual({ id: 't5', ambiguous: false })
   })
 })

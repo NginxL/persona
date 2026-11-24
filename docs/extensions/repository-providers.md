@@ -192,9 +192,8 @@ fake provider.
 
 ## In the apps
 
-The web shows a provider extension's sources and repositories only once there is one: with GitHub and GitLab alone,
-every screen is what it was before #10330, and the to-do requests are unchanged. Settings › Repositories sends one more
-request, the providers read beside the list.
+The web shows the Sources list when an extension source is installed or referenced by a saved repository. Settings ›
+Repositories reads the providers beside the list.
 
 - **Settings › Repositories** (`web/src/views/settings/Repositories.tsx`) reads `GET …/repositories/providers` beside
   the list (a 404 or a failure means the built-ins only, never an error). With an extension's source installed or a
@@ -210,6 +209,12 @@ request, the providers read beside the list.
   the old id, which the list does not have: the page takes it to be the listed source with the same contribution that
   claims its host, and sends the saved id, which the hub follows. Until the providers are read (or when they can't be),
   the page claims nothing about a saved repository's source and lets the hub answer a new address for it.
+  **Ask assistant to connect** opens a new chat draft when an address is unsupported, a source is unavailable, or a
+  preview or save fails. The editable draft includes the address with any userinfo, query and fragment removed, and
+  the filled repository details. If the address cannot be read, the draft asks for an address without credentials.
+  It asks the assistant to set up or fix a local provider and prepare the binding.
+  **Ask assistant to add a source** in the expanded panel opens the same onboarding flow for a platform the user
+  identifies in chat.
 - **A to-do's Repositories and work** (`web/src/ui/TaskRepositoryBindingsEditor.tsx`) draws an extension's repository
   with the extension mark and, after its address, its source's name as saved with it (`provider_name`, else "Another
   source"; never the `ext:` id; the to-do page reads no providers list, so a source renamed since shows its saved

@@ -15,6 +15,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.ClipEntry
 import androidx.compose.ui.platform.Clipboard
 import androidx.compose.ui.platform.LocalClipboard
+import persona.core.inbox.*
 
 /**
  * An item the selection menu of a native Feishu view adds ("AI edit", "Use as context", "Hand to Persona"): its label and what

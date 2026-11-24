@@ -35,6 +35,7 @@ import persona.core.navigation.ConversationKind
 import persona.core.navigation.Navigator
 import persona.core.navigation.RouteSource
 import java.io.File
+import persona.core.inbox.*
 
 @RunWith(AndroidJUnit4::class)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)

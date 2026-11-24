@@ -564,3 +564,86 @@ func roundAnchor(path string) (roundTranscript, error) {
 	}
 	return out, nil
 }
+
+// noteRoundFork records that a background supervision round for baseID produced a forked Claude session id forkID.
+// The forked branch inherits the base session's assistant state so hooks and MCP calls retain assistant identity,
+// and stays hidden from the ordinary Agents list.
+func (n *Node) noteRoundFork(forkID, baseID string) {
+	if forkID == "" || baseID == "" || forkID == baseID || !validID(forkID) {
+		return
+	}
+	n.mu.Lock()
+	if n.roundForks == nil {
+		n.roundForks = map[string]string{}
+	}
+	already := n.roundForks[forkID] == baseID
+	n.roundForks[forkID] = baseID
+	p := n.procs[baseID]
+	n.mu.Unlock()
+	if n.state != nil {
+		cur, hasCur := n.state.get(forkID)
+		if !hasCur || cur.RoundForkOf != baseID {
+			st, _ := n.state.get(baseID)
+			if p != nil && st.Cwd == "" {
+				st.Cwd = p.cwd
+			}
+			if p != nil && st.Launcher == "" {
+				st.Launcher = p.launcher
+			}
+			n.state.put(forkID, sessionState{
+				Launcher:                st.Launcher,
+				Cwd:                     st.Cwd,
+				Model:                   st.Model,
+				ModelFingerprint:        st.ModelFingerprint,
+				ModelEffort:             st.ModelEffort,
+				Origin:                  st.Origin,
+				OriginKnown:             st.OriginKnown,
+				ConfigDir:               st.ConfigDir,
+				SupervisionInstructions: st.SupervisionInstructions,
+				FollowsSetting:          st.FollowsSetting,
+				AppMode:                 st.AppMode,
+				AppModeExplicit:         st.AppModeExplicit,
+				AppEffort:               st.AppEffort,
+				StartedAt:               time.Now().UTC(),
+				RoundForkOf:             baseID,
+			})
+		}
+	}
+	if !already {
+		forgetOfflineScan()
+		n.notifySessionsSoon()
+	}
+}
+
+// roundForkParent returns the base background supervisor session id when id is a forked supervision round branch.
+func (n *Node) roundForkParent(id string) string {
+	if id == "" {
+		return ""
+	}
+	n.mu.Lock()
+	base := n.roundForks[id]
+	n.mu.Unlock()
+	if base != "" {
+		return base
+	}
+	if n.state != nil {
+		if st, ok := n.state.get(id); ok && st.RoundForkOf != "" {
+			return st.RoundForkOf
+		}
+	}
+	return ""
+}
+
+// isRoundFork reports whether id is a forked background supervision round branch that should stay hidden from the
+// ordinary session/Agents list.
+func (n *Node) isRoundFork(id string) bool {
+	return n.roundForkParent(id) != ""
+}
+
+// canonicalAssistantSession maps a forked background supervision round id back to its base supervisor id.
+func (n *Node) canonicalAssistantSession(id string) string {
+	if base := n.roundForkParent(id); base != "" {
+		return base
+	}
+	return id
+}

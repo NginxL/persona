@@ -1,9 +1,11 @@
 {
   "takeover": "接管",
   "takeover_new": "另开新会话继续",
+  "takeover_new_short": "新会话继续",
   "takeover_title": "接管 Codex",
   "takeover_confirm": "确认接管",
-  "takeover_running_confirm": "会结束终端里正在跑的这一轮",
+  "takeover_running_confirm": "会结束终端里正在跑的这一轮。",
+  "takeover_done": "已接管",
   "reason_encrypted_context": "加密的对话上下文无法在此会话中恢复，请另开新会话继续。",
   "reason_unavailable": "此对话无法在当前会话中恢复，请另开新会话继续。"
 }

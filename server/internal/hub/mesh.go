@@ -29,21 +29,22 @@ const (
 var meshRefreshEvery = 30 * time.Second
 
 type meshState struct {
-	mu      sync.Mutex
-	running bool // initMesh ran (a hub in unit tests has no mesh: everything is local)
-	ctx     context.Context
-	started time.Time
-	epoch   int64
-	rev     int64
-	links   map[string]*peerLink   // hub id -> its live link
-	records map[string]*hubRecord  // hub id -> its newest record, this hub's own included
-	seenAt  map[string]time.Time   // hub id -> when its record last arrived or it was reachable
-	peers   map[string]db.Peer     // the paired hubs (peers table)
-	dialers map[string]*peerDialer // hub id -> the loop dialing it
-	built   []byte                 // the last record this hub published, without its rev
-	publish bool                   // a publish is scheduled
-	saveAt  time.Time              // records last persisted
-	dirty   bool                   // records changed since
+	mu           sync.Mutex
+	running      bool // initMesh ran (a hub in unit tests has no mesh: everything is local)
+	ctx          context.Context
+	started      time.Time
+	epoch        int64
+	rev          int64
+	links        map[string]*peerLink   // hub id -> its live link
+	records      map[string]*hubRecord  // hub id -> its newest record, this hub's own included
+	seenAt       map[string]time.Time   // hub id -> when its record last arrived or it was reachable
+	peers        map[string]db.Peer     // the paired hubs (peers table)
+	dialers      map[string]*peerDialer // hub id -> the loop dialing it
+	built        []byte                 // the last record this hub published, without its rev
+	publish      bool                   // a publish is scheduled
+	saveAt       time.Time              // records last persisted
+	dirty        bool                   // records changed since
+	saveDeferred bool                   // persist deferred by snapshot pause
 
 	group meshGroup // the center and its term (mesh_group.go)
 	// handedTo: the center (and term) this hub last handed its device credentials to (mesh_group.go).
@@ -393,11 +394,39 @@ func (h *Hub) meshPersist(force bool) {
 	}
 	ms.dirty, ms.saveAt = false, time.Now()
 	ms.mu.Unlock()
+	if !h.quiesce.beginOrDefer(func() {
+		ms.mu.Lock()
+		ms.dirty = true
+		ms.saveDeferred = true
+		ms.mu.Unlock()
+	}) {
+		return
+	}
+	defer h.quiesce.end()
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 	if err := h.store.PutSetting(ctx, "mesh.records", kept); err != nil {
 		h.logf("mesh: save records: %v", err)
 	}
+}
+
+func (h *Hub) resumeMeshPersist() {
+	if h.store == nil {
+		return
+	}
+	ms := &h.mesh
+	ms.mu.Lock()
+	deferred := ms.saveDeferred
+	ms.saveDeferred = false
+	ms.mu.Unlock()
+	if !deferred {
+		return
+	}
+	h.nodeWorkers.Add(1)
+	go func() {
+		defer h.nodeWorkers.Done()
+		h.meshPersist(true)
+	}()
 }
 
 // meshHub is a hub of the group as the apps see it in hello's mesh (docs/archive/operations/plan-hub-mesh.md 2.6, plan-hub-center.md

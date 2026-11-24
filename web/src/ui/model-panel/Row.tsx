@@ -44,6 +44,9 @@ interface RowProps {
   keepSecond?: boolean;
   /** A mixed disclosure list uses buttons rather than listbox options. */
   asButton?: boolean;
+  /** The panel's middle column (#12315): one tighter line, the effort and Fast left to the columns beside it, a check on
+   *  the model that runs, a description kept for the tooltip. */
+  dense?: boolean;
   /** Why it can't be picked (its tooltip); undefined while it can. */
   blocked?: { reason: string };
   customizable: boolean;
@@ -62,7 +65,7 @@ interface RowProps {
   onForget?: () => void;
 }
 
-export function Row({ row, second, describes, keepSecond, asButton, blocked, customizable, flyoutOpen, starred, starRemoves, frozen, onPick, onStar, onCustomize, onCustomizeKey, onForget }: RowProps) {
+export function Row({ row, second, describes, keepSecond, asButton, dense, blocked, customizable, flyoutOpen, starred, starRemoves, frozen, onPick, onStar, onCustomize, onCustomizeKey, onForget }: RowProps) {
   const { model, provider } = row;
   const saved = row.kind === "favorite" || row.kind === "recent";
   const name = row.kind === "typed" ? t("ui-modelpanel.use_typed", { id: model.id }) : row.preset ? row.preset.name : row.kind === "favorite" || row.kind === "recent" ? `${provider.name} · ${model.name}` : model.name;
@@ -118,7 +121,7 @@ export function Row({ row, second, describes, keepSecond, asButton, blocked, cus
       aria-disabled={ariaOff || undefined}
       aria-keyshortcuts={customizable ? "ArrowLeft" : undefined}
       tabIndex={ariaOff ? -1 : 0}
-      title={blocked?.reason || undefined}
+      title={blocked?.reason || (dense && describes && second) || undefined}
       aria-description={blocked?.reason || undefined}
       data-panel-row={row.key}
       data-current={row.current || undefined}
@@ -134,7 +137,8 @@ export function Row({ row, second, describes, keepSecond, asButton, blocked, cus
       }}
       onKeyDown={key}
       className={cx(
-        "group/row relative z-[1] flex w-full flex-col rounded-control px-3 py-2 text-[14px] leading-[1.43] text-ink outline-none select-none [&+[data-panel-row]]:mt-1",
+        "group/row relative z-[1] flex w-full flex-col rounded-control px-3 text-[14px] leading-[1.43] text-ink outline-none select-none",
+        dense ? "py-1.5 [&+[data-panel-row]]:mt-px" : "py-2 [&+[data-panel-row]]:mt-1",
         "focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent",
         row.current && "bg-hover-2 data-[glide]:bg-transparent",
         saved && "min-h-11 justify-center",
@@ -146,7 +150,7 @@ export function Row({ row, second, describes, keepSecond, asButton, blocked, cus
         <span className="flex size-[18px] shrink-0 items-center justify-center text-ink-2">
           <ProviderMark engine={provider.engine} label={provider.engineLabel} size={16} />
         </span>
-        <span ref={nameEl} title={row.kind === "typed" ? model.id : name} className={cx("min-w-0 truncate leading-5 font-medium", model.custom && stars && "font-mono")}>{name}</span>
+        <span ref={nameEl} title={row.kind === "typed" ? model.id : cut ? name : undefined} className={cx("min-w-0 truncate leading-5 font-medium", model.custom && stars && "font-mono")}>{name}</span>
         {row.latest && <span data-row-latest className="shrink-0 text-submeta leading-5 text-ink-3">{t("ui-modelpanel.latest")}</span>}
         {tier && (
           <span data-price-tier={tier} aria-label={t("ui-modelpanel.price_tier", { tier })} title={t("ui-modelpanel.price_tier", { tier })} className="shrink-0 text-[11px] leading-none font-semibold tracking-[0.5px] text-ink-2">
@@ -181,14 +185,18 @@ export function Row({ row, second, describes, keepSecond, asButton, blocked, cus
         {model.custom && row.kind === "model" && onForget && (
           <RowButton icon="x" disabled={frozen} label={t("ui-modelpanel.forget", { id: model.id })} onClick={onForget} className={cx("text-ink-3 hover:text-ink-2", REVEAL)} />
         )}
-        <span className="ml-auto flex shrink-0 items-center">
-          <span title={setupTitle} data-row-setup className="flex max-w-[118px] shrink-0 items-center gap-1 truncate text-[12px] text-ink-3">
-            {effort && <span className="truncate">{effortTitle(effort)}</span>}
-            {row.setup.fast && <Icon name="bolt" size={11} className="shrink-0 fill-current" />}
+        {dense ? (
+          row.current && <Icon name="check" size={14} stroke={2.5} className="ml-auto shrink-0 text-ink" />
+        ) : (
+          <span className="ml-auto flex shrink-0 items-center">
+            <span title={setupTitle} data-row-setup className="flex max-w-[118px] shrink-0 items-center gap-1 truncate text-[12px] text-ink-3">
+              {effort && <span className="truncate">{effortTitle(effort)}</span>}
+              {row.setup.fast && <Icon name="bolt" size={11} className="shrink-0 fill-current" />}
+            </span>
           </span>
-        </span>
+        )}
       </div>
-      {!saved && second && (keepSecond || idLine !== "always") && (
+      {!saved && second && !(dense && describes) && (keepSecond || idLine !== "always") && (
         <div title={second} className={cx("min-w-0 truncate pt-px pl-[26px] text-[12px] leading-[1.4] text-ink-2", describes && "max-w-[30ch]", !keepSecond && idLine === "touch" && "[@media(hover:none)]:hidden")}>
           {second}
         </div>

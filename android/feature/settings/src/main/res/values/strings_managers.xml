@@ -74,4 +74,8 @@
     <string name="settings_group_device">This device</string>
     <string name="settings_group_hub">Hub</string>
     <string name="settings_group_hub_footer">These two groups are the same whichever assistant is current.</string>
+    <string name="settings_switcher_assistants_on">Assistants on %1$s</string>
+    <string name="settings_switcher_hub_current">%1$s, Current</string>
+    <string name="settings_switcher_hub_connecting">Connecting…</string>
+    <string name="settings_switcher_hub_switch_failed">Couldn\'t switch hubs.</string>
 </resources>

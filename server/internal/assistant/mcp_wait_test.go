@@ -24,6 +24,9 @@ type mcpWaitElicitExtension struct {
 	answer func(context.Context) (map[string]any, error)
 }
 
+// ConnectorTool: none of its tools is a connector's.
+func (e *mcpWaitElicitExtension) ConnectorTool(string) bool { return false }
+
 func (e *mcpWaitElicitExtension) AnswerComputerElicit(ctx context.Context, _ string, _ json.RawMessage) (map[string]any, error) {
 	return e.answer(ctx)
 }

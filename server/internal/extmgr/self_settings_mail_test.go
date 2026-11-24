@@ -7,8 +7,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/nwverse/persona/server/internal/extmgr/mailport"
 	"github.com/nwverse/persona/server/internal/i18n"
-	"github.com/nwverse/persona/server/internal/mail"
+	"github.com/nwverse/persona/server/internal/mailwire"
 	"github.com/nwverse/persona/server/internal/proto"
 )
 
@@ -16,22 +17,25 @@ import (
 
 type selfSettingsMail struct {
 	Mail
-	added []mail.AddAccountRequest
+	added []mailwire.AddAccountRequest
 }
 
 func (f *selfSettingsMail) Tools() []proto.Tool { return nil }
-func (f *selfSettingsMail) AddAccount(req mail.AddAccountRequest) (*mail.MailAccount, error) {
+
+// PasswordGuide: the example domains have none.
+func (f *selfSettingsMail) PasswordGuide(string, string) string { return "" }
+func (f *selfSettingsMail) AddAccount(req mailwire.AddAccountRequest) (*mailwire.MailAccount, error) {
 	f.added = append(f.added, req)
-	return &mail.MailAccount{ID: "acc_1", Email: req.Email, Provider: req.Provider}, nil
+	return &mailwire.MailAccount{ID: "acc_1", Email: req.Email, Provider: req.Provider}, nil
 }
 
 func TestSelfSettingsMailRequest(t *testing.T) {
-	req, summary, err := mailAccountRequest(i18n.Default, json.RawMessage(`{"email":" Me@Example.com ","imap_host":"imap.example.com","imap_port":993,"smtp_host":"smtp.example.com"}`))
-	if err != nil || req.Email != "me@example.com" || req.Password != "" || req.Provider != mail.ProviderIMAP || !strings.Contains(summary, "imap.example.com:993") {
+	req, summary, err := mailAccountRequest(i18n.Default, json.RawMessage(`{"email":" Me@Example.com ","imap_host":"imap.example.com","imap_port":993,"smtp_host":"smtp.example.com"}`), nil)
+	if err != nil || req.Email != "me@example.com" || req.Password != "" || req.Provider != mailwire.ProviderIMAP || !strings.Contains(summary, "imap.example.com:993") {
 		t.Fatalf("request %+v, summary %q, error %v", req, summary, err)
 	}
 	for _, input := range []string{`{"email":"a@gmail.com"}`, `{"email":"a@example.com","provider":"gmail"}`, `{"email":"nope"}`} {
-		if _, _, err := mailAccountRequest(i18n.Default, json.RawMessage(input)); err == nil {
+		if _, _, err := mailAccountRequest(i18n.Default, json.RawMessage(input), nil); err == nil {
 			t.Fatalf("accepted %s", input)
 		}
 	}
@@ -77,19 +81,24 @@ func TestSelfSettingsMailNeedsPhoneInput(t *testing.T) {
 
 // What the card says, in each language.
 func TestMailAccountRequestInEnglish(t *testing.T) {
-	if _, summary, err := mailAccountRequest(i18n.Default, json.RawMessage(`{"email":"me@qq.com"}`)); err != nil ||
-		!strings.Contains(summary, "mail.qq.com") || !strings.Contains(summary, "生成授权码") {
-		t.Errorf("mail qq.com: %q %v", summary, err)
+	// The providers' guides are the mail module's; a build without it checks the rest.
+	var guide func(lang, email string) string
+	if mailport.Factory() != nil {
+		guide = testMail(t).PasswordGuide
+		if _, summary, err := mailAccountRequest(i18n.Default, json.RawMessage(`{"email":"me@qq.com"}`), guide); err != nil ||
+			!strings.Contains(summary, "mail.qq.com") || !strings.Contains(summary, "生成授权码") {
+			t.Errorf("mail qq.com: %q %v", summary, err)
+		}
+		if _, summary, err := mailAccountRequest(i18n.En, json.RawMessage(`{"email":"me@163.com"}`), guide); err != nil ||
+			!strings.Contains(summary, "mail.163.com") || !strings.Contains(summary, "authorization code") {
+			t.Errorf("mail 163.com en: %q %v", summary, err)
+		}
 	}
-	if _, summary, err := mailAccountRequest(i18n.En, json.RawMessage(`{"email":"me@163.com"}`)); err != nil ||
-		!strings.Contains(summary, "mail.163.com") || !strings.Contains(summary, "authorization code") {
-		t.Errorf("mail 163.com en: %q %v", summary, err)
-	}
-	if _, summary, err := mailAccountRequest(i18n.En, json.RawMessage(`{"email":"me@qq.com","imap_host":"imap.example.com"}`)); err != nil ||
+	if _, summary, err := mailAccountRequest(i18n.En, json.RawMessage(`{"email":"me@qq.com","imap_host":"imap.example.com"}`), guide); err != nil ||
 		strings.Contains(summary, "authorization code") {
 		t.Errorf("mail qq.com with its own servers: %q %v", summary, err)
 	}
-	_, summary, err := mailAccountRequest(i18n.En, json.RawMessage(`{"email":"me@example.com"}`))
+	_, summary, err := mailAccountRequest(i18n.En, json.RawMessage(`{"email":"me@example.com"}`), guide)
 	if err != nil || summary != "Add mail account me@example.com (servers detected automatically). After you enter the password it connects once before saving" {
 		t.Errorf("mail en: %q %v", summary, err)
 	}

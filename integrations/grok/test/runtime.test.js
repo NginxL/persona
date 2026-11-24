@@ -343,6 +343,23 @@ test('native transcript separates intermediate text, tools and final answer', ()
   assert.equal(parsed.lastText, 'Answer')
 })
 
+test('terminal tool_call_update retains output streamed in earlier updates', () => {
+  const updates = [
+    { sessionUpdate: 'tool_call', toolCallId: 't1', title: 'read_file' },
+    { sessionUpdate: 'tool_call_update', toolCallId: 't1', status: 'in_progress', content: [{ type: 'content', content: { type: 'text', text: 'Streamed text' } }] },
+    { sessionUpdate: 'tool_call_update', toolCallId: 't1', status: 'completed' },
+    { sessionUpdate: 'tool_call', toolCallId: 't2', title: 'run_terminal_command' },
+    { sessionUpdate: 'tool_call_update', toolCallId: 't2', status: 'in_progress', rawOutput: 'exit 1: permission denied' },
+    { sessionUpdate: 'tool_call_update', toolCallId: 't2', status: 'failed', content: [] },
+  ]
+  const parsed = parseTranscript(updates.map((update) => JSON.stringify({ method: 'session/update', params: { update } })).join('\n'))
+  const results = parsed.items.filter((i) => i.kind === 'tool_result')
+  assert.deepEqual(results.map((r) => ({ id: r.tool_use_id, text: r.text, is_error: r.is_error })), [
+    { id: 't1', text: 'Streamed text', is_error: false },
+    { id: 't2', text: 'exit 1: permission denied', is_error: true },
+  ])
+})
+
 test('unsupported reasoning effort fails without claiming the setting applied', async (t) => {
   const f = await fixture(t)
   await f.start()

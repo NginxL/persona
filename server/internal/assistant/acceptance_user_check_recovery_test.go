@@ -147,6 +147,7 @@ func TestUserCheckAlreadyReopenedKeepsWorkingAfterRestart(t *testing.T) {
 }
 
 func TestUserCheckPassWaitsForItsOwnRound(t *testing.T) {
+	needsLarkLayer(t)
 	for _, source := range []string{"web button", "card reply", "recovery sweep"} {
 		t.Run(source, func(t *testing.T) {
 			ctx := t.Context()
@@ -232,6 +233,7 @@ func (d *userCheckPassStore) PutSetting(ctx context.Context, key string, value a
 }
 
 func TestUserCheckRecoversEveryPersistedPassStep(t *testing.T) {
+	needsLarkLayer(t)
 	ctx := context.Background()
 	for _, tc := range []struct {
 		name             string
@@ -336,6 +338,7 @@ func TestUserCheckRecoversEveryPersistedPassStep(t *testing.T) {
 }
 
 func TestUserCheckRetriesFailedPassLedgerBeforeVerification(t *testing.T) {
+	needsLarkLayer(t)
 	ctx := context.Background()
 	store := &userCheckPassStore{DB: todoTestDB(t)}
 	s, f, todo := acceptedForUserCheckOn(t, store)

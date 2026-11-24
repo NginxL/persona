@@ -8,19 +8,17 @@ import (
 	"github.com/nwverse/persona/server/internal/proto"
 )
 
-// A review a side conversation leaves waiting (#8043, docs/assistant/unified-entry.md "Supervision"). A side
-// conversation supervises what it hands out (defaultPlanSupervisor), and a task's wait for review is told once per
-// review (watchSignals). When that conversation is no longer used, or its turn ended without task_review, nothing told
-// anyone again: the task sat under the owner's Needs you as awaiting review for good, although the main conversation
-// and the background supervisor may both review it.
+// A review a pre-#5732 side-supervised ledger leaves waiting (#8043, docs/assistant/unified-entry.md "Supervision").
+// New conversation-dispatched tasks belong to the main conversation; this compatibility path covers an old ledger
+// that still names a side conversation. Its wait for review was told once per review (watchSignals), so a conversation
+// that was no longer used, or whose turn ended without task_review, could leave the task awaiting review for good.
 //
 // So a task that has waited for a side conversation's review for sideReviewAfter, while that conversation is not in a
-// turn, is handed to the main conversation's follow-up: its ledger names the main conversation as its supervisor from
-// then on, as it does for a task planned by a conversation that cannot be told anything (#4669), and the review is
-// signalled once more, saying why. digestTo sends it to the background supervisor, or to the main conversation while
-// there is none. The move is the record: a task the main conversation supervises is not looked at again, so it happens
-// once, also across a restart. The origin stays: the side conversation keeps the task's card, may still review it, and
-// gets the one-line notice of how it ended (taskEndedNotice).
+// turn, is handed to the main conversation: its ledger names the main conversation as its supervisor from then on,
+// and the review is signalled once more, saying why. digestTo keeps that signal with main even when a legacy
+// background conversation is configured. The move is the record: a task the main conversation supervises is not looked
+// at again, so it happens once, also across a restart. The origin stays: the side conversation keeps the task's card
+// and gets the one-line notice of how it ended (taskEndedNotice); acceptance stays with main.
 //
 // Left as they were: a leader conversation's task (its supervisor is what places it in the direction the owner set up,
 // direction_tree.go, so moving it would take it out of that direction; its signals already go to the main conversation
@@ -57,8 +55,8 @@ func (s *Service) handOverUnreviewed(ctx context.Context, now time.Time) {
 	}
 }
 
-// sideSupervisor: supervisor is a side conversation that supervises what it handed out: not the main conversation, a
-// leader conversation, the background supervisor or a task leader's agent.
+// sideSupervisor: supervisor is a legacy side conversation that supervised what it handed out: not the main
+// conversation, a leader conversation, the background supervisor or a task leader's agent.
 func (s *Service) sideSupervisor(ctx context.Context, cfg Settings, supervisor string) bool {
 	return supervisor != "" && supervisor != cfg.Main && !s.isLeader(ctx, supervisor) && !s.isBackground(ctx, supervisor) &&
 		!s.isLeaderRef(supervisor)

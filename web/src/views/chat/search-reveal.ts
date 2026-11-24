@@ -19,8 +19,10 @@ let undo: (() => void)[] = [];
 const emit = () => listeners.forEach((l) => l());
 
 export function revealItem(scope: string, itemId: string) {
-  target = { scope, itemId, n: ++count };
+  const request = { scope, itemId, n: ++count };
+  target = request;
   emit();
+  return () => { if (target === request) clearReveal(); };
 }
 
 export function clearReveal() {
@@ -51,8 +53,9 @@ function subscribe(l: () => void) {
 const current = () => target;
 
 /** Opens with `open` when the item asked for is one of `ids` in this chat; `open` returns how to close it again, or
- *  nothing when it was open already. */
-export function useReveal(scope: string, ids: readonly string[], open: () => (() => void) | void) {
+ *  nothing when it was open already. Returns whether this row holds the current target, so a deferred row can mount
+ *  before the chat looks for the exact hit. */
+export function useReveal(scope: string, ids: readonly string[], open: () => (() => void) | void): boolean {
   const t = useSyncExternalStore(subscribe, current, current);
   const hit = Boolean(t && t.scope === scope && ids.includes(t.itemId));
   const n = hit ? t!.n : 0;
@@ -63,4 +66,5 @@ export function useReveal(scope: string, ids: readonly string[], open: () => (()
     // only a new request opens: `open` changing with the row's state is not one
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [n]);
+  return hit;
 }

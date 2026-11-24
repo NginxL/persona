@@ -107,7 +107,7 @@ class WireCompatibilityTest {
         val legacyError = JsonCodec.decodeFromString<ErrorBody>("""{"error":"示例"}""")
         assertNull(legacyError.delivered)
         assertNull(legacyError.retryable)
-        assertThrows(SerializationException::class.java) { JsonCodec.decodeFromString<Session>("""{"session_id":false}""") }
+        assertThrows(SerializationException::class.java) { val _ = JsonCodec.decodeFromString<Session>("""{"session_id":false}""") }
     }
 
     @Test fun fileContentKeepsTheHubsRevision() {

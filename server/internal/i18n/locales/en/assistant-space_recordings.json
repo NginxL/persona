@@ -1,0 +1,8 @@
+{
+  "unknown_space": "That space is not available for recordings. Save the recording to the knowledge base or choose another space.",
+  "day": "All-day recordings stay in the knowledge base and cannot be saved to a space.",
+  "unavailable": "Recordings cannot be saved to a space right now. Try again later.",
+  "offline": "The assistant's computer is offline. Recordings can be saved to the space once it is back online.",
+  "outdated": "Update Persona on the assistant's computer to save recordings to a space.",
+  "in_kb": "This recording is already in the knowledge base and stays there. It cannot also be saved to a space."
+}

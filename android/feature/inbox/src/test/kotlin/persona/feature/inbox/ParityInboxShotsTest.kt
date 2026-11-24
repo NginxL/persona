@@ -48,6 +48,7 @@ import persona.core.domain.inbox.InboxItem
 import persona.core.navigation.AppTab
 import persona.core.navigation.Navigator
 import java.io.File
+import persona.core.inbox.*
 
 /**
  * The inbox and Feishu chat additions of #3045 in every style, light and dark: a row's "Mute" and "Rule" options, "Muted", "Pinned messages",

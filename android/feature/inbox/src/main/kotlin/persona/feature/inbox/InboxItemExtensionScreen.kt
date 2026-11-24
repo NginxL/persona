@@ -23,6 +23,7 @@ import persona.core.navigation.InboxItemUiRoute
 import persona.core.navigation.Navigator
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
+import persona.core.inbox.*
 
 /** The item's tier for its header (the extension's body does not repeat it); none before triage. */
 internal fun inboxHeaderTier(record: InboxRecord): InboxTier? = record.item.triage.takeIf { record.item.isTriaged }

@@ -6,16 +6,17 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/nwverse/persona/server/internal/cliwire"
+
 	"github.com/nwverse/persona/server/internal/extension"
 	"github.com/nwverse/persona/server/internal/lark"
-	larkcliadapter "github.com/nwverse/persona/server/internal/larkcli"
 	"github.com/nwverse/persona/server/internal/rpc"
 )
 
 type fakeHostCLI struct {
 	version     string
-	auth        larkcliadapter.AuthStatus
-	chats       larkcliadapter.ChatList
+	auth        cliwire.AuthStatus
+	chats       cliwire.ChatList
 	search      json.RawMessage
 	searchLimit int
 	err         error
@@ -25,14 +26,14 @@ func (f *fakeHostCLI) CheckVersion(context.Context) error { return nil }
 func (f *fakeHostCLI) Version(context.Context) (string, error) {
 	return f.version, f.err
 }
-func (f *fakeHostCLI) AuthStatus(context.Context) (larkcliadapter.AuthStatus, error) {
+func (f *fakeHostCLI) AuthStatus(context.Context) (cliwire.AuthStatus, error) {
 	return f.auth, f.err
 }
-func (f *fakeHostCLI) ListChats(context.Context, int) (larkcliadapter.ChatList, error) {
+func (f *fakeHostCLI) ListChats(context.Context, int) (cliwire.ChatList, error) {
 	return f.chats, f.err
 }
-func (f *fakeHostCLI) ListMessages(context.Context, string, string, string, int) (larkcliadapter.MessagePage, error) {
-	return larkcliadapter.MessagePage{}, f.err
+func (f *fakeHostCLI) ListMessages(context.Context, string, string, string, int) (cliwire.MessagePage, error) {
+	return cliwire.MessagePage{}, f.err
 }
 func (f *fakeHostCLI) SearchLimit(_ context.Context, _, _ string, limit int) (json.RawMessage, error) {
 	f.searchLimit = limit
@@ -40,6 +41,7 @@ func (f *fakeHostCLI) SearchLimit(_ context.Context, _, _ string, limit int) (js
 }
 
 func TestExtensionHostCLIRequiresConfiguredGrantAndDeclaration(t *testing.T) {
+	needsLarkCLI(t)
 	h := newTestManager(t)
 	spec := extension.HostIntegrationSpec{ID: "lark-cli", Version: ">=1.0.72"}
 	if _, err := h.extensionHostCLICall(context.Background(), "example", spec, []byte(`{"operation":"auth_status"}`)); err == nil {
@@ -49,7 +51,7 @@ func TestExtensionHostCLIRequiresConfiguredGrantAndDeclaration(t *testing.T) {
 	if _, err := h.extensionHostCLICall(context.Background(), "example", extension.HostIntegrationSpec{ID: "other", Version: ">=1.0.0"}, []byte(`{}`)); err == nil {
 		t.Fatal("an undeclared integration must fail")
 	}
-	h.hostCLIState = &hostCLIState{runner: &fakeHostCLI{version: "1.0.98", auth: larkcliadapter.AuthStatus{LoggedIn: true, UserName: "Example", AppID: "not-exported"}}}
+	h.hostCLIState = &hostCLIState{runner: &fakeHostCLI{version: "1.0.98", auth: cliwire.AuthStatus{LoggedIn: true, UserName: "Example", AppID: "not-exported"}}}
 	got, err := h.extensionHostCLICall(context.Background(), "example", spec, []byte(`{"operation":"auth_status"}`))
 	if err != nil {
 		t.Fatal(err)
@@ -73,6 +75,7 @@ func TestExtensionHostCLIRequiresConfiguredGrantAndDeclaration(t *testing.T) {
 }
 
 func TestExtensionHostCLISearchForwardsLimit(t *testing.T) {
+	needsLarkCLI(t)
 	h := newTestManager(t)
 	h.cfg.Lark = lark.Config{CLI: &lark.CLIConfig{Extensions: true}}
 	runner := &fakeHostCLI{version: "1.0.98", search: json.RawMessage(`{"results":[]}`)}
@@ -102,6 +105,7 @@ func TestExtensionHostCLISearchForwardsLimit(t *testing.T) {
 }
 
 func TestExtensionHostCLIRejectsVersionsAndUnsafeOperations(t *testing.T) {
+	needsLarkCLI(t)
 	h := newTestManager(t)
 	h.cfg.Lark = lark.Config{CLI: &lark.CLIConfig{Extensions: true}}
 	h.hostCLIState = &hostCLIState{runner: &fakeHostCLI{version: "1.0.71", search: json.RawMessage(`{"ok":true}`)}}
@@ -125,6 +129,7 @@ func TestExtensionHostCLIRejectsVersionsAndUnsafeOperations(t *testing.T) {
 }
 
 func TestExtensionHostCLILimitsAndRedactsFailures(t *testing.T) {
+	needsLarkCLI(t)
 	h := newTestManager(t)
 	h.cfg.Lark = lark.Config{CLI: &lark.CLIConfig{Extensions: true}}
 	large := make([]byte, (1<<20)+1)
@@ -135,7 +140,7 @@ func TestExtensionHostCLILimitsAndRedactsFailures(t *testing.T) {
 	if _, err := h.extensionHostCLICall(context.Background(), "example", extension.HostIntegrationSpec{ID: "lark-cli", Version: ">=1.0.0"}, []byte(`{"operation":"search","kind":"docs","query":"x"}`)); err == nil {
 		t.Fatal("an oversized result accepted")
 	}
-	h.hostCLIState = &hostCLIState{runner: &fakeHostCLI{version: "1.0.98", err: &larkcliadapter.Error{Kind: larkcliadapter.KindTimeout}}}
+	h.hostCLIState = &hostCLIState{runner: &fakeHostCLI{version: "1.0.98", err: &cliwire.Error{Kind: cliwire.KindTimeout}}}
 	_, err := h.extensionHostCLICall(context.Background(), "example", extension.HostIntegrationSpec{ID: "lark-cli", Version: ">=1.0.0"}, []byte(`{"operation":"auth_status"}`))
 	var rpcErr *rpc.Error
 	if !errors.As(err, &rpcErr) || rpcErr.Code != extension.CodeTimeout {
@@ -144,6 +149,7 @@ func TestExtensionHostCLILimitsAndRedactsFailures(t *testing.T) {
 }
 
 func TestHostIntegrationSpec(t *testing.T) {
+	needsLarkCLI(t)
 	for _, spec := range []extension.HostIntegrationSpec{{ID: "unknown", Version: ">=1.0.0"}, {ID: "lark-cli", Version: ""}, {ID: "lark-cli", Version: "1.0.0"}} {
 		if err := spec.Validate(); err == nil {
 			t.Fatalf("invalid spec accepted: %+v", spec)

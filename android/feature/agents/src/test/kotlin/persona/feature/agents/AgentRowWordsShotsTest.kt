@@ -101,7 +101,7 @@ class AgentRowWordsShotsTest {
     private fun lines(words: String): Int {
         val results = mutableListOf<TextLayoutResult>()
         // The row's own text, not the merged node of the whole row (which reads its first text's layout).
-        rule.onNode(hasText(words, substring = true), useUnmergedTree = true).fetchSemanticsNode().config[SemanticsActions.GetTextLayoutResult].action?.invoke(results)
+        val _ = rule.onNode(hasText(words, substring = true), useUnmergedTree = true).fetchSemanticsNode().config[SemanticsActions.GetTextLayoutResult].action?.invoke(results)
         return results.single().lineCount
     }
 

@@ -85,6 +85,7 @@ struct DispatchHandoffCard: View {
             }
             return .agent(at: at, state: state, limit: limit)
         }
+        if let todo, let line = store.startFailureCard(todo, canOpen: entry.detailTodoID != nil) { return .failed(line) }
         if let failure = failure(todo) {
             return .failed(StartFailureWords.cardLine(failure, canOpen: entry.detailTodoID != nil))
         }
@@ -236,7 +237,7 @@ struct DispatchHandoffCardBody: View, Equatable {
             .accessibilityIdentifier("dispatch.interrupted")
         case .failed(let line):
             // the raw error is the task's details' (TaskDetailSheet), never the card's
-            Text(line).font(Theme.Font.caption).foregroundStyle(Theme.danger).lineLimit(entry.detailTodoID == nil ? nil : 2)
+            Text(line).font(Theme.Font.caption).foregroundStyle(Theme.danger).fixedSize(horizontal: false, vertical: true)
                 .accessibilityIdentifier("dispatch.failure")
         case .gone:
             Text("This task no longer exists").font(Theme.Font.caption).foregroundStyle(.tertiary).lineLimit(1)

@@ -15,7 +15,7 @@ import (
 	"strings"
 
 	"github.com/nwverse/persona/server/internal/extension"
-	"github.com/nwverse/persona/server/internal/node/iphone"
+	"github.com/nwverse/persona/server/internal/node/iphoneport"
 	"github.com/nwverse/persona/server/internal/proto"
 	"github.com/nwverse/persona/server/internal/rpc"
 )
@@ -28,6 +28,22 @@ var builtinPrograms = map[string]string{"cua": "computer.", "ego": "browser.", "
 
 // builtinProgramIDs is builtin_programs, in a fixed order.
 var builtinProgramIDs = []string{"cua", "ego", "imessage", "iphone"}
+
+// builtinProgramsInfo is builtin_programs as node.info says them: iphone only when the build has the phone-extra
+// module (internal/node/iphoneport), so a hub offers no phone control on a computer without it. Its id stays reserved
+// (builtinPrograms): no extension's package takes it.
+func builtinProgramsInfo() []string {
+	if iphoneport.Get() != nil {
+		return builtinProgramIDs
+	}
+	out := make([]string, 0, len(builtinProgramIDs))
+	for _, id := range builtinProgramIDs {
+		if id != "iphone" {
+			out = append(out, id)
+		}
+	}
+	return out
+}
 
 // errNoBuiltinMethod is a method the built-in program does not have.
 var errNoBuiltinMethod = errors.New("no such method")
@@ -109,8 +125,12 @@ func builtinCall(ctx context.Context, id, method string, params json.RawMessage,
 			return browserCookies(ctx, "browser."+method, params)
 		}
 	case "iphone":
+		iphone := iphoneport.Get() // the phone-extra module's (internal/node/iphoneport); none: no such method
+		if iphone == nil {
+			break
+		}
 		switch method {
-		case "status": // the iPhones this computer reaches, asked only while the user has the extension on (iphone/)
+		case "status": // the iPhones this computer reaches, asked only while the user has the extension on
 			return iphone.Status(ctx), nil
 		case "call":
 			return iphone.Call(ctx, params)

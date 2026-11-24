@@ -36,16 +36,18 @@ type todoAsk struct {
 	AskedAt   time.Time `json:"asked_at"`
 	Risk      string    `json:"risk,omitempty"`
 
-	Question      string           `json:"question,omitempty"`
-	WhyOwner      string           `json:"why_owner,omitempty"`
-	Options       []DecisionOption `json:"options,omitempty"`
-	CostOfWaiting string           `json:"cost_of_waiting,omitempty"`
-	From          *askFrom         `json:"from,omitempty"`
-	Stands        string           `json:"stands,omitempty"`
-	Background    string           `json:"background,omitempty"`
-	Deadline      *time.Time       `json:"deadline,omitempty"`
-	Default       string           `json:"default,omitempty"`
-	Responses     []string         `json:"responses,omitempty"`
+	Terminal       *SessionRef      `json:"resume_terminal,omitempty"`
+	TerminalOption string           `json:"terminal_option,omitempty"`
+	Question       string           `json:"question,omitempty"`
+	WhyOwner       string           `json:"why_owner,omitempty"`
+	Options        []DecisionOption `json:"options,omitempty"`
+	CostOfWaiting  string           `json:"cost_of_waiting,omitempty"`
+	From           *askFrom         `json:"from,omitempty"`
+	Stands         string           `json:"stands,omitempty"`
+	Background     string           `json:"background,omitempty"`
+	Deadline       *time.Time       `json:"deadline,omitempty"`
+	Default        string           `json:"default,omitempty"`
+	Responses      []string         `json:"responses,omitempty"`
 	// Response: the fixed answer the owner already gave it while it still waits (explain_first).
 	Response string `json:"response,omitempty"`
 	// Suggestion: the owner gave this go-ahead for this directory three times; the decision offers a standing
@@ -84,6 +86,21 @@ func (s *Service) todoAsks(ctx context.Context) map[string]todoAsk {
 		a := todoAsk{Outcome: w.ask.Outcome, Verdict: verdictText(l, &w.ask), AskedAt: w.ask.AskedAt, Risk: askRisk(&w.ask)}
 		if decideAsk(&w.ask) {
 			a.Recommend = w.ask.Recommend
+			if w.ask.OutsideID == "" {
+				if task, ok := s.todoNow(w.todo); ok {
+					for _, option := range w.ask.Options {
+						if target := decisionTerminal(task, option.Label); target != nil {
+							a.Terminal, a.TerminalOption = target, option.Label
+							break
+						}
+					}
+					// A new card keeps the manual control out of its choices. The
+					// reason can still direct the owner to the one bound Agent.
+					if a.Terminal == nil && terminalResumeMention(w.ask.Reason) {
+						a.Terminal = soleDecisionAgent(task, w.ask.AskedAt)
+					}
+				}
+			}
 			a.Question, a.Responses, a.Response = w.ask.Reason, ownerResponses, w.ask.Response
 			a.ForBriefing = w.ask.ForBriefing
 			a.WhyOwner, a.Options, a.CostOfWaiting = w.ask.WhyOwner, w.ask.Options, w.ask.CostOfWaiting
@@ -122,6 +139,7 @@ func askRisk(a *acceptAsk) string {
 // askChanged: a to-do's ask came up, was taken or ended: the apps read the to-dos again ({"type":"todos"}) and the board
 // follows.
 func (s *Service) askChanged(context.Context) {
+	s.trevision.changed()
 	s.todosPushSoon() // with the rest of the write that changed it
 	s.boardChanged()
 }
@@ -129,8 +147,8 @@ func (s *Service) askChanged(context.Context) {
 // pushDecision pushes task id's decision that waits for the owner and recommends an option (a "decide" push): what is to
 // be decided and the option, in the words of its card, what the notification's OK needs to take it (the to-do, the
 // round), and how its push may answer it (the view's ask and lock-screen rule). True when the hub took it. None for a
-// decision without a recommendation (nothing for OK to take), for a task from a health conversation (the lock screen
-// says nothing of those) or a muted one.
+// decision without a recommendation (nothing for OK to take), for a task from a conversation of a space that redacts
+// (the lock screen says nothing of those) or a muted one.
 func (s *Service) pushDecision(ctx context.Context, id string) bool {
 	sent, _ := s.pushDecisionErr(ctx, id)
 	return sent
@@ -139,6 +157,13 @@ func (s *Service) pushDecision(ctx context.Context, id string) bool {
 // pushDecisionErr is pushDecision that tells a push the hub did not take (the error: it may take it later) from one
 // that is not due (false, nil).
 func (s *Service) pushDecisionErr(ctx context.Context, id string) (bool, error) {
+	return s.pushDecisionAbout(ctx, id, assistantwire.TodoPushDecide)
+}
+
+// pushDecisionAbout is pushDecisionErr about reason (assistantwire.TodoPushDecide, or TodoPushDecideOverdue for the
+// reminder past its deadline): the hub rings one push per to-do and reason while the decision waits (TodoPushKey), and
+// takes it back once the decision is over (todoPushOver).
+func (s *Service) pushDecisionAbout(ctx context.Context, id, reason string) (bool, error) {
 	a, ok := s.askCopy(id)
 	t, found := s.todoNow(id)
 	if !ok || !found || !decideAsk(&a) || a.Recommend == "" || !a.AcceptedAt.IsZero() ||
@@ -150,20 +175,24 @@ func (s *Service) pushDecisionErr(ctx context.Context, id string) (bool, error) 
 	if a.OutsideID != "" && sessionID == "" {
 		sessionID = s.settings(ctx).Main // a standalone decision opens the main chat's Needs you
 	}
-	if s.muted(here, sessionID) || s.inHealth(ctx, sessionID) {
+	if s.muted(here, sessionID) || s.selfPolicy(ctx, sessionID).Redact {
 		return false, nil
 	}
 	l := s.lang(ctx)
 	n := Notification{ID: "ntf_" + randomHex(8), Kind: assistantwire.NotifyDecide, Subtitle: "Persona", DeviceID: here, SessionID: sessionID,
 		Title: i18n.T(l, "assistant-reports.verdict_title", i18n.Args{"task": clip(oneLine(t.Title), 30)}),
 		Body:  verdictText(l, &a) + "\n" + recommendText(l, &a),
-		// A decision the owner must take now: P0 interrupts even with the hub's push tiering on, every time it is
-		// pushed (its reminders too); the hub keys it by to-do and round.
-		Level: assistantwire.LevelP0,
+		// The level goes by why it is the owner's (decisionPushLevel): one that cannot wait interrupts even with the
+		// hub's push tiering on, every time it is pushed (its reminders too); the hub keys it by to-do and round.
+		Level: decisionPushLevel(a.WhyOwner),
 		// The ask and how its push may answer it: the view's (projection), so a notification never offers what the
 		// to-do's row would not answer in place.
 		Todo: &assistantwire.NotifyTodo{ID: id, AskedAt: a.AskedAt, Recommend: a.Recommend, Responses: ownerResponses,
-			Ask: projection.DecisionAskID(a.AskedAt), Lockscreen: projection.Lockscreen(askRisk(&a))}}
+			Ask: projection.DecisionAskID(a.AskedAt), Lockscreen: projection.Lockscreen(askRisk(&a))},
+		// One push a to-do and reason while it waits, not one a round (todoPushOver lets the next one ring). It carries
+		// no card id: the iOS app clears a delivered push whose interaction_id is not in its card list as stale, and a
+		// decision is never in that list, so a card id would take an unanswered decision off the lock screen.
+		RelatedKey: assistantwire.TodoPushKey(id, reason)}
 	for _, o := range a.Options {
 		n.Todo.Options = append(n.Todo.Options, o.Label)
 	}
@@ -174,9 +203,31 @@ func (s *Service) pushDecisionErr(ctx context.Context, id string) (bool, error) 
 	if lines := decisionLines(l, s.location(ctx), &a); len(lines) > 0 {
 		n.Body += "\n" + strings.Join(lines, "\n")
 	}
+	// A decision whose words say something sensitive is still pushed (it is due), but the lock screen hears only that
+	// there is news, and a tap opens it, with no answer to give from there (exitPolicy; a track that redacts is not
+	// pushed, above). The recommended label stays in the payload for the app, which the lock screen does not show.
+	space, _ := s.selfSpace(ctx, sessionID)
+	if s.exitPolicy(ctx, n.Title+"\n"+n.Body+"\n"+strings.Join(n.Todo.Options, "\n"), sessionID, space).Redact {
+		n.Title, n.Body = s.redactedNotice(ctx, l, space)
+		n.Todo.Options, n.Todo.Lockscreen = nil, assistantwire.OwnerAskLockscreenOpenOnly
+	}
+	s.noteCard(ctx, cardDecision, n)
 	if _, err := s.hub.NotifyRequest(ctx, NotifyRequest{Notification: n}); err != nil {
 		s.logf("task %s: decision push: %v", id, err)
 		return false, err
 	}
 	return true, nil
+}
+
+// todoPushOver: to-do id no longer waits on the owner (its decision answered, superseded or withdrawn by its
+// supervisor, its owner wait over, the to-do closed). The hub lets the next push about it ring
+// (assistantwire.TodoPushKey). Nothing is pushed. Pushes already on the phones stay there: they carry no card id
+// (pushDecisionAbout says why), so there is nothing to take back by.
+func (s *Service) todoPushOver(id string) {
+	if s.hub == nil || id == "" {
+		return
+	}
+	if err := s.hub.Tell(assistantwire.EventFleetResolved, assistantwire.FleetResolved{ID: assistantwire.TodoAskCardID(id)}); err != nil {
+		s.logf("task %s: owner push over: %v", id, err)
+	}
 }

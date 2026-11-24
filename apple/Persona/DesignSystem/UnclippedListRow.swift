@@ -1,7 +1,5 @@
 import SwiftUI
-#if os(iOS) || os(visionOS)
 import UIKit
-#endif
 
 extension View {
     /// Leaves this List row's cell unclipped. An inset-grouped list rounds its cells (a 26 pt corner configuration) and
@@ -9,15 +7,10 @@ extension View {
     /// page's first kind pills lost a corner (#7735, docs/lessons/ios.md). Only for a row with a clear background
     /// (`listRowBackground(Color.clear)`): a row with one would show its cell's square corners.
     func unclippedListRow() -> some View {
-        #if os(iOS) || os(visionOS)
         background(UnclippedListCell())
-        #else
-        self
-        #endif
     }
 }
 
-#if os(iOS) || os(visionOS)
 /// Finds the collection-view cell it sits in and turns the cell's clipping off, keeping it off when the list sets it
 /// again (it does when it configures the cell), and turns it back on once it leaves the cell (the cell is reused).
 /// The Agents header's search field does the same for its own row (`AgentsHeader.Holder`).
@@ -70,4 +63,3 @@ private struct UnclippedListCell: UIViewRepresentable {
         }
     }
 }
-#endif

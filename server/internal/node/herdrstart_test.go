@@ -98,7 +98,8 @@ func downHerdrNode(t *testing.T) (*Node, string) {
 	t.Cleanup(func() { os.RemoveAll(dir) })
 	sock := filepath.Join(dir, "herdr", "herdr.sock")
 	n, _ := testNode(t)
-	n.hosts = herdrHosts(&herdr.Client{Socket: sock})
+	// Its own state directory: a start writes its task instructions there, not into the package's source (#13393).
+	n.hosts, n.dir = herdrHosts(&herdr.Client{Socket: sock}), t.TempDir()
 	return n, sock
 }
 
@@ -502,7 +503,7 @@ func TestClaudeResumeArgv(t *testing.T) {
 	}
 	// A Codex's resume says it is Codex; a compatible CLI and pi have no name in herdr: nothing in front.
 	for _, tc := range []struct{ kind, launcher, want string }{
-		{"codex", "cx", "HERDR_AGENT=codex cx resume " + startID},
+		{"codex", "cx", dquote(n.bin) + " codex-start --herdr-resume --launcher cx resume " + startID},
 		{traexAgent, "tx", "tx resume " + startID},
 		{piAgent, "pi", "HERDR_AGENT=pi pi --approve --session " + startID},
 	} {
@@ -685,7 +686,7 @@ func TestPersonaOtherAgentsResumeWithLauncher(t *testing.T) {
 	// 1. Direct holdResume on codex
 	spec := agentLaunch{Agent: "codex", Launcher: "work_codex", ID: startID}
 	n.holdResume(context.Background(), launch, "w1:p4", startID, spec)
-	held := resumeHeldAgent("codex", "w1:p4", startID, inAgentEnv(n.dir, "HERDR_AGENT=codex work_codex resume "+startID, dquote))
+	held := resumeHeldAgent("codex", "w1:p4", startID, inAgentEnv(n.dir, dquote(n.bin)+" codex-start --herdr-resume --launcher work_codex resume "+startID, dquote))
 	assertTrace(t, f.trace(), held[:])
 
 	// 2. Backfill for running Codex agent

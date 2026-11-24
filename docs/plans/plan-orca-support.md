@@ -219,6 +219,18 @@ runtime protocol (`docs/integrations/runtimes.md`), like the Paseo bridge but in
 - **Live checks** (2026-11-05, Orca 1.4.246, newly created test sessions closed afterward): `setOption`, `send` (same operation ID resend does not send twice),
   Bash approval card content and deny (file not created), answering an already answered approval, `cancel` (working → stopped), and `close` all matched the behavior above.
 
+## Registered bot endpoints (#12610)
+
+Phase 1 exposes only explicit manager-owned registrations in **Agents → Bots**. It does not infer bots from structured sessions, create a second transcript store, or add a `/api/v1/bots` chat API. Registration is a `bots.endpoints` entry in the manager's 0600 `manager.json` (`docs/operations/config.md`, "manager.json"); there is deliberately no browser link/add form in this phase. A registration has a stable public endpoint ID and title plus an exact machine and Orca session binding. Its public session ID is `bot_<endpoint id>:endpoint`, never Orca's structured-session identity.
+
+Each registration is an independent `agents.Source`. The manager resolves the bound computer and uses `Machine.call`; the node alone calls Orca through `orcart.Client`. The internal `agentbot.describe`, `agentbot.history` and `agentbot.send` RPCs require an exact, unambiguous local structured-session binding. Missing, stale or duplicate bindings fail closed rather than falling back to a default bot or another session. Existing `/api/v1/agents...` routes, `agents.read` / `agents.control`, full / answer device rules, outbox, invalidation and polling are unchanged.
+
+History comes from `agentSession.history`: stable `itemId`, `sequence`, `observedAt` and message `role` / `blocks`, with `page.window.nextCursor {epoch, sequence}` encoded as the existing API's opaque older-page cursor. `rankTimeMs` is the bound row's update time or the newest history message, whichever is later. Assistant replies are read from this history, never synthesized from a send receipt; acceptance does not mean completion. Text and known tool blocks are projected without forwarding unknown raw block payloads.
+
+For writes, the manager persists only idempotency metadata (endpoint binding, SHA-256 of the exact text, operation ID and creation time), not message text or a transcript. It does so before calling the node, and passes that operation ID as Orca's `clientOperationId`; `agentSession.send` computes the exact payload fingerprint. The same client ID and payload therefore replay after a manager/node restart, while a changed payload or binding conflicts before another write. `retryUnknown` is never set and unknown outcomes never auto-repost. A retry is always the user's explicit retry with the same client ID. The book keeps the newest 2,000 operations (four times the outbox's 500), so a client ID outlives its outbox row; only a retry after that many newer sends would get a fresh operation ID.
+
+Registering an endpoint makes it reachable by everything that already holds personal-Agent access: full devices, and extensions granted `agents.read` (history, including tool inputs and results) or `agents.control` (sending). An Orca session is usually a coding agent with tools on that computer, so register only a session you would let those extensions instruct.
+
 ## herdr-core host
 
 herdr-core (command `hc`) is the terminal runtime behind the Herdr desktop app. It has the same author as herdr, but is a rewrite and incompatible: different socket, `terminal.*` methods,

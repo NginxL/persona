@@ -41,7 +41,7 @@ func claudeTurnFailure(isError bool, result string, kinds []string) (text, kind 
 	if len(kinds) > 0 && kinds[0] != "" {
 		return text, kinds[0]
 	}
-	if assistantwire.AuthErrorText(r) {
+	if assistantwire.AuthErrorText(r) || assistantwire.ImageLimitErrorText(r) {
 		return text, proto.TurnErrorUser
 	}
 	return text, ""

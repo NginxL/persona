@@ -98,6 +98,8 @@ func TestTurnErrorCodes(t *testing.T) {
 		"There's an issue with the selected model (x). It may not exist.":              proto.TurnErrorModelRoute,
 		`API Error: 400 {"error":{"message":"no account match for model speech_o50"}}`: proto.TurnErrorModelRoute,
 		"API Error: 429 rate limit exceeded":                                           proto.TurnErrorRateLimited,
+		"API Error: 503 no eligible upstream account is currently available":           proto.TurnErrorUpstreamUnavailable,
+		"API Error: 503 no eligible upstream account for model claude-sonnet-4-5":      proto.TurnErrorUpstreamUnavailable,
 		"API Error: 529 Overloaded":                                                    "",
 		"API Error: Connection error.":                                                 "",
 	} {
@@ -105,7 +107,8 @@ func TestTurnErrorCodes(t *testing.T) {
 			t.Errorf("turnErrorCode(%q) = %q, want %q", text, got, want)
 		}
 	}
-	if !userTurnError(proto.TurnErrorNotLoggedIn) || userTurnError(proto.TurnErrorRateLimited) || userTurnError("") {
+	if !userTurnError(proto.TurnErrorNotLoggedIn) || userTurnError(proto.TurnErrorRateLimited) ||
+		userTurnError(proto.TurnErrorUpstreamUnavailable) || userTurnError("") {
 		t.Error("userTurnError")
 	}
 }

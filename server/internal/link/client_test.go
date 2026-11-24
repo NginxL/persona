@@ -12,7 +12,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
-	"os"
 	"path/filepath"
 	"runtime"
 	"strconv"
@@ -960,7 +959,7 @@ func linkEnds(t *testing.T, l hubLink, within time.Duration) {
 }
 
 // A link that finds another pairing in link.json while writing to it (the hub's endpoints, a rename's new name) moves
-// to it at once, also when link.json's modification time does not show the change to the pairing check.
+// to it at once, not only at the pairing check's next look (an hour away here).
 func TestLinkMovesToAPairingItFindsWhileWritingLinkJSON(t *testing.T) {
 	for _, tc := range []struct{ name, msg string }{
 		{"endpoints", `{"type":"endpoints","endpoints":[{"url":"https://192.0.2.7:18660","kind":"lan"}]}`},
@@ -969,16 +968,10 @@ func TestLinkMovesToAPairingItFindsWhileWritingLinkJSON(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			srv, links := pairingHub(t, endpointsOf, nil)
 			path := filepath.Join(t.TempDir(), "link.json")
-			ch := runAgainst(t, srv, "jd_x", Options{Path: path})
+			ch := runAgainst(t, srv, "jd_x", Options{Path: path, PairCheck: time.Hour})
 			first := nextLink(t, links, 10*time.Second)
 			waitFor(t, ch, func(s Status) bool { return s.State == "connected" && s.HubName == "home" })
-			// Let the pairing check look at link.json as the endpoints left it.
-			<-time.After(pairCheck + time.Second)
-			was := stampOf(path)
 			if err := Update(path, func(c *Config) error { c.Token = "jd_new"; return nil }); err != nil {
-				t.Fatal(err)
-			}
-			if err := os.Chtimes(path, was, was); err != nil { // the pairing check alone would not look again
 				t.Fatal(err)
 			}
 			sendJSON(t, first.conn, tc.msg)

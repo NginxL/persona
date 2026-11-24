@@ -228,12 +228,7 @@ private struct PageSearchable: ViewModifier {
     #endif
 
     func body(content: Content) -> some View {
-        #if os(macOS)
-        // On a view of its own beside the content, so the content keeps its identity when the field comes and goes.
-        content.background { if active { field(Color.clear) } }
-        #else
         field(content)
-        #endif
     }
 
     @ViewBuilder private func field<V: View>(_ v: V) -> some View {
@@ -272,13 +267,7 @@ private struct PageToolbar<Items: ToolbarContent>: ViewModifier {
     @Environment(\.tabIsActive) private var active
 
     func body(content: Content) -> some View {
-        #if os(macOS)
-        // Taken out behind, not `.hidden(!active)`: AppKit lays the toolbar out again either way, and with every page's
-        // items kept hidden in it the switch's long frame grew from about 85 ms to 150 (#390).
-        content.toolbar { if active { items } }
-        #else
         content.toolbar { items }
-        #endif
     }
 }
 

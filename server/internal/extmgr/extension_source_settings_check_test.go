@@ -20,11 +20,9 @@ import (
 // The real settings route, RPC process and source Unix broker, with only the guest runtime faked. Restart notifications
 // stay off so the running registration remains at saved A while the registry checks and commits (or refuses) candidate B.
 func TestSourceSettingsCheckCandidateFlow(t *testing.T) {
-	noBwrap(t)
 	setVarFor(t, &settingsCheckTimeout, 2*time.Second)
 	h, _ := extensionTestHub(t)
 	ps := h.extensions
-	ps.sandboxes.noDefault = false
 	const id = "example-gateway"
 	socket := filepath.Join(shortSocketDir(t), "runtime.sock")
 	dir := settingsCheckPackage(t)
@@ -87,9 +85,10 @@ func TestSourceSettingsCheckCandidateFlow(t *testing.T) {
 	}
 	current := reg.Get(id)
 	granted := &extension.Manifest{Permissions: extension.Permissions{Network: current.Record.Granted.Network}}
-	px := ps.sandboxes.proxyIfStarted()
-	if px == nil {
-		t.Fatal("no source egress proxy")
+	// The protocol fixture is not sandboxed; seed the broker registration directly.
+	px, err := ps.egress()
+	if err != nil {
+		t.Fatal(err)
 	}
 	px.Register(id, egress.Rule{Targets: extension.ConfiguredTargets(granted, reg.Config(current))})
 	if err := px.ListenRuntimeUnix(id, socket); err != nil {

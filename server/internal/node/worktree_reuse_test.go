@@ -1,6 +1,7 @@
 package node
 
 import (
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -9,7 +10,57 @@ import (
 
 	"github.com/nwverse/persona/server/internal/host"
 	"github.com/nwverse/persona/server/internal/proto"
+	"github.com/nwverse/persona/server/internal/rpc"
 )
+
+func TestWorktreePrepareTaskCheckoutWithDrafts(t *testing.T) {
+	w := worktreeNode(t)
+	params := map[string]any{"cwd": w.repo, "branch": "task/todo_example", "allow_untracked": true}
+	prep, err := request(t, w.n, "worktree.prepare", params)
+	if err != nil {
+		t.Fatal(err)
+	}
+	at := filepath.Join(mkdir(t, str(prep["path"])), "task-todo_example")
+	runPullGit(t, w.repo, "worktree", "add", "-b", "task/todo_example", "--", at)
+	write := func(name, contents string) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(at, name), []byte(contents), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("draft.txt", "keep this draft\n")
+	got, err := request(t, w.n, "worktree.prepare", params)
+	if err != nil {
+		t.Fatalf("untracked draft blocked reuse: %v", err)
+	}
+	if existing, _ := got["existing"].(map[string]any); str(existing["path"]) != at {
+		t.Fatalf("did not reuse original checkout: %v", got)
+	}
+	if data, err := os.ReadFile(filepath.Join(at, "draft.txt")); err != nil || string(data) != "keep this draft\n" {
+		t.Fatalf("draft was changed: %q %v", data, err)
+	}
+
+	write("app.txt", "tracked edit\n")
+	for _, name := range []string{"a staged.txt", "b-staged.txt", "z-staged.txt"} {
+		write(name, "staged edit\n")
+		runPullGit(t, at, "add", "--", name)
+	}
+	_, err = request(t, w.n, "worktree.prepare", params)
+	var refused *rpc.Error
+	if !errors.As(err, &refused) || refused.Code != proto.CodeCheckoutDirty {
+		t.Fatalf("tracked and staged changes should block reuse: %v", err)
+	}
+	var fields map[string]string
+	if err := json.Unmarshal(refused.Data, &fields); err != nil {
+		t.Fatal(err)
+	}
+	if got := fields["files"]; got != `"a staged.txt", "app.txt", "b-staged.txt"` {
+		t.Fatalf("expected at most three changed paths: %q", got)
+	}
+	if data, err := os.ReadFile(filepath.Join(at, "app.txt")); err != nil || string(data) != "tracked edit\n" {
+		t.Fatalf("tracked edit was changed: %q %v", data, err)
+	}
+}
 
 func TestWorktreePrepareFindsCheckedOutBranch(t *testing.T) {
 	w := worktreeNode(t)

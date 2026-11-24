@@ -7,9 +7,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/nwverse/persona/server/internal/botcard"
 	"github.com/nwverse/persona/server/internal/channel"
 	"github.com/nwverse/persona/server/internal/db"
-	"github.com/nwverse/persona/server/internal/feishubot"
 	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/prompts"
 	"github.com/nwverse/persona/server/internal/proto"
@@ -55,7 +55,7 @@ const threadHintEvery = 10 * time.Minute
 const threadHintsKeep = 200
 
 // threadMessage takes a message from a group chat: the to-do bound to its topic records it and its agent gets it.
-func (s *Service) threadMessage(ctx context.Context, ev feishubot.MessageEvent, st FeishuStatus, content feishubot.Content) {
+func (s *Service) threadMessage(ctx context.Context, ev botcard.MessageEvent, st FeishuStatus, content botcard.Content) {
 	msg := ev.Message
 	// Only the owner's own words count here, whatever reaches this far: the hub checks it too (a later step), and the
 	// words go to an agent that acts on them.
@@ -81,7 +81,7 @@ func (s *Service) threadMessage(ctx context.Context, ev feishubot.MessageEvent, 
 	if !bound && s.openTopicIfAsked(ctx, ev, st, content, topic) {
 		return // a topic bound to nothing that starts one, or "/ai …" in one: a to-do is opened (feishu_thread_open.go)
 	}
-	if bound && !content.Forward && noReplyCommand(openingWords(ev, content)) { // after the bot's @, which a group that only sends what @s the bot starts every message with
+	if bound && !content.Forward && noReplyCommand(openingCommandWords(ev, content)) { // after the bot's @, which a group that only sends what @s the bot starts every message with
 		// "Don't report back": a command of its own, also for a todo that is done and not yet reported, and never passed on
 		// as words (todo_source.go).
 		s.threadNoReply(ctx, ev, t, topic)
@@ -93,7 +93,7 @@ func (s *Service) threadMessage(ctx context.Context, ev feishubot.MessageEvent, 
 			key = "assistant-feishu.thread_done"
 		}
 		// "/ai" for a to-do that is done is asked for in so many words: it is answered each time, not once in ten minutes.
-		if _, asked := aiCommand(openingWords(ev, content)); bound && asked || s.threadHintDue(msg.ChatID+"/"+msg.ThreadID) {
+		if _, asked := aiCommand(openingCommandWords(ev, content)); bound && asked || s.threadHintDue(msg.ChatID+"/"+msg.ThreadID) {
 			s.botNoteTo(ctx, to, msg.MessageID, i18n.T(l, key))
 		}
 		return
@@ -135,6 +135,13 @@ func (s *Service) threadMessage(ctx context.Context, ev feishubot.MessageEvent, 
 			key = "assistant-feishu.thread_recorded_not_sent"
 		}
 		s.botNoteTo(ctx, to, msg.MessageID, i18n.T(l, key, i18n.Args{"error": clip(oneLine(err.Error()), 200)}))
+	}
+	if text != "" && needsUserWakeEligible(t) {
+		label := msg.ThreadID
+		if t.Thread != nil && strings.TrimSpace(t.Thread.Title) != "" {
+			label = t.Thread.Title
+		}
+		s.emitNeedsUserExternalInfo(ctx, t, "feishu thread "+label, text, "feishu_thread:"+msg.ChatID+"/"+msg.ThreadID+"@"+msg.MessageID)
 	}
 	if len(routes) == 0 {
 		s.logf("bots: topic message of todo %s: no one to give it to: %v", t.ID, routeErr)

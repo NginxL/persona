@@ -9,6 +9,7 @@ import (
 
 // AC1: the transport creates the native agent message under the origin, in the same opted-in chat and topic.
 func TestCotCreateRepliesInOriginTopic(t *testing.T) {
+	needsLarkModule(t)
 	w := newBotWorld(t)
 	w.pair(t)
 	w.topicsOn(t, topicChat)
@@ -33,6 +34,7 @@ func topicCotBotFeatures(t *testing.T, w *botWorld) map[string]any {
 
 // AC5: the existing bot-settings API exposes the behavior-changing switch as on by default.
 func TestBotTopicCotSettingDefaultsOn(t *testing.T) {
+	needsLarkModule(t)
 	w := newBotWorld(t)
 	w.pair(t)
 	if features := topicCotBotFeatures(t, w); features["topic_cot"] != true {
@@ -42,6 +44,7 @@ func TestBotTopicCotSettingDefaultsOn(t *testing.T) {
 
 // AC5: the setting reverses through the existing API without disturbing the other feature switches.
 func TestBotTopicCotSettingRoundTrip(t *testing.T) {
+	needsLarkModule(t)
 	w := newBotWorld(t)
 	w.pair(t)
 	for _, tc := range []struct {
@@ -60,6 +63,7 @@ func TestBotTopicCotSettingRoundTrip(t *testing.T) {
 
 // AC5: Settings' existing channel metadata exposes a labelled switch, not a hidden/chat-only control.
 func TestChannelListIncludesTopicCotSetting(t *testing.T) {
+	needsLarkModule(t)
 	w := newChannelWorld(t)
 	out, err := w.channels(t, assistantwire.ChannelsList, nil)
 	if err != nil {

@@ -15,6 +15,29 @@ struct CallPersonaIntentTests {
         }
     }
 
+    /// The Call Persona control (#13241) opens the app as Call Persona does and places Call Persona's own call, with
+    /// Call Persona's glyph; its intent stays out of Shortcuts, where the App Shortcut already is.
+    @Test func theCallControlPlacesCallPersonasCall() throws {
+        if #available(iOS 26.0, *) {
+            #expect(OpenPersonaCallIntent.supportedModes == .foreground(.immediate))
+        } else {
+            #expect(OpenPersonaCallIntent.openAppWhenRun)
+        }
+        #expect(!OpenPersonaCallIntent.isDiscoverable)
+        let apple = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+        let intents = try String(contentsOf: apple.appending(path: "LiveActivity/PersonaControlIntents.swift"), encoding: .utf8)
+        let start = try #require(intents.range(of: "struct OpenPersonaCallIntent: AppIntent {"))
+        let end = try #require(intents.range(of: "\n}\n", range: start.upperBound..<intents.endIndex))
+        let intent = String(intents[start.upperBound..<end.lowerBound])
+        #expect(intent.contains("await MainActor.run { CallPersonaIntent.place() }"))
+        let controls = try String(contentsOf: apple.appending(path: "PersonaWidgets/PersonaControls.swift"), encoding: .utf8)
+        let control = try #require(controls.range(of: "struct CallPersonaControl: ControlWidget {"))
+        let drawingEnd = try #require(controls.range(of: "\n}\n", range: control.upperBound..<controls.endIndex))
+        let drawing = String(controls[control.upperBound..<drawingEnd.lowerBound])
+        #expect(drawing.contains("ControlWidgetButton(action: OpenPersonaCallIntent())"))
+        #expect(drawing.contains("systemImage: \"\(Theme.Icon.callPersona)\""))
+    }
+
     /// The car's conversation still starts in the background (the phone may stay locked in the car); only the phone's
     /// call comes to the front.
     @Test func talkToPersonaStaysInTheBackgroundUntilItCalls() {

@@ -56,6 +56,7 @@ func TestExtensionTakesOverLark(t *testing.T) {
 // hub's own is kept aside (it still checks the computers' gh logins for Settings › Connectors › GitHub) and comes back
 // after.
 func TestExtensionTakesOverGitHub(t *testing.T) {
+	needsGitHubModule(t)
 	h := newTestManager(t)
 	h.connectors = connector.NewRegistry(nil)
 	h.registerConnectors()

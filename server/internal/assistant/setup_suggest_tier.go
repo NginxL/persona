@@ -87,12 +87,13 @@ type supervisorTier struct {
 	modelName, lowerName string
 }
 
-// setupTierOf says what the background supervisor's purpose runs on and the tier below it: ok only while the
-// background supervisor is on and there is one (ownSupervisor), its purpose resolves to a provider added in Persona
-// that starts a CLI, and tierBelow can tell. Anything that cannot be read is "not known", and nothing is suggested.
+// setupTierOf says what the legacy background supervisor's purpose runs on and the tier below it: ok only while an
+// already configured background supervisor remains enabled to finish its old work (#5732), its purpose resolves to a
+// provider added in Persona that starts a CLI, and tierBelow can tell. New work is supervised by the planning lead or main and does not
+// create or enable this endpoint. Anything that cannot be read is "not known", and nothing is suggested.
 func (s *Service) setupTierOf(ctx context.Context) (supervisorTier, bool) {
 	cfg := s.settings(ctx)
-	if !s.backgroundOn(cfg) || s.ownSupervisor(cfg) == cfg.Main {
+	if !s.backgroundOn(cfg) || cfg.BackgroundSupervisor == "" || cfg.BackgroundSupervisor == cfg.Main {
 		return supervisorTier{}, false
 	}
 	b, err := s.resolveModel(ctx, purposeSupervise)

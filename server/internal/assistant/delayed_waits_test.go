@@ -525,7 +525,7 @@ func newReceiptWaitFixtureOn(t *testing.T, st Store, at time.Time) (*Service, *f
 	t.Helper()
 	first, f := newTaskServiceOn(t, st)
 	startedTask(t, first, f)
-	first.taskWorking(context.Background(), "box", "s1")
+	first.taskWorking(context.Background(), "box", "s1", startRow{})
 	f.judge = `{"verdict":"done","reason":"Delivery verified"}`
 	f.setItems(proto.Item{ID: "answer-1", Kind: proto.KindText, Role: "assistant", Text: "Delivery verified", TS: time.Now()})
 	f.setSessions("box", proto.Session{MachineID: "box", SessionID: "s1", Agent: "codex", Status: proto.StatusDone,

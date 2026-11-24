@@ -2,7 +2,7 @@
 // The zoomed Mermaid diagram is a modal: the focus moves into it, and closing it (Esc or a click) gives it back to "Enlarge".
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 // jsdom has no matchMedia (useMedia reads it); the diagram is drawn already, so Mermaid itself never loads
 vi.hoisted(() => {
@@ -14,7 +14,12 @@ vi.mock("../lib/mermaid", () => ({
   mermaidProblem: () => ({ summary: "", detail: "" }),
 }));
 import { t } from "../i18n";
-import { MermaidBlock } from "./Mermaid";
+import { MermaidBlock, MermaidViewer } from "./Mermaid";
+
+// The zoomed view is its own chunk (Mermaid.tsx): in before the clicks, so each one draws it at once, as after a hover.
+beforeAll(async () => {
+  await MermaidViewer.preload();
+});
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 

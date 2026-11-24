@@ -5,8 +5,9 @@ refs/heads/main and refs/pull/7/head, and puts a fake gh first on PATH. The fake
 answers `repo view` and `api`, and logs every call. Like GitHub with squash messages set to PR_TITLE / PR_BODY, it
 records `<title> (#7)` and the body as they are at merge time (`at_merge`: an edit saved after the last view) unless
 the merge passes --subject / --body-file. The real gh never runs. The clone carries this checkout's copies of the scripts
-merge-pr.sh runs: privacy_check.py and scripts/ci/changed_ratchets.py with the two ratchets it loads (#7977). Its main
-has no ratchet baselines unless a test commits them, so only that test's PRs are checked against them.
+merge-pr.sh runs: privacy_check.py and scripts/ci/changed_ratchets.py with the two ratchets it loads (#7977) and the
+ratchet_base.py they import. Its main has no ratchet baselines unless a test commits them, so only that test's PRs are
+checked against them.
 """
 import importlib.util
 import json
@@ -30,7 +31,7 @@ CONFIG_ENV = set(_privacy_check.CONFIG_ENV)
 sys.path.insert(0, str(SCRIPTS / "operations"))
 import pr_watch_merge  # noqa: E402
 
-RATCHET_SCRIPTS = ("changed_ratchets.py", "sleep_ratchet.py", "web_font_ratchet.py")  # under scripts/ci
+RATCHET_SCRIPTS = ("changed_ratchets.py", "sleep_ratchet.py", "web_font_ratchet.py", "ratchet_base.py")  # scripts/ci
 GO_TEST = "server/internal/demo/demo_test.go"
 
 FAKE_GH = r'''
@@ -180,6 +181,22 @@ class MergePrTests(unittest.TestCase):
         self.assertEqual(self.merges(calls), [])
         self.log.unlink()
         result, calls = self.merge_pr(self.view(self.open_pr(files={GO_TEST: wait % " // sleep-ok: the child exits"})))
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(len(self.merges(calls)), 1)
+
+    def test_a_pr_that_only_lowers_a_count_merges(self):
+        """A count under its baseline is not a failure (docs/operations/testing.md, "Count ratchets"), so a PR that takes
+        a sleep out and leaves the baseline merges; lowering the baseline is tidying for later."""
+        wait = "package demo\n\nfunc TestWait(t *testing.T) {\n%s}\n"
+        self.git("checkout", "-q", "main")
+        (self.repo / GO_TEST).parent.mkdir(parents=True, exist_ok=True)
+        (self.repo / GO_TEST).write_text(wait % "\ttime.Sleep(time.Second)\n")
+        (self.repo / "scripts/ci/sleep_baseline.json").write_text(json.dumps({GO_TEST: 1}) + "\n")
+        (self.repo / "scripts/ci/web_font_baseline.json").write_text("{}\n")
+        self.git("add", "scripts/ci", GO_TEST)
+        self.git("commit", "-q", "-m", "Baselines")
+        self.git("push", "-q", "origin", "main")
+        result, calls = self.merge_pr(self.view(self.open_pr(files={GO_TEST: wait % ""})))
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertEqual(len(self.merges(calls)), 1)
 

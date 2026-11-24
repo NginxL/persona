@@ -1,0 +1,12 @@
+{
+  "source": "https://github.com/nwverse/refract",
+  "commit": "811db385e4a38a4d5df720c795197368efe3602c",
+  "archiveUrl": "deterministic git source archive built by scripts/package_cli.py at the pinned commit",
+  "archiveSha256": "d8920f5d8be338020922ef24039180906113892c1be7d3989224ae8507b7ddba",
+  "sourceTreeSha256": "ec5d90f26482772970bd408679a069d70709c702cc203712b7d1453bbf5c29ea",
+  "archiveTreeSha256": "c1e1fbe476d3b059619b894c1a942ab97500478b14365bcdb4451c4bd978b0ae",
+  "mappingSchemaVersion": 1,
+  "swiftSyntaxVersion": "600.0.1",
+  "swiftSyntaxRevision": "0687f71944021d616d34d922343dcef086855920",
+  "note": "Current main inspected on 2026-11-22, still an experimental source snapshot, not a supported release. The consumer is Android-only. The second backend is schema validation only: no HarmonyOS source, destination or compilation is claimed. The generated file retains Refract's source-only header; this adjacent reviewed lock supplies the exact generator identity."
+}

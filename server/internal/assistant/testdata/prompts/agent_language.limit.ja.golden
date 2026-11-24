@@ -1,5 +1,5 @@
 <persona-context kind="message-source" title="">
-{"kind":"followup"}
+{"kind":"auto-continue"}
 </persona-context>
 <persona-limit-continue />
 ⏰（Personaからの再開依頼です。）サブスクリプションの利用枠がリセットされ、再び利用できます。

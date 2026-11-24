@@ -63,7 +63,7 @@ struct MailAccountForm: Equatable {
 }
 
 /// A mail provider whose clients sign in with an authorization code or app password made on its website, not the account's password. The hub
-/// says the same steps for the same domains (`server/internal/mail/preset.go`, `Guide`): change them together.
+/// says the same steps for the same domains (`server/internal/modules/mail/preset.go`, `Guide`): change them together.
 struct CodeGuide: Equatable {
     enum Provider: Equatable { case qq, netease, gmail, icloud }
     let provider: Provider

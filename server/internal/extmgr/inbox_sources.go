@@ -144,12 +144,15 @@ var migrations = map[string]subscriptions.Migration{
 	"imessage": {Connector: "imessage", Source: "imessage", Icon: "chat", Recipe: inboxRows(wire.ConnectorSubscriptionKindSubMessage)},
 	// GitHub's rows as its Collect makes them, through the generic inbox_things (#6381, #6404).
 	"github": {Connector: "github", Source: "github", Icon: "code", Recipe: inboxRows(wire.ConnectorSubscriptionKindSubNotice)},
+	// Lark's rows as its extension's Collect makes them, through the generic inbox_things (#13672): chats, documents
+	// and moments of several accounts, a conversation's batch of new messages beside its events' state (#13637).
+	"lark": {Connector: "lark", Source: "lark", Icon: "chat", Recipe: inboxRows(wire.ConnectorSubscriptionKindSubMessage)},
 }
 
 // withheld are the sources whose default subscription is not offered yet: the owner says when (decision 6 of the
-// migration). GitHub's waits for iMessage's week on the owner's hub (2026-11-13). One already switched still shows
-// its switch, to switch back.
-var withheld = map[string]bool{"github": true}
+// migration), each after the source before it has had its week there. GitHub's is offered since iMessage's week
+// (#13599); Lark's waits for GitHub's (#13672). One already switched still shows its switch, to switch back.
+var withheld = map[string]bool{"lark": true}
 
 // inboxRows is a default subscription's recipe: the source's own Inbox rows, ready-made (inbox_things), a row
 // without a kind of its own being kind.

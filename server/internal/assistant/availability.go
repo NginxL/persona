@@ -887,6 +887,9 @@ func (s *Service) availabilityAsks(ctx context.Context, since time.Time) []taskA
 			t.who = askWhoDefault
 		case a.BySupervisor, a.ByAssistant:
 			t.who = askWhoSupervisor
+		case a.Superseded:
+			// Its supervisor moved on or took it back (supersedeDecision): ended without the owner's answer, never theirs.
+			t.who = askWhoDismissed
 		}
 		out = append(out, t)
 	}

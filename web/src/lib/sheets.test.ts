@@ -143,6 +143,11 @@ describe("names and geometry", () => {
     for (const s of ["12", "-3.5", "1,234.50", "25%", "$4", "¥1,000", "1e5", "(12)"]) expect(looksNumeric(s), s).toBe(true);
     for (const s of ["", "abc", "12a", "2026-11-04", "v1.2"]) expect(looksNumeric(s), s).toBe(false);
   });
+
+  it("rejects unmatched parentheses as text instead of accounting numbers", () => {
+    for (const s of ["1)", "2)", "(12", "-5)", "+5)", "(-5)", "(+5)"]) expect(looksNumeric(s), s).toBe(false);
+    expect(rangeSummary([["1)", "2)"]], { r0: 0, c0: 0, r1: 0, c1: 1 })).toEqual({ count: 2 });
+  });
 });
 
 describe("selection", () => {

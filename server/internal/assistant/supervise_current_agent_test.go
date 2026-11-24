@@ -100,7 +100,7 @@ func TestTakeoverStopTellsTheSupervisor(t *testing.T) {
 	}
 	f.setItems(text("assistant", "查了一半，没有全部解决。"))
 	turn(proto.StatusWorking, proto.StateWorking, "")
-	s.taskWorking(ctx, "box", "s2")
+	s.taskWorking(ctx, "box", "s2", startRow{})
 	turn(proto.StatusDone, proto.StateUnread, "查了一半，没有全部解决。")
 	s.taskTurnEnded(ctx, "box", "s2")
 	waitFor(t, "the stopped-short message", func() bool { return len(f.notices()) == 1 })

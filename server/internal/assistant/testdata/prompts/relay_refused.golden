@@ -1,3 +1,6 @@
+<persona-context kind="message-source" title="">
+{"kind":"notice","title":"Persona"}
+</persona-context>
 🔔 你用 conversation_send 发给对话「Research」（side1）的消息没有送到：那段对话拒收了它（unheard_of），不会再自动重发。
 消息开头：please check the build
 （这是 Persona 的通知，不是用户发的消息，也不是那段对话发来的；这条消息只通知这一次。）

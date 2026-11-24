@@ -209,6 +209,24 @@ class MeetingTranscriptionMockTests(Transcription, unittest.TestCase):
         self.assertNotIn("echo", self.detail(rid)["segments"][0])
         self.end(ws, 4)
 
+    def test_final_pass_progress_while_it_runs(self):
+        # #13461: while the pass runs, final_done (0: the mock replays in one step) beside end; neither once final.
+        self.mode(final_seconds=3)
+        rid = self.recording()
+        ws = self.socket(rid)
+        self.pcm(ws, 4)
+        self.assertEqual(ws("line")["start"], 0)
+        self.pcm(ws, 1)
+        self.assertEqual(ws("ack")["at"], 5)
+        self.pcm(ws, 3)
+        self.assertEqual(ws("line")["start"], 4)
+        self.end(ws, 8)
+        self.upload(rid, transcription="hub", complete=True, duration=8)
+        self.assertEqual(self.meta(rid)["transcription"], {"mode": "hub", "state": "finishing", "gaps": [], "final_done": 0, "end": 8})
+        final = self.wait(lambda: (t := self.meta(rid)["transcription"])["state"] == "final" and t, "final")
+        self.assertNotIn("final_done", final)
+        self.assertNotIn("end", final)
+
     def test_gap_upload_before_final_and_duplicate_audio(self):
         rid = self.recording()
         ws = self.socket(rid)
@@ -252,6 +270,19 @@ class MeetingTranscriptionMockTests(Transcription, unittest.TestCase):
         self.mode(fatal="upstream_failed")
         self.assertEqual(ws("error"), {"type": "error", "code": "upstream_failed", "fatal": True})
         self.assertEqual(ws("close")["code"], 1008)
+
+    def test_problem_kinds(self):
+        # #13446: a refused or busy service is its own problem, not upstream_unavailable; no line goes while it stands.
+        rid = self.recording()
+        self.mode(upstream="forbidden")
+        ws = self.socket(rid)
+        self.assertEqual(ws("problem")["code"], "upstream_forbidden")
+        self.pcm(ws, 5)
+        self.assertEqual(self.live(rid)["next"], 0)
+        self.assertEqual(self.live(rid)["transcription"]["problem"], "upstream_forbidden")
+        self.mode(upstream="busy")
+        self.assertEqual(ws("problem")["code"], "upstream_busy")
+        self.assertEqual(self.call("POST", "/mock/meeting_transcription", {"upstream": "made_up"})[0], 400)
 
     def test_upstream_recovery_waits_for_a_hub_sentence(self):
         rid = self.recording()

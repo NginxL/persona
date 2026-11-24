@@ -39,6 +39,7 @@ import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
 import persona.core.designsystem.AppStyle
 import persona.core.designsystem.PersonaTheme
+import persona.core.inbox.*
 
 /** Native JVM component evidence only; IME, real windows and device glass still need the adaptive scene and integration shots. */
 @RunWith(AndroidJUnit4::class)
@@ -200,7 +201,7 @@ class InboxHandOffBarShotsTest {
                 else -> "View"
             }).assertHasClickAction()
             val layouts = mutableListOf<TextLayoutResult>()
-            rule.onNodeWithText(longTarget, useUnmergedTree = true).fetchSemanticsNode()
+            val _ = rule.onNodeWithText(longTarget, useUnmergedTree = true).fetchSemanticsNode()
                 .config[SemanticsActions.GetTextLayoutResult].action!!(layouts)
             assertTrue("$nextStyle: the target label must ellipsize in its bounded chip",
                 layouts.single().isLineEllipsized(0))

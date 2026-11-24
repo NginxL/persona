@@ -52,7 +52,8 @@ func listKeyFmt(list []proto.Session) string {
 		for _, t := range s.Background {
 			b.WriteString(t.ID + ",")
 		}
-		b.WriteString(fmt.Sprint(s.BackgroundWaiting) + "\n")
+		b.WriteString(fmt.Sprint(s.BackgroundWaiting) + ",")
+		b.WriteString(fmt.Sprint(uint32(s.BackgroundStalledSince)) + "\n")
 		for _, t := range s.BackgroundEnded() {
 			fmt.Fprintf(&b, "ended:%s/%s/%d\n", t.ID, t.Status, unixOf(t.EndedAt))
 		}
@@ -287,7 +288,8 @@ func listKeyVariants() (proto.Session, map[string]proto.Session) {
 			s.Subagents = []proto.Subagent{{ID: "a1", Running: true, UpdatedAt: act.Add(9 * time.Second)}}
 		},
 		"subagent_new":       func(s *proto.Session) { s.Subagents = append(s.Subagents, proto.Subagent{ID: "a2"}) },
-		"background_waiting": func(s *proto.Session) { s.BackgroundWaiting = !s.BackgroundWaiting }, // #6045
+		"background_waiting": func(s *proto.Session) { s.BackgroundWaiting = !s.BackgroundWaiting },        // #6045
+		"background_stalled": func(s *proto.Session) { s.BackgroundStalledSince = proto.UnixTime32Of(at) }, // #13744
 		// a new call shows at once (#5602), not with the next 10 s of updated_at
 		"subagent_step": func(s *proto.Session) {
 			s.Subagents = []proto.Subagent{{ID: "a1", Running: true, UpdatedAt: at, Steps: 1, LastTool: &proto.WorkflowTool{ID: "toolu_1", Name: "Read"}}}

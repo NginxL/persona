@@ -55,5 +55,6 @@
   "send_denied": "The app this came from didn’t allow the reply, so nothing was sent. It may be missing a permission, or the chat may no longer be reachable. Reply in that app instead.",
   "send_rate_limited": "The app this came from is limiting how often replies can be sent, so nothing was sent. Try again in a moment.",
   "send_failed": "The app this came from couldn’t send the reply, so nothing was sent. Try again, or reply in that app.",
-  "send_unrecorded": "The reply couldn’t be recorded before sending, so nothing was sent. Try again in a moment."
+  "send_unrecorded": "The reply couldn’t be recorded before sending, so nothing was sent. Try again in a moment.",
+  "reply_policy_blocked": "Reply policy blocked this owner draft, so nothing was sent."
 }

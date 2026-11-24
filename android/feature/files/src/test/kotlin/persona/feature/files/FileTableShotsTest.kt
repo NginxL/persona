@@ -55,10 +55,10 @@ class FileTableShotsTest {
             style = current
             dark = isDark
             rule.waitForIdle()
-            rule.onAllNodes(scroll)[0].performSemanticsAction(SemanticsActions.ScrollBy) { it(-100_000f, 0f) }
+            rule.onAllNodes(scroll)[0].performSemanticsAction(SemanticsActions.ScrollBy) { val _ = it(-100_000f, 0f) }
             rule.waitForIdle()
             capture(out, "file-${current.name.lowercase()}-${if (isDark) "dark" else "light"}-start.png")
-            rule.onAllNodes(scroll)[0].performSemanticsAction(SemanticsActions.ScrollBy) { it(100_000f, 0f) }
+            rule.onAllNodes(scroll)[0].performSemanticsAction(SemanticsActions.ScrollBy) { val _ = it(100_000f, 0f) }
             rule.waitForIdle()
             capture(out, "file-${current.name.lowercase()}-${if (isDark) "dark" else "light"}-end.png")
         }

@@ -110,7 +110,11 @@ func fold(run []proto.Item) proto.Item {
 	first, last := run[0], run[len(run)-1]
 	fo := &proto.Fold{Items: len(run), Until: last.TS, ThroughSeq: last.Seq, ThroughID: last.ID, ToolNames: []string{}}
 	latestThought := -1
+	var firstTTFT *int64
 	for i, it := range run {
+		if firstTTFT == nil && it.TTFTMS != nil {
+			firstTTFT = it.TTFTMS
+		}
 		switch {
 		case it.Kind == proto.KindToolUse:
 			fo.Tools++
@@ -133,7 +137,7 @@ func fold(run []proto.Item) proto.Item {
 	fo.Changes = foldChanges(run)
 	fo.Usage = foldUsage(run)
 	fo.Sources = foldSources(run)
-	return proto.Item{ID: "fold:" + first.ID, Seq: first.Seq, TS: first.TS, Role: "assistant", Kind: proto.KindFold, Fold: fo}
+	return proto.Item{ID: "fold:" + first.ID, Seq: first.Seq, TS: first.TS, Role: "assistant", Kind: proto.KindFold, Fold: fo, TTFTMS: proto.CloneTTFTMS(firstTTFT)}
 }
 
 func thinkingPreview(it proto.Item) *proto.Item {

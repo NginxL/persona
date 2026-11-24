@@ -182,18 +182,19 @@ func TestHerdrRestoreOutsideWindowsIgnoresDefaultShell(t *testing.T) {
 	}
 }
 
-// Codex, a compatible CLI and the work agents get the same handoff, with their own commands: a Codex keeps its task
-// instructions, agy its model, its effort and its verified conversation, and these and a managed agy's personad path
-// are quoted for Git Bash, not for eval.
+// Codex, a compatible CLI and the work agents get the same handoff, with their own commands: a Codex restores through
+// codex-start and keeps its task instructions, agy its model, its effort and its verified conversation, and these and
+// personad's path are quoted for Git Bash, not for eval.
 func TestWindowsHerdrRestorePowerShellOtherAgents(t *testing.T) {
 	withWindowsRestore(t, "pwsh.exe")
 	n := &Node{dir: `C:\node dir`, home: t.TempDir(), bin: `C:\Program Files\Persona\personad.exe`}
 	n.managed.byID = map[string]proto.ManagedLauncher{"work-agy": {Name: "work-agy"}}
 	prefix := "unset " + strings.Join(agentUnsetNames(), " ") + ` && PERSONA_HOME='C:'\\'node dir' ` + agentMarkEnv + " "
 	rules := "Don't \"guess\".\nAsk first."
+	codexStart := `'C:'\\'Program Files'\\'Persona'\\'personad.exe' codex-start --herdr-resume `
 	for _, tc := range []struct{ kind, launcher, model, effort, conv, rules, want string }{
-		{"codex", "cx", "", "", "", "", "cx resume " + startID},
-		{"codex", "codex", "", "", "", rules, "codex -c " + shellQuote(codexTaskConfig(rules)) + " resume " + startID},
+		{"codex", "cx", "", "", "", "", codexStart + "--launcher cx resume " + startID},
+		{"codex", "codex", "", "", "", rules, codexStart + "codex -c " + shellQuote(codexTaskConfig(rules)) + " resume " + startID},
 		{traexAgent, "tx", "", "", "", "", "tx resume " + startID},
 		{piAgent, "pi", "", "", "", "", "pi --approve --session " + startID},
 		{cursorAgent, "", "gpt 5", "", "", "", "cursor-agent --model 'gpt 5'"},

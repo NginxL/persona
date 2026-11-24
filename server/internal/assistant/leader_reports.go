@@ -347,12 +347,13 @@ func leaderTaskStuckAfter(t Todo) time.Duration {
 	return silentAfter(expect)
 }
 
-// notStarted: no agent has ever worked on to-do t (none linked, not even one let go since), and it is not a concern
-// (#5846): a piece of a direction a leader recorded with todo_create and has not handed out, a Lark topic's to-do, a
-// to-do the user made. The direction tree shows it as planned, and it is stuck only while it waits on the owner
-// (taskStuck). A concern waits for the main conversation's answer (concerns.go) and keeps the rules it had.
+// notStarted: no agent has ever worked on to-do t (none linked, not even one let go since), no external responsible
+// party owns it (#12712), and it is not a concern (#5846): a piece of a direction a leader recorded with todo_create
+// and has not handed out, a Lark topic's to-do, a to-do the user made. The direction tree shows it as planned, and it
+// is stuck only while it waits on the owner (taskStuck). A concern waits for the main conversation's answer
+// (concerns.go) and keeps the rules it had.
 func notStarted(t Todo) bool {
-	return len(t.Agents) == 0 && !t.isConcern()
+	return len(t.Agents) == 0 && t.Responsible == nil && !t.isConcern()
 }
 
 // leaderSessions finds the sessions of the tasks' agents as the apps get them, asking each machine once; reached says,

@@ -355,7 +355,9 @@ func (s *Service) execute(ctx context.Context, sub Subscription, asked bool, sta
 		if pl.snapHash != sub.SnapshotHash {
 			it := *pl.snapshot
 			it.SubscriptionID = sub.ID
-			items, seen = append(items, it), append(seen, Seen{UID: it.UID, ContentHash: pl.snapHash})
+			// SnapshotHash is a snapshot's dedup, and the lease already serializes pulls: a seen key would make the
+			// commit's claim drop a snapshot that returns to an earlier value (#13122).
+			items = append(items, it)
 			next.SnapshotHash = pl.snapHash
 		}
 	} else {
@@ -402,10 +404,14 @@ func (s *Service) execute(ctx context.Context, sub Subscription, asked bool, sta
 			next.SinceAt, next.Continuation = newest, nil
 		}
 		next.WeakDedup = pl.weak || sub.Continuation != nil && sub.WeakDedup
+		if sub.Recipe.Mode == wire.ConnectorSubscriptionModeThings {
+			next.Answer, next.AnswerAt = answerOf(pl.items), &start // the Inbox gets these rows as they are (#13637)
+		}
 	}
 	var baselineCommit *time.Time
 	if baseline != nil {
 		run.Baseline, items = len(items), nil
+		next.Answer, next.AnswerAt = nil, nil // its new rows are not kept: each thread's newest stored, as before
 		if pl.continuation == nil {
 			next.Baseline, baselineCommit = nil, baseline
 		}
@@ -428,8 +434,13 @@ func (s *Service) execute(ctx context.Context, sub Subscription, asked bool, sta
 		n := s.nextRun(next, start, false)
 		next.NextRunAt = &n
 	}
-	if !s.commit(ctx, sub, next, &commitData{seen: seen, items: items, read: read, baseline: baselineCommit}, &run, start, true) {
+	committed, ok := s.commit(ctx, sub, next, &commitData{seen: seen, items: items, read: read, baseline: baselineCommit}, &run, start, true)
+	if !ok {
 		return
+	}
+	next, items = committed.Sub, committed.Items
+	if len(next.Runs) > 0 {
+		run = next.Runs[len(next.Runs)-1]
 	}
 	if pl.continuation != nil {
 		s.poke()
@@ -453,13 +464,14 @@ const (
 	kbKeep    = 30 * 24 * time.Hour
 )
 
-// prune drops sub's held items its destinations are past.
+// prune drops sub's held items its destinations are past, but for its things recipe's latest answer's rows, which the
+// Inbox gets while they are in it however old they are (#13637).
 func (s *Service) prune(ctx context.Context, sub Subscription, now time.Time) {
 	keep := inboxKeep
 	if sub.ToKB {
 		keep = kbKeep
 	}
-	if err := s.o.Store.PruneItems(ctx, sub.ID, now.Add(-keep)); err != nil {
+	if err := s.o.Store.PruneItems(ctx, sub.ID, now.Add(-keep), sub.Answer); err != nil {
 		s.o.Logf("subscription %s: prune its items: %v", sub.ID, err)
 	}
 }
@@ -537,9 +549,9 @@ type commitData struct {
 	baseline *time.Time // the baseline mark this run took
 }
 
-// commit writes a run's outcome (a run with a Run, a skipped round without) and tells the apps; false when it could
-// not be kept.
-func (s *Service) commit(ctx context.Context, sub, next Subscription, d *commitData, run *Run, now time.Time, ran bool) bool {
+// commit writes a run's outcome (a run with a Run, a skipped round without), returns what its transaction actually
+// claimed, and tells the apps; false when it could not be kept.
+func (s *Service) commit(ctx context.Context, sub, next Subscription, d *commitData, run *Run, now time.Time, ran bool) (RunCommit, bool) {
 	if ran {
 		next.LastRunAt = &now
 	}
@@ -556,15 +568,16 @@ func (s *Service) commit(ctx context.Context, sub, next Subscription, d *commitD
 	if d != nil {
 		c.Seen, c.Items, c.Read, c.Baseline = d.seen, d.items, d.read, d.baseline
 	}
-	if err := s.o.Store.CommitRun(ctx, c); err != nil {
+	committed, err := s.o.Store.CommitRun(ctx, c)
+	if err != nil {
 		// Nothing of the run is kept; its lease runs out and the run is made again, deduplicated.
 		s.o.Logf("subscription %s: keep run: %v", sub.ID, err)
-		return false
+		return RunCommit{}, false
 	}
 	if cur, err := s.o.Store.GetSubscription(ctx, sub.ID); err == nil && cur != nil {
 		s.o.Changed(shown(*cur), false)
 	}
-	return true
+	return committed, true
 }
 
 // nextRun is when sub runs next after a run at now: at its daily time, or after its interval with up to a tenth

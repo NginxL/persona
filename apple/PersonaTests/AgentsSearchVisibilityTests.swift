@@ -14,11 +14,7 @@ struct AgentsSearchVisibilityTests {
                     let retained = AgentsSearchVisibility.retained(query: query)
                     let shown = AgentsSearchVisibility.rowShown(scrolled: scrolled, band: band,
                                                                 floating: floating, query: query)
-                    #if os(iOS)
                     let expected = floating || retained ? 0 : min(max(band - scrolled, 0), band)
-                    #else
-                    let expected = floating ? 0 : min(max(band - scrolled, 0), band)
-                    #endif
                     #expect(shown == expected, "scrolled \(scrolled), floating \(floating), query \(query)")
                     // These are the exact inputs used by the row's hit testing and accessibility hiding.
                     #expect((shown >= band / 2) == (expected >= band / 2))
@@ -31,11 +27,7 @@ struct AgentsSearchVisibilityTests {
     @Test func retainedQueryMatrix() {
         for query in ["", "a", " "] {
             let retained = AgentsSearchVisibility.retained(query: query)
-            #if os(iOS)
             #expect(retained == !query.isEmpty, "query \(query)")
-            #else
-            #expect(!retained, "retained search is scoped to iOS")
-            #endif
         }
     }
 
@@ -47,7 +39,6 @@ struct AgentsSearchVisibilityTests {
     }
 }
 
-#if os(iOS) || os(visionOS)
 @MainActor
 struct AgentsSearchStartTests {
     @Test func pushCancelsThePendingSearchBeforeTheKeyboardAnswers() {
@@ -91,4 +82,3 @@ struct AgentsSearchStartTests {
         #expect(!header.compact)
     }
 }
-#endif

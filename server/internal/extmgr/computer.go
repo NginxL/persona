@@ -394,14 +394,14 @@ func (h *Manager) callComputerTool(ctx context.Context, sessionID, name string, 
 			return proto.TextResult(err.Error(), true)
 		}
 	}
-	declined := func(what string) proto.ToolResult {
-		h.logf("[%s] %s declined on the phone (%s)", m.cfg.ID, name, what)
-		return proto.TextResult("The user declined this on the phone. Do not retry it unless they ask.", true)
+	declined := func(what, outcome string) proto.ToolResult {
+		h.logf("[%s] %s %s (%s)", m.cfg.ID, name, refusalWord(outcome), what)
+		return notApproved(outcome)
 	}
 	apps, whole := callApps(name, a.App, a.Script, a.Steps)
 	if name == "computer_state" {
-		if _, ok := h.approveApps(ctx, m, h.assistantAsker(sessionID, m.cfg.ID), name, apps, whole, args, nil); !ok {
-			return declined("look")
+		if _, ok, outcome := h.approveAppsOutcome(ctx, m, h.assistantAsker(sessionID, m.cfg.ID), name, apps, whole, args, nil); !ok {
+			return declined("look", outcome)
 		}
 		shot := a.Screenshot == nil || *a.Screenshot
 		return h.computerState(ctx, m, session, sessionID, a.App, a.Query, shot, a.PID, a.WindowID)
@@ -480,10 +480,12 @@ func (h *Manager) callComputerTool(ctx context.Context, sessionID, name string, 
 		return refuse(v)
 	}
 	what := computerSummary(h.userLang(), m.name(), tool, a.Script, a.Steps)
-	asked, ok := h.approveApps(ctx, m, h.assistantAsker(sessionID, m.cfg.ID), name, apps, whole, args, known)
-	refused := !ok || (h.cua().Confirm && !asked && !h.approve(ctx, h.assistantAsker(sessionID, m.cfg.ID), name, what, args))
-	if refused {
-		return declined(computerLogWhat(tool, a.Script, a.Steps))
+	asked, ok, outcome := h.approveAppsOutcome(ctx, m, h.assistantAsker(sessionID, m.cfg.ID), name, apps, whole, args, known)
+	if ok && h.cua().Confirm && !asked {
+		ok, outcome = h.approveOutcome(ctx, h.assistantAsker(sessionID, m.cfg.ID), name, what, args)
+	}
+	if !ok {
+		return declined(computerLogWhat(tool, a.Script, a.Steps), outcome)
 	}
 	if asked || h.cua().Confirm { // a card may have waited minutes: look again
 		if v := guard(tool, in); v.Why != "" {

@@ -8,5 +8,6 @@
   "remove": "Remove",
   "workspace": "Workspace",
   "repository": "Repository",
-  "skill": "Skill"
+  "skill": "Skill",
+  "file": "File"
 }

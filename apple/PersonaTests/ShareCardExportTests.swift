@@ -80,6 +80,48 @@ import PersonaWire
         }
     }
 
+    @Test func aSceneCardDrawsItsStillSceneImmediately() throws {
+        let card = """
+        {
+          "fallback": "Home: ceiling lamp on, 26 °C",
+          "title": "Home",
+          "sections": [
+            {
+              "items": [
+                {
+                  "type": "scene",
+                  "key": "home",
+                  "alt": "A two-room home with a sofa, a table and two lamps.",
+                  "shapes": [
+                    {"kind": "prism", "points": [[-3, -2], [3, -2], [3, 2], [-3, 2]], "bottom": 0, "top": 0.08, "color": "#C9AD8C", "material": "wood"},
+                    {"kind": "box", "center": [-1.2, 0.4], "size": [1.8, 0.85], "round": 0.1, "bottom": 0.08, "top": 0.78, "color": "#7C8A98"},
+                    {"kind": "cylinder", "center": [0.4, 0.2], "radius": 0.45, "bottom": 0.08, "top": 0.5, "color": "#B8946E", "material": "wood"}
+                  ],
+                  "labels": [
+                    {"text": "Living room", "at": [-0.5, -0.8], "height": 0.08}
+                  ],
+                  "pins": [
+                    {"id": "lamp", "at": [-0.5, 0.2], "height": 2.3, "label": "Ceiling lamp", "state": "On", "tone": "positive", "light": {"on": true, "warmth": "warm"}}
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+        """
+        let raw = try JSONDecoder().decode(ExtensionView.self, from: Data(card.utf8))
+        #expect(AssistantRichMarkdown.supports(raw))
+        let decoded = try #require(AssistantRichMarkdown.decode(card))
+        #expect(ShareCardParts.drawable(decoded))
+        let message = ShareMessage(text: "```persona-view\n\(card)\n```", isUser: false, source: "MacBook",
+                                   date: Date(timeIntervalSince1970: 1_793_000_000), agent: "Claude")
+        let image = try #require(MessageShareCard.render(message, dark: false))
+        #expect(image.size.height >= 200)
+        if let dir = ProcessInfo.processInfo.environment["PERSONA_SHOTS"], let png = image.pngData() {
+            try png.write(to: URL(fileURLWithPath: dir).appending(path: "share-scene.png"))
+        }
+    }
+
     static let message = ShareMessage(text: reply, isUser: false, source: "MacBook · shop-web",
                                       date: Date(timeIntervalSince1970: 1_793_000_000), agent: "Claude")
 }

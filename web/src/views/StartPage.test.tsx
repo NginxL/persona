@@ -46,6 +46,7 @@ beforeEach(() => {
   vi.resetModules();
   localStorage.clear();
   localStorage.setItem("persona.token", "test-token");
+  localStorage.setItem("persona.starredMessages", "1"); // Starred is off until switched on in Settings
   history.replaceState(null, "", "/");
   places = [todayPlace, otherPlace];
   navigation = {};

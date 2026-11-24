@@ -3,8 +3,6 @@
 // agent rows and as a thin bar below the composer. "Show agent details" turns on the sidebar line for this browser.
 import { useSyncExternalStore } from "react";
 import { t } from "../i18n";
-import type { MenuItem } from "../ui/menu-model";
-import { formatTokens } from "./compaction";
 import { ago, baseName } from "./format";
 import type { Session } from "./types";
 
@@ -25,11 +23,17 @@ export interface ContextUsage {
   window: number;
 }
 
-/** The session's context usage, or null while the node cannot tell (no reply yet, a model whose window it does not know, an older node). */
-export function contextUsage(s: Pick<Session, "context_tokens" | "context_window"> | undefined): ContextUsage | null {
+/** Tokens in the latest context, independent of the model's window and the cumulative session total. */
+export function currentContextTokens(s: Pick<Session, "context_tokens"> | undefined): number {
   const tokens = s?.context_tokens ?? 0;
+  return Number.isFinite(tokens) && tokens > 0 ? tokens : 0;
+}
+
+/** A window share needs both an observed context size and a known capacity. */
+export function contextUsage(s: Pick<Session, "context_tokens" | "context_window"> | undefined): ContextUsage | null {
+  const tokens = currentContextTokens(s);
   const window = s?.context_window ?? 0;
-  if (!(tokens > 0) || !(window > 0)) return null;
+  if (!tokens || !Number.isFinite(window) || window <= 0) return null;
   const used = Math.min(100, Math.max(0, Math.round((tokens / window) * 100)));
   return { used, left: 100 - used, tokens, window };
 }
@@ -46,21 +50,6 @@ export function contextWarn(u: ContextUsage): boolean {
 /** The composer and sidebar use the same short label for the used share. */
 export function contextLabel(u: ContextUsage): string {
   return t("context.label", { percent: u.used });
-}
-
-/** What happens when the window fills, and what to do once it is close (#3668): the header's tooltip under the share. */
-export function contextHint(u: ContextUsage): string {
-  return contextWarn(u) ? t("context.hint_warn") : t("context.hint_ok");
-}
-
-/** The header's popover (#4054), the tooltip's words for a screen without hover: the share with the token count beside
- *  it, then what happens when the window fills (and, once close, what to do). */
-export function contextNotes(u: ContextUsage): MenuItem[] {
-  const none = () => {};
-  return [
-    { key: "share", note: true, label: contextTooltip(u), hint: t("context.tokens", { used: formatTokens(u.tokens), window: formatTokens(u.window) }), onSelect: none },
-    { key: "hint", note: true, label: contextHint(u), onSelect: none },
-  ];
 }
 
 /** The explanation in the popover, tooltip and accessible names. */
@@ -83,6 +72,7 @@ export function modelShort(model: string | undefined): string {
 /** One piece of a sidebar row's second line. */
 export interface DetailPart {
   text: string;
+  usage?: ContextUsage;
   /** The context share at the warning colour (orange; also set with `danger`). */
   warn?: boolean;
   /** The context share in the danger tier: 10% or less left. */
@@ -90,15 +80,15 @@ export interface DetailPart {
   title?: string;
 }
 
-/** The second line of an agent's sidebar row: model · context share · how long ago it moved · folder, most useful
+/** The second line of an agent's sidebar row: context share · model · how long ago it moved · folder, most useful
  *  first — the row clips what does not fit at its end, and the folder is mostly the group's own name already. A piece
  *  the session has no value for is left out, so the line is empty (and not drawn) for a session that says nothing yet. */
 export function rowDetail(s: Session, now = Date.now()): DetailPart[] {
   const parts: DetailPart[] = [];
+  const u = contextUsage(s);
+  if (u) parts.push({ text: contextLabel(u), usage: u, warn: contextWarn(u), danger: contextTier(u) === "danger", title: contextTooltip(u) });
   const model = modelShort(s.model);
   if (model) parts.push({ text: model, title: s.model });
-  const u = contextUsage(s);
-  if (u) parts.push({ text: contextLabel(u), warn: contextWarn(u), danger: contextTier(u) === "danger", title: contextTooltip(u) });
   const age = s.updated_at ? ago(s.updated_at, now) : "";
   if (age) parts.push({ text: age });
   const folder = baseName(s.cwd);

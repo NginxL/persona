@@ -72,7 +72,7 @@ function richOutput(data: Json): Output | null {
 function readOutput(o: Json): Output | null {
   switch (o.output_type) {
     case "stream":
-      return { kind: "stream", name: o.name === "stderr" ? "stderr" : "stdout", text: capLines(stripAnsi(str(o.text))) };
+      return { kind: "stream", name: o.name === "stderr" ? "stderr" : "stdout", text: str(o.text) };
     case "execute_result":
     case "display_data":
       return richOutput((o.data as Json) ?? {});
@@ -100,7 +100,7 @@ function mergeStreams(out: Output[]): Output[] {
     if (o.kind === "stream" && last?.kind === "stream" && last.name === o.name) merged[merged.length - 1] = { ...last, text: last.text + o.text };
     else merged.push(o);
   }
-  return merged;
+  return merged.map((o) => (o.kind === "stream" ? { ...o, text: capLines(stripAnsi(o.text)) } : o));
 }
 
 /** A notebook's JSON into cells; throws with a readable reason for what is not one. */

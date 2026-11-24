@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/nwverse/persona/server/internal/compat"
+	"github.com/nwverse/persona/server/internal/identity"
 )
 
 // PERSONA_NODE_SESSION_DIR opts a second resident or stdio node into discovering
@@ -69,6 +70,23 @@ func sessionScopeWithin(root, p string) bool {
 
 func (n *Node) sessionScopeAllows(cwd string) bool {
 	return n.sessionScope == nil || sessionScopeWithin(n.sessionScope.dir, cwd)
+}
+
+// assistantFallbackDir is where an assistant conversation runs when it has no folder of its own: a scoped node's
+// assistant directory (PERSONA_NODE_SESSION_DIR, the only one it lists), else the data directory's assistant directory.
+func (n *Node) assistantFallbackDir() string {
+	if n.sessionScope != nil && n.sessionScope.dir != "" {
+		return n.sessionScope.dir
+	}
+	return identity.AssistantDir(n.home)
+}
+
+// unlistedAssistantDir: dir is the built-in assistant's directory in a scoped node's state root, which that node never
+// lists. Nothing starts a conversation there on purpose: it is the folder storedCwd fell back to before it knew the
+// scope, and a conversation resumed there again dropped out of every list, so the manager ended each channel message
+// to it as gone after channel.MissingAfter.
+func (n *Node) unlistedAssistantDir(dir string) bool {
+	return n.sessionScope != nil && dir != "" && sameScopePath(dir, identity.AssistantDir(n.home)) && !n.sessionScopeAllows(dir)
 }
 
 func (n *Node) scopedTranscript(path string) bool {

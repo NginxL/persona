@@ -10,7 +10,9 @@ draws, its scope, each client's code symbol and test, and whether drawing the ma
 - `matches` rows with the same label draw the same count;
 - the replays' report surfaces (`replays`) are rows of each lane, read from keys every fixture case has, and a
   lane's mark in a case (`known_differences.<lane>`) on a key a surface reads is in that row's `decisions`;
-- the `differs` rows only go down: the README states how many there are, and none is new against the base commit;
+- a replay's surfaces that draw the same count show one number in every case (the needs-you badge and header, D6);
+- the `differs` rows only go down: the README states how many there are, and none is new against the base commit
+  but in the change that records a decided refinement of a count it draws (the count's `refined_by`), naming it;
 - a hub-fed surface (a row with `view`) names its fallback in no source file of its client but the fallback's own;
 - check-fast runs this guard for every file the table names (scripts/ci/check_fast_map.py).
 
@@ -28,6 +30,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "scripts" / "ci"))
@@ -54,6 +57,8 @@ _SKIP_DIRS = {".git", "node_modules", "build", ".build", "dist", "DerivedData", 
 SCOPES = {"assistant", "unscoped", "default_manager", "manager", "each_assistant", "all_hubs", "list"}
 STATUSES = ("matches", "differs")
 ROW_KEYS = {"client", "surface", "label", "shown_on", "count", "scope", "code", "tests", "status", "why"}
+COUNT_KEYS = {"rule", "pinned_by", "waits_on"}
+COUNT_OPTIONAL_KEYS = {"refined_by"}
 OPTIONAL_KEYS = {"decisions", "local", "view"}
 _DECISION = re.compile(r"D[0-9]+")
 _PLAN_DECISION = re.compile(r"^- \*\*(D[0-9]+)\*\*", re.M)
@@ -105,9 +110,13 @@ def shape_problems(table, decisions, root):
     if not isinstance(counts, dict) or not counts:
         return found + ["counts: missing"]
     for name, count in counts.items():
-        if not isinstance(count, dict) or set(count) != {"rule", "pinned_by", "waits_on"}:
-            found.append(f"counts.{name}: needs rule, pinned_by and waits_on, and nothing else")
+        if not isinstance(count, dict) or not COUNT_KEYS <= set(count) or set(count) - COUNT_KEYS - COUNT_OPTIONAL_KEYS:
+            found.append(f"counts.{name}: needs rule, pinned_by and waits_on, may have refined_by, and nothing else")
             continue
+        refined = count.get("refined_by", [])
+        if not isinstance(refined, list) or "refined_by" in count and not refined or any(
+                d not in decisions for d in refined):
+            found.append(f"counts.{name}: refined_by lists decisions of the plan's section 6")
         if count["rule"] is not None and not (isinstance(count["rule"], str) and count["rule"].strip()):
             found.append(f"counts.{name}: rule is a sentence, or null while it waits on a decision")
         if count["pinned_by"] is not None and not (root / str(count["pinned_by"])).is_dir():
@@ -228,6 +237,38 @@ def replay_problems(table, root):
                 if not key or any(key not in case.get("expected", {}) for case in cases):
                     found.append(f"replays.{fixture}.{surface}: not every case's expected has {key}")
             found += mark_problems(table, fixture, cases, replay, surface, read)
+        found += same_count_problems(table, fixture, cases, replay)
+    return found
+
+
+def _number(value):
+    """What a surface shows for a case's expected value: a list counts its rows."""
+    return len(value) if isinstance(value, list) else value
+
+
+def same_count_problems(table, fixture, cases, replay):
+    """Surfaces one lane reports in a replay that draw the same count show one number in every case's `expected`
+    (docs/design/PRINCIPLES.md, "Consistency first"): a needs-you case gives the Agents tab's badge and the section's
+    header the same number (D6 of the plan). Marks are today's values and may differ until their decision lands."""
+    found = []
+    rows = {rid(row): row for row in table["surfaces"]}
+    surfaces = replay.get("surfaces") or {}
+    pairs = set()
+    for lane in replay.get("lanes", []):
+        drawn = {}
+        for surface in surfaces:
+            row = rows.get(f"{lane}.{surface}")
+            if row is not None:
+                drawn.setdefault(tuple(row["count"]), []).append(surface)
+        for count, names in drawn.items():
+            pairs.update((count, a, b) for i, a in enumerate(names) for b in names[i + 1:])
+    for count, a, b in sorted(pairs):
+        for case in cases:
+            expected = case.get("expected", {})
+            x, y = _number(expected.get(surfaces[a].get("value"))), _number(expected.get(surfaces[b].get("value")))
+            if x != y:
+                found.append(f"replays.{fixture}: case {case.get('name')} gives {a} {x} and {b} {y}, which both draw "
+                             f"{' + '.join(count)}; one count shows one number on every surface that draws it")
     return found
 
 
@@ -253,7 +294,22 @@ def mark_problems(table, fixture, cases, replay, surface, read):
     return found
 
 
+def newly_refined(table, base_table):
+    """{count id: the decisions its refined_by lists that the base's does not}: the refinements this change records."""
+    base_counts = base_table.get("counts") if isinstance(base_table.get("counts"), dict) else {}
+    out = {}
+    for name, count in table["counts"].items():
+        base = base_counts.get(name) if isinstance(base_counts.get(name), dict) else {}
+        added = set(count.get("refined_by", [])) - set(base.get("refined_by") or [])
+        if added:
+            out[name] = added
+    return out
+
+
 def ratchet_problems(table, readme_text, base_table):
+    """The `differs` rows only go down. A decided refinement of a count (D18 of the plan: it keeps its id) may make
+    rows that matched differ, but only in the change that adds the decision to the count's refined_by, and only rows
+    that name it: once the base lists it, no further row can come to differ by it."""
     found = []
     now = differs(table)
     stated = _README_COUNT.search(readme_text)
@@ -262,9 +318,16 @@ def ratchet_problems(table, readme_text, base_table):
     elif int(stated.group(1)) != len(now):
         found.append(f"{README}: says {stated.group(1)} `differs` rows; the table has {len(now)}")
     if base_table is not None:
-        new = sorted(now - differs(base_table))
+        refined = newly_refined(table, base_table)
+        rows = {rid(row): row for row in table["surfaces"]}
+
+        def recorded_here(name):
+            row = rows[name]
+            return any(decision in refined.get(count, ()) for count in row["count"] for decision in row["decisions"])
+        new = sorted(name for name in now - differs(base_table) if not recorded_here(name))
         if new:
-            found.append("the `differs` rows only go down; new against the base commit: " + ", ".join(new))
+            found.append("the `differs` rows only go down; new against the base commit: " + ", ".join(new)
+                         + " (a row comes to differ only by a refinement its count's refined_by adds in this change)")
     return found
 
 
@@ -326,24 +389,35 @@ def problems(root, table, readme_text, plan_text, base_table=None, checks=None):
     return found
 
 
-def _git(*args):
-    return subprocess.run(["git", *args], cwd=ROOT, capture_output=True, text=True, timeout=60)
+def _git(root, *args):
+    return subprocess.run(["git", *args], cwd=root, capture_output=True, text=True, timeout=60)
 
 
-def base_table():
+def base_table(root=ROOT):
     """The table at the base commit (CI_BASE_SHA, else the merge base with origin's default branch), or None: no base
-    here, or the table is new there."""
+    here, or the table is new there.
+
+    Whether the table is at the base comes from the tree, not from reading it: the scripts shards' checkout is
+    blobless (#12753), so the base's copy of a changed table is fetched on first read, and a failed fetch must not
+    count as "new there" (which would skip the only-go-down check)."""
     base = os.environ.get("CI_BASE_SHA", "").strip()
     if not base:
         for ref in ("refs/remotes/origin/HEAD", "refs/remotes/origin/main"):
-            merge = _git("merge-base", "HEAD", ref)
+            merge = _git(root, "merge-base", "HEAD", ref)
             if merge.returncode == 0:
                 base = merge.stdout.strip()
                 break
     if not base:
         return None
-    shown = _git("show", f"{base}:{TABLE}")
-    return json.loads(shown.stdout) if shown.returncode == 0 else None
+    listed = _git(root, "ls-tree", "-z", "--full-tree", base, "--", TABLE)
+    if listed.returncode != 0:
+        raise RuntimeError(f"cannot read the tree of the base commit {base}: {listed.stderr.strip()}")
+    if not any(entry.partition("\t")[2] == TABLE for entry in listed.stdout.split("\0")):
+        return None
+    shown = _git(root, "show", f"{base}:{TABLE}")
+    if shown.returncode != 0:
+        raise RuntimeError(f"cannot read {base}:{TABLE}: {shown.stderr.strip()}")
+    return json.loads(shown.stdout)
 
 
 def _read(path):
@@ -366,6 +440,47 @@ class RealTableTests(unittest.TestCase):
                        "ownerBadge", "waitingAgents", "setBadge", "islandState", "needsYou", "linkAttention",
                        "tellInboxNeedsYou", "Counts", "treeCounts", "counts"):
             self.assertIn(symbol, symbols)
+
+
+class BaseTableTests(unittest.TestCase):
+    """The base's table in a blobless clone, as the scripts shards check it out (#12753)."""
+
+    def test_a_base_table_that_cannot_be_fetched_is_an_error_not_a_new_table(self):
+        with tempfile.TemporaryDirectory() as directory, mock.patch.dict(os.environ):
+            os.environ.pop("CI_BASE_SHA", None)
+            work = Path(directory)
+            source, origin, clone = work / "source", work / "origin.git", work / "clone"
+            table = source / TABLE
+
+            def git(*args, cwd=source):
+                subprocess.run(["git", "-c", "user.name=Fixture", "-c", "user.email=fixture@example.com",
+                                "-c", "core.hooksPath=/dev/null", *args], cwd=cwd, check=True, capture_output=True,
+                               timeout=60)
+            source.mkdir()
+            (source / "README.md").write_text("fixture\n")
+            git("init", "-q", "-b", "main")
+            git("add", ".")
+            git("commit", "-q", "-m", "no table yet")
+            table.parent.mkdir(parents=True)
+            table.write_text('{"surfaces": ["base"]}\n')
+            git("add", ".")
+            git("commit", "-q", "-m", "the table")
+            git("checkout", "-q", "-b", "change")
+            table.write_text('{"surfaces": ["changed"]}\n')
+            git("commit", "-q", "-am", "change the table")
+            git("checkout", "-q", "main")
+            git("clone", "-q", "--bare", str(source), str(origin), cwd=work)
+            git("config", "uploadpack.allowFilter", "true", cwd=origin)
+            git("clone", "-q", "--filter=blob:none", "--branch", "change", origin.as_uri(), str(clone), cwd=work)
+            git("remote", "set-url", "origin", (work / "gone.git").as_uri(), cwd=clone)
+            with self.assertRaisesRegex(RuntimeError, "cannot read"):
+                base_table(clone)
+            git("remote", "set-url", "origin", origin.as_uri(), cwd=clone)
+            self.assertEqual({"surfaces": ["base"]}, base_table(clone))
+            # Against a base without the table, the table is new there, which the tree says without a fetch.
+            git("remote", "set-url", "origin", (work / "gone.git").as_uri(), cwd=clone)
+            git("update-ref", "refs/remotes/origin/main", "refs/remotes/origin/main~1", cwd=clone)
+            self.assertIsNone(base_table(clone))
 
 
 class SeededViolationTests(unittest.TestCase):
@@ -480,6 +595,32 @@ class SeededViolationTests(unittest.TestCase):
             t["replays"] = {}  # the seed's mark on ios.tab goes with it, as a real one would
         self.assertEqual([], self.run_guard(self.broken(fewer), readme="`differs` rows today: 1", base=self.TABLE))
 
+    def test_a_decided_refinement_lets_rows_differ_only_in_its_own_change(self):
+        def refined(t, decision="D1"):
+            t["counts"]["agents"]["refined_by"] = ["D1"]
+            t["surfaces"][1].update(status="differs", decisions=[decision])
+        readme = "`differs` rows today: 3"
+        # The change that adds D1 to the count's refined_by may make a row that drew it differ, naming D1.
+        self.assertEqual([], self.run_guard(self.broken(refined), readme=readme, base=self.TABLE))
+        # Once the base lists the refinement, no further row comes to differ by it.
+        base = self.broken(lambda t: t["counts"]["agents"].update(refined_by=["D1"]))
+        self.assertCaught(self.broken(refined), "only go down", "server.live", readme=readme, base=base)
+        # A row that names another decision is a new difference all the same.
+        self.assertCaught(self.broken(lambda t: refined(t, "D7")), "only go down", "server.live", readme=readme,
+                          base=self.TABLE)
+        # Nor does a refinement of one count let a row that draws another differ.
+        def other_count(t):
+            t["counts"]["agents"]["refined_by"] = ["D7"]
+            t["surfaces"][2].update(status="differs", decisions=["D7"])
+        self.assertCaught(self.broken(other_count), "only go down", "web.inbox", readme=readme, base=self.TABLE)
+        # refined_by lists decisions of the plan, at least one.
+        self.assertCaught(self.broken(lambda t: t["counts"]["agents"].update(refined_by=["D99"])),
+                          "counts.agents", "refined_by")
+        self.assertCaught(self.broken(lambda t: t["counts"]["agents"].update(refined_by=[])),
+                          "counts.agents", "refined_by")
+        self.assertCaught(self.broken(lambda t: t["counts"]["agents"].update(extra=1)), "counts.agents",
+                          "nothing else")
+
     def test_a_differs_row_names_a_decision_of_the_plan(self):
         self.assertCaught(self.broken(lambda t: t["surfaces"][0].pop("decisions")), "names the decisions")
         self.assertCaught(self.broken(lambda t: t["surfaces"][0].update(decisions=["D99"])), "D99")
@@ -519,6 +660,31 @@ class SeededViolationTests(unittest.TestCase):
             {"name": "other", "expected": {"rows": [], "badge": 0, "extra": 0},
              "known_differences": {"ios": {"decision": "D7", "replace": {"extra": 1}}}}],
             self.TABLE["replays"]["cases"], "tab", {"value": "badge", "keys": "rows"}))
+
+    def test_surfaces_that_draw_one_count_show_one_number(self):
+        def section(t, count="agents"):
+            t["surfaces"].append({**copy.deepcopy(t["surfaces"][0]), "surface": "section", "count": [count]})
+            t["replays"]["cases"]["surfaces"]["section"] = {"value": "header", "keys": "rows"}
+        table = self.broken(section)
+        replay = table["replays"]["cases"]
+        split = [{"name": "split", "expected": {"rows": [{"id": "a"}, {"id": "b"}], "badge": 1, "header": 2}}]
+        found = same_count_problems(table, "cases", split, replay)
+        self.assertEqual(1, len(found), found)
+        self.assertTrue(all(w in found[0] for w in ("split", "section 2", "tab 1", "agents")), found)
+        # One number, or a mark at today's split: nothing to say.
+        one = [{"name": "one", "expected": {"rows": [{"id": "a"}, {"id": "b"}], "badge": 1, "header": 1},
+                "known_differences": {"ios": {"decision": "D1", "replace": {"header": 2}}}}]
+        self.assertEqual([], same_count_problems(table, "cases", one, replay))
+        # A list value counts its rows.
+        listed = self.broken(lambda t: (section(t), t["replays"]["cases"]["surfaces"]["section"].update(value="rows")))
+        self.assertEqual([], same_count_problems(listed, "cases", [
+            {"name": "rows", "expected": {"rows": [{"id": "a"}], "badge": 1}}], listed["replays"]["cases"]))
+        # Surfaces that draw different counts may differ.
+        other = self.broken(lambda t: section(t, "unread"))
+        self.assertEqual([], same_count_problems(other, "cases", split, other["replays"]["cases"]))
+        # The real table's needs-you replay: the Agents tab's badge and the section's header (D6).
+        real = json.loads(_read(TABLE))
+        self.assertEqual([], same_count_problems(real, "needs-you", _cases(ROOT, "needs-you"), real["replays"]["needs-you"]))
 
     def test_a_hub_fed_surface_names_its_fallback_only_in_the_fallback_file(self):
         def fed(t):

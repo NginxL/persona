@@ -63,4 +63,24 @@ class ChildSessionHomeTest {
             fail("A departed page must cancel the lookup")
         } catch (_: CancellationException) { }
     }
+
+    @Test fun crossMachineFoldResolvesParentAndDirectSubagentDetailNeverRedirects() = runTest {
+        val child = Session(
+            "box-b", "sub-1", title = "Remote worker", isSubagent = true,
+            parentMachineId = "box-a", parentSessionId = "parent",
+            foldedUnder = "parent", foldedUnderMachineId = "box-a",
+        )
+        val parent = Session("box-a", "parent", title = "Lead")
+        assertEquals(ChildSessionHome(parent.key, "sub-1"), childSessionHome(child.key, child, parent))
+        // Direct subagent detail view keeps child's own key even when parent is listed.
+        assertEquals(ChildSessionHome(child.key), childSessionHome(child.key, child, parent, directSubagent = true))
+
+        // Cold direct subagent lookup fetches child metadata without redirecting to parent.
+        val direct = resolveChildSessionHome(child.key, emptyList(), directSubagent = true) { target ->
+            listOf(child, parent).firstOrNull { it.key == target }
+        }
+        assertEquals(child.key, direct.key)
+        assertNull(direct.childSessionId)
+        assertEquals(listOf(child), direct.rows)
+    }
 }

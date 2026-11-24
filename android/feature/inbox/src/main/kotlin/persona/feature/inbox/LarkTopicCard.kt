@@ -34,6 +34,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import persona.core.designsystem.*
 import persona.core.designsystem.icons.PersonaIcons
+import persona.core.inbox.*
 
 /**
  * The newest replies under a topic's card (#576 G134, iOS `LarkTopicReplies`): the thread's page holds the topic first and

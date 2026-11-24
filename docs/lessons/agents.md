@@ -1,5 +1,29 @@
 # Lessons: Claude Code, Codex, and herdr
 
+## Persona's own agy hooks: report only, own one key, prove the pane (#13729)
+
+- agy's global `hooks.json` is shared: herdr, Moshi and Orca each own a top-level group. Write only the `persona` key through the ordered-object editor (`editSettings`), never rewrite the others, and treat a changed command (moved binary) as stale, not as foreign.
+- agy runs the hook with the terminal's environment, which has no `PERSONA_HOME`: a node with a non-default directory must put `--persona-home <dir>` in the command, or the hook dials the default node's socket.
+- The hook must print `{}` and exit fast on every path (no node, unknown pane, bad input), or agy waits on it. Subagent conversations inherit the pane's environment and report too, so the node still has to prove the conversation is not a subagent's (#13336) before it reads or resumes.
+- herdr's own report and Persona's can disagree for a moment after a new conversation; the node treats a disagreement as unknown instead of picking one.
+
+## Visibility-only `TurnErrorCode` values must not trip `readinessBlocks` or `CutOff` on node `TurnError` (#13372)
+
+- `readinessBlocks` (`server/internal/assistant/readiness.go`) defaults every `StepProblem` code to `mode: "setup"` unless explicitly excluded. Any non-user-fix `TurnErrorCode` (such as `upstream_unavailable`, alongside `rate_limited`, `model_fallback_unavailable`, and `tool_search_unsupported`) must be excluded in `readinessBlocks` and paired with `test_assistant` and plain-language readiness strings, or an upstream outage locks every client's composer with "Connect a model first".
+- Apply `assistantwire.CutOff` (`"API Error:"` prefix check) only when falling back to `Session.LastText`, never to a node-populated `Session.TurnError` (`latestTurnError`): Codex rollouts and runtime bridges report `5xx` errors as plain messages (`unexpected status 503 Service Unavailable`) that do not start with `"API Error:"`.
+- When tracking multi-turn streaks in `transcript.Meta`, copy the streak fields in `Tail.Settle` (`server/internal/transcript/branch.go`) and preserve/merge them in `mergeModelFallback` (`server/internal/node/model_refusal.go`), which otherwise resets `m.turnErr.code` on every `bgScan` merge.
+
+## An App update can leave a socket without its server (#13190)
+
+- A Unix socket file proves only that a process bound that path at some point. After the Codex App removed its IPC router, the old `<CODEX_HOME>/ipc/ipc.sock` remained and a file-type check still advertised writable chats. Check that a listener accepts connections, with a short timeout and one probe per home per list, and handle a later connection failure as a normal control refusal.
+- Match transport logs to the host that owns the threads. In App build 29803, `hostId=durable transport=websocket` describes a cloud connection; the local host still spawns a private stdio app-server. A socket path in a permission allowlist, or a daemon path behind an inactive process flag, does not establish an available endpoint. Inspect process arguments and actual listeners read-only before choosing a route.
+- Keep App chat identity separate from transport availability. History and project grouping remain useful without control; a missing bus must not advertise send / stop / settings, accept a queued message, or invite another app-server to become the thread's writer. Preserve uncertain delivery after a request has actually gone out. See [Codex support](../integrations/codex.md#sessions-in-the-codex-desktop-app-app-local-ipc).
+
+## Detached approvals and hub-owned device methods (#12918)
+
+- When a prepared or detachable `PreToolUse` approval releases its hook with `approval.WaitingText` or `approval.ClarifyingText`, Claude Code writes that message into the transcript as an ordinary `tool_result` carrying the original `tool_use_id`. Transcript reconciliation for terminal-answered permissions (`syncPlanInteractions`) must skip `p.prepared != nil` and non-final approval tool results, or the retained 24-hour card is dismissed as `answered_by=terminal` a second later.
+- Methods in `assistantwire.HubDeviceMethods` (`interactions.list`, `sessions.list`, `session.get`) never exist on nodes. Answer them in both `localFleetDeviceCall` and `hub.deviceCallFrom` for concrete machine IDs as well as `DeviceAll`, and never mask a missing manager/hub branch by injecting `f.nodes[DeviceInteractionsList]` in tests.
+
 ## A one-start speed must not become a resume default (#11141)
 
 - Codex's per-start `service_tier` belongs only in the initial argv; validate it against the selected model's catalog rather than trusting Codex to refuse an unadvertised tier.
@@ -14,6 +38,10 @@
   the linked task's current participants, parking and close state, and keep the same cases on every client.
 - Error detection also runs on every ordinary session's last answer. Compare a case-insensitive prefix without
   lowercasing whole answers; an extra allocation per row broke the 8,200-session list's allocation budget.
+- A wire kind/code must drive the invalid label and full subtitle too, not only hide Continue: raw-text-only row checks
+  otherwise show an opaque error as an ordinary interruption. Apply the working/waiting replacement guard to each
+  client's separate To-dos triage as well as the Assistant tray, and recheck permanent refusal in the timed-out resume
+  path before it sends `session.start`.
 - For mock screenshots, combine `MOCK_TASKS=1 MOCK_TASKS_CUT=1 MOCK_TASKS_INVALID=1` with the mock hub. This is UI
   evidence only, not deployment or proof that a real account-sealed conversation has disappeared from Needs you.
 - Keep permanent compaction errors separate from retryable tool-search refusals when merging error handling.
@@ -147,6 +175,14 @@ Codex bridge does. A login shell need not have `personad` on PATH. Render after 
 callers the node's reported absolute executable as data for the existing scoped CLI. Bound the metadata read;
 unavailable metadata or unknown capabilities omit unverified hints, not the assignment.
 Keep the existing project context, approval snapshot and attachment order intact.
+
+A handoff note that reads as an instruction gets followed (#12995). A Codex worker at high reasoning effort read
+"use the terminal entry below for a separate session on this assignment" as a step of its task: it handed its whole
+assignment to a child in the same checkout, telling it the parent would coordinate and verify, then polled the
+child's process, `git status` and transcript until it finished. Nothing said the caller still owns its assignment,
+that the child shares its directory and permissions, or that the child reports to the supervisor, not to the caller.
+The note now says each wherever an entry is offered. The server still allows writable children in the caller's
+directory: continuations rely on them (`tasks_continuation_test.go`).
 
 - A guest conversation's session id and tools are registered before the node starts it: Claude Code lists the
   Persona MCP server's tools as it starts, a later `guestSet` makes that first list empty, and a connected MCP server
@@ -311,6 +347,9 @@ may legitimately repeat an earlier answer, so retirement follows the landed stre
 - Claude Code 2.1.206 changed `/effort` to a slider ("←/→ to adjust · Enter to confirm", low at the left), removing the old list's "for this session only";
   node's `tuiSetEffort` recognizes both (`effortPicker`). Confirming the slider writes `effortLevel` in `~/.claude/settings.json` ("saved as your default for new sessions"),
   not just this session. `CLAUDE_CODE_EFFORT_LEVEL` in the environment (settings.json `env` or launcher) wins; Claude only replies "… overrides this session" and changes nothing, and the App reports that accurately.
+- Claude Code 2.1.330 advertises the session-only confirmation key in the `/effort` footer (#13534). Read it after moving the slider.
+  Savable levels offer `s`, while a session-only selection such as `max` uses Enter. The effort indicator above the input box
+  can confirm the level when the command's result is outside the visible area.
 - Effort `auto` (Claude Code 2.1.316) works only through `/effort auto`: `--effort auto` warns and is ignored, and settings.json `effortLevel: auto`
   is silently dropped (`max` too; settings accepts only low…xhigh). The picker has no auto position. `/effort auto` clears this model's default in settings;
   phone auto handling must differ by path (`docs/apple/ios.md` ("Effort and permission modes")). Testing `/effort …` on a dev machine also changes real settings.json; don't use your own configuration.
@@ -371,6 +410,8 @@ may legitimately repeat an earlier answer, so retirement follows the landed stre
 - Codex app-server `thread/loaded/list` isn't all chats (2026-11-05, #2118, 0.166): TUI creates `ephemeral: true` threads for small background tasks in the shared managed daemon
   (`threadSource: "thread_title"`, title generation), without `path` / rollout; they stay loaded and `active` after finishing. Ignoring `ephemeral` produces a row of untitled "Working" Codex entries from the same directory and second on the Agents page.
   Skip `ephemeral` before listing sessions; they also don't support `includeTurns` (returns -32600).
+  Remember the answer too (#12517): an app-server-compatible daemon kept 600 to 740 finished helper threads loaded, and reading every one on each 5 s refresh made about 100 reads a second
+  and used up the refresh's 20 s before the real threads were read. Nor read a long list in its own order, or count a read the refresh's time cut short as read: either way the same threads are cut on every refresh.
 - Use the exported `codex app-server` protocol (`codex app-server generate-ts --out <dir>`). Experimental APIs (`thread/backgroundTerminals/*`, `process/*`)
   require `--experimental` to export and `capabilities.experimentalApi: true` in `initialize` to use. Other Codex assistant pitfalls are in `assistant.md`.
   Codex assistant rollout begins with tens of KB of instructions (AGENTS.md, snapshot), with the first user message after 70 KB: scanning only the first 32 KB for a title fails (`readQuickMeta`).
@@ -541,6 +582,10 @@ Measured with `claude plugin … --json` in throwaway `CLAUDE_CONFIG_DIR`s while
   messages in a row taken during one long turn, the thirteenth never written anywhere). Never treat an inbox write as a
   delivery, and prefer the plugin's `$.prompt.submit({ asUser: true })` for the owner's words whenever the session's
   plugin can take them, busy or not (`docs/integrations/claude-integration.md` "Owner input through the Persona plugin").
+- Run `claude plugin validate` and `claude plugin test` on the exact conflict-resolved head, not only the pre-merge
+  branch: one lost `}` kept every hook from loading. A timer that releases a busy poll is only a scheduling boundary,
+  never `submitted: true`; let the real submission continuation ack and cover delayed rejection and `drop`, idle and
+  busy (#11980).
 
 ## Claude Code writes into its transcript as it exits: delete it after the process (2026-11-11, #4665)
 
@@ -1451,6 +1496,11 @@ previews, and cache parsed files with bounded storage and file-version invalidat
 Test normal RPC pages, live pushes, delayed export writes and same-size or atomic file updates. Preserve literal
 placeholder examples in complete source text.
 
+For Herdr panes, keep the compact export's step identities and order when filling in text from the full export
+(#13706). A full export can arrive late or still hold the abandoned branch after a rewind. Match the step metadata,
+retained prefix and suffix, and omitted byte count before restoring a field. A late match must invalidate the settled
+preview already cached by clients while keeping the reply's item ID.
+
 ## Filesystem timestamps can alias rapid native rewrites (#5659)
 
 Nanosecond stat fields can repeat across same-size writes within one filesystem timestamp tick. Bypass the parsed
@@ -1580,3 +1630,36 @@ therefore activate its suffix-command parser and append a command to an unrelate
 ACP embedded text resource, keeping the user's own text in its separate text block. Separate text blocks alone are
 insufficient: ACP expands each one. Preserve explicit standalone native commands, and test the captured ACP payload
 for both a new conversation and later messages with command names in the snapshot.
+
+
+## Embedded context has a native transcript envelope (#12813)
+
+Moving auxiliary input out of ACP text blocks protects it from command expansion, but Antigravity serializes the
+embedded resource back into native `USER_INPUT.content` with a `Content of persona-context:///snapshot.txt:` label.
+Removing only the snapshot XML leaves that label visible. Check the native export before blaming replay, and clean
+both the companion and pane history projections. Require the complete leading Persona resource envelope so ordinary
+labels and other URI schemes survive; keep embedded-resource transport intact and version the history format.
+
+## A persisted triage wait needs answerable evidence
+
+A read-only session skips card creation, but must not skip evidence validation. Normalize model `blocked / user`
+results with no grounded question or authorization link before storing them and when displaying old records.
+Otherwise a guess appears as "Awaiting your reply" with nothing in the chat to answer.
+
+## A herdr pane's title is its terminal's, and agy sets none (#13639)
+
+herdr reports the title the program in a pane gives its terminal. agy gives none, so an agy pane's row kept the
+shell's (`user@host: /path`, a path on a primary screen) or nothing, and the apps showed herdr's tab name (`agent-2`),
+even after the node read the pane's conversation and merged its model and usage from the companion's row. When a
+herdr row's conversation comes from somewhere else, so does its title: pi and opencode take their runtime's, agy the
+companion's, else its own (`cache/conversation_metadata.json`), else the first message typed into it. Merging a
+runtime's row into a pane's, go through every field the runtime knows better, not only the ones a report named.
+
+## The companion's agy row can be a conversation a terminal agy has open (#13603)
+
+The Antigravity companion lists every recent agy conversation on disk, including ones an `agy` in a terminal is
+running. When the node had no pane row to merge it into (herdr-core terminals were not recognised as agy), a message to
+`agy-<conversation>`, card answers included, went to the companion, which ran a second agy on the same conversation: the
+terminal never saw it, and the companion's turn overwrote the stored steps from where it had last loaded them. The
+terminal agy holds an exclusive flock on `presence/<conversation>.lock`; the file stays after agy exits, so test the lock,
+never the file. Calls that drive the conversation go to the pane, or are refused (`agy_in_terminal`) while the lock is held.

@@ -60,11 +60,6 @@
   "related_recordings": "Related recordings",
   "related_topics": "Related topics",
   "hit_transcript": "Transcript",
-  "device_phone": "iPhone",
-  "device_watch": "Apple Watch",
-  "duration_hours": "{h} h {m} min",
-  "duration_minutes": "{m} min {s} s",
-  "duration_seconds": "{s} s",
   "hit_minutes": "Minutes",
   "hit_recap": "Day recap"
 }

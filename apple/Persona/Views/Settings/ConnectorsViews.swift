@@ -7,13 +7,9 @@ import PersonaWire
 
 /// What a connector is called and says in the settings list.
 enum ConnectorText {
-    /// This device as a connector: This iPhone / iPad / Mac.
+    /// This device as a connector: This iPhone / iPad.
     static var device: String {
-        #if os(macOS)
-        String(localized: "This Mac")
-        #else
         UIDevice.current.userInterfaceIdiom == .pad ? String(localized: "This iPad") : String(localized: "This iPhone")
-        #endif
     }
 
     static func deviceSummary() -> String {
@@ -587,11 +583,7 @@ struct FeishuConnectorView: View {
                 Toggle("Show Messages on Home", isOn: $larkHome.enabled)
                 .accessibilityIdentifier("feishu-home-enabled")
             } footer: {
-                #if os(macOS)
-                Text("Adds Messages to the sidebar to browse all direct and group chats. It shares accounts and chat history with the Inbox.")
-                #else
                 Text("Adds a Messages entry on Home to browse all direct and group chats. It shares accounts and chat history with the Inbox.")
-                #endif
             }
 
             if !absent {
@@ -611,11 +603,7 @@ struct FeishuConnectorView: View {
             Section("What Persona Does with Lark") {
                 use(Theme.Icon.inbox, String(localized: "Inbox"), String(localized: "Direct messages, @mentions, group messages and mentions in docs; AI sorts them and drafts replies"))
                 use(Theme.Icon.knowledge, String(localized: "Knowledge"), String(localized: "Chats, people, groups and projects are archived as context for the assistant and AI twin"))
-                #if os(macOS)
-                use(Theme.Icon.ai, String(localized: "Assistant"), String(localized: "Persona can search messages and read docs; sending messages and other changes ask you in the app first"))
-                #else
                 use(Theme.Icon.ai, String(localized: "Assistant"), String(localized: "Persona can search messages and read docs; sending messages and other changes ask you on your phone first"))
-                #endif
                 use(Theme.Icon.agents, "/agent", String(localized: "Start a message with /agent anywhere in Lark to have an agent handle it and reply for you"))
                 ModelConfigurationLink(title: String(localized: "/agent Model"), purposeID: "lark.agent", owner: modelOwner)
             }

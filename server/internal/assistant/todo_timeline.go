@@ -27,9 +27,9 @@ import (
 // which clients match to the to-do by its ref. The manager names CapabilityTodoTimeline in its hello.
 //
 // An extension's token (todos.read) reads less (docs/extensions/extensions.md "Never shown to extensions"): nothing of
-// a to-do whose history may hold the health space's words, whose routes answer it 404 (todoScoped, todo_scope.go), and
+// a to-do whose history may hold a private space's words, whose routes answer it 404 (todoScoped, todo_scope.go), and
 // no answered cards, whose records hold what the owner typed into a card's fields and do not say whose card it was (a
-// Just me card, a health run's).
+// Just me card, a space run's).
 
 const (
 	// todoTimelineFeedCap is how many of a to-do's feed items a read takes, the newest: a to-do has a few hundred at
@@ -94,12 +94,6 @@ func supervisorOf(t Todo) string {
 	return t.Supervision.Supervisor
 }
 
-// healthRun: session c works in the health space, by its space or its directory (identity.InHealthSpace: this only
-// hides, so a subfolder counts).
-func healthRun(c proto.Session) bool {
-	return spaceOf(c) == SpaceHealth || identity.InHealthSpace(c.Cwd)
-}
-
 // conversationSpace is the space of the conversation a to-do names, id ("" the assistant's own, as for no
 // conversation), and whether it could be told, as conversationSpaces tells it.
 func (s *Service) conversationSpace(ctx context.Context, id string) (string, bool) {
@@ -107,22 +101,25 @@ func (s *Service) conversationSpace(ctx context.Context, id string) (string, boo
 	return t.space, t.known
 }
 
-// leaderSpace is the space of task leader agent machine/sid, and whether it could be told: the health space's when any
-// of its links keeps a directory there (a subfolder counts: this only hides), else outside it when one keeps a
-// directory, else as its computer lists it.
+// leaderSpace is the space of task leader agent machine/sid, and whether it could be told: a space's when any of its
+// links keeps a directory there (identity.SpaceAt: a subfolder counts, this only hides), else outside any when one
+// keeps a directory, else as its computer lists it (runSpace).
 func (s *Service) leaderSpace(ctx context.Context, machine, sid string) (string, bool) {
 	s.todos.mu.RLock()
-	inSpace, kept := false, false
+	space, kept := "", false
 	for _, t := range s.todos.todos {
 		for _, a := range t.Agents {
 			if a.MachineID == machine && a.SessionID == sid && a.Cwd != "" {
-				inSpace, kept = inSpace || identity.InHealthSpace(a.Cwd), true
+				if space == "" {
+					space = identity.SpaceAt(a.Cwd)
+				}
+				kept = true
 			}
 		}
 	}
 	s.todos.mu.RUnlock()
-	if inSpace {
-		return SpaceHealth, true
+	if space != "" {
+		return space, true
 	} else if kept {
 		return "", true
 	}
@@ -132,10 +129,7 @@ func (s *Service) leaderSpace(ctx context.Context, machine, sid string) (string,
 	}
 	for _, c := range list {
 		if c.SessionID == sid {
-			if healthRun(c) {
-				return SpaceHealth, true
-			}
-			return "", true
+			return runSpace(c), true
 		}
 	}
 	return "", false

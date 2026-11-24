@@ -1,4 +1,3 @@
-#if os(iOS) || os(visionOS)
 import PersonaKit
 import UIKit
 
@@ -120,4 +119,3 @@ import UIKit
         done?(arrived)
     }
 }
-#endif

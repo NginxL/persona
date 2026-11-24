@@ -40,7 +40,7 @@ import PersonaWire
                                    if case .done(let created) = answer { answered(.init(created: created ?? self.created, read: read)) }
                                    return answer
                                },
-                               refused: { [weak self] _, message in self?.refusals.append(message) },
+                               refused: { [weak self] _, message, _ in self?.refusals.append(message) },
                                standing: { [weak self] id in self?.standing[id] },
                                listed: { [weak self] in self?.listed ?? [] }))
     }
@@ -426,6 +426,11 @@ struct TodoOutboxTests {
         #expect(TodoOutbox.outcome(APIError(status: 404, message: "no manager", fields: ["code": "no_manager"]), of: .delete)
             == .refused("no manager"))
         #expect(TodoOutbox.outcome(APIError(status: 409, message: "closed"), of: .someday(true)) == .refused("closed"))
+        // A new to-do's project is what a 400 to one made in a project turned down; another refusal is not about it.
+        let inKyoto = TodoOutbox.Write.create(title: "Book the ryokan", notes: nil, project: "kyoto")
+        #expect(TodoOutbox.outcome(APIError(status: 400, message: "no project"), of: inKyoto) == .refused("no project", project: true))
+        #expect(TodoOutbox.outcome(APIError(status: 403, message: "read-only"), of: inKyoto) == .refused("read-only"))
+        #expect(TodoOutbox.outcome(APIError(status: 400, message: "empty"), of: .create(title: "A", notes: nil)) == .refused("empty"))
         #expect(TodoOutbox.outcome(APIError(status: 0, message: "no hub"), of: .done(true)) == .notSent)
         #expect(TodoOutbox.outcome(APIError(status: 503, message: "away", fields: ["code": "assistant_offline"]),
                                    of: .create(title: "A", notes: nil)) == .notSent)
@@ -439,6 +444,42 @@ struct TodoOutboxTests {
         #expect(TodoOutbox.outcome(URLError(.cannotConnectToHost), of: .done(true)) == .notSent)
         #expect(TodoOutbox.outcome(URLError(.networkConnectionLost), of: .create(title: "A", notes: nil)) == .unknown)
         #expect(TodoOutbox.outcome(URLError(.timedOut), of: .create(title: "A", notes: nil)) == .unknown)
+    }
+
+    /// A new to-do kept on disk before a write carried the place it was made in (#10465) still loads, made nowhere in
+    /// particular; one made in a place keeps its due date and project through the file, and its drawn row has them.
+    @Test func aNewToDoKeptBeforePlacesStillLoads() throws {
+        let decode = { (json: String) in try JSONDecoder().decode(TodoOutbox.Write.self, from: Data(json.utf8)) }
+        #expect(try decode(#"{"create":{"title":"Buy stamps","notes":"at the post office"}}"#)
+            == .create(title: "Buy stamps", notes: "at the post office"))
+        #expect(try decode(#"{"create":{"title":"Buy stamps"}}"#) == .create(title: "Buy stamps", notes: nil))
+        let at = Date(timeIntervalSince1970: 1_795_000_000)
+        let placed = TodoOutbox.Write.create(title: "Renew passport", notes: nil, dueAt: at, project: "kyoto")
+        let entry = TodoOutbox.Entry(id: UUID(), hub: "g", todo: TodoOutbox.newID(), manager: nil, write: placed, made: at, due: at)
+        let kept = try JSONDecoder().decode(TodoOutbox.Entry.self, from: JSONEncoder().encode(entry))
+        #expect(kept == entry)
+        #expect(kept.newItem?.dueAt == at && kept.newItem?.dueDate == nil && kept.newItem?.project == "kyoto")
+        let day = TodoOutbox.Write.create(title: "Renew passport", notes: nil, dueDate: "2026-11-18")
+        #expect(TodoOutbox.Entry(id: UUID(), hub: "g", todo: "new-1", manager: nil, write: day, made: at, due: at).newItem?.dueDate
+            == "2026-11-18")
+    }
+
+    /// A new to-do the hub turned down comes back in its sheet (the toast's Edit) due when it was due, a moment or a
+    /// day, and in its project. One whose project the hub turned down comes back without it, and the toast says so, or
+    /// every Add would be turned down again.
+    @Test func aRefusedNewToDoComesBackDueAsItWasWithoutTheProjectItWasRefusedFor() {
+        let at = Date(timeIntervalSince1970: 1_795_090_000)
+        let write = TodoOutbox.Write.create(title: "Book the ryokan", notes: "Two nights", dueAt: at, project: "kyoto")
+        let inProject = TodoOutbox.refusal(write, message: "no knowledge-base project \"kyoto\"", project: true)
+        #expect(inProject.draft == TodoOutbox.Draft(title: "Book the ryokan", notes: "Two nights", dueAt: at))
+        #expect(inProject.message.contains("Book the ryokan") && !inProject.message.contains("knowledge-base"), "\(inProject.message)")
+        let notAllowed = TodoOutbox.refusal(write, message: "read-only role cannot modify todos")
+        #expect(notAllowed.draft == TodoOutbox.Draft(title: "Book the ryokan", notes: "Two nights", dueAt: at, project: "kyoto"))
+        #expect(notAllowed.message == "read-only role cannot modify todos")
+        let dated = TodoOutbox.refusal(.create(title: "Renew passport", notes: nil, dueDate: "2026-11-20"), message: "refused")
+        #expect(dated.draft == TodoOutbox.Draft(title: "Renew passport", dueDate: "2026-11-20") && dated.message == "refused")
+        let tick = TodoOutbox.refusal(.done(true), message: "This to-do is closed")
+        #expect(tick.draft == nil && tick.message == "This to-do is closed")
     }
 }
 

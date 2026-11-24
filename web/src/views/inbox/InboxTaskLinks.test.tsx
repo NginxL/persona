@@ -111,3 +111,27 @@ it("also shows task links above the event body", () => {
   draw({ ...item, status: "action", recap: "Investigating" });
   expect(host.querySelectorAll("[data-inbox-task-links] a")).toHaveLength(2);
 });
+
+it("renders compact auto-forward badge, linked to-do fallback title, and fallback reason", () => {
+  todos = [];
+  draw({
+    ...item,
+    agent: undefined,
+    todo_forward: {
+      todo_id: "todo_fwd_1",
+      todo_title: "Fix PR #42",
+      canonical_url: "https://github.com/example/repo/pull/42",
+      match_kind: "pull_request",
+      status: "fallback",
+      reason: "machine box is offline",
+      forwarded_at: "2026-11-21T12:00:00Z",
+    },
+  });
+  const badge = host.querySelector("[data-inbox-todo-forward='fallback']");
+  expect(badge).not.toBeNull();
+  expect(badge?.textContent).toContain("machine box is offline");
+  const links = [...host.querySelectorAll<HTMLAnchorElement>("[data-inbox-task-links] a")];
+  expect(links).toHaveLength(1);
+  expect(links[0].getAttribute("href")).toBe("/todos?id=todo_fwd_1");
+  expect(links[0].textContent).toContain("Fix PR #42");
+});

@@ -32,3 +32,12 @@ it("reads the epoch without writing, then retries the exact explicit operation",
   expect(calls[1].body).toMatchObject({ source_machine_id: "computer", machine_id: "computer", launcher: "codex", expected_epoch: 8 });
   expect(calls.some((c) => c.url.endsWith("/model"))).toBe(false);
 });
+it("prepares a v4 UUID operation_id when crypto.randomUUID is unavailable (plain HTTP)", async () => {
+  const real = globalThis.crypto;
+  vi.stubGlobal("crypto", { getRandomValues: (a: Uint8Array) => real.getRandomValues(a) });
+  vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ enabled: true, epoch: 3 }), { headers: { "Content-Type": "application/json" } })));
+  const request = await prepareConversationSwitch(session, { launcher: "agy" });
+  expect(request.operation_id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+  expect(request.expected_epoch).toBe(3);
+  expect(request.launcher).toBe("agy");
+});

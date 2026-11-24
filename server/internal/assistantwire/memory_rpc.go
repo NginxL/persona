@@ -35,6 +35,9 @@ type AssistantMemoryEntry struct {
 	// AssistantMemoryTotalMax (Truncated says so).
 	Content   string `json:"content,omitempty"`
 	Truncated bool   `json:"truncated,omitempty"`
+	// Track is the track whose memory it is ("" the main track's); an extension is shown another track's only when it
+	// may read what comes from it (docs/assistant/health.md "Using information by scene", scene 6).
+	Track string `json:"track,omitempty"`
 }
 
 // AssistantMemoryResult is assistant.memory's result, by name. An assistant without memory (none written yet, or

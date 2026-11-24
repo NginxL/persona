@@ -44,11 +44,7 @@ extension AppModel {
     func openExtensionSettings(_ id: String, manager: String? = nil) {
         extensionOpen = nil
         settingsPath = NavigationPath([SettingsPage.plugins, SettingsPage.plugin(id, manager: manager)])
-        #if os(macOS)
-        MacShellState.shared.go(.settings, self)
-        #else
         selectedTab = .settings
-        #endif
     }
 
     /// Opens `url` when it is an extension's settings link (`ExtensionSettingsLink`); false for any other, which the
@@ -79,11 +75,7 @@ extension AppModel {
         guard SubscriptionsUI.isGraph(url) else { return false }
         extensionOpen = nil
         settingsPath = NavigationPath([SettingsPage.inboxSources, SettingsPage.sourcesGraph])
-        #if os(macOS)
-        MacShellState.shared.go(.settings, self)
-        #else
         selectedTab = .settings
-        #endif
         return true
     }
 }

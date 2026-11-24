@@ -226,4 +226,16 @@ struct FleetStateTests {
         #expect(p.island.sides == (.assistant, .load) && p.island.machine == nil)
         #expect(try JSONDecoder().decode(NotifyPrefs.self, from: Data("{}".utf8)).island.preset == .a)
     }
+
+    /// #12982: without names on the Lock Screen a request has no Allow / Deny (as the hub's forDevice): nobody can tell
+    /// who asks or what approving does. With names the buttons stay.
+    @Test func noButtonsWithoutDetails() {
+        let ask = FleetState.Item(id: "m/s", title: "Infra lead", kind: .permission, detail: "Mark the to-do done", interaction: "ix_1")
+        let s = FleetState(phase: .needsYou, needsYou: 1, items: [ask])
+        let hidden = s.tailored(island: IslandPrefs(), details: false)
+        #expect(hidden.firstActionable == nil)
+        #expect(hidden.needsYou == 1 && hidden.items.count == 1)
+        #expect(FleetLink.lockScreen(hidden, stale: false) == FleetLink.url(ask)) // a tap opens the request in the app
+        #expect(s.tailored(island: IslandPrefs(), details: true).firstActionable?.interaction == "ix_1")
+    }
 }

@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"github.com/nwverse/persona/server/internal/assistant/archiverecovery"
 	"os"
 	"path/filepath"
 	"strings"
@@ -12,8 +11,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/nwverse/persona/server/internal/assistant/archiverecovery"
+
 	"github.com/nwverse/persona/server/internal/assistantwire"
-	"github.com/nwverse/persona/server/internal/connector/imessage"
+	"github.com/nwverse/persona/server/internal/imessagewire"
 	"github.com/nwverse/persona/server/internal/kb"
 	"github.com/nwverse/persona/server/internal/managerconf"
 )
@@ -73,7 +74,7 @@ func newArchiveRecoveryReplacement(t *testing.T, r *archiveSwitchRig, dir string
 		t.Fatalf("open replacement archive: %v", err)
 	}
 	s.kb.mu.Lock()
-	s.kb.archivedAt = map[string]time.Time{imessage.ID: time.Now()}
+	s.kb.archivedAt = map[string]time.Time{imessagewire.ID: time.Now()}
 	s.kb.mu.Unlock()
 	return &archiveRecoveryReplacement{s: s, e: &kb.Engine{Store: st}, calls: calls}
 }
@@ -111,7 +112,7 @@ func callArchiveRecoveryFence(t *testing.T, r *archiveSwitchRig, method string, 
 func archiveRecoveryPageWork(page assistantwire.ChangesResult) archiverecovery.Work {
 	work := archiverecovery.Work{}
 	for _, batch := range page.Batches {
-		source := imessage.ID
+		source := imessagewire.ID
 		if batch.Source != "" {
 			source = batch.Source
 		}
@@ -122,11 +123,11 @@ func archiveRecoveryPageWork(page assistantwire.ChangesResult) archiverecovery.W
 
 func ingestArchiveRecoveryPage(r *archiveSwitchRig, page assistantwire.ChangesResult) error {
 	for _, batch := range page.Batches {
-		source := imessage.ID
+		source := imessagewire.ID
 		if batch.Source != "" {
 			source = batch.Source
 		}
-		src := kbConnectorSource{id: source, connector: imessage.ID}
+		src := kbConnectorSource{id: source, connector: imessagewire.ID}
 		if _, err := r.e.Ingest(r.ctx, src, batch.Chat, batch.Messages); err != nil {
 			return err
 		}
@@ -136,7 +137,7 @@ func ingestArchiveRecoveryPage(r *archiveSwitchRig, page assistantwire.ChangesRe
 
 func writeArchiveRecoveryCursor(t *testing.T, r *archiveSwitchRig, cursor string) {
 	t.Helper()
-	path := filepath.Join(r.e.Store.Dir, "cursors", imessage.ID+".json")
+	path := filepath.Join(r.e.Store.Dir, "cursors", imessagewire.ID+".json")
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -151,7 +152,7 @@ func writeArchiveRecoveryCursor(t *testing.T, r *archiveSwitchRig, cursor string
 
 func makeUnfinishedArchiveRecoveryIngest(t *testing.T, r *archiveSwitchRig, page assistantwire.ChangesResult) {
 	t.Helper()
-	chatID := kb.ChatID(imessage.ID, page.Batches[0].Chat.ID)
+	chatID := kb.ChatID(imessagewire.ID, page.Batches[0].Chat.ID)
 	messages := r.e.Store.Path(kb.KindChat, chatID, "messages")
 	if err := os.MkdirAll(messages, 0o700); err != nil {
 		t.Fatal(err)
@@ -178,9 +179,9 @@ func makeUnfinishedArchiveRecoveryIngest(t *testing.T, r *archiveSwitchRig, page
 
 func assertArchiveRecoveryData(t *testing.T, e *kb.Engine, stage archiverecovery.Stage) {
 	t.Helper()
-	chatID := kb.ChatID(imessage.ID, "0123456789ab")
+	chatID := kb.ChatID(imessagewire.ID, "0123456789ab")
 	chat, exists := e.Store.Chat(chatID)
-	cursor, err := os.ReadFile(filepath.Join(e.Store.Dir, "cursors", imessage.ID+".json"))
+	cursor, err := os.ReadFile(filepath.Join(e.Store.Dir, "cursors", imessagewire.ID+".json"))
 	switch stage {
 	case archiverecovery.Begin:
 		if exists || !errors.Is(err, os.ErrNotExist) {
@@ -213,7 +214,7 @@ func TestIMessageArchiveReservationRecoversAfterAssistantRestart(t *testing.T) {
 			r.node.unblock()
 			page := readArchiveRecoveryPage(t, r)
 			work := archiveRecoveryPageWork(page)
-			req := assistantwire.ArchiveFence{ID: imessage.ID, Generation: page.Generation, Token: tc.token}
+			req := assistantwire.ArchiveFence{ID: imessagewire.ID, Generation: page.Generation, Token: tc.token}
 			if tc.stage != archiverecovery.Begin {
 				if err := archiverecovery.Write(r.e.Store.Dir, archiverecovery.NewRecord(req, archiverecovery.Begin, work)); err != nil {
 					t.Fatal(err)
@@ -244,7 +245,7 @@ func TestIMessageArchiveReservationRecoversAfterAssistantRestart(t *testing.T) {
 			}
 			var unrelated *assistantwire.ArchiveFence
 			if tc.unrelated {
-				other := assistantwire.ArchiveFence{ID: imessage.ID, Generation: page.Generation, Token: strings.Repeat("d", 32)}
+				other := assistantwire.ArchiveFence{ID: imessagewire.ID, Generation: page.Generation, Token: strings.Repeat("d", 32)}
 				callArchiveRecoveryFence(t, r, assistantwire.ConnectorsArchiveBegin, other)
 				unrelated = &other
 			}
@@ -277,7 +278,7 @@ func TestIMessageArchiveReservationRecoversAfterAssistantRestart(t *testing.T) {
 					second.calls.count(assistantwire.ConnectorsArchiveBegin), second.calls.count(assistantwire.ConnectorsChanges))
 			}
 			second.s.kb.mu.Lock()
-			second.s.kb.archivedAt[imessage.ID] = time.Time{}
+			second.s.kb.archivedAt[imessagewire.ID] = time.Time{}
 			second.s.kb.mu.Unlock()
 			second.s.kbConnectors(r.ctx, second.e)
 			if second.calls.count(assistantwire.ConnectorsChanges) != 1 || second.calls.count(assistantwire.ConnectorsArchiveBegin) != 1 ||
@@ -286,8 +287,8 @@ func TestIMessageArchiveReservationRecoversAfterAssistantRestart(t *testing.T) {
 					second.calls.count(assistantwire.ConnectorsArchiveBegin), second.calls.count(assistantwire.ConnectorsArchiveEnd),
 					second.calls.count(assistantwire.ConnectorsChanges))
 			}
-			chat, exists := second.e.Store.Chat(kb.ChatID(imessage.ID, "0123456789ab"))
-			cursor, err := os.ReadFile(filepath.Join(second.e.Store.Dir, "cursors", imessage.ID+".json"))
+			chat, exists := second.e.Store.Chat(kb.ChatID(imessagewire.ID, "0123456789ab"))
+			cursor, err := os.ReadFile(filepath.Join(second.e.Store.Dir, "cursors", imessagewire.ID+".json"))
 			if !exists || chat.Messages != 1 || err != nil || string(cursor) != `{"cursor":"9"}` {
 				t.Fatalf("archive after recovery duplicated or lost work: chat=%+v cursor=%s err=%v", chat, cursor, err)
 			}
@@ -340,7 +341,7 @@ func TestIMessageArchiveRecoveryJournalPrecedesBegin(t *testing.T) {
 			}
 			record := records[0]
 			if record.Stage != archiverecovery.Begin || record.Token != req.Token || record.Generation != req.Generation ||
-				len(record.Chats) != 1 || record.Chats[0].Source != imessage.ID || record.Chats[0].Chat != "0123456789ab" {
+				len(record.Chats) != 1 || record.Chats[0].Source != imessagewire.ID || record.Chats[0].Chat != "0123456789ab" {
 				t.Errorf("wrong pre-Begin journal: %+v request=%+v", record, req)
 			}
 		case assistantwire.ConnectorsArchiveEnd:
@@ -349,14 +350,14 @@ func TestIMessageArchiveRecoveryJournalPrecedesBegin(t *testing.T) {
 			if err != nil || len(records) != 1 || records[0].Stage != archiverecovery.End {
 				t.Errorf("journal before End: records=%+v err=%v", records, err)
 			}
-			cursor, err := os.ReadFile(filepath.Join(r.e.Store.Dir, "cursors", imessage.ID+".json"))
+			cursor, err := os.ReadFile(filepath.Join(r.e.Store.Dir, "cursors", imessagewire.ID+".json"))
 			if err != nil || string(cursor) != `{"cursor":"9"}` {
 				t.Errorf("end journal preceded cursor commitment: %s err=%v", cursor, err)
 			}
 		}
 	}
 	replacement.s.kb.mu.Lock()
-	replacement.s.kb.archivedAt[imessage.ID] = time.Time{}
+	replacement.s.kb.archivedAt[imessagewire.ID] = time.Time{}
 	replacement.s.kb.mu.Unlock()
 	replacement.s.kbConnectors(r.ctx, replacement.e)
 	if !beginSeen || !endSeen {
@@ -378,7 +379,7 @@ func TestIMessageArchiveRecoveryUnreadableJournalFailsClosed(t *testing.T) {
 	r.node.unblock()
 	page := readArchiveRecoveryPage(t, r)
 	work := archiveRecoveryPageWork(page)
-	req := assistantwire.ArchiveFence{ID: imessage.ID, Generation: page.Generation, Token: strings.Repeat("a", 32)}
+	req := assistantwire.ArchiveFence{ID: imessagewire.ID, Generation: page.Generation, Token: strings.Repeat("a", 32)}
 	if err := archiverecovery.Write(r.e.Store.Dir, archiverecovery.NewRecord(req, archiverecovery.Begin, work)); err != nil {
 		t.Fatal(err)
 	}

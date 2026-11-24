@@ -283,6 +283,7 @@ func (s *Service) triageModelIn(ctx context.Context, input, rules string, timeou
 		rules = s.inboxConfig(ctx).Rules
 	}
 	extContext, _ := s.inboxExtensionContext(ctx)
+	extContext = append(extContext, s.inboxMemoryContext(ctx, input)...) // memory_extension_source.go
 	system := prompts.RenderInboxTriage(prompts.InboxTriage{Owner: hello.Owner, Rules: rules, Language: answerLanguage(hello.Locale),
 		Context: extContext})
 	var out struct {
@@ -383,21 +384,34 @@ const draftModelWait = 2 * time.Minute
 func (s *Service) draftReply(ctx context.Context, id, instruction string) (string, error) {
 	hello := s.hello(ctx)
 	language := answerLanguage(hello.Locale)
+	policy := compileReplyPolicy(s.inboxConfig(ctx).ReplyPolicy)
 	b := &s.inbox
 	b.mu.Lock()
 	it, ok := b.items[id]
 	var item prompts.InboxItem
+	var policyItem replyPolicyItemData
+	var existingSnap *InboxReplyPolicySnapshot
 	if ok {
 		item = b.promptItemIn(it, language)
+		if policy.enabled {
+			policyItem = snapshotItemForReplyPolicyLocked(it)
+			existingSnap = cloneReplyPolicySnapshot(it.ReplyPolicy)
+		}
 	}
 	b.mu.Unlock()
 	if !ok {
 		return "", errNoInboxItem
 	}
+	if policy.enabled {
+		if _, err := s.gateReplyPolicySuggestion(ctx, policy, policyItem, existingSnap, instruction); err != nil {
+			return "", errReplyPolicyBlocked
+		}
+	}
 	extContext, neverQuote := s.inboxExtensionContext(ctx)
 	// About me as the user last edited it in the app, else the config file's (notes), as the main chat has it.
 	d := prompts.InboxDraft{Owner: hello.Owner, Notes: s.notes(ctx), Language: answerLanguage(hello.Locale), Context: extContext}
 	input := prompts.RenderInboxDraftInput(prompts.InboxDraftInput{Language: language, Item: item, Instruction: strings.TrimSpace(instruction)})
+	d.Context = append(d.Context, s.inboxMemoryContext(ctx, input)...) // memory_extension_source.go
 	cctx, cancel := context.WithTimeout(ctx, draftModelWait)
 	defer cancel()
 	// A draft that repeats a sentence an extension marked never to quote (what it keeps about people: evaluations,
@@ -410,6 +424,17 @@ func (s *Service) draftReply(ctx context.Context, id, instruction string) (strin
 		text = strings.TrimSpace(text)
 		hit := quotesAny(text, neverQuote)
 		if hit == "" {
+			if livePolicy := compileReplyPolicy(s.inboxConfig(ctx).ReplyPolicy); livePolicy.enabled {
+				b.mu.Lock()
+				liveCV := replyPolicyContentVersion(b.items[id])
+				b.mu.Unlock()
+				if !policy.enabled || livePolicy.revision != policy.revision || liveCV != policyItem.contentVersion {
+					return "", errReplyPolicyBlocked
+				}
+				if _, err := s.gateReplyPolicySend(ctx, livePolicy, policyItem, text); err != nil {
+					return "", errReplyPolicyBlocked
+				}
+			}
 			return text, nil
 		}
 		if d.Rewrite {
@@ -536,11 +561,16 @@ func (s *Service) replyInboxDoMode(ctx context.Context, id, text, clientID strin
 	once.mu.Lock()
 	defer once.mu.Unlock()
 	if attempt, _ := ctx.Value(suggestionReplyOnly{}).(*InboxSuggestionAttempt); attempt != nil {
+		livePolicy := compileReplyPolicy(s.inboxConfig(ctx).ReplyPolicy)
 		b.mu.Lock()
 		current := b.currentReplyAttempt(it, attempt)
+		policyErr := verifyReplyPolicySendAttemptLocked(it, attempt, livePolicy)
 		b.mu.Unlock()
 		if !current {
 			return InboxItem{}, errSuggestionStale
+		}
+		if policyErr != nil {
+			return InboxItem{}, errReplyPolicyBlocked
 		}
 	}
 	if fromCard {

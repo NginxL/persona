@@ -53,13 +53,15 @@ func (b *BusHub) TodoEvent(event string, params any) error { return b.notifyHub(
 
 // todoMark is what a change of a todo is told by: what todo.changed carries and whether it is done.
 type todoMark struct {
-	title      string
-	done       bool
-	failed     bool
-	bound      bool
-	thread     TodoThread
-	supervisor string
-	kind       string
+	title          string
+	done           bool
+	failed         bool
+	bound          bool
+	thread         TodoThread
+	supervisor     string
+	kind           string
+	hasResponsible bool
+	responsible    TodoResponsible
 }
 
 func markOf(t *Todo) todoMark {
@@ -70,6 +72,9 @@ func markOf(t *Todo) todoMark {
 	if t.Thread != nil {
 		m.bound, m.thread = true, *t.Thread
 	}
+	if t.Responsible != nil {
+		m.hasResponsible, m.responsible = true, *t.Responsible
+	}
 	return m
 }
 
@@ -78,6 +83,18 @@ func (m todoMark) eventThread() *assistantwire.TodoEventThread {
 		return nil
 	}
 	return &assistantwire.TodoEventThread{Channel: m.thread.Channel, ChatID: m.thread.ChatID, ThreadID: m.thread.ThreadID, Title: m.thread.Title}
+}
+
+func (m todoMark) eventResponsible() *assistantwire.TodoEventResponsible {
+	if !m.hasResponsible {
+		return nil
+	}
+	return &assistantwire.TodoEventResponsible{
+		Kind:      m.responsible.Kind,
+		Name:      m.responsible.Name,
+		MachineID: m.responsible.MachineID,
+		SessionID: m.responsible.SessionID,
+	}
 }
 
 type todoNotice struct {
@@ -261,13 +278,13 @@ func (s *Service) todoFlush() {
 		switch {
 		case there && !known:
 			s.todoQueue(todoNotice{assistantwire.EventTodoChanged, assistantwire.TodoChangedEvent{
-				ID: id, Title: now.title, Thread: now.eventThread(), Done: now.done, Supervisor: now.supervisor, Kind: now.kind, What: assistantwire.TodoCreated}})
+				ID: id, Title: now.title, Thread: now.eventThread(), Done: now.done, Supervisor: now.supervisor, Kind: now.kind, Responsible: now.eventResponsible(), What: assistantwire.TodoCreated}})
 		case there && now != was:
 			s.todoQueue(todoNotice{assistantwire.EventTodoChanged, assistantwire.TodoChangedEvent{
-				ID: id, Title: now.title, Thread: now.eventThread(), Done: now.done, Supervisor: now.supervisor, Kind: now.kind, What: assistantwire.TodoUpdated}})
+				ID: id, Title: now.title, Thread: now.eventThread(), Done: now.done, Supervisor: now.supervisor, Kind: now.kind, Responsible: now.eventResponsible(), What: assistantwire.TodoUpdated}})
 		case !there:
 			s.todoQueue(todoNotice{assistantwire.EventTodoChanged, assistantwire.TodoChangedEvent{
-				ID: id, Title: was.title, Thread: was.eventThread(), Done: was.done, Supervisor: was.supervisor, Kind: was.kind, What: assistantwire.TodoDeleted}})
+				ID: id, Title: was.title, Thread: was.eventThread(), Done: was.done, Supervisor: was.supervisor, Kind: was.kind, Responsible: was.eventResponsible(), What: assistantwire.TodoDeleted}})
 		}
 	}
 	if dropped > 0 {

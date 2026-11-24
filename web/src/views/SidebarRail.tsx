@@ -4,6 +4,7 @@ import { useLayoutEffect, useRef, useState } from "react";
 import { t } from "../i18n";
 import { stateOf } from "../lib/format";
 import { href, type Route } from "../lib/router";
+import { pickMainChat } from "../lib/handoff";
 import { useStore } from "../lib/store";
 import { BREATHING, connStatus, phaseTone } from "../lib/connection";
 import { cx, Menu } from "../ui/atoms";
@@ -13,6 +14,8 @@ import { Icon } from "../ui/icons";
 import { formatChord, jumpHint, useBindings } from "../lib/shortcuts";
 import { takeFocusHandoff, toggleSidebarColumn } from "../lib/layout";
 import { CURRENT_ROW, DOT_CLASS, morePagesMenu, pageLabel, type NavPage, pageIconStyle, useActiveKey, useGo, useNavPages } from "./SidebarParts";
+import { requestDirectWaiting } from "../lib/direct-waiting";
+import { useMainWaiting } from "./assistant/use-main-waiting";
 import type { UIColor } from "../lib/extension-ui-v6";
 
 /** The button that folds the sidebar to the rail and opens it again (⌘⌥B by default; the hint follows a rebinding). */
@@ -69,15 +72,17 @@ export function SidebarRail({ route, onSearch, onNewAgent }: { route: Route; onS
   const go = useGo();
   const status = connStatus(phase, online, total);
   const st = main ? stateOf(main) : undefined;
-  const pending = main?.pending_interactions ?? 0;
+  const mainWaiting = useMainWaiting(main);
+  const pending = mainWaiting.count;
   // `color`: a page's icon color (NavPage.color, #10822), kept under the pointer as well
-  const link = (k: string, to: Route, label: string, icon: React.ReactNode, dot?: React.ReactNode, title?: string, color?: UIColor) => {
+  const link = (k: string, to: Route, label: string, icon: React.ReactNode, dot?: React.ReactNode, title?: string, color?: UIColor, after?: () => void) => {
     const active = activeKey === k;
     return (
       <a
         key={k}
         href={href(to)}
-        onClick={go(to)}
+        // Main Chat opens the page its conversation kept, as the sidebar's row does (#13164)
+        onClick={(e) => { go(to, k === "persona" ? () => pickMainChat(active) : undefined)(e); if (e.defaultPrevented) after?.(); }}
         aria-label={label}
         title={title ?? label}
         aria-current={active ? "page" : undefined}
@@ -106,6 +111,8 @@ export function SidebarRail({ route, onSearch, onNewAgent }: { route: Route; onS
           pending > 0 ? <span aria-hidden className="absolute top-1 right-1 size-2 rounded-full bg-attention ring-2 ring-canvas" />
             : st === "working" || st === "needs_you" || st === "unread" ? <span aria-hidden className="absolute top-0.5 right-0.5 flex rounded-full ring-2 ring-canvas"><StatusMark state={st} /></span> : null,
           bindings.persona ? `${t("sidebar.persona_main")} (${formatChord(bindings.persona)})` : t("sidebar.persona_main"),
+          undefined,
+          () => { if (main && pending > 0) requestDirectWaiting(main.session_id); },
         )}
         {pages.map((p) => link(
           p.k,

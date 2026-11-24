@@ -23,9 +23,13 @@ import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 import persona.core.contracts.api.AssistantManagerChoice
+import persona.core.contracts.api.HubGroupInfo
+import persona.core.contracts.api.HubGroups
 import persona.core.contracts.api.HubManager
 import persona.core.contracts.api.HubManagers
 import persona.core.contracts.api.ManagerRoster
@@ -72,20 +76,46 @@ fun AssistantSwitcher(
     headModifier: Modifier = Modifier,
     /** False draws the time once (the pictures and the tests). */
     ticking: Boolean = true,
+    /** Multi-hub groups for unified hub + assistant switching in the sidebar (matching iOS #12594). */
+    hubs: HubGroups? = null,
     trailing: (@Composable () -> Unit)? = null,
     fallback: @Composable () -> Unit = {},
     head: SwitcherHead? = null,
 ) {
     val reported = LocalManagerRoster.current
-    if (managers == null || reported == null || reported.installed.isEmpty()) { fallback(); return }
+    val scope = rememberCoroutineScope()
+    val feedback = LocalAppFeedback.current
+    val res = LocalResources.current
+    val emptyGroups = remember { MutableStateFlow(emptyList<HubGroupInfo>()) }
+    val groupList by (hubs?.groups ?: emptyGroups).collectAsState()
+    val multiHubGroups = if (groupList.size > 1) groupList else emptyList()
+    val pickHub: (HubGroupInfo) -> Unit = { group ->
+        if (!group.selected && hubs != null) {
+            scope.launch {
+                try {
+                    hubs.select(group.id)
+                    feedback?.notice(res.getString(R.string.settings_switcher_switched, group.name))
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (_: Exception) {
+                    feedback?.notice(res.getString(R.string.settings_switcher_hub_switch_failed))
+                }
+            }
+        }
+    }
+    if (managers == null || reported == null || reported.installed.isEmpty()) {
+        if (multiHubGroups.isNotEmpty() && hubs != null && head == null) {
+            MultiHubOnlySwitcher(multiHubGroups, onPickHub = pickHub, modifier = modifier, headModifier = headModifier, trailing = trailing)
+            return
+        }
+        fallback()
+        return
+    }
     // Without the hub nothing is known to be online, as the assistant page reads it.
     val roster = if (hubOnline) reported else reported.copy(managers = reported.managers.map { it.copy(online = false) })
     val choice by AssistantManagerChoice.current.collectAsState()
     val model = remember(managers) { ManagersModel(managers) }
     val state by model.state.collectAsState()
-    val scope = rememberCoroutineScope()
-    val feedback = LocalAppFeedback.current
-    val res = LocalResources.current
     var expanded by rememberSaveable { mutableStateOf(false) }
     var naming by remember { mutableStateOf(false) }
     val counting = ticking && (state.code != null || (expanded && roster.managers.any { it.isInstalling }))
@@ -96,8 +126,10 @@ fun AssistantSwitcher(
     }
     AssistantSwitcherContent(roster, choice.shown, waiting, expanded, now, modifier, headModifier,
         failure = state.failure.takeIf { !naming && state.code == null },
+        hubGroups = multiHubGroups,
         onToggle = { expanded = !expanded; if (expanded) model.clearFailure() },
         onDismiss = { expanded = false },
+        onPickHub = { group -> expanded = false; pickHub(group) },
         onPick = { manager ->
             if (manager.isInstalling) scope.launch {
                 // Its code is all there is of it: straight to the install commands (a new code, as on its page). The
@@ -132,7 +164,9 @@ fun AssistantSwitcher(
 internal fun AssistantSwitcherContent(
     roster: ManagerRoster, shown: String, waiting: Map<String, Int>, expanded: Boolean, now: Instant,
     modifier: Modifier = Modifier, headModifier: Modifier = Modifier, failure: ResText? = null,
-    onToggle: () -> Unit, onDismiss: () -> Unit, onPick: (HubManager) -> Unit, onNew: () -> Unit, onManage: () -> Unit,
+    hubGroups: List<HubGroupInfo> = emptyList(),
+    onToggle: () -> Unit, onDismiss: () -> Unit, onPickHub: (HubGroupInfo) -> Unit = {},
+    onPick: (HubManager) -> Unit, onNew: () -> Unit, onManage: () -> Unit,
     trailing: (@Composable () -> Unit)? = null, head: SwitcherHead? = null,
 ) {
     val res = LocalResources.current
@@ -160,6 +194,7 @@ internal fun AssistantSwitcherContent(
             JAction(stringResource(R.string.settings_switcher_manage), PhIcons.Gear, onClick = onManage),
         ), Modifier.width(width)) {
             Column(Modifier.fillMaxWidth().semantics { contentDescription = listLabel }) {
+                HubSwitcherSection(groups = hubGroups, onPickHub = onPickHub)
                 list.forEach { manager ->
                     JAssistantSwitcherRow(manager, manager.id == default, switcherLine(res, manager, now),
                         current = manager.id == current.id, badge = waiting[manager.id] ?: 0, onClick = { onPick(manager) },

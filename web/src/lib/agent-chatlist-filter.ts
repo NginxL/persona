@@ -5,7 +5,7 @@ import { baseName, failureReason, sessionPreview, sessionTitle, stateOf } from "
 import { machineWithHub } from "./mesh";
 import { isPinned, type AgentPins } from "./pins";
 import { plainMarkdown } from "./plain-markdown";
-import { requestHome } from "./child-sessions";
+import { requestHome, requestHomeMachine } from "./child-sessions";
 import type { AgentState, Interaction, Machine, Session } from "./types";
 
 export type SearchScope = "all" | "title" | "conversation" | "user" | "assistant" | "errors";
@@ -173,7 +173,7 @@ export function sessionHasError(s: Session, interactions: readonly Interaction[]
   const st = stateOf(s);
   if (st === "needs_you") return true;
   // a child session's card is its parent's (#5120)
-  return interactions.some((ix) => ix.machine_id === s.machine_id && requestHome(ix) === s.session_id);
+  return interactions.some((ix) => requestHomeMachine(ix) === s.machine_id && requestHome(ix) === s.session_id);
 }
 
 /** Toggle an item in a multi-select facet array (Orca All/multi-select semantics: empty array means All). */

@@ -18,6 +18,7 @@ import persona.core.domain.inbox.InboxInteraction
 import persona.core.domain.inbox.InboxItem
 import persona.core.navigation.AppTab
 import persona.core.navigation.Navigator
+import persona.core.inbox.*
 
 /**
  * A background refresh of a shown inbox leaves its layout alone (#1947): no loading row over the list, and the brief

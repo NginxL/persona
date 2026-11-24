@@ -47,6 +47,7 @@ import persona.core.navigation.AppTab
 import persona.core.navigation.Navigator
 import java.io.File
 import java.time.Instant
+import persona.core.inbox.*
 
 /**
  * The inbox with several managers (docs/assistant/managers.md "Clients"): the page lists the current assistant's items only

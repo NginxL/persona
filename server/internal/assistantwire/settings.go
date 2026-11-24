@@ -24,6 +24,13 @@ type Profile struct {
 	// Keep are the conversations their machines list however long they are quiet: the main one, the main ones it
 	// replaced, scheduled tasks' own (node.configure keep_sessions: a busy machine's newest transcripts crowd them out).
 	Keep []SessionRef `json:"keep"`
+	// ExtensionOwners are the extensions the user marked as their own (#13246, trust owner, such as their memory
+	// extension): the hub does not hide the tracks' conversations and cards from them. Any other extension is a third
+	// party's, from which the hub hides every track; an older manager names none.
+	ExtensionOwners []string `json:"extension_owners,omitempty"`
+	// Attention is the attention mode the user set (attention.go, #13503), which the hub's push filter reads; nil (an
+	// older manager, or never set) is normal. The hub reads its end itself (Attention.Effective).
+	Attention *Attention `json:"attention,omitempty"`
 }
 
 // MainRouteMachine keeps legacy profiles usable while preferring the confirmed main binding.
@@ -54,6 +61,19 @@ const (
 	MethodKeepUndelivered = "assistant.keep_undelivered"
 )
 
+// InboxPermissionModeParam is manager-only authorization metadata on assistant.send, session.send and
+// assistant.model. It carries the AI twin's own saved mode separately from the caller-controlled permission_mode.
+// Older nodes ignore it and retain their default clamp; newer nodes never treat its absence as permission to bypass.
+const InboxPermissionModeParam = "inbox_permission_mode"
+
+// DefaultPermissionModeParam carries the manager's current default separately from an explicit permission_mode.
+// PermissionModeExplicitParam marks the latter as a deliberate per-conversation choice. Older nodes ignore both and
+// retain their legacy resume behavior; newer nodes keep the legacy behavior when an older manager omits them.
+const (
+	DefaultPermissionModeParam  = "default_permission_mode"
+	PermissionModeExplicitParam = "permission_mode_explicit"
+)
+
 // CodeUndeliveredAhead: SendParams refuses the owner's message because older ones to the same conversation are kept
 // undelivered (MethodKeepUndelivered): the hub keeps this one behind them instead of sending it first.
 const CodeUndeliveredAhead = "undelivered_ahead"
@@ -67,7 +87,9 @@ const CodeDeliveryUnknown = "delivery_unknown"
 // (docs/protocol/protocol.md "hub ↔ node"), passed through by the hub's device.call like the others.
 const (
 	DeviceAssistantDirectory = "assistant.directory" // {path} -> {cwd}; validates an existing directory without writes
-	// DeviceAssistantPrepare: {dir, claude_md, work_guide_md?, connectors, clis, plugin_skills} → {cwd, plugin_skills_need}.
+	// DeviceAssistantPrepare: {dir, claude_md, work_guide_md?, connectors, clis, plugin_skills, deny_dirs?} → {cwd,
+	// plugin_skills_need}. deny_dirs: [{dir, track}], the track directories the assistant's other conversations' Read
+	// and Edit are denied (nodeproto.DenyDirs).
 	DeviceAssistantPrepare   = "assistant.prepare"
 	DeviceAssistantExecution = "assistant.execution" // {session_id} → proto.AssistantExecution
 	// DeviceAssistantGuestPrepare: {dir, claude_md} → {cwd}: a guest conversation's directory (assistant/guest.go), only
@@ -102,10 +124,12 @@ const ConfigDirClaudeOnly = "config_dir is only supported for Claude assistant c
 
 // StartParams is assistant.start's params.
 type StartParams struct {
+	RequireLauncher     bool          `json:"-"` // start on the requested preset or refuse before sending
 	TaskModel           *ModelBinding `json:"-"`
 	Cwd                 string        `json:"-"` // internal scheduled task directory; validated on the target computer
 	TaskExecution       bool          `json:"-"` // refuse execution substitutions
 	LegacyTaskExecution bool          `json:"-"` // an unconfigured scheduled turn may use an older node
+	PromptSelections    bool          `json:"-"` // from the stored, owner-approved scheduled prompt
 	Text                string        `json:"text"`
 	Images              []proto.Image `json:"images,omitempty"`
 	Launcher            string        `json:"launcher,omitempty"`

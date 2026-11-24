@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/nwverse/persona/server/internal/feishubot"
+	"github.com/nwverse/persona/server/internal/botcard"
 	"github.com/nwverse/persona/server/internal/proto"
 )
 
@@ -18,7 +18,7 @@ func TestFeishuStickerIsAcceptedSilently(t *testing.T) {
 	f.answerApp(AppFeishu, FeishuReact, func(json.RawMessage) (any, error) { reactions++; return map[string]any{"reaction_id": "r1"}, nil })
 	s := newTestService(t, f)
 
-	var ev feishubot.MessageEvent
+	var ev botcard.MessageEvent
 	ev.Message.MessageID, ev.Message.ChatType, ev.Message.MessageType, ev.Message.Content = "om_s", "p2p", "sticker", `{"file_key":"f1"}`
 	s.feishuMessage(ev, FeishuStatus{Ready: true, Features: FeishuFeatures{Main: true}}, "")
 	if reactions != 0 {

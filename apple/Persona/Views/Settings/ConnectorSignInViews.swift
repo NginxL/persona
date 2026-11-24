@@ -406,25 +406,12 @@ struct ConnectorSignInSteps: View {
             Section {
                 if p.isDeviceCode {
                     if let s = p.url, let url = URL(string: s) {
-                        #if os(macOS)
-                        // Standard buttons at the trailing end on the Mac, not bars the width of the form (#1221).
-                        HStack {
-                            Spacer(minLength: 0)
-                            Link(destination: url) {
-                                Label("Open \(name) to Enter Code", systemImage: Theme.Icon.openExternal).lineLimit(1)
-                            }
-                            .formButton(prominent: true)
-                            .accessibilityIdentifier("connector.openVerification")
-                        }
-                        .listRowBackground(Color.clear)
-                        #else
                         Link(destination: url) {
                             Label("Open \(name) to Enter Code", systemImage: Theme.Icon.openExternal).lineLimit(1).frame(maxWidth: .infinity)
                         }
                         .themedButton(prominent: true)
                         .listRowBackground(Color.clear)
                         .accessibilityIdentifier("connector.openVerification")
-                        #endif
                     }
                 } else if p.isPairCode {
                     EmptyView() // nothing to press: the code goes to the bot from the chat app

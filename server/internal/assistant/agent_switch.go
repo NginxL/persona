@@ -60,12 +60,14 @@ func (s *Service) toolAgentSwitch(ctx context.Context, machine, self string, arg
 	}
 	own := cmp.Or(c.Launcher, "claude")
 	text := strings.TrimSpace(a.Text)
+	var source *proto.MessageSource
 	if text == "" {
 		if c.TurnErrorKind != proto.TurnErrorUsageLimit {
 			return "", fmt.Errorf("text is required: what %s should do on the new launcher (only an agent stopped on a usage limit "+
 				"goes on without it). Nothing was done", label)
 		}
 		text = prompts.RenderAgentLimitContinue(answerLanguage(s.hello(ctx).Locale)) // what the manager sends it once the limit resets (agents_work_tick.go)
+		source = autoContinueSource()
 	}
 	if exitText(text) {
 		return "", errors.New("text cannot be /exit or /quit: the agent is moved to go on working. Nothing was done")
@@ -73,10 +75,11 @@ func (s *Service) toolAgentSwitch(ctx context.Context, machine, self string, arg
 	if err := s.switchReachable(ctx, am, t.Launcher, nodeproto.LauncherSwitchNow); err != nil {
 		return "", fmt.Errorf("%w. Nothing was done", err)
 	}
-	if ok, err := s.confirmOutbound(ctx, machine, self, "agent_switch", label+" · "+am.Name+" → "+t.Launcher+"\n\n"+text, args); err != nil {
+	if ok, outcome, err := s.confirmOutbound(ctx, machine, self, "agent_switch", strings.TrimSpace(a.Text), label+" · "+am.Name+" → "+t.Launcher+"\n\n"+text, args); err != nil {
 		return "", err
 	} else if !ok {
-		return "The user declined on the phone: the agent was not moved and nothing was sent.", nil
+		return outboundNotDone(outcome, "The user declined on the phone: the agent was not moved and nothing was sent.",
+			"the agent was not moved and nothing was sent"), nil
 	}
 	// Read after the phone, as agent_send: a task another conversation supervises gets the words as a side conversation.
 	if _, theirs, err := s.supervisedElsewhere(ctx, self, am, c); err != nil {
@@ -84,7 +87,7 @@ func (s *Service) toolAgentSwitch(ctx context.Context, machine, self string, arg
 	} else if theirs {
 		text = prompts.RenderSideConversation(text)
 	}
-	if err := s.moveAgent(ctx, am, c, t, text); err != nil {
+	if err := s.moveAgent(ctx, am, c, t, text, source); err != nil {
 		return "", fmt.Errorf("%s was not moved to %s: %w. Nothing was sent", label, t.Launcher, err)
 	}
 	s.logf("agent_switch %s on %s: %s → %s (from %s)", short(c.SessionID), am.ID, own, t.Launcher, short(self))
@@ -124,7 +127,7 @@ func switchUnsupported(c proto.Session, launcher string) error {
 // switchReachable says why agents on am cannot be moved to launcher now, nil when they can: this manager connects the
 // computer, its node can (capability), and the launcher is in the computer's scope.
 func (s *Service) switchReachable(ctx context.Context, am Device, launcher, capability string) error {
-	nodes, _ := s.devs.(nodeAnnouncer)
+	nodes, _ := s.physicalDevices().(nodeAnnouncer)
 	if s.devs == nil || nodes == nil || !s.devs.Has(am.ID) {
 		return fmt.Errorf("%s is not connected by this manager: it cannot move agents there", am.Name)
 	}
@@ -136,9 +139,10 @@ func (s *Service) switchReachable(ctx context.Context, am Device, launcher, capa
 }
 
 // moveAgent switches agent c on am to t now: the pick (session.modes with the launcher and from), then text with
-// switch_now, or with no text session.switch (an idle agent waits on the new launcher). The node's refusal comes back
+// switch_now, or with no text session.switch (an idle agent waits on the new launcher). source marks only a default
+// continuation the hub generated; custom switch text keeps its caller's provenance. The node's refusal comes back
 // as it is (switch_busy for a busy agent), with nothing typed and no switch left waiting.
-func (s *Service) moveAgent(ctx context.Context, am Device, c proto.Session, t switchTarget, text string) error {
+func (s *Service) moveAgent(ctx context.Context, am Device, c proto.Session, t switchTarget, text string, source *proto.MessageSource) error {
 	// The node carries the switch out on its own clock once it starts (a quit, a start on the new launcher, a way back):
 	// a caller that stops waiting must not cut it short.
 	wctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), agentSwitchWait)
@@ -160,6 +164,9 @@ func (s *Service) moveAgent(ctx context.Context, am Device, c proto.Session, t s
 	} else {
 		params := sendParams(c.SessionID, text, false)
 		params["apply_switch"], params["switch_now"] = true, true
+		if source != nil {
+			params["message_source"] = source
+		}
 		err = s.call(wctx, am.ID, DeviceSessionSend, params, nil)
 	}
 	// For an agent off its launcher, picking that launcher again is no way to drop the switch back to it: it is the

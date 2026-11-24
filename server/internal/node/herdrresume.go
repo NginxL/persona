@@ -3,6 +3,8 @@ package node
 import (
 	"context"
 	"encoding/base64"
+	"fmt"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -10,6 +12,7 @@ import (
 
 	"github.com/nwverse/persona/server/internal/herdr"
 	"github.com/nwverse/persona/server/internal/host"
+	"github.com/nwverse/persona/server/internal/modelhttp"
 )
 
 // When herdr's server restarts it restores its panes and, once a client attaches, resumes the agents in them with its
@@ -36,6 +39,8 @@ const resumeSource = "custom:persona"
 
 // agentLaunch is what an agent in a pane was started with, to start it again the same way.
 type agentLaunch struct {
+	Source modelhttp.Source `json:"model_source,omitzero"`
+
 	AdditionalDirs                   []string `json:"additional_dirs,omitempty"`
 	TaskInstructionFile              string
 	TaskInstructions                 string
@@ -203,6 +208,51 @@ func resumeSayable(cmd string) bool {
 		strings.IndexFunc(cmd, unicode.IsControl) < 0
 }
 
+// Keep alias credentials out of herdr's persisted command. A restore reads the
+// launcher's words again and hands them to the same resolver as a file-based start.
+// q quotes for the shell the restore line runs in (resumeArgv).
+func (n *Node) herdrCodexLauncher(name string, q func(string) string) string {
+	launcherCache.Lock()
+	words := launcherCache.codex[name]
+	launcherCache.Unlock()
+	if len(words) == 0 {
+		if _, managed := n.managedLauncher(name); managed {
+			return q(n.bin) + " launch " + q(name)
+		}
+		if name == "codex" {
+			return "codex" // codex-start resolves the stock CLI even before discovery
+		}
+	}
+	if name == "codex" && len(words) == 1 && (words[0] == "codex" || filepath.IsAbs(words[0])) {
+		return q(words[0])
+	}
+	// Rediscover custom launcher words in the marked shell on restore.
+	return "--launcher " + q(name)
+}
+
+func herdrCodexRestore(args []string) (codexStartFile, error) {
+	if len(args) >= 2 && args[0] == "--launcher" {
+		name := args[1]
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		defer cancel()
+		env := append(codexPaneEnv(&herdrHost{}), codexStartMarker)
+		out, err := scanLaunchers(ctx, env...)
+		if err != nil {
+			return codexStartFile{}, err
+		}
+		_, launchers, _, _ := mergeLaunchers(string(out))
+		words := launchers[name]
+		if len(words) == 0 {
+			if name != "codex" {
+				return codexStartFile{}, fmt.Errorf("%s Codex launcher %q not found", codexStartError, name)
+			}
+			words = []string{"codex"} // a function or PATH entry only the marked shell sees
+		}
+		args = append(words, args[2:]...)
+	}
+	return codexStartFile{Argv: args, Agent: herdrAgentName("codex")}, nil
+}
+
 // agentResumeArgv is the resume_argv for an agent Persona started (Claude, Codex, a compatible CLI, pi, the Cursor
 // CLI, the Antigravity CLI). A Codex, and a work agent herdr detects, gets HERDR_AGENT like Claude. A work agent's
 // command keeps its model and effort overrides. Pi names its session, omp requires its session file, and agy adds a
@@ -225,6 +275,9 @@ func (n *Node) agentResumeArgv(spec agentLaunch, id string) (argv []string, ok b
 		return nil, false
 	}
 	return n.resumeArgv(func(q func(string) string) string {
+		if kind == "codex" {
+			return q(n.bin) + " codex-start --herdr-resume " + n.herdrCodexLauncher(spec.Launcher, q) + codexTaskFlags(spec.TaskInstructions, q) + " resume " + id
+		}
 		if _, program, ok := workAgent(kind); ok {
 			launcher := spec.Launcher
 			resumeID := id
@@ -256,9 +309,14 @@ func (n *Node) holdResume(ctx context.Context, launch host.Launcher, pane, id st
 		return
 	}
 	spec.ID = id
+	var agyConv string
+	if spec.Agent == agyAgent {
+		n.ensureAgyHooksForLaunch() // agyhooks.go (#13950): ensure hooks exist for resumed agy panes
+		agyConv = n.agyConversation(id, pane)
+	}
 	n.mu.Lock()
 	if spec.Agent == agyAgent {
-		spec.AgyConversation = n.agyConversationLocked(id, pane)
+		spec.AgyConversation = agyConv
 	}
 	if n.launches == nil {
 		n.launches = map[string]claudeLaunch{}
@@ -281,20 +339,22 @@ func (n *Node) reportResume(ctx context.Context, h *herdrHost, pane string, spec
 	if cur, ok := n.launches[pane]; ok {
 		spec = cur
 	}
+	n.mu.Unlock()
 	reportID := spec.ID
 	if spec.Agent == agyAgent {
-		spec.AgyConversation = n.agyConversationLocked(spec.ID, pane)
+		spec.AgyConversation = n.agyConversation(spec.ID, pane)
 		if spec.AgyConversation != "" {
 			reportID = spec.AgyConversation
 		}
+		n.mu.Lock()
 		if cur, ok := n.launches[pane]; ok && cur.ID == spec.ID {
 			// What is reported is what the pane resumes: kept, so the server is recorded below and backfill does not
 			// report the same conversation again.
 			cur.AgyConversation = spec.AgyConversation
 			n.launches[pane] = cur
 		}
+		n.mu.Unlock()
 	}
-	n.mu.Unlock()
 	argv, ok := n.agentResumeArgv(spec, spec.ID)
 	if !ok {
 		if spec.Agent == ompAgent && n.ompKnownFile(spec.ID) == "" {
@@ -379,6 +439,12 @@ func (n *Node) backfillResume(agents []host.Agent) {
 	var work []todo
 	var recheck []held
 	var reports []string
+	agyByPane := map[string]string{}
+	for _, a := range agents {
+		if a.Agent == agyAgent && a.PaneID != "" && host.ParsePane(a.PaneID).Kind == host.Herdr {
+			agyByPane[a.PaneID] = n.agyConversation(otherSession(a), a.PaneID)
+		}
+	}
 	n.mu.Lock()
 	for _, a := range agents {
 		if a.PaneID == "" || host.ParsePane(a.PaneID).Kind != host.Herdr {
@@ -391,7 +457,7 @@ func (n *Node) backfillResume(agents []host.Agent) {
 		var agy string
 		if a.Agent == agyAgent {
 			id = otherSession(a)
-			agy = n.agyConversationLocked(id, a.PaneID)
+			agy = agyByPane[a.PaneID]
 		} else if !validID(id) {
 			continue
 		}

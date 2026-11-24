@@ -117,6 +117,35 @@ describe("openOverlay", () => {
     expect(onOverlayEntry()).toBe(false);
   });
 
+  it("closes stacked overlays strictly one layer at a time (three deep)", async () => {
+    const b = fakeBrowser();
+    const onFirst = vi.fn();
+    const onSecond = vi.fn();
+    const onThird = vi.fn();
+    openOverlay(onFirst);
+    openOverlay(onSecond);
+    openOverlay(onThird);
+    expect(overlayDepth()).toBe(3);
+
+    b.pressBack();
+    await vi.runAllTimersAsync();
+    expect(onThird).toHaveBeenCalledOnce();
+    expect(onSecond).not.toHaveBeenCalled();
+    expect(onFirst).not.toHaveBeenCalled();
+    expect(overlayDepth()).toBe(2);
+
+    b.pressBack();
+    await vi.runAllTimersAsync();
+    expect(onSecond).toHaveBeenCalledOnce();
+    expect(onFirst).not.toHaveBeenCalled();
+    expect(overlayDepth()).toBe(1);
+
+    b.pressBack();
+    await vi.runAllTimersAsync();
+    expect(onFirst).toHaveBeenCalledOnce();
+    expect(overlayDepth()).toBe(0);
+  });
+
   it("an overlay entry written before the depth field still counts as one", () => {
     fakeBrowser();
     expect(overlayDepth(null)).toBe(0);

@@ -13,6 +13,7 @@ import persona.core.designsystem.*
 import persona.core.designsystem.icons.PhIcons
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
+import persona.core.inbox.*
 
 /**
  * Sizes people read: bytes below 1 KB, then KB and MB. The unit is picked after rounding, as the machine pages'

@@ -2,7 +2,6 @@
 <resources>
     <string name="inbox_lark_latest_failed">Couldn\'t load the latest messages. Try again.</string>
     <string name="inbox_lark_older_failed">Couldn\'t load earlier messages. Try again.</string>
-    <string name="inbox_lark_messages_failed">Couldn\'t load messages. Try again.</string>
     <string name="inbox_lark_sent_refresh_failed">Message sent, but couldn\'t refresh. Try again.</string>
     <string name="inbox_lark_unconfirmed">Can\'t confirm delivery yet. It won\'t be resent automatically.</string>
     <string name="inbox_lark_check_unfinished">Couldn\'t finish checking. Try again later.</string>
@@ -44,13 +43,8 @@
         <item quantity="other">View all %1$d messages</item>
     </plurals>
     <string name="inbox_lark_chat_history">Chat history</string>
-    <string name="inbox_lark_not_paired">Pair with a hub first</string>
-    <string name="inbox_lark_incomplete">Message history isn\'t fully synced yet</string>
-    <string name="inbox_lark_card_partial">Part of the card isn\'t shown</string>
     <string name="inbox_lark_card_action">Action</string>
-    <string name="inbox_lark_image_unavailable">Image not available</string>
     <string name="inbox_lark_card_image">Card image</string>
-    <string name="inbox_lark_content_unsupported">This content can\'t be shown yet</string>
     <string name="inbox_lark_card_unsupported">This card can\'t be shown yet</string>
     <string name="inbox_lark_processing">Working…</string>
     <string name="inbox_lark_action_failed">That didn\'t work</string>
@@ -71,7 +65,6 @@
     <string name="inbox_lark_thread_older">Show earlier replies</string>
     <string name="inbox_lark_thread_no_reply">This connection doesn\'t support thread replies yet</string>
     <string name="inbox_lark_thread_reply">Reply in thread</string>
-    <string name="inbox_lark_thread_failed">Couldn\'t load replies. Try again.</string>
     <string name="inbox_lark_emoji_default">Default</string>
     <string name="inbox_lark_emoji_group">Emoji</string>
     <string name="inbox_lark_react">React</string>
@@ -102,31 +95,10 @@
     <string name="inbox_moments_no_comments_title">No comments yet</string>
     <string name="inbox_moments_no_comments_text">No one has commented on this post yet.</string>
     <string name="inbox_moments_reply_to">Reply to @%1$s:</string>
-    <string name="inbox_lark_emoji_thumbsup">Thumbs up</string>
-    <string name="inbox_lark_emoji_done">Done</string>
-    <string name="inbox_lark_emoji_heart">Heart</string>
-    <string name="inbox_lark_emoji_smile">Smile</string>
-    <string name="inbox_lark_emoji_laugh">Laugh</string>
-    <string name="inbox_lark_emoji_surprised">Surprised</string>
-    <string name="inbox_lark_emoji_cry">Cry</string>
-    <string name="inbox_lark_emoji_clap">Clap</string>
-    <string name="inbox_lark_emoji_fire">Fire</string>
-    <string name="inbox_lark_emoji_party">Party</string>
-    <string name="inbox_lark_emoji_thinking">Thinking</string>
-    <string name="inbox_lark_emoji_muscle">Keep it up</string>
-    <string name="inbox_lark_emoji_wave">Bye</string>
-    <string name="inbox_lark_emoji_fist">Fist bump</string>
-    <string name="inbox_lark_emoji_shake">Handshake</string>
-    <string name="inbox_lark_emoji_rose">Rose</string>
-    <string name="inbox_lark_emoji_beer">Beer</string>
-    <string name="inbox_lark_emoji_cake">Cake</string>
-    <string name="inbox_lark_emoji_coffee">Coffee</string>
     <!-- Between people's names in a list. -->
     <string name="inbox_lark_name_separator">", "</string>
     <!-- Between the parts of a line: kind, title, duration. -->
     <string name="inbox_lark_part_separator">", "</string>
-    <string name="inbox_lark_emoji_ok">OK</string>
-    <string name="inbox_lark_emoji_jiayi">+1</string>
     <string name="inbox_lark_pins_title">Pinned messages</string>
     <string name="inbox_lark_pins_loading">Loading pinned messages…</string>
     <string name="inbox_lark_pins_empty_title">No pinned messages yet</string>

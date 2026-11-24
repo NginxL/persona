@@ -4,7 +4,7 @@ because it is missing." on the mock while they were missing."""
 import json
 import os
 from pathlib import Path
-import socket
+import re
 import subprocess
 import tempfile
 import time
@@ -18,21 +18,31 @@ REQUIRED = {"id", "name", "is_group", "unread", "at_me", "muted", "preview", "is
 
 class MockHub:
     def __init__(self, **env):
-        with socket.socket() as sock:
-            sock.bind(("127.0.0.1", 0))
-            self.port = sock.getsockname()[1]
-        self.log = tempfile.TemporaryFile()
+        # PORT=0: the hub binds a free port itself and prints it. Choosing one here and handing it over raced with the
+        # other suites of the shard, which could take it in between (the hub then failed to bind, or the health check
+        # reached someone else's listener).
+        self.log = tempfile.NamedTemporaryFile(prefix="lark-mock-", suffix=".log")
         self.process = subprocess.Popen(["python3", "-I", str(Path(__file__).with_name("mock_hub.py"))],
-                                        env=dict(os.environ, PORT=str(self.port), **env), stdout=self.log, stderr=self.log)
-        for _ in range(60):
+                                        env=dict(os.environ, **env, PORT="0"), stdout=self.log, stderr=self.log)
+        self.port = None
+        for _ in range(100):
             if self.process.poll() is not None:
-                raise RuntimeError("mock hub exited before startup")
-            try:
-                with urlopen(self.url("/api/v1/health"), timeout=1):
-                    return
-            except (URLError, TimeoutError):
-                time.sleep(0.1)
+                raise RuntimeError("mock hub exited before startup: " + self.output())
+            if self.port is None:
+                found = re.search(r"^mock hub on 127\.0\.0\.1:(\d+)$", self.output(), re.M)
+                self.port = int(found.group(1)) if found else None
+            if self.port is not None:
+                try:
+                    with urlopen(self.url("/api/v1/health"), timeout=1):
+                        return
+                except (URLError, TimeoutError):
+                    pass
+            time.sleep(0.1)
+        self.stop()
         raise RuntimeError("mock hub startup timed out")
+
+    def output(self):
+        return Path(self.log.name).read_text(errors="replace")
 
     def url(self, path):
         return f"http://127.0.0.1:{self.port}{path}"

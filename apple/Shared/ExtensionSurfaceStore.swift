@@ -98,14 +98,6 @@ nonisolated struct ExtensionSurfaceStore: Sendable {
     static var shared: Self {
         #if DEBUG
         if ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil { return Self(root: nil) }
-        #if os(macOS)
-        if let path = UserDefaults.standard.string(forKey: "macSnapshot") {
-            let directory = URL(fileURLWithPath: path).standardizedFileURL.deletingLastPathComponent()
-            guard directory.path.hasPrefix("/tmp/") || directory.path.hasPrefix("/private/tmp/") else { return Self(root: nil) }
-            // A local snapshot must not replace the user's real Shortcuts/App Group credentials.
-            return Self(root: directory.appendingPathComponent("ExtensionSurfaces", isDirectory: true))
-        }
-        #endif
         #endif
         let name = Bundle.main.object(forInfoDictionaryKey: "PersonaAppGroup") as? String
         let container = name.flatMap { FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: $0) }

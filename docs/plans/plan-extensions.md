@@ -312,7 +312,7 @@ Validation:
 ### How iMessage uses it
 
 - **Becomes extension `imessage`**: `node.command` has only `darwin-*`, the machine-selection field has `maxItems: 1`, and `keep_running: "always"`.
-- **Node program**: the current Reader (`connector/imessage`), answering `connector.list/chats/older/changes/search` over stdio using the connector protocol.
+- **Node program**: the current Reader (`modules/imessage`), answering `connector.list/chats/older/changes/search` over stdio using the connector protocol.
   The hub-side connector framework forwards calls through `plugin.node.call` and returns `changed` notifications. Connector conformance tests keep running.
 - **Config**: move from `imessage.machine` in hub.json to the extension's `machines` field. On the first startup during migration, read the old value and write it there; keep the old field read-only for one version. The "Send to Persona" switch is unchanged.
 - **Full Disk Access**: macOS attributes child-process permissions to the "responsible process", namely the node that launches it, so step 1 remains as today: grant node permission.

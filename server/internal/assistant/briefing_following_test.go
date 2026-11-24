@@ -202,6 +202,7 @@ func TestBriefFollowingFormatsTextWithoutChangingInput(t *testing.T) {
 
 // A cold-start briefing loads the Inbox, then carries both lists to the model even when a card carries the other facts.
 func TestBriefFactsIncludeInboxFollowUps(t *testing.T) {
+	needsLarkLayer(t)
 	e := newBriefEnv(t)
 	setSettings(t, e.s, func(v *Settings) { v.Timezone = "UTC" })
 	waitNeedsYouIdle(t, e.s)

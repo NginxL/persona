@@ -127,5 +127,9 @@
   "follow_assistant": "跟随助手",
   "follow_launcher": "Agent 默认",
   "daily_hint_zone": "{days} {time}，按 {zone} 时区。",
-  "cron_hint_named": "分 时 日 月 周，按 {zone} 时区计算。日和周都写了时，满足其中一个就运行。"
+  "cron_hint_named": "分 时 日 月 周，按 {zone} 时区计算。日和周都写了时，满足其中一个就运行。",
+  "input_hint": "输入 @ 选择文件或技能，也可以输入 / 选择技能或常用提示词。任务运行时读取最新内容。",
+  "input_loading": "正在检查任务的执行电脑和工作目录…",
+  "input_unsupported": "当前执行设置下无法选择文件和技能，仍可使用文本和快捷提示词。",
+  "input_changed": "此文件属于其他电脑、目录或智能体。请移除后重新选择。"
 }

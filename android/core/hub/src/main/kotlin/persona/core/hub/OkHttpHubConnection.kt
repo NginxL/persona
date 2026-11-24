@@ -559,7 +559,7 @@ class OkHttpHubConnection(
         val selected = awaitRoute()
         if (expectedRoute != null && selected !== expectedRoute) throw HubFailure(HubError.NoNetwork)
         val owner = synchronized(lock) {
-            activeRoute().takeIf { it === selected } ?: throw HubFailure(HubError.NoNetwork)
+            if (activeRoute() !== selected) throw HubFailure(HubError.NoNetwork)
             routeOwner?.takeIf { it.first === selected }?.second ?: throw HubFailure(HubError.NoNetwork)
         }
         require(path.startsWith("/api/") && !path.contains('#')) { "Expected an API path" }

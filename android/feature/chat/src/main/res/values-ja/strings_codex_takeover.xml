@@ -1,0 +1,20 @@
+<resources>
+    <string name="chat_takeover_action">引き継ぐ</string>
+    <string name="chat_takeover_continue_short">新規で続ける</string>
+    <string name="chat_takeover_continue_long">新しいセッションで続ける</string>
+    <string name="chat_takeover_continue_instead">代わりに新しいセッションで続ける</string>
+    <string name="chat_takeover_running_reason">Codex がターミナルで実行中</string>
+    <string name="chat_takeover_confirm_title">このセッションを引き継ぎますか？</string>
+    <string name="chat_takeover_running_confirm">ターミナルで実行中のこのターンを終了します。</string>
+    <string name="chat_takeover_continue_title">新しいセッションで続けますか？</string>
+    <string name="chat_takeover_reason_encrypted_context">この会話のコンテキストは暗号化されているため復元できません。新しいセッションで続けてください。</string>
+    <string name="chat_takeover_reason_unavailable">このセッションは安全に再開できません。新しいセッションで続けてください。</string>
+    <string name="chat_takeover_done">引き継ぎました</string>
+    <string name="chat_takeover_continued">新しいセッションを開始しました</string>
+    <string name="chat_takeover_progress">引き継ぎ中…</string>
+    <string name="chat_takeover_continuing">新しいセッションを開始中…</string>
+    <string name="chat_takeover_checking">新しいセッションの状態を確認中…</string>
+    <string name="chat_takeover_continue_pending">新しいセッションはまだ起動中です。再試行前に状態を確認してください。</string>
+    <string name="chat_takeover_continue_unknown">新しいセッションが起動したか確認できませんでした。再試行前に状態を確認してください。</string>
+    <string name="chat_takeover_check_status">状態を確認</string>
+</resources>

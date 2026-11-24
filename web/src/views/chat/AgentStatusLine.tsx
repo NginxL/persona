@@ -1,12 +1,12 @@
 import type { ReactNode } from "react";
 import { t } from "../../i18n";
-import { contextUsage } from "../../lib/context-usage";
+import { currentContextTokens } from "../../lib/context-usage";
 import { togglePanel } from "../../lib/panel";
 import { countdown, liveAccounts, resetLabel, useUsageWindows, windowKey, type UsageAccount } from "../../lib/usage-windows";
-import type { Session } from "../../lib/types";
+import type { Item, Session } from "../../lib/types";
 import { useNow } from "../../ui/atoms";
 import { Icon } from "../../ui/icons";
-import { ContextMeter } from "./ContextMeter";
+import { ContextMeter, hasSessionTokenUsage } from "./ContextMeter";
 
 function pathParts(path: string | undefined): string[] {
   return path?.replaceAll("\\", "/").split("/").filter(Boolean) ?? [];
@@ -37,12 +37,20 @@ export function sessionQuota(accounts: UsageAccount[], session: Session, now: nu
   return windows.length ? { account, windows } : null;
 }
 
-export function AgentStatusLine({ session, source }: { session: Session; source?: ReactNode }) {
-  const place = workingLocation(session);
-  const hasContext = contextUsage(session) !== null;
+export function AgentStatusLine({ session, source, assistant, items, onCompact, compactBlocked }: {
+  session: Session;
+  source?: ReactNode;
+  assistant?: boolean;
+  items?: readonly Item[];
+  onCompact?: () => boolean | void | Promise<boolean | void | unknown>;
+  compactBlocked?: boolean;
+}) {
+  const isAssistant = Boolean(assistant || session.assistant);
+  const place = isAssistant ? null : workingLocation(session);
+  const hasContext = currentContextTokens(session) > 0 || hasSessionTokenUsage(items);
   const accounts = useUsageWindows();
-  const now = useNow(30_000, accounts.length > 0);
-  const quota = sessionQuota(accounts, session, now);
+  const now = useNow(30_000, !isAssistant && accounts.length > 0);
+  const quota = isAssistant ? null : sessionQuota(accounts, session, now);
   if (!place && !hasContext && !quota && !source) return null;
 
   const placeLabel = place && [place.folder || place.name, place.branch].filter(Boolean).join(" · ");
@@ -75,8 +83,9 @@ export function AgentStatusLine({ session, source }: { session: Session; source?
         ) : (
           <span data-composer-source className={placeClass} title={placeLabel || undefined}>{placeContent}</span>
         ))}
-        {hasContext && <ContextMeter session={session} />}
-        {source}
+        {isAssistant && source}
+        {hasContext && <ContextMeter session={session} items={items} assistant={isAssistant} onCompact={onCompact} compactBlocked={compactBlocked} />}
+        {!isAssistant && source}
         {quota && (
           <a
             href="/admin/usage"

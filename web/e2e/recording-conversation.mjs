@@ -262,7 +262,8 @@ async function shoot(page, name) {
 const kinds = (page) => page.locator("[data-meeting-conversation] li[data-thread]").evaluateAll((els) => els.map((el) => el.getAttribute("data-thread")));
 
 async function running(theme, lang = "en", width = 1440) {
-  const s = JSON.parse(await readFile(new URL(`../src/i18n/locales/${lang}/knowledge-kbdetail.json`, import.meta.url), "utf8"));
+  // the knowledge page's strings and the recording module's (src/modules/recording, #13407)
+  const s = Object.assign(...await Promise.all(["knowledge-kbdetail", "recording"].map(async (ns) => JSON.parse(await readFile(new URL(`../src/i18n/locales/${lang}/${ns}.json`, import.meta.url), "utf8")))));
   const { ctx, state, push } = await context(theme, lang, width, { meta: {}, live: {} });
   const errors = [];
   const page = await ctx.newPage();
@@ -309,7 +310,8 @@ async function running(theme, lang = "en", width = 1440) {
 }
 
 async function after(theme, lang = "en", width = 1440) {
-  const s = JSON.parse(await readFile(new URL(`../src/i18n/locales/${lang}/knowledge-kbdetail.json`, import.meta.url), "utf8"));
+  // the knowledge page's strings and the recording module's (src/modules/recording, #13407)
+  const s = Object.assign(...await Promise.all(["knowledge-kbdetail", "recording"].map(async (ns) => JSON.parse(await readFile(new URL(`../src/i18n/locales/${lang}/${ns}.json`, import.meta.url), "utf8")))));
   const scene = { meta: { complete: true, ended_at: "2026-11-10T14:31:00+08:00", minutes_state: "ready", room: ended, private: false }, live: { room: ended, private: false, revs: { room: 3, asks: 4, private: 1 } } };
   const { ctx, state } = await context(theme, lang, width, scene);
   const errors = [];
@@ -352,7 +354,8 @@ async function after(theme, lang = "en", width = 1440) {
 }
 
 async function down(theme, lang = "en", width = 1440) {
-  const s = JSON.parse(await readFile(new URL(`../src/i18n/locales/${lang}/knowledge-kbdetail.json`, import.meta.url), "utf8"));
+  // the knowledge page's strings and the recording module's (src/modules/recording, #13407)
+  const s = Object.assign(...await Promise.all(["knowledge-kbdetail", "recording"].map(async (ns) => JSON.parse(await readFile(new URL(`../src/i18n/locales/${lang}/${ns}.json`, import.meta.url), "utf8")))));
   const scene = { meta: { room: unavailable }, live: { room: unavailable, asks: [ask({ via: "material" })] } };
   const { ctx, state } = await context(theme, lang, width, scene);
   const errors = [];
@@ -375,7 +378,8 @@ async function down(theme, lang = "en", width = 1440) {
 /** Phase 6: any recording with text or minutes that has ended (here a note: no room, no attendance, no private mark)
  *  offers **Talk about this meeting**; its first words make the follow-up, which is then its thread. */
 async function talk(theme, lang = "en", width = 1440) {
-  const s = JSON.parse(await readFile(new URL(`../src/i18n/locales/${lang}/knowledge-kbdetail.json`, import.meta.url), "utf8"));
+  // the knowledge page's strings and the recording module's (src/modules/recording, #13407)
+  const s = Object.assign(...await Promise.all(["knowledge-kbdetail", "recording"].map(async (ns) => JSON.parse(await readFile(new URL(`../src/i18n/locales/${lang}/${ns}.json`, import.meta.url), "utf8")))));
   const scene = { meta: { kind: "note", title: "Vendor call", complete: true, ended_at: "2026-11-10T14:31:00+08:00", minutes_state: undefined, attendance: undefined, room: undefined }, live: { attendance: "off", asks: [], room: undefined, revs: { asks: 0 } } };
   const { ctx, state } = await context(theme, lang, width, scene);
   const errors = [];
@@ -415,7 +419,8 @@ async function talk(theme, lang = "en", width = 1440) {
 /** Questions in the room that got no answer: one in the thread says why, one still being answered says so, and one that
  *  never went into the room (spoken, failed) shows after the thread. */
 async function stuck(theme, lang = "en", width = 1440) {
-  const s = JSON.parse(await readFile(new URL(`../src/i18n/locales/${lang}/knowledge-kbdetail.json`, import.meta.url), "utf8"));
+  // the knowledge page's strings and the recording module's (src/modules/recording, #13407)
+  const s = Object.assign(...await Promise.all(["knowledge-kbdetail", "recording"].map(async (ns) => JSON.parse(await readFile(new URL(`../src/i18n/locales/${lang}/${ns}.json`, import.meta.url), "utf8")))));
   const spokenAsk = "33333333-3333-4333-8333-333333333333";
   const waitingAsk = "44444444-4444-4444-8444-444444444444";
   const stuckAsks = [
@@ -459,7 +464,8 @@ async function shootFrom(page, selector, name) {
 /** Phase 3 while the meeting runs: the room's photos in its thread (a deleted one as "Photo removed", never the room's
  *  copy), **Photos** with the note and the folded text, and a photos revision read again from GET …/photos only. */
 async function photosRunning(theme, lang = "en", width = 1440) {
-  const s = JSON.parse(await readFile(new URL(`../src/i18n/locales/${lang}/knowledge-kbdetail.json`, import.meta.url), "utf8"));
+  // the knowledge page's strings and the recording module's (src/modules/recording, #13407)
+  const s = Object.assign(...await Promise.all(["knowledge-kbdetail", "recording"].map(async (ns) => JSON.parse(await readFile(new URL(`../src/i18n/locales/${lang}/${ns}.json`, import.meta.url), "utf8")))));
   const scene = {
     meta: {}, live: { revs: { room: 2, asks: 4, photos: 2 } }, roomItems: photoRoomItems,
     photos: (st) => st.photosRev >= 3 ? photosList().map((p) => (p.n === 3 ? { ...p, note: "A slide with the rollout plan: three steps, then a review." } : p)) : photosList(),
@@ -518,7 +524,8 @@ async function photosRunning(theme, lang = "en", width = 1440) {
 /** Phase 3 after the meeting: minutes items that cite a photo show it (one deleted since as "Photo removed") and go to it
  *  under **Photos**; a thumbnail there opens the image viewer. */
 async function photosAfter(theme, lang = "en", width = 1440) {
-  const s = JSON.parse(await readFile(new URL(`../src/i18n/locales/${lang}/knowledge-kbdetail.json`, import.meta.url), "utf8"));
+  // the knowledge page's strings and the recording module's (src/modules/recording, #13407)
+  const s = Object.assign(...await Promise.all(["knowledge-kbdetail", "recording"].map(async (ns) => JSON.parse(await readFile(new URL(`../src/i18n/locales/${lang}/${ns}.json`, import.meta.url), "utf8")))));
   const scene = {
     meta: { complete: true, ended_at: "2026-11-10T14:31:00+08:00", minutes_state: "ready", room: ended, private: false },
     live: { room: ended, private: false, revs: { room: 3, asks: 4, private: 1, photos: 4 } },
@@ -565,7 +572,8 @@ async function photosAfter(theme, lang = "en", width = 1440) {
 /** Phase 2 while the meeting runs: **Topics** (done, now, still to come) and **Live**, the newest lines; a meeting_live event
  *  reads only the new lines, from the page's own next position, and the topics once they moved. */
 async function liveView(theme, lang = "en", width = 1440) {
-  const s = JSON.parse(await readFile(new URL(`../src/i18n/locales/${lang}/knowledge-kbdetail.json`, import.meta.url), "utf8"));
+  // the knowledge page's strings and the recording module's (src/modules/recording, #13407)
+  const s = Object.assign(...await Promise.all(["knowledge-kbdetail", "recording"].map(async (ns) => JSON.parse(await readFile(new URL(`../src/i18n/locales/${lang}/${ns}.json`, import.meta.url), "utf8")))));
   const said = [
     [5, "Ada: Today we look at the export flow of the example project."], [12, "Bo: The cap is still 4 MB."], [31, "Ada: Let's keep it for this release."],
     [312, "Bo: Pricing next: two options on the table."], [340, "Ada: The yearly plan keeps the discount."], [1790, "Bo: Did we decide on the cap last time, or is it still open?"],

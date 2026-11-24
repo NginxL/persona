@@ -69,7 +69,7 @@ class JSectionHeaderOverflowTest {
         rule.setContent {
             CompositionLocalProvider(LocalDensity provides Density(LocalDensity.current.density, 2f)) {
                 PersonaTheme(style = AppStyle.Brief, reduceMotion = true) {
-                    Box(Modifier.width(400.dp)) {
+                    Box(Modifier.width(280.dp)) {
                         JSectionHeader("Needs you", count = 2, trailing = "Collapse", open = true, onClick = {},
                             overflowActions = listOf(JAction("Mark all as read", onClick = {})), action = {
                                 JTextButton("Mark all as read", {})

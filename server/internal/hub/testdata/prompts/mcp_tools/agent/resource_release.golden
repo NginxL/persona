@@ -1,0 +1,42 @@
+{
+  "name": "resource_release",
+  "description": "使用 fencing token 记录本会话持有租约的退出码和结果。",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "resource": {
+        "type": "string"
+      },
+      "lease_id": {
+        "type": "string"
+      },
+      "token": {
+        "type": "integer"
+      },
+      "outcome": {
+        "type": "object",
+        "properties": {
+          "exit": {
+            "type": "integer"
+          },
+          "run": {
+            "type": "string"
+          },
+          "output": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "exit",
+          "run"
+        ]
+      }
+    },
+    "required": [
+      "resource",
+      "lease_id",
+      "token",
+      "outcome"
+    ]
+  }
+}

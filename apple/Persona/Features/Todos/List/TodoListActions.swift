@@ -6,11 +6,18 @@ import UIKit
 
 /// One row of the V1 list and what it does: drawn from its own cell and the list's model, two references that stay the
 /// same, so a list update that leaves the row alone does not draw it again (P6). The link under it opens the to-do (no
-/// chevron on every row, as the Inbox's rows; iOS 18 draws the chevron of a link that is the row whatever it is told);
-/// a new to-do opens once the hub has it. The row's confirmations are presented from the row they ask about.
+/// chevron on any row, as the Agents list's and the Inbox's rows; iOS 18 draws the chevron of a link that is the row
+/// whatever it is told); a new to-do opens once the hub has it. The row's confirmations are presented from the row they
+/// ask about. The system's cell in its card: no row background of ours, so every shape a row takes in use is the
+/// system's (`sectionCards()`).
 struct TodoListCell: View {
     var cell: TodosListModel.Row
     var model: TodosListModel
+
+    /// A row's one padding is its own (`TodoListRow`); the card's inner inset at its sides, none above or below. Set by
+    /// the list on the row's outermost view (`TodoListView.row`): set here, inside the swipe and the long press, the
+    /// list never saw it, and the rows kept the system's margins on every side.
+    static let insets = EdgeInsets(top: Theme.Space.flush, leading: Theme.Space.l, bottom: Theme.Space.flush, trailing: Theme.Space.l)
 
     var body: some View {
         let c = cell.content
@@ -21,7 +28,6 @@ struct TodoListCell: View {
                 }
                 TodoRowDialogs(model: model, key: cell.id)
             }
-            .themedRow()
             .modifier(TodoRowActions(model: model, key: cell.id, row: c))
     }
 }
@@ -205,42 +211,37 @@ private struct TodoProjectMenu: View {
     }
 }
 
-/// New To-Do, floating at the list's foot (the V1 frames' pill): the Theme Color's pill, as wide as its words.
-struct TodoNewPill: View {
-    var action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            HStack(spacing: Theme.Space.xs) {
-                ThemedIcon(Theme.Icon.add)
-                Text("New To-Do [To-dos Actions]").buttonLabelLine(minimumScale: 1)
-            }
-            .floatingPill(prominent: true)
-            .fixedSize(horizontal: true, vertical: false)
-        }
-        .buttonStyle(.plain)
-        .accessibilityShowsLargeContentViewer()
-        .accessibilityIdentifier("todos.new")
-        .padding(.vertical, Theme.Space.s)
-        .frame(maxWidth: .infinity) // the foot's blur across the page, the pill in its middle
-    }
-}
-
 /// The New To-Do sheet: a title and notes, and Add. It closes at once: the to-do is listed while it is saved, and goes
 /// to the hub with its op id when it can (`TodosListModel.create`). `draft`: what a new to-do the hub turned down said.
+/// Made in a place (`capture`, proposal 3.3 "Capture default"), it says where it starts: its project under the title
+/// ("In Kyoto trip"), or its due date, which the owner can change and give a time (Today's today, Upcoming's tomorrow or
+/// the day whose + was tapped; an hour tapped on Upcoming's calendar starts with that time, All Day off).
 struct TodoNewSheet: View {
-    var add: (_ title: String, _ notes: String?) -> Void
+    var capture: TodoCapture
+    /// The project's name, for `capture`'s project.
+    var projectName: String?
+    var add: (_ title: String, _ notes: String?, _ due: APIClient.TodoPlanChange.Due?) -> Void
     @Environment(\.dismiss) private var dismiss
     @State private var title: String
     @State private var notes: String
+    @State private var due: Date
+    @State private var allDay: Bool
     /// The notes' mic, made as the sheet appears (P3: a `@State` initial value does nothing).
     @State private var dictation: Dictation?
     @FocusState private var focused: Bool
 
-    init(draft: TodoOutbox.Draft? = nil, add: @escaping (_ title: String, _ notes: String?) -> Void) {
+    init(draft: TodoOutbox.Draft? = nil, capture: TodoCapture = TodoCapture(), projectName: String? = nil,
+         add: @escaping (_ title: String, _ notes: String?, _ due: APIClient.TodoPlanChange.Due?) -> Void) {
+        self.capture = capture
+        self.projectName = projectName
         self.add = add
         _title = State(initialValue: draft?.title ?? "")
         _notes = State(initialValue: draft?.notes ?? "")
+        // The time it gets if All Day is turned off: the calendar's for a new to-do (`TodoQuickAddSheet`), or the one given.
+        let day = capture.day ?? .distantFuture
+        _allDay = State(initialValue: capture.at == nil)
+        _due = State(initialValue: capture.at
+            ?? TodoCalendar.userCalendar.date(bySettingHour: TodoCalendar.morning + 1, minute: 0, second: 0, of: day) ?? day)
     }
 
     private var ready: Bool { !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
@@ -248,22 +249,17 @@ struct TodoNewSheet: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section {
-                    TextField(String(localized: "Title [To-dos New]"), text: $title)
-                        .lineLimit(1)
-                        .focused($focused)
-                        .submitLabel(.done)
-                        .onSubmit(save)
-                        .accessibilityIdentifier("todos.new.title")
-                    HStack(alignment: .top, spacing: Theme.Space.s) {
-                        TextField(String(localized: "Notes [To-dos New]"), text: $notes, axis: .vertical)
-                            .lineLimit(3...8)
-                            .accessibilityIdentifier("todos.new.notes")
-                        if let dictation {
-                            FieldMicButton(dictation: dictation, text: $notes, id: "todos.new.notes.mic")
-                                .font(Theme.Font.body)
-                                .foregroundStyle(Theme.accent)
-                        }
+                if let projectName, capture.project != nil {
+                    Section { fields } footer: { Text("In \(projectName) [To-dos Places]") }
+                } else {
+                    Section { fields }
+                }
+                if capture.day != nil {
+                    Section {
+                        FormDatePicker("Due", selection: $due, displayedComponents: allDay ? [.date] : [.date, .hourAndMinute],
+                                       identifier: "todos.new.due")
+                        Toggle(String(localized: "All Day"), isOn: $allDay)
+                            .accessibilityIdentifier("todos.new.allDay")
                     }
                 }
             }
@@ -283,10 +279,31 @@ struct TodoNewSheet: View {
         .presentationDetents([.medium])
     }
 
+    @ViewBuilder private var fields: some View {
+        TextField(String(localized: "Title [To-dos New]"), text: $title)
+            .lineLimit(1)
+            .focused($focused)
+            .submitLabel(.done)
+            .onSubmit(save)
+            .accessibilityIdentifier("todos.new.title")
+        HStack(alignment: .top, spacing: Theme.Space.s) {
+            TextField(String(localized: "Notes [To-dos New]"), text: $notes, axis: .vertical)
+                .lineLimit(3...8)
+                .accessibilityIdentifier("todos.new.notes")
+            if let dictation {
+                FieldMicButton(dictation: dictation, text: $notes, id: "todos.new.notes.mic")
+                    .font(Theme.Font.body)
+                    .foregroundStyle(Theme.accent)
+            }
+        }
+    }
+
     private func save() {
         guard ready else { return }
         dictation?.stop() // what is saved is what the field shows
-        add(title, notes)
+        let when: APIClient.TodoPlanChange.Due? = capture.day == nil ? nil
+            : allDay ? .day(TodoPlanText.day(due, calendar: TodoCalendar.userCalendar)) : .at(due)
+        add(title, notes, when)
         dismiss()
     }
 }

@@ -102,10 +102,11 @@ func (p Profile) decode(src []byte) (pic image.Image, passed *Image, err error) 
 	return pic, nil, nil
 }
 
-// Fit is a picture someone sent (a channel's photo sent as the original, #11985) made to hold at most most bytes:
+// fit is a picture someone sent (a channel's photo sent as the original, #11985) made to hold at most most bytes:
 // decoded once under Pictures and drawn at the largest of Sizes whose encoding fits. A HEIC or AVIF is kept as it is
 // when it fits. An error is an *Error: the type is not one the hub takes, it does not decode, or no size fits.
-func Fit(src []byte, most int) (*Image, error) {
+// Callers go through Fetcher.Fit, which holds a decode slot while it runs.
+func fit(src []byte, most int) (*Image, error) {
 	pic, passed, err := Pictures.decode(src)
 	if err != nil {
 		return nil, err

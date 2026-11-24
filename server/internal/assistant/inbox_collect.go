@@ -115,6 +115,9 @@ func (s *Service) InboxCollected(ctx context.Context, r assistantwire.InboxRound
 	if readsChanged && len(changed) == 0 {
 		s.inboxChanged(ctx, nil) // nothing came in, but which sources could be read did (saveInbox tells otherwise)
 	}
+	if s.inboxTodoForwardOn(ctx) {
+		s.forwardInboxSoon(ctx)
+	}
 	s.triageInbox(ctx)
 	s.settleInbox(ctx) // "Needs you" events the owner answered in the source, or that were closed there (inbox_settle.go)
 	s.translateInbox(ctx)

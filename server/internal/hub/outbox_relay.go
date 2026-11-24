@@ -31,17 +31,26 @@ func init() {
 			if ctx.Err() != nil {
 				break // the rest come again
 			}
-			if it.ID != "" && h.firstHandOver(ctx, from, it.ID) {
-				var err error
-				switch {
-				case it.Notification != nil:
-					_, err = h.deliverPushFrom(from, *it.Notification)
-				case len(it.Message) > 0:
-					err = h.relayBroadcastFrom(from, it.Message)
+			if it.ID != "" {
+				first, release, paused := h.beginHandOver(ctx, from, it.ID)
+				if paused {
+					break // writes are paused: leave this and the rest for retry after resume
 				}
-				if err != nil {
-					h.forgetHandOver(from, it.ID)
-					h.logf("outbox: [%s] %s: %v (not delivered)", from, it.ID, err)
+				if first {
+					var err error
+					switch {
+					case it.Notification != nil:
+						_, err = h.deliverPushFrom(from, *it.Notification)
+					case len(it.Message) > 0:
+						err = h.relayBroadcastFrom(from, it.Message)
+					}
+					if err != nil {
+						h.forgetHandOver(from, it.ID, release != nil)
+						h.logf("outbox: [%s] %s: %v (not delivered)", from, it.ID, err)
+					}
+				}
+				if release != nil {
+					release()
 				}
 			}
 			out.Done = append(out.Done, it.ID) // delivered now or before, or not deliverable: not to come again
@@ -64,32 +73,55 @@ type handOverStore interface {
 	HandOverForget(ctx context.Context, manager, id string) error
 }
 
-// firstHandOver records manager's item id and reports whether it is new. A store that does not answer: memory
-// decides (the item is delivered rather than lost).
-func (h *Hub) firstHandOver(ctx context.Context, manager, id string) bool {
+// beginHandOver records manager's item id and reports whether it is new. When a durable store is configured, it
+// acquires one write-quiesce turn before mutating in-memory state and returns release for the caller to hold across
+// delivery and any forgetHandOver settlement. When writes are paused, paused is true and neither memory nor the store
+// is mutated, so the caller leaves the item for retry after resume. A store that does not answer: memory decides (the
+// item is delivered rather than lost).
+func (h *Hub) beginHandOver(ctx context.Context, manager, id string) (first bool, release func(), paused bool) {
+	s, hasStore := h.store.(handOverStore)
+	if hasStore {
+		if !h.quiesce.begin() {
+			return false, nil, true
+		}
+		release = h.quiesce.end
+	}
 	// Memory first: an item this process took (also while the store did not answer) is not taken again, and of two
 	// sends of one id at once exactly one goes on to the store.
 	if !h.handedOver.first(manager+"\x00"+id, time.Now()) {
-		return false
+		if release != nil {
+			release()
+		}
+		return false, nil, false
 	}
-	if s, ok := h.store.(handOverStore); ok {
+	if hasStore {
 		sctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
-		first, err := s.HandOverFirst(sctx, manager, id, handedOverFor)
+		storeFirst, err := s.HandOverFirst(sctx, manager, id, handedOverFor)
 		cancel()
 		if err == nil {
-			return first // an earlier hub process may have taken it
+			if !storeFirst {
+				release()
+				return false, nil, false // an earlier hub process took it
+			}
+			return true, release, false
 		}
 		h.logf("outbox: [%s] %s: %v", manager, id, err)
 	}
-	return true
+	return true, release, false
 }
 
 // forgetHandOver: manager's item id was not delivered after all (refused): one that comes again is tried again.
-func (h *Hub) forgetHandOver(manager, id string) {
+// held reports whether the caller already holds the write-quiesce turn from beginHandOver.
+func (h *Hub) forgetHandOver(manager, id string, held bool) {
 	if s, ok := h.store.(handOverStore); ok {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		_ = s.HandOverForget(ctx, manager, id)
-		cancel()
+		if held || h.quiesce.begin() {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			_ = s.HandOverForget(ctx, manager, id)
+			cancel()
+			if !held {
+				h.quiesce.end()
+			}
+		}
 	}
 	h.handedOver.forget(manager + "\x00" + id)
 }

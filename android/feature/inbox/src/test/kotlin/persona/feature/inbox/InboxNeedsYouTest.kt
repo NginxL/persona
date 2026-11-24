@@ -6,6 +6,7 @@ import persona.core.domain.inbox.InboxListSettings
 import persona.core.domain.inbox.buildInboxList
 import org.junit.Assert.assertEquals
 import org.junit.Test
+import persona.core.inbox.*
 
 /** Pending counts match "Needs you" without including work already taken by the AI twin. */
 class InboxNeedsYouTest {

@@ -1,4 +1,3 @@
-#if os(iOS)
 import Foundation
 import Testing
 @testable import Persona
@@ -106,4 +105,3 @@ struct SidebarLayoutRoutingTests {
         #expect(NavigationLayout.effective(picked: "unknown", regular: true) == .sidebar)
     }
 }
-#endif

@@ -3,7 +3,7 @@ import { initI18n } from "../i18n";
 import {
   taskConversations,
   blankTask, clockLabel, dayLabel, everyLabel, fromLocalInput, fromTemplate, lastRunText, momentLabel, nextHour, nextText, normalizeDays,
-  parseTime, repeatsLabel, ruleText, runDays, runDetail, runsWith, sameTask, splitTasks, taskBody, taskTitle, TEMPLATES, toLocalInput, untilLabel, untilText, withPush,
+  parseTime, repeatsLabel, ruleText, runDays, runDetail, runsWith, sameTask, splitTasks, taskBody, taskInputSettings, taskTitle, TEMPLATES, toLocalInput, untilLabel, untilText, withPush,
   upcoming, validateTask, withRepeat, type Run, type Task,
 } from "./routines";
 
@@ -78,8 +78,22 @@ describe("words", () => {
   });
 
   it("titles a follow-up without one by its prompt", () => {
-    expect(taskTitle({ title: "", prompt: "\n周五发周报前核对数据\n第二行" })).toBe("周五发周报前核对数据");
-    expect(taskTitle({ title: "  周报 ", prompt: "x" })).toBe("周报");
+    expect(taskTitle({ repeat: "once", title: "", prompt: "\n周五发周报前核对数据\n第二行" })).toBe("周五发周报前核对数据");
+    expect(taskTitle({ repeat: "once", title: "  周报 ", prompt: "x" })).toBe("周报");
+  });
+
+  it("titles an untitled follow-up from the text after its selected references", () => {
+    const skill = '<persona-context kind="skill" ref="review">\nproject\n</persona-context>';
+    const file = '<persona-context kind="file" path="report.md">\nreport.md\n</persona-context>';
+    const selected = { repeat: "once" as const, title: "", prompt_selections: true };
+    expect(taskTitle({ ...selected, prompt: `${skill}\n${file}\n\n\n 核对周报 \n第二行` })).toBe("核对周报");
+    expect(taskTitle({ ...selected, prompt: file })).toBe("定时跟进");
+    for (const repeat of ["interval", "cron"] as const) {
+      expect(taskTitle({ ...selected, repeat, prompt: file })).toBe("定时任务");
+      expect(taskTitle({ ...selected, repeat, prompt: file, title: "Review" })).toBe("Review");
+      expect(taskTitle({ ...selected, repeat, prompt: `${file}\n\nReview notes` })).toBe("Review notes");
+    }
+    expect(taskTitle({ repeat: "once", title: "", prompt: `${skill}\n\n原文` })).toBe(skill.split("\n")[0]);
   });
 
   it("says the next and the last run", () => {
@@ -95,13 +109,13 @@ describe("words", () => {
   it("says what it runs with when not the default", () => {
     expect(runsWith({})).toBeNull();
     expect(runsWith({ permission_mode: "default" })).toBeNull();
-    expect(runsWith({ launcher: "claude-fast", permission_mode: "auto", effort: "low" })).toEqual({ text: "claude-fast · 自动审批 · 思考低", danger: false });
+    expect(runsWith({ launcher: "claude-fast", permission_mode: "auto", effort: "low" })).toEqual({ text: "claude-fast · 自动审批 · 思考Low", danger: false });
     expect(runsWith({ permission_mode: "bypassPermissions" })).toEqual({ text: "完全访问", danger: true });
   });
 
   it("names its launcher by the provider's display name; an rc alias by its ID (#5029)", () => {
     const names = [{ name: "relay-example-com", display_name: "我的中转 站" }, { name: "cc_glm" }];
-    expect(runsWith({ launcher: "relay-example-com", effort: "low" }, names)).toEqual({ text: "我的中转 站 · 思考低", danger: false });
+    expect(runsWith({ launcher: "relay-example-com", effort: "low" }, names)).toEqual({ text: "我的中转 站 · 思考Low", danger: false });
     expect(runsWith({ launcher: "cc_glm" }, names)).toEqual({ text: "cc_glm", danger: false });
     expect(runsWith({ launcher: "gone" }, names)).toEqual({ text: "gone", danger: false });
   });
@@ -226,6 +240,17 @@ describe("the editor", () => {
     expect(splitTasks([cron]).repeating).toEqual([cron]);
   });
 
+  it("previews and saves the same explicit cron rule when the draft changes repeat", () => {
+    const saved = task({ repeat: "cron", cron: "0 9 * * *" });
+    const changed = { ...saved, cron: " 0 10 * * * " };
+    const oneOff = withRepeat(saved, "once", now);
+    for (const [draft, cron] of [[changed, "0 10 * * *"], [oneOff, ""]] as const) {
+      const rule = { repeat: draft.repeat, cron };
+      expect(taskInputSettings(draft, saved)).toMatchObject(rule);
+      expect(taskBody(draft, saved)).toMatchObject(rule);
+    }
+  });
+
   it("keeps the editor valid when the rule changes", () => {
     const d = withRepeat(task({ repeat: "daily" }), "once", now);
     expect(parseTime(d.at)).toEqual(at(2, 11));
@@ -317,4 +342,16 @@ describe("taskConversations (#2824)", () => {
     expect(taskConversations(tk, [r("1", "own", "2026-11-05T09:00:00Z"), r("2", "own", "2026-11-04T09:00:00Z"), r("3", "old", "2026-11-01T09:00:00Z")]))
       .toEqual([{ sid: "own", at: "2026-11-05T09:00:00Z" }, { sid: "old", at: "2026-11-01T09:00:00Z" }]);
   });
+});
+
+it("writes a selected reference only to the rich prompt field while plain and quoted text remain compatible", () => {
+  const text = '<persona-context kind="skill" ref="opaque">Inbox</persona-context>\n\nReview the receipts';
+  const saved = task({ prompt: text, prompt_selections: true });
+  for (const body of [taskBody(saved), taskBody({ ...saved, enabled: !saved.enabled }, saved)]) {
+    expect(body.structured_prompt).toBe(text);
+    expect(body).not.toHaveProperty("prompt");
+  }
+  // Owner typed identical markup before pickers existed (or a tool authored the plain task).
+  expect(taskBody({ ...saved, prompt_selections: false }, saved)).toHaveProperty("prompt", text);
+  expect(sameTask(saved, { ...saved, prompt_selections: false })).toBe(false);
 });

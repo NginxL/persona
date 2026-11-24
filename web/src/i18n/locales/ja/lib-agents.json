@@ -3,6 +3,7 @@
   "setup_disabled": "個人エージェントを提供する拡張機能で有効になっていません。拡張機能の説明に従って有効にしてから再起動してください",
   "setup_no_accounts": "個人エージェントのアカウントが未接続です。Lark ゲートウェイ の設定で Cue か Grok Bot を追加してください",
   "other": "その他",
+  "bot": "ボット",
   "group_date": "日付",
   "group_provider": "ソース",
   "group_none": "グループなし",

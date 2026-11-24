@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/nwverse/persona/server/internal/mail"
+	"github.com/nwverse/persona/server/internal/mailwire"
 )
 
 // pagedMail is one account's inbox, paged by before_uid like the IMAP listing: newest first, NextBeforeUID the
@@ -19,35 +19,35 @@ import (
 type pagedMail struct {
 	inboxOnlyMail
 	validity uint32
-	msgs     []mail.MailSummary // ascending UID
-	failOld  bool               // pages below the newest fail, as a slow server's would time out
+	msgs     []mailwire.MailSummary // ascending UID
+	failOld  bool                   // pages below the newest fail, as a slow server's would time out
 }
 
 var mailTestBase = time.Date(2026, 10, 1, 8, 0, 0, 0, time.UTC)
 
 func (m *pagedMail) add(from, to uint32) {
 	for uid := from; uid <= to; uid++ {
-		m.msgs = append(m.msgs, mail.MailSummary{AccountID: "acc", Mailbox: "INBOX", UID: uid, Subject: fmt.Sprint("mail ", uid),
-			From: mail.Address{Email: "sender@example.com"}, Date: mailTestBase.Add(time.Duration(uid) * time.Minute).Format(time.RFC3339),
+		m.msgs = append(m.msgs, mailwire.MailSummary{AccountID: "acc", Mailbox: "INBOX", UID: uid, Subject: fmt.Sprint("mail ", uid),
+			From: mailwire.Address{Email: "sender@example.com"}, Date: mailTestBase.Add(time.Duration(uid) * time.Minute).Format(time.RFC3339),
 			Snippet: "snippet"})
 	}
 }
 
-func (m *pagedMail) ListAccounts() ([]mail.MailAccount, error) {
-	return []mail.MailAccount{{ID: "acc", Email: "me@example.com"}}, nil
+func (m *pagedMail) ListAccounts() ([]mailwire.MailAccount, error) {
+	return []mailwire.MailAccount{{ID: "acc", Email: "me@example.com"}}, nil
 }
 
-func (m *pagedMail) ListMessages(_ context.Context, opts mail.ListOptions) (*mail.ListResult, error) {
+func (m *pagedMail) ListMessages(_ context.Context, opts mailwire.ListOptions) (*mailwire.ListResult, error) {
 	if m.failOld && opts.BeforeUID != 0 {
 		return nil, errors.New("i/o timeout")
 	}
-	var below []mail.MailSummary
+	var below []mailwire.MailSummary
 	for _, s := range m.msgs {
 		if opts.BeforeUID == 0 || s.UID < opts.BeforeUID {
 			below = append(below, s)
 		}
 	}
-	res := &mail.ListResult{UIDValidity: m.validity}
+	res := &mailwire.ListResult{UIDValidity: m.validity}
 	if len(below) > opts.Limit {
 		below = below[len(below)-opts.Limit:]
 		res.HasMore, res.NextBeforeUID = true, below[0].UID
@@ -58,7 +58,7 @@ func (m *pagedMail) ListMessages(_ context.Context, opts mail.ListOptions) (*mai
 	return res, nil
 }
 
-func (m *pagedMail) GetMessage(context.Context, string, uint32, string) (*mail.MailMessage, error) {
+func (m *pagedMail) GetMessage(context.Context, string, uint32, string) (*mailwire.MailMessage, error) {
 	return nil, errors.New("not in this test")
 }
 
@@ -229,6 +229,6 @@ func TestMailArchiveUnreadableInbox(t *testing.T) {
 
 type failingMail struct{ *pagedMail }
 
-func (failingMail) ListMessages(context.Context, mail.ListOptions) (*mail.ListResult, error) {
+func (failingMail) ListMessages(context.Context, mailwire.ListOptions) (*mailwire.ListResult, error) {
 	return nil, errors.New("login failed")
 }

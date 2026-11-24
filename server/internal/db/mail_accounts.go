@@ -2,21 +2,16 @@ package db
 
 import (
 	"context"
-	"encoding/json"
 
 	"github.com/jackc/pgx/v5"
+
+	"github.com/nwverse/persona/server/internal/mailwire"
 )
 
 // ---- mail accounts ----
 
-// MailAccountRow is one account as the mail package persists it: non-secret JSON plus ciphertext.
-type MailAccountRow struct {
-	ID          string
-	Email       string
-	Data        json.RawMessage
-	PasswordEnc string
-	OAuthEnc    string
-}
+// MailAccountRow is one account as the mail module persists it (mailwire.AccountRow).
+type MailAccountRow = mailwire.AccountRow
 
 func (d *DB) MailAccounts(ctx context.Context) ([]MailAccountRow, error) {
 	rows, err := d.pool.Query(ctx, `SELECT id, email, data, password_enc, oauth_enc FROM mail_accounts ORDER BY created_at`)

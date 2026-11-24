@@ -70,9 +70,10 @@ type fakePlugin struct {
 	session    string
 	transcript string
 
-	mu   sync.Mutex
-	mode string
-	got  []map[string]any
+	mu    sync.Mutex
+	mode  string
+	got   []map[string]any
+	ready chan struct{} // the first authenticated HTTP poll completed
 }
 
 func startFakePlugin(t *testing.T, c *http.Client, session, transcript, mode string) *fakePlugin {
@@ -81,12 +82,13 @@ func startFakePlugin(t *testing.T, c *http.Client, session, transcript, mode str
 
 // startFakePluginAs is startFakePlugin for a plugin of version with capabilities (0.2.0: busy_input, interrupt).
 func startFakePluginAs(t *testing.T, c *http.Client, session, transcript, mode, version string, caps []string) *fakePlugin {
-	p := &fakePlugin{t: t, c: c, session: session, transcript: transcript, mode: mode}
+	p := &fakePlugin{t: t, c: c, session: session, transcript: transcript, mode: mode, ready: make(chan struct{})}
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 	t.Cleanup(func() { cancel(); <-done })
 	go func() {
 		defer close(done)
+		var ready sync.Once
 		for ctx.Err() == nil {
 			b, _ := json.Marshal(map[string]any{"session_id": session, "plugin_version": version, "engine_version": "2.1.308", "capabilities": caps, "wait_ms": 1000})
 			req, _ := http.NewRequestWithContext(ctx, http.MethodPost, "http://persona/claude-plugin/v1/poll", strings.NewReader(string(b)))
@@ -101,8 +103,11 @@ func startFakePluginAs(t *testing.T, c *http.Client, session, transcript, mode, 
 			var answer struct {
 				Messages []map[string]any `json:"messages"`
 			}
-			_ = json.NewDecoder(res.Body).Decode(&answer)
+			decodeErr := json.NewDecoder(res.Body).Decode(&answer)
 			res.Body.Close()
+			if res.StatusCode == http.StatusOK && decodeErr == nil {
+				ready.Do(func() { close(p.ready) })
+			}
 			for _, m := range answer.Messages {
 				p.take(m)
 			}
@@ -253,6 +258,10 @@ func TestCCPluginFallsBackToTheInbox(t *testing.T) {
 			var plugin *fakePlugin
 			if c.mode != "" {
 				plugin = startFakePlugin(t, pluginSocket(t, n), sidA, p, c.mode)
+				if c.mode == "refuse" {
+					// Finish transport setup and authentication before measuring the short acknowledgement window.
+					<-plugin.ready
+				}
 				waitPolling(t, n, sidA)
 			}
 			res, err := request(t, n, "session.send", map[string]any{"session_id": sidA, "text": "merge it", "client_msg_id": "m-1", "owner_input": true})
@@ -600,7 +609,15 @@ func TestCCPluginWaitsForARestartedNodesPlugin(t *testing.T) {
 			shortPluginWaits(t)
 			oldWait, oldInstalled := ccPluginRejoinWait, ccPluginInstalledFor
 			ccPluginRejoinWait = 3 * time.Second
-			ccPluginInstalledFor = func(_ *Node, dir string) bool { return c.installed && sameDir(dir, filepath.Join(home, ".claude")) }
+			entered := make(chan struct{})
+			var installed sync.Once
+			ccPluginInstalledFor = func(_ *Node, dir string) bool {
+				present := c.installed && sameDir(dir, filepath.Join(home, ".claude"))
+				if present {
+					installed.Do(func() { close(entered) })
+				}
+				return present
+			}
 			t.Cleanup(func() { ccPluginRejoinWait, ccPluginInstalledFor = oldWait, oldInstalled })
 			n.bootAt = time.Now()
 			if !c.fresh {
@@ -612,13 +629,33 @@ func TestCCPluginWaitsForARestartedNodesPlugin(t *testing.T) {
 			f.reply("session.snapshot", snapshot(nil, nil, nil, nil))
 			client := pluginSocket(t, n)
 			var plugin *fakePlugin
-			started := make(chan struct{})
-			time.AfterFunc(500*time.Millisecond, func() { // the plugin comes back after the send started
+			params := map[string]any{"session_id": sidA, "text": "carry on", "client_msg_id": "m-1", "owner_input": true}
+			var res map[string]any
+			var err error
+			if c.fresh && c.installed {
+				type result struct {
+					res map[string]any
+					err error
+				}
+				finished := make(chan result, 1)
+				go func() {
+					answer, sendErr := request(t, n, "session.send", params)
+					finished <- result{answer, sendErr}
+				}()
+				select {
+				case <-entered:
+				case early := <-finished:
+					t.Fatalf("send finished before waiting for the returning plugin: %v, %v", early.res, early.err)
+				}
 				plugin = startFakePlugin(t, client, sidA, p, "submit")
-				close(started)
-			})
-			res, err := request(t, n, "session.send", map[string]any{"session_id": sidA, "text": "carry on", "client_msg_id": "m-1", "owner_input": true})
-			<-started
+				answer := <-finished
+				res, err = answer.res, answer.err
+			} else {
+				res, err = request(t, n, "session.send", params)
+				// A plugin arriving after a non-rejoining send must not receive that earlier message.
+				plugin = startFakePlugin(t, client, sidA, p, "submit")
+				waitPolling(t, n, sidA)
+			}
 			if err != nil {
 				t.Fatalf("send: %v", err)
 			}

@@ -53,7 +53,7 @@ internal fun ChatHostNote(
     val link = session?.externalLink
     val inset = modifier.padding(horizontal = Tokens.Space.m, vertical = Tokens.Space.xs)
     val openLink: (@Composable () -> Unit)? = link?.let { url -> {
-        JTextButton(stringResource(R.string.chat_host_open_feishu), { runCatching { uriHandler.openUri(url) } }, icon = PhIcons.ArrowSquareOut)
+        JTextButton(stringResource(R.string.chat_host_open_feishu), { val _ = runCatching { uriHandler.openUri(url) } }, icon = PhIcons.ArrowSquareOut)
     } }
     when (note) {
         is HostNote.Attention -> JInlineStatus(note.reason, inset, tone = InlineTone.Caution, action = openLink)

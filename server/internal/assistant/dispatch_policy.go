@@ -155,7 +155,7 @@ func (s *Service) dispatchConversationClass(ctx context.Context, machine, sid st
 	if slices.Contains(cfg.Leaders, sid) {
 		return dispatchClassLeader
 	}
-	if cfg.BackgroundSupervisor != "" && cfg.BackgroundSupervisor == sid {
+	if s.isBackgroundSession(ctx, sid) {
 		return dispatchClassBackgroundSupervisor
 	}
 	if s.devs != nil {

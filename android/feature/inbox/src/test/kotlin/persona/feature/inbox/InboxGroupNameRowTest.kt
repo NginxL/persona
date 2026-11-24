@@ -34,6 +34,7 @@ import persona.core.navigation.*
 import java.io.File
 import java.lang.reflect.Proxy
 import java.util.Locale
+import persona.core.inbox.*
 
 @RunWith(AndroidJUnit4::class)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
@@ -73,7 +74,7 @@ class InboxGroupNameRowTest {
     private fun textLayout(text: String): TextLayoutResult {
         val node = rule.onNodeWithText(text, useUnmergedTree = true).fetchSemanticsNode()
         val layouts = mutableListOf<TextLayoutResult>()
-        node.config[SemanticsActions.GetTextLayoutResult].action!!(layouts)
+        val _ = node.config[SemanticsActions.GetTextLayoutResult].action!!(layouts)
         return layouts.single()
     }
 

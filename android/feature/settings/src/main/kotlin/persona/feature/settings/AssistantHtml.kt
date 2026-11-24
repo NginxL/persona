@@ -121,7 +121,7 @@ internal object AssistantHtmlSandbox {
     @SuppressLint("SetJavaScriptEnabled")
     fun configure(view: WebView, blocked: () -> Unit, gone: () -> Unit) {
         if (runCatching { WebViewFeature.isFeatureSupported(WebViewFeature.MULTI_PROFILE) }.getOrDefault(false)) {
-            runCatching { WebViewCompat.setProfile(view, "persona-assistant-html") }
+            val _ = runCatching { WebViewCompat.setProfile(view, "persona-assistant-html") }
         }
         view.settings.apply {
             javaScriptEnabled = true

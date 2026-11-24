@@ -23,7 +23,7 @@ import PersonaWire
         var fields: [String: Any] = ["machine_id": machine, "session_id": id, "title": id, "cwd": "/code/app",
                                      "status": state == "offline" ? "offline" : "idle", "state": state, "source_kind": "runtime",
                                      "agent": agent]
-        if let parent { fields.merge(["is_subagent": true, "parent_session_id": parent]) { _, new in new } }
+        if let parent { fields["parent_session_id"] = parent }
         return try JSON.decoder.decode(Session.self, from: JSONSerialization.data(withJSONObject: fields))
     }
 
@@ -155,10 +155,10 @@ import PersonaWire
         #expect(AgentsNeedsYou.waiting(projection(rows) { $0.machine = "another-box" }.base).isEmpty)
     }
 
-    @Test func aSubagentNamingNoParentIsARowOfItsOwnButNotCounted() throws {
+    @Test func aSubagentNamingNoParentIsFilteredOutOfMainAgentsList() throws {
         let rows = try [row("chat"), row("lone", extra: ["is_subagent": true])]
         let list = projection(rows)
-        #expect(list.base.map(\.sessionID) == ["chat", "lone"])
+        #expect(list.base.map(\.sessionID) == ["chat"])
         #expect(list.filterCounts[.working] == 1)
     }
 

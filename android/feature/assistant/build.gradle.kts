@@ -18,6 +18,7 @@ dependencies {
     implementation(project(":core:domain"))
     implementation(project(":core:designsystem"))
     implementation(project(":core:navigation"))
+    implementation(project(":core:moduleapi"))
     implementation(project(":feature:chat"))
     implementation(libs.compose.preview)
     implementation(libs.androidx.activity)

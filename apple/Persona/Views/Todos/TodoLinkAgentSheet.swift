@@ -115,11 +115,6 @@ struct TodoLinkAgentSheet: View {
         .onAppear { draft.reset(currentTodoID: currentTodoID) }
         .onChange(of: target.id) { _, _ in draft.reset(currentTodoID: currentTodoID) }
         .presentationDetents([.medium, .large])
-        #if os(macOS)
-        // A Mac sheet ignores detents and opens at its content's minimum size. The list has none before its rows are
-        // measured, so the sheet came up as a strip with no to-do to pick (#4404). On the stack, not its root content.
-        .macSheet()
-        #endif
     }
 
     private func submit(_ operation: @escaping @MainActor () async throws -> Void) {

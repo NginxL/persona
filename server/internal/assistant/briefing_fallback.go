@@ -108,7 +108,7 @@ func (s *Service) briefFallbackRun(ctx context.Context, scheduled ScheduleRun, t
 	}
 	cancel()
 
-	if feat, ready := s.feishuFeatures(ctx); ready && feat.Pushes {
+	if feat, ready := s.chat().Features(ctx); ready && feat.Pushes {
 		mirror := &mirrorSend{l: l, cards: cards,
 			target: botTarget{Kind: targetPersona, MachineID: m.ID, SessionID: scheduled.SessionID}, label: run.label,
 			key: "f" + id, sent: func() { s.briefAsked(run.facts, shown) }}
@@ -120,7 +120,7 @@ func (s *Service) briefFallbackRun(ctx context.Context, scheduled ScheduleRun, t
 
 	// deliver preserves this stable notification ID (push/pushResult would replace it with a random one).
 	s.noteAsked(scheduled.SessionID)
-	s.deliver(Notification{ID: "ntf_brief_fallback_" + id, Kind: assistantwire.NotifyDone, DeviceID: m.ID, Subtitle: m.Name,
+	s.deliverCard(cardBriefFallback, Notification{ID: "ntf_brief_fallback_" + id, Kind: assistantwire.NotifyDone, DeviceID: m.ID, Subtitle: m.Name,
 		SessionID: scheduled.SessionID, Title: run.label, Body: plain})
 	s.briefListed(run.facts)
 }
@@ -128,7 +128,7 @@ func (s *Service) briefFallbackRun(ctx context.Context, scheduled ScheduleRun, t
 // briefNotStarted covers model resolution and conversation-start failures, where no watcher exists. The fixed facts go
 // to the task's conversation, or main when this run intended to create one. A Facts/Report retry keeps the original due;
 // ordinary tasks never enter this path and retain oneOffNotStarted's old failure notification and retry behavior.
-func (s *Service) briefNotStarted(ctx context.Context, t Task, failed ScheduleRun) {
+func (s *Service) briefNotStarted(ctx context.Context, t Task, failed ScheduleRun, retry bool) {
 	scheduled := failed
 	if scheduled.SessionID == "" {
 		scheduled.SessionID = t.SessionID
@@ -153,7 +153,7 @@ func (s *Service) briefNotStarted(ctx context.Context, t Task, failed ScheduleRu
 	} else {
 		s.logf("task %s: model failed before a conversation started and no device can deliver its briefing facts", t.ID)
 	}
-	if failed.Retried || failed.Manual {
+	if !retry || failed.Retried || failed.Manual {
 		return
 	}
 	delay := runRetryDelay

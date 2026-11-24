@@ -33,8 +33,8 @@ import (
 // larkCheck let that very call through (the phone confirmed it, or "Always allow in this session" covers it). Printing the
 // environment so yields an address that works on this machine only and skips nothing.
 //
-// In a health conversation (docs/assistant/health.md "Outbound") every write goes that way, whatever the rules say: the address of
-// a process started in the health space is marked so when it is opened, and a write there goes only with the grant larkCheck
+// In a conversation in a space (docs/assistant/health.md "Outbound") every write goes that way, whatever the rules say: the address of
+// a process started in a space is marked so when it is opened, and a write there goes only with the grant larkCheck
 // gave it after the phone confirmed, as larkCheck itself holds it. Reads go as everywhere.
 //
 // The proxy also sees what the API answered. A write it forwarded that came back 2xx is told to the manager
@@ -77,9 +77,9 @@ type gateProxy struct {
 	ln     net.Listener
 	keys   map[string]gateKey // key → the gate's command and the conversation its process was started for
 	grants []gateGrant
-	// health: the conversations known to be in the health space (markHealth). A conversation does not change space,
-	// so one stays in it, and only the health ones are kept.
-	health map[string]struct{}
+	// spaces: the conversations known to be in a space (markSpace). A conversation does not change space, so one
+	// stays in it, and only the ones in a space are kept.
+	spaces map[string]struct{}
 
 	// reporting holds a slot for each report to the manager in flight (gateReportsMax).
 	reporting chan struct{}
@@ -91,9 +91,9 @@ type gateKey struct {
 	// session is the conversation the process was started for ("" when none is known). The assistant's process serves
 	// one, so a write a rule allowed belongs to it.
 	session string
-	// health: the process was started in the health space. Decided once, from the directory the node started it in,
+	// space: the process was started in a space. Decided once, from the directory the node started it in,
 	// when its address is opened: the address stays with that one process, so it never serves another space.
-	health bool
+	space bool
 }
 
 // gateGrant is a call larkCheck let through, to go once.
@@ -139,8 +139,8 @@ func (n *Node) gates() *gateProxy {
 
 // openIn gives one process of the assistant, the one started for session ("" when that is not known yet: nameAddr gives
 // it later), its own address for command's gate: the base to put in its BaseEnv, and release, which takes the address
-// back when the process ends. health says whether the process is in the health space.
-func (p *gateProxy) openIn(command, session string, health bool) (base string, release func(), err error) {
+// back when the process ends. space says whether the process is in a space.
+func (p *gateProxy) openIn(command, session string, space bool) (base string, release func(), err error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if p.ln == nil {
@@ -159,7 +159,7 @@ func (p *gateProxy) openIn(command, session string, health bool) (base string, r
 		return "", nil, err
 	}
 	key := hex.EncodeToString(b)
-	p.keys[key] = gateKey{command: command, session: session, health: health}
+	p.keys[key] = gateKey{command: command, session: session, space: space}
 	return "http://" + p.ln.Addr().String() + "/" + key, func() {
 		p.mu.Lock()
 		delete(p.keys, key)
@@ -182,24 +182,24 @@ func (p *gateProxy) nameAddr(base, session string) {
 	}
 }
 
-// markHealth notes that session is a conversation in the health space (larkCheck asks healthSession).
-func (p *gateProxy) markHealth(session string) {
+// markSpace notes that session is a conversation in a space (larkCheck asks spaceSession).
+func (p *gateProxy) markSpace(session string) {
 	if session == "" {
 		return
 	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if p.health == nil {
-		p.health = map[string]struct{}{}
+	if p.spaces == nil {
+		p.spaces = map[string]struct{}{}
 	}
-	p.health[session] = struct{}{}
+	p.spaces[session] = struct{}{}
 }
 
-// healthSession says whether session was noted as a health conversation: the space its process was started in.
-func (p *gateProxy) healthSession(session string) bool {
+// spaceSession says whether session was noted as a conversation in a space: the space its process was started in.
+func (p *gateProxy) spaceSession(session string) bool {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	_, ok := p.health[session]
+	_, ok := p.spaces[session]
 	return ok && session != ""
 }
 
@@ -246,7 +246,7 @@ func gateQueryKey(raw string) string {
 
 // take uses up a grant for a request at the address k stands for: its command's gate, the method, path and query, and
 // the body confirmed if one was. A grant of one conversation is not for another's request: when both are known and
-// differ, it stays for its own. A health conversation's address takes only a grant of its own conversation: not one made
+// differ, it stays for its own. A space conversation's address takes only a grant of its own conversation: not one made
 // for no conversation, nor any when it has none. It returns the grant.
 func (p *gateProxy) take(k gateKey, method, path, query string, body []byte, isJSON bool) (gateGrant, bool) {
 	var sent any
@@ -261,7 +261,7 @@ func (p *gateProxy) take(k gateKey, method, path, query string, body []byte, isJ
 		if g.command != k.command || g.method != method || g.path != path || g.query != query {
 			continue
 		}
-		if k.health && (k.session == "" || g.session != k.session) {
+		if k.space && (k.session == "" || g.session != k.session) {
 			continue
 		}
 		if g.session != "" && k.session != "" && g.session != k.session {
@@ -307,17 +307,30 @@ func (p *gateProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	cfg := n.assistantLark(r.Context())
+	cfg := n.assistantLarkForGate(r.Context(), command)
 	gi := slices.IndexFunc(cfg.Gates, func(g proto.CommandGate) bool { return g.Command == command && g.Auth != nil })
 	if gi < 0 {
 		gateRefuse(w, http.StatusServiceUnavailable, command+" 现在用不了：提供它的扩展停用了，或者 hub 没给它凭据。")
 		return
 	}
 	g := cfg.Gates[gi]
-	up, err := url.Parse(g.Env[g.BaseEnv])
-	if err != nil || up.Host == "" || up.Scheme != "http" && up.Scheme != "https" {
-		gateRefuse(w, http.StatusServiceUnavailable, command+" 没有可用的接口地址（扩展没给，或者给的不对）。")
-		return
+	var up *url.URL
+	if !g.Relay { // a relayed gate's API is the extension's socket at the manager (gate.relay, #12904)
+		var err error
+		up, err = url.Parse(g.Env[g.BaseEnv])
+		if err != nil || up.Host == "" || up.Scheme != "http" && up.Scheme != "https" {
+			gateRefuse(w, http.StatusServiceUnavailable, command+" 没有可用的接口地址（扩展没给，或者给的不对）。")
+			return
+		}
+		// A sandboxed extension names this machine's loopback as host.persona.internal (#13540): the node dials
+		// 127.0.0.1 itself.
+		if strings.EqualFold(up.Hostname(), "host.persona.internal") {
+			if p := up.Port(); p != "" {
+				up.Host = net.JoinHostPort("127.0.0.1", p)
+			} else {
+				up.Host = "127.0.0.1"
+			}
+		}
 	}
 	restPath, err := url.PathUnescape("/" + rest)
 	if err != nil {
@@ -355,12 +368,12 @@ func (p *gateProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	session, through := gk.session, proto.LarkLetThrough{}
 	switch larkDecision(cfg, c) {
 	case "allow":
-		// A call larkCheck confirmed and a rule allows too (a health conversation confirms what a rule allows) was
-		// let through by the card: it uses up its grant, as a confirmed call does. In a health conversation a write
+		// A call larkCheck confirmed and a rule allows too (a space conversation confirms what a rule allows) was
+		// let through by the card: it uses up its grant, as a confirmed call does. In a space conversation a write
 		// goes only so: a rule's allow is not the phone's yes.
 		if gr, ok := p.take(gk, c.Method, c.Path, c.Query, body, isJSON); ok {
 			session, through = firstNonEmpty(gr.session, session), gr.through
-		} else if gk.health && !larkRead(c) {
+		} else if gk.space && !larkRead(c) {
 			gateNeedsPhone(w, command, c)
 			return
 		} else if rule, ok := firstLark(g.Rules, c); ok {
@@ -389,6 +402,10 @@ func (p *gateProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			p.reportSent(n, proto.LarkSent{Command: command, Method: c.Method, Path: c.Path, SessionID: session, LetThrough: through}, body, isJSON, sw.reply)
 		}
 	}()
+	if g.Relay {
+		p.relay(r.Context(), n, sw, r, command, restPath, g.Headers)
+		return
+	}
 	rp := &httputil.ReverseProxy{
 		Rewrite: func(pr *httputil.ProxyRequest) {
 			out := pr.Out

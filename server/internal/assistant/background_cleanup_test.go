@@ -17,6 +17,18 @@ func drainFleetBackground(t *testing.T, s *Service, cancel context.CancelFunc) {
 	t.Helper()
 	cancel()
 
+	// A retry callback may still be restoring todos before it takes dedupMu. Cancel its context, wait for the whole
+	// callback, then disarm anything left; a callback that was already due observes the cancellation before any I/O.
+	digest := &s.supervise
+	digest.digestMu.Lock()
+	digest.mu.Lock()
+	if digest.timer != nil {
+		digest.timer.Stop()
+		digest.timer, digest.timerAt = nil, time.Time{}
+	}
+	digest.mu.Unlock()
+	digest.digestMu.Unlock()
+
 	names := &s.agentNames
 	names.mu.Lock()
 	if names.timer != nil {
@@ -67,7 +79,7 @@ func drainFleetBackground(t *testing.T, s *Service, cancel context.CancelFunc) {
 	waitFleetBackground(t, "direction tree", &tree.runs)
 	waitFleetBackground(t, "to-do views", &s.tview.runs)
 	waitFleetBackground(t, "screen upgrades", &s.fleet.upgrades)
-	waitFleetBackground(t, "hub transcription", &s.hubTr.wg)
+	recWait(t, s) // the recording module's (hub transcription, questions)
 	waitFleetBackground(t, "work events", &s.work.eventWrites)
 }
 
@@ -199,6 +211,85 @@ func (s *acceptedSendStore) Setting(ctx context.Context, key string, out any) (b
 		}
 	}
 	return s.DB.Setting(ctx, key, out)
+}
+
+// digestLoadStore holds a digest in its todo restoration, before it takes the delivery lock. Draining still has to
+// wait for that callback; otherwise the database fixture can close while the callback is only getting started.
+type digestLoadStore struct {
+	*db.DB
+	started chan struct{}
+	release chan struct{}
+	loaded  chan struct{}
+	once    sync.Once
+}
+
+func (s *digestLoadStore) ListTodos(context.Context) ([]db.TodoRow, error) {
+	s.once.Do(func() { close(s.started) })
+	<-s.release
+	close(s.loaded)
+	return nil, nil
+}
+
+func (s *digestLoadStore) ListAllTodoSpaces(context.Context) ([]db.TodoSpaceRow, error) {
+	return nil, nil
+}
+
+func (s *digestLoadStore) ListAllTodoAgents(context.Context) ([]db.TodoAgentRow, error) {
+	return nil, nil
+}
+
+func TestDrainFleetBackgroundDigestLifecycle(t *testing.T) {
+	t.Run("stops_retry", func(t *testing.T) {
+		s := New(Options{Hub: newFakeHub(), Store: func() Store { return &memStore{} }, Logf: t.Logf, Devices: newFleetDevs()})
+		runCtx, cancel := context.WithCancel(context.Background())
+		s.running.Store(&runCtx)
+		b := &s.supervise
+		b.mu.Lock()
+		b.init()
+		s.retryDigestLocked(time.Hour)
+		b.mu.Unlock()
+
+		drainFleetBackground(t, s, cancel)
+		b.mu.Lock()
+		defer b.mu.Unlock()
+		if b.timer != nil {
+			t.Fatal("the digest retry remained armed after the service was drained")
+		}
+	})
+
+	t.Run("waits_for_callback_before_delivery_lock", func(t *testing.T) {
+		st := &digestLoadStore{DB: taskRecoveryDatabase(t), started: make(chan struct{}), release: make(chan struct{}), loaded: make(chan struct{})}
+		s := New(Options{Hub: newFakeHub(), Store: func() Store { return st }, Logf: t.Logf, Devices: newFleetDevs()})
+		runCtx, cancel := context.WithCancel(context.Background())
+		s.running.Store(&runCtx)
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			s.sendDigest(context.Background())
+		}()
+		select {
+		case <-st.started:
+		case <-time.After(5 * time.Second):
+			t.Fatal("the digest did not reach its todo restoration")
+		}
+		time.AfterFunc(50*time.Millisecond, func() { close(st.release) })
+
+		drainFleetBackground(t, s, cancel)
+		early := false
+		select {
+		case <-st.loaded:
+		default:
+			early = true
+		}
+		select {
+		case <-done:
+		case <-time.After(5 * time.Second):
+			t.Fatal("the digest did not finish after its restoration was released")
+		}
+		if early {
+			t.Fatal("drain returned while the digest was still restoring its todos")
+		}
+	})
 }
 
 // A database-backed fleet fixture must drain the service work it started before the test's database closes. Each case

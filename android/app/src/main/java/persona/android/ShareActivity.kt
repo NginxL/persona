@@ -42,6 +42,8 @@ import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.AndroidEntryPoint
 import dagger.hilt.android.lifecycle.HiltViewModel
 import persona.core.designsystem.PersonaTheme
+import persona.core.designsystem.RetainedTextDensity
+import persona.core.designsystem.currentTextDensities
 import persona.core.designsystem.dense
 import persona.core.designsystem.dismissKeyboardOnBlankTap
 import persona.core.contracts.SessionKey
@@ -84,7 +86,9 @@ class ShareActivity : ComponentActivity() {
                         finish()
                     }
                 }
+                val densities = currentTextDensities()
                 ModalBottomSheet(onDismissRequest = { finish() }, sheetState = sheet) {
+                    RetainedTextDensity(densities) {
                     Column(
                         Modifier.fillMaxWidth().dismissKeyboardOnBlankTap().verticalScroll(rememberScrollState())
                             .padding(horizontal = 24.dp.dense).padding(bottom = 24.dp.dense),
@@ -161,6 +165,7 @@ class ShareActivity : ComponentActivity() {
                                 }
                             }
                         }
+                    }
                     }
                 }
             }

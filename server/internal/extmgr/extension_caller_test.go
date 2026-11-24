@@ -406,3 +406,55 @@ func TestRelayedExtensionWebSocket(t *testing.T) {
 		t.Fatal("the extension's side stayed open after the hub cut the relay")
 	}
 }
+
+// relayServer must keep idle relay streams open longer than the hub's relayIdleFor (90 s) so the hub retires them
+// first instead of racing a peer-side idle close on a non-idempotent POST.
+func TestRelayServerIdleTimeoutExceedsHubPool(t *testing.T) {
+	h := New(Options{Dir: t.TempDir()})
+	srv := h.relayServer()
+	if srv.IdleTimeout <= 90*time.Second {
+		t.Fatalf("relayServer IdleTimeout = %s, want > 90s", srv.IdleTimeout)
+	}
+	if srv.ReadHeaderTimeout != 30*time.Second {
+		t.Fatalf("relayServer ReadHeaderTimeout = %s, want 30s", srv.ReadHeaderTimeout)
+	}
+}
+
+// Accept serves sequential GET and POST requests over one keep-alive relay stream without closing between them.
+func TestRelayAcceptKeepAlive(t *testing.T) {
+	h, _ := callerTestManager(t)
+	h.routes()
+	rh := newRelayHub(t, h)
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	client := &http.Client{Transport: &http.Transport{
+		DialContext: func(dctx context.Context, _, _ string) (net.Conn, error) {
+			_, nc, err := rh.dial(dctx)
+			return nc, err
+		},
+	}}
+	defer client.CloseIdleConnections()
+
+	for i := range 3 {
+		method, body := "GET", io.Reader(nil)
+		if i > 0 {
+			method, body = "POST", bytes.NewBufferString(`{"action":"ping"}`)
+		}
+		req, _ := http.NewRequestWithContext(ctx, method, "http://manager/api/v1/extensions/callee/echo", body)
+		req.Header.Set(extwire.HeaderDevice, "dev_phone")
+		req.Header.Set(extwire.HeaderRole, roleFull)
+		res, err := client.Do(req)
+		if err != nil {
+			t.Fatalf("%s #%d: %v", method, i, err)
+		}
+		_, _ = io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK {
+			t.Fatalf("%s #%d: status %d", method, i, res.StatusCode)
+		}
+	}
+	if got := rh.n.Load(); got != 1 {
+		t.Fatalf("dialed %d relay streams for sequential GET+POST, want 1", got)
+	}
+}

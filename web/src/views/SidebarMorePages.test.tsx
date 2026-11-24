@@ -4,15 +4,19 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+// the feature modules (the health page is one: docs/web/web.md "Modules")
+import { MODULES } from "../modules";
 vi.hoisted(() => {
   globalThis.ResizeObserver ??= class { observe() {} unobserve() {} disconnect() {} } as unknown as typeof ResizeObserver;
   window.matchMedia ??= ((query: string) => ({ matches: false, media: query, onchange: null, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {}, dispatchEvent: () => false })) as typeof window.matchMedia;
 });
 import { setSidebarCollapsed } from "../lib/layout";
-import { getSidebarPrefs, setPageShown } from "../lib/sidebar-pages";
+import { getSidebarPrefs, resetSidebarPrefs, setMoreShown, setPageShown } from "../lib/sidebar-pages";
 import { reset } from "../lib/store";
 import { SidebarPagesGroup } from "./settings/SidebarPages";
 import { NavGrid, Sidebar, SidebarRail } from "./Sidebar";
+// the health module, when this run has it (the core-only lane, #13932, runs with no module)
+const HEALTH = MODULES.some((m) => m.id === "health");
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -38,6 +42,7 @@ afterEach(() => {
   act(() => root.unmount());
   host.remove();
   reset();
+  resetSidebarPrefs();
   vi.unstubAllGlobals();
 });
 
@@ -48,7 +53,7 @@ describe("更多 in the sidebar", () => {
     expect(moreButton()).toBeUndefined();
   });
 
-  it("holds the pages put away, folded, and opens to them", async () => {
+  it.skipIf(!HEALTH)("holds the pages put away, folded, and opens to them", async () => {
     setPageShown("kb", false);
     setPageShown("health", false);
     act(() => root.render(<Sidebar route={{ name: "home" }} onSearch={() => {}} onNewAgent={() => {}} />));
@@ -71,6 +76,36 @@ describe("更多 in the sidebar", () => {
     act(() => root.render(<Sidebar route={{ name: "kb" }} onSearch={() => {}} onNewAgent={() => {}} />));
     await flush();
     expect(moreButton()!.getAttribute("aria-expanded")).toBe("true");
+  });
+
+  it("can hide More in the sidebar, rail and phone grid without losing its pages", async () => {
+    setPageShown("inbox", false);
+    setPageShown("kb", false);
+    setMoreShown(false);
+    act(() => root.render(<Sidebar route={{ name: "inbox" }} onSearch={() => {}} onNewAgent={() => {}} />));
+    await flush();
+    expect(moreButton()).toBeUndefined();
+    expect(pageLinks()).toContain("设置");
+    expect(pageLinks()).not.toContain("收件箱");
+    history.replaceState(null, "", "/inbox");
+    expect(location.pathname).toBe("/inbox");
+    act(() => root.render(<SidebarRail route={{ name: "inbox" }} onSearch={() => {}} onNewAgent={() => {}} />));
+    await flush();
+    expect(host.querySelector('button[aria-haspopup="menu"]')).toBeNull();
+    const page = (k: string, label: string) => ({ k, to: { name: k } as never, icon: "gear" as const, label });
+    act(() => root.render(<NavGrid pages={[page("settings", "设置")]} more={[]} activeKey="settings" go={() => () => {}} />));
+    expect(host.querySelector('button[aria-haspopup="menu"]')).toBeNull();
+    act(() => {
+      setMoreShown(true);
+      root.render(<NavGrid pages={[page("settings", "设置")]} more={[page("inbox", "收件箱"), page("kb", "知识库")]} activeKey="settings" go={() => () => {}} />);
+    });
+    await flush();
+    const more = host.querySelector<HTMLButtonElement>('button[aria-haspopup="menu"]')!;
+    expect(more.getAttribute("aria-label")).toContain("2");
+    act(() => more.click());
+    await flush();
+    expect(document.body.textContent).toContain("收件箱");
+    expect(document.body.textContent).toContain("知识库");
   });
 
   it("is a ⋯ on the rail that lists them", async () => {
@@ -129,5 +164,21 @@ describe("设置 › 通用 › 侧栏", () => {
     act(() => reset.click());
     expect(order().slice(0, 2)).toEqual([first, second]);
     expect(getSidebarPrefs()).toEqual({ order: [], shown: [], hidden: [] });
+  });
+
+  it("hides More itself from the setting, then restores the pages put away", async () => {
+    setPageShown("kb", false);
+    act(() => root.render(<SidebarPagesGroup />));
+    await flush();
+    const sw = () => host.querySelector<HTMLButtonElement>('[data-sidebar-more] button[role="switch"]')!;
+    expect(sw().getAttribute("aria-checked")).toBe("true");
+    act(() => sw().click());
+    expect(sw().getAttribute("aria-checked")).toBe("false");
+    expect(getSidebarPrefs().hidden).toEqual(["kb"]);
+    expect(getSidebarPrefs().more).toBe(false);
+    expect(host.textContent).toContain("仍可通过搜索或已有链接打开");
+    act(() => sw().click());
+    expect(sw().getAttribute("aria-checked")).toBe("true");
+    expect(getSidebarPrefs()).toEqual({ order: [], shown: [], hidden: ["kb"], more: true });
   });
 });

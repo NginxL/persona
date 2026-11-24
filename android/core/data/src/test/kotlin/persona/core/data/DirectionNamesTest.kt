@@ -9,6 +9,7 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import persona.core.contracts.DirectionsEvent
+import persona.core.contracts.ExternalDirection
 import persona.core.contracts.ServerEvent
 import persona.core.contracts.Session
 import persona.core.contracts.api.AssistantSnapshot
@@ -87,5 +88,24 @@ class DirectionNamesTest {
         ]}"""))
         assertEquals(mapOf("a" to "Product"), names)
         assertEquals(emptyMap<String, String>(), directionNamesOf(json("{}")))
+    }
+
+    @Test fun theLeadersFallbackKeepsOutsideDirectionsEvenWithBlankNamesOrTargets() {
+        val data = json("""{"leaders": [
+            {"id": "bound", "name": " Product ", "external": true, "machine_id": "work", "session_id": "agent"},
+            {"id": "untitled", "name": "", "external": true},
+            {"id": "partial", "external": true, "session_id": "agent"},
+            {"id": "ended", "external": true, "ended": true},
+            {"id": "false", "external": false, "machine_id": "work", "session_id": "agent"},
+            {"id": "old", "machine_id": "work", "session_id": "agent"},
+            {"id": "", "external": true}
+        ]}""")
+        assertEquals(mapOf(
+            "bound" to ExternalDirection("work", "agent"),
+            "untitled" to ExternalDirection(),
+            "partial" to ExternalDirection(sessionId = "agent"),
+        ), directionExternalOf(data))
+        assertEquals(emptyMap<String, ExternalDirection>(), directionExternalOf(json("{}")))
+        assertEquals(mapOf("bound" to "Product"), directionNamesOf(data))
     }
 }

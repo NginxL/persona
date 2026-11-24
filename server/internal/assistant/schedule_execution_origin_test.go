@@ -164,6 +164,9 @@ func TestTaskSourceFallbackDeliveryBoundary(t *testing.T) {
 		{"link closed", rpc.ErrClosed, false},
 		{"reply lost", context.DeadlineExceeded, false},
 		{"other refusal", errors.New("send failed"), false},
+		{"file refusal without delivery evidence", &rpc.Error{Code: "file_unavailable", Message: "file unavailable"}, false},
+		{"file error after delivery", &rpc.Error{Code: "file_unavailable", Message: "file unavailable", Data: []byte(`{"delivered":"yes","retryable":false}`)}, false},
+		{"file error with unknown delivery", &rpc.Error{Code: "file_unavailable", Message: "file unavailable", Data: []byte(`{"delivered":"unknown","retryable":false}`)}, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			f := newFakeHub().withMachine()
@@ -295,5 +298,34 @@ func TestTaskExecutionKnownMissingLauncherIsNotSubstituted(t *testing.T) {
 	setModel(t, s, "task.job", ModelBinding{Provider: "launcher.gone"})
 	if _, err := runNow(t, s, "job"); err == nil || f.sent() != 0 {
 		t.Fatalf("missing launcher was substituted: %v sent=%d", err, f.sent())
+	}
+}
+
+func TestTaskSourceFileRefusalRetriesOnlyTheOriginalConversation(t *testing.T) {
+	f := newFakeHub().withMachine()
+	s := newTestService(t, f)
+	s.runRetry = 15 * time.Millisecond
+	var source, other atomic.Int32
+	f.answerNode(DeviceAssistantSend, func(_ string, raw json.RawMessage) (any, error) {
+		var p struct {
+			Session  string `json:"session_id"`
+			Selected bool   `json:"task_input"`
+		}
+		if err := json.Unmarshal(raw, &p); err != nil {
+			return nil, err
+		}
+		if p.Session == "origin" && p.Selected {
+			source.Add(1)
+		} else {
+			other.Add(1)
+		}
+		return nil, &rpc.Error{Code: "file_unavailable", Message: "file unavailable", Data: []byte(`{"delivered":"none","retryable":false}`)}
+	})
+	setTasks(s, Task{ID: "job", Title: "Review", Prompt: `<persona-context kind="file" machine="server" cwd="/work" launcher="claude" path="notes.txt">Notes</persona-context>` + "\n\nReview",
+		PromptSelections: true, Repeat: repeatOnce, At: time.Now().Add(-time.Minute), Enabled: true, MachineID: "server", SessionID: "origin"})
+	s.runDue(t.Context(), time.Now())
+	runs := waitRuns(t, s, 2)
+	if len(runs) != 2 || source.Load() != 2 || other.Load() != 0 || runs[0].DeliveryUnknown || runs[1].DeliveryUnknown || !runs[1].Retried {
+		t.Fatalf("refusal changed conversation or retry evidence: %+v source=%d other=%d", runs, source.Load(), other.Load())
 	}
 }

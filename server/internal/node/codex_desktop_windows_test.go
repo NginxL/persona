@@ -57,7 +57,11 @@ func listenFakeCodexBus(t *testing.T) (home string, l net.Listener) {
 		t.Fatal(err)
 	}
 	useCodexPipe(t, name)
-	return t.TempDir(), l
+	home = filepath.Join(t.TempDir(), ".codex")
+	if err := os.MkdirAll(home, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	return home, l
 }
 
 // noFakeCodexBus: the App bus is a pipe nobody serves.

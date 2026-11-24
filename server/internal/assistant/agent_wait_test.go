@@ -65,8 +65,11 @@ func TestAgentWaitQuestion(t *testing.T) {
 	now := time.Now()
 	f.sessions["box"] = []proto.Session{{SessionID: "s1", Status: proto.StatusBlocked, UpdatedAt: now}}
 	f.items = inlineItems("mine", now)[:2]
-	cards := []proto.Interaction{{ID: "question1", MachineID: "box", SessionID: "s1", Kind: proto.IxQuestion, CreatedAt: now, Questions: []proto.Question{{Question: "Sample A or B?"}}}}
-	f.nodes = map[string]nodeAnswer{DeviceInteractionsList: func(string, json.RawMessage) (any, error) { return map[string]any{"interactions": cards}, nil }}
+	f.hubCards = []proto.Interaction{{ID: "question1", MachineID: "box", SessionID: "s1", Kind: proto.IxQuestion, CreatedAt: now, Questions: []proto.Question{{Question: "Sample A or B?"}}}}
+	f.nodes = map[string]nodeAnswer{DeviceInteractionsList: func(string, json.RawMessage) (any, error) {
+		t.Fatal("interactions.list must never be forwarded to a node")
+		return nil, nil
+	}}
 	got := s.waitAgentReply(context.Background(), "Sent.", "mine", time.Second, fixedWaitTarget("box", "s1"))
 	if !strings.Contains(got, `"state":"question"`) || !strings.Contains(got, `"interaction_id":"question1"`) || !strings.Contains(got, "Sample A or B?") {
 		t.Fatal(got)
@@ -86,10 +89,12 @@ func TestAgentWaitTimeoutCancellationAndUnavailable(t *testing.T) {
 			if state == "cancelled" {
 				cancel()
 			}
+			wait := time.Millisecond
 			if state == "unavailable" {
-				f.itemsFail = 1
+				// The failed read decides at once; a deadline that could pass before the first read would make it a timeout.
+				f.itemsFail, wait = 1, time.Minute
 			}
-			got := s.waitAgentReply(ctx, "Queued receipt.", "mine", time.Millisecond, fixedWaitTarget("box", "s1"))
+			got := s.waitAgentReply(ctx, "Queued receipt.", "mine", wait, fixedWaitTarget("box", "s1"))
 			if !strings.HasPrefix(got, "Queued receipt.") || !strings.Contains(got, `"state":"`+state+`"`) || strings.Contains(got, "old answer") {
 				t.Fatal(got)
 			}
@@ -97,6 +102,25 @@ func TestAgentWaitTimeoutCancellationAndUnavailable(t *testing.T) {
 				t.Fatal("wait dispatched work")
 			}
 		})
+	}
+}
+
+// A reply read just as the wait's deadline passes is the reply, not a timeout.
+func TestAgentWaitKeepsAReplyReadAtTheDeadline(t *testing.T) {
+	s, f := newTaskService(t)
+	now := time.Now()
+	f.sessions["box"] = []proto.Session{{SessionID: "s1", Status: proto.StatusIdle, UpdatedAt: now.Add(time.Second)}}
+	const wait = 10 * time.Millisecond
+	start := time.Now()
+	f.answerNode(DeviceSessionItems, func(string, json.RawMessage) (any, error) {
+		for time.Since(start) < 2*wait { // answer only once the deadline has passed
+			<-time.After(time.Millisecond)
+		}
+		return map[string]any{"items": inlineItems("mine", now)}, nil
+	})
+	got := s.waitAgentReply(context.Background(), "Sent.", "mine", wait, fixedWaitTarget("box", "s1"))
+	if !strings.Contains(got, "sample checked") || strings.Contains(got, `"state":"timeout"`) {
+		t.Fatal(got)
 	}
 }
 func TestAgentStartInlineReply(t *testing.T) {
@@ -240,14 +264,86 @@ func TestAgentWaitRejectsOldAndLaterQuestions(t *testing.T) {
 			case "private":
 				ix.Private = true
 			}
+			f.hubCards = []proto.Interaction{ix}
 			f.nodes = map[string]nodeAnswer{DeviceInteractionsList: func(string, json.RawMessage) (any, error) {
-				return map[string]any{"interactions": []proto.Interaction{ix}}, nil
+				t.Fatal("interactions.list must never be forwarded to a node")
+				return nil, nil
 			}}
 			got := s.waitAgentReply(context.Background(), "Sent.", "mine", 2*time.Millisecond, fixedWaitTarget("box", "s1"))
 			if !strings.Contains(got, `"state":"timeout"`) || strings.Contains(got, "Question?") {
 				t.Fatal(got)
 			}
 		})
+	}
+}
+
+func TestLocalFleetDeviceCallInteractionsListByMachine(t *testing.T) {
+	ft := newFleetTestNoStore(t)
+	ft.d.add("box", "box")
+	now := time.Now().UTC()
+	for _, ix := range []proto.Interaction{
+		{ID: "ix-mac", MachineID: "mac", SessionID: "s1", Kind: proto.IxQuestion, CreatedAt: now},
+		{ID: "ix-box", MachineID: "box", SessionID: "s2", Kind: proto.IxQuestion, CreatedAt: now.Add(time.Millisecond)},
+		{ID: "ix-global", SessionID: "s3", Kind: proto.IxPermission, CreatedAt: now.Add(2 * time.Millisecond)},
+	} {
+		putPending(ft.s, &pending{ix: ix, done: make(chan proto.Resolution, 1)})
+	}
+
+	readIDs := func(device string) []string {
+		t.Helper()
+		raw, handled, err := ft.s.localFleetDeviceCall(context.Background(), DeviceCall{Device: device, Method: DeviceInteractionsList})
+		if err != nil || !handled {
+			t.Fatalf("device %q: handled=%v err=%v", device, handled, err)
+		}
+		var out struct {
+			Interactions []proto.Interaction `json:"interactions"`
+		}
+		if err := json.Unmarshal(raw, &out); err != nil {
+			t.Fatal(err)
+		}
+		ids := make([]string, 0, len(out.Interactions))
+		for _, ix := range out.Interactions {
+			ids = append(ids, ix.ID)
+		}
+		return ids
+	}
+
+	if got := strings.Join(readIDs(DeviceAll), ","); got != "ix-mac,ix-box,ix-global" {
+		t.Fatalf("DeviceAll ids = %q", got)
+	}
+	if got := strings.Join(readIDs("mac"), ","); got != "ix-mac,ix-global" {
+		t.Fatalf("mac ids = %q, want ix-mac,ix-global", got)
+	}
+	if got := strings.Join(readIDs("box"), ","); got != "ix-box,ix-global" {
+		t.Fatalf("box ids = %q, want ix-box,ix-global", got)
+	}
+	if _, handled, err := ft.s.localFleetDeviceCall(context.Background(), DeviceCall{Device: "missing", Method: DeviceInteractionsList}); !handled || !errors.Is(err, ErrNoDevice) {
+		t.Fatalf("missing machine: handled=%v err=%v, want handled ErrNoDevice", handled, err)
+	}
+}
+
+func TestAgentWaitQuestionUsesFleetLocalHandler(t *testing.T) {
+	shortInlinePoll(t)
+	ft := newFleetTestNoStore(t)
+	now := time.Now().UTC()
+	sess := []proto.Session{{MachineID: "mac", SessionID: "s1", Status: proto.StatusBlocked, UpdatedAt: now}}
+	ft.d.setSessions("mac", sess)
+	ft.f.sessions["mac"] = sess
+	ft.f.items = inlineItems("mine", now)[:2]
+	ft.f.nodes = map[string]nodeAnswer{DeviceInteractionsList: func(string, json.RawMessage) (any, error) {
+		t.Fatal("interactions.list must never reach the node")
+		return nil, nil
+	}}
+	putPending(ft.s, &pending{
+		ix: proto.Interaction{
+			ID: "ix-live-q", MachineID: "mac", SessionID: "s1", Kind: proto.IxQuestion, CreatedAt: now,
+			Questions: []proto.Question{{Question: "Proceed with option A?"}},
+		},
+		done: make(chan proto.Resolution, 1),
+	})
+	got := ft.s.waitAgentReply(context.Background(), "Sent.", "mine", 50*time.Millisecond, fixedWaitTarget("mac", "s1"))
+	if !strings.Contains(got, `"state":"question"`) || !strings.Contains(got, `"interaction_id":"ix-live-q"`) || !strings.Contains(got, "Proceed with option A?") {
+		t.Fatalf("waitAgentReply through fleet local handler = %s", got)
 	}
 }
 func TestTaskPlanMultiKeepsImmediateReceipt(t *testing.T) {

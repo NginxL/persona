@@ -10,6 +10,7 @@ import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.json.*
+import persona.core.inbox.*
 
 /** Optional decorator for the composition root; the existing repository still owns drafts and outbox. */
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -308,11 +309,11 @@ class LarkInboxRepository(
         synchronized(windows) { (listOfNotNull(windows[feedId]) + readers.keys).distinct().filter { it.feed == feedId && it.transport === transport } }
             .forEach { window ->
                 window.readPosition = maxOf(window.readPosition, position)
-                val acknowledged = window.state.value.messages.filter { !it.mine && it.position != null && it.position <= position }
+                val acknowledged = window.state.value.messages.filter { !it.mine && (it.position ?: Long.MAX_VALUE) <= position }
                 confirmedReads.update { old -> old.filterTo(mutableSetOf()) { it.scope == transport.scope } +
                     acknowledged.map { InboxMessageRead(transport.scope, feedId, it.id, it.position!!) } }
                 window.state.update { state -> state.copy(messages = state.messages.map { message ->
-                    if (!message.mine && message.position != null && message.position <= position) message.copy(isRead = true) else message
+                    if (!message.mine && (message.position ?: Long.MAX_VALUE) <= position) message.copy(isRead = true) else message
                 }) }
             }
         return true
@@ -335,19 +336,20 @@ class LarkInboxRepository(
             if (visible.size != messages.size) return@withLock false
             val highest = visible.maxByOrNull { it.position!! } ?: return@withLock false
             if (visible.all { it.mine || it.isRead || InboxMessageRead(w.transport.scope, feedId, it.id, it.position!!) in confirmedReads.value }) return@withLock true
-            if (highest.position!! < w.readPosition) return@withLock visible.all { it.isRead || it.id in w.readIds }
+            val highestPosition = highest.position!!
+            if (highestPosition < w.readPosition) return@withLock visible.all { it.isRead || it.id in w.readIds }
             val ids = visible.filter { !it.mine && !it.isRead && it.id !in w.readIds &&
                 InboxMessageRead(w.transport.scope, feedId, it.id, it.position!!) !in confirmedReads.value }.map { it.id }
-            if (highest.position == w.readPosition && ids.isEmpty()) return@withLock true
-            w.source.read { w.transport.markRead(feedId, highest.position, highest.badgeCount, ids) }
+            if (highestPosition == w.readPosition && ids.isEmpty()) return@withLock true
+            w.source.read { w.transport.markRead(feedId, highestPosition, highest.badgeCount, ids) }
             if (!owns(w)) return@withLock false
-            w.readPosition = highest.position; w.readIds += ids
+            w.readPosition = highestPosition; w.readIds += ids
             val opened = synchronized(windows) { (listOf(w) + readers.keys).distinct().filter { it.feed == feedId && owns(it) } }
-            val acknowledged = opened.flatMap { it.state.value.messages }.filter { !it.mine && it.position != null && it.position <= highest.position }
+            val acknowledged = opened.flatMap { it.state.value.messages }.filter { !it.mine && (it.position ?: Long.MAX_VALUE) <= highestPosition }
             confirmedReads.update { old -> old.filterTo(mutableSetOf()) { it.scope == w.transport.scope } +
                 acknowledged.map { InboxMessageRead(w.transport.scope, feedId, it.id, it.position!!) } }
             opened.forEach { window -> window.state.update { state -> state.copy(messages = state.messages.map { message ->
-                if (!message.mine && message.position != null && message.position <= highest.position) message.copy(isRead = true) else message
+                if (!message.mine && (message.position ?: Long.MAX_VALUE) <= highestPosition) message.copy(isRead = true) else message
             }) } }
             true
         }

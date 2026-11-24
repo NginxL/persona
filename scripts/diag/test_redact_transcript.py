@@ -25,6 +25,38 @@ class TimestampTests(unittest.TestCase):
             with self.subTest(stamp=stamp):
                 self.assertEqual(r.ts(stamp), shifted)
 
+    def test_offset_rfc3339_timestamps_shift_to_utc_without_leaking_timezone(self):
+        r = redact.Redactor()
+        out = r.obj({
+            "timestamp": "2026-03-01T18:00:01+08:00",
+            "created_at": "2026-03-01T18:00:03.25+08:00",
+            "message": {
+                "content": "started 2026-03-01T03:00:06.5-07:00 finished 2026-03-01T10:00:11z",
+            },
+        })
+        self.assertEqual(out["timestamp"], "2026-01-01T00:00:00.000Z")
+        self.assertEqual(out["created_at"], "2026-01-01T00:00:02.250Z")
+        self.assertIn("2026-01-01T00:00:05.500Z", out["message"]["content"])
+        self.assertIn("2026-01-01T00:00:10.000Z", out["message"]["content"])
+        self.assertNotIn("+08:00", json.dumps(out))
+        self.assertNotIn("-07:00", json.dumps(out))
+
+    def test_image_content_blocks_replace_base64_payload_with_1x1_png(self):
+        r = redact.Redactor()
+        raw_b64 = "QUJDREVGR0hJSktMTU5PUFFSU1RVVldYWVo="
+        out = r.obj({
+            "content": [
+                {"type": "image", "mimeType": "image/png", "data": raw_b64},
+                {"type": "image", "media_type": "image/jpeg", "data": raw_b64},
+                {"kind": "image", "image": {"mime": "image/webp", "data": raw_b64}},
+                {"type": "progress", "data": "still running"},
+            ],
+        })
+        self.assertEqual(out["content"][0]["data"], redact.PNG_1x1)
+        self.assertEqual(out["content"][1]["data"], redact.PNG_1x1)
+        self.assertEqual(out["content"][2]["image"]["data"], redact.PNG_1x1)
+        self.assertNotEqual(out["content"][3]["data"], redact.PNG_1x1)
+
 
 class KeptAsIsTests(unittest.TestCase):
     """`--words` is the review step before a fixture is committed, so it lists every string the output keeps as is."""
@@ -80,15 +112,49 @@ class RangeTests(unittest.TestCase):
             root = Path(directory)
             source, output = root / "source.jsonl", root / "output.jsonl"
             source.write_text("".join(json.dumps({"line": i}) + "\n" for i in range(1, 12)))
-            selection = str(source) + ":7,4-5,2-4,3,9-6,10-200"
+            selection = str(source) + ":7,4-5,2-4,3,10-200"
             run = subprocess.run([sys.executable, "-B", redact.__file__, "-o", str(output), selection],
                                  capture_output=True, text=True, timeout=10)
             self.assertEqual(run.returncode, 0, run.stderr)
             self.assertEqual([json.loads(line)["line"] for line in output.read_text().splitlines()],
                              [2, 3, 4, 5, 7, 10, 11])
 
+    def test_invalid_selection_is_reported_before_replacing_existing_output(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            first, second, output = root / "first.jsonl", root / "second.jsonl", root / "output.jsonl"
+            first.write_text('{"line":1}\n')
+            second.write_text('{"line":2}\n')
+            for suffix in ("4-2", "0", "0-2", "1,4-2", "1,,2", "1-", "-2", "1--2"):
+                with self.subTest(suffix=suffix):
+                    output.write_text("existing output\n")
+                    run = subprocess.run([sys.executable, "-B", redact.__file__, "-o", str(output),
+                                          str(first), f"{second}:{suffix}"], capture_output=True, text=True, timeout=10)
+                    self.assertEqual((run.returncode, output.read_text()), (2, "existing output\n"), run.stderr)
+                    self.assertIn("invalid line selection", run.stderr)
+                    self.assertNotIn("Traceback", run.stderr)
+
+    def test_colon_in_a_filename_is_not_itself_a_selector(self):
+        self.assertEqual(redact.parse_spec("fixture:copy.jsonl"), ("fixture:copy.jsonl", None))
+        self.assertEqual(redact.parse_spec("fixture:copy.jsonl:1"), ("fixture:copy.jsonl", [range(1, 2)]))
+
 
 class OutputTests(unittest.TestCase):
+    def test_skips_non_record_lines_and_keeps_later_valid_entries(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source, output = root / "source.jsonl", root / "output.jsonl"
+            rows = ['{"type":"user","line":1}', "null", "[]", "42", '"text"', "{",
+                    '{"type":"api-request","line":7}', '{"type":"assistant","line":8}']
+            original = "\n".join(rows) + "\n"
+            source.write_text(original)
+            run = subprocess.run([sys.executable, "-B", redact.__file__, "-o", str(output), str(source)],
+                                 capture_output=True, text=True, timeout=10)
+            self.assertEqual(run.returncode, 0, run.stderr)
+            self.assertEqual([json.loads(line) for line in output.read_text().splitlines()],
+                             [{"type": "user", "line": 1}, {"type": "assistant", "line": 8}])
+            self.assertEqual(source.read_text(), original)
+
     def test_refuses_output_alias_of_an_input(self):
         transcript = b'{"type":"user","signature":"synthetic fixture"}\n'
         for alias in ("direct", "symlink", "hardlink"):

@@ -1,12 +1,14 @@
 package assistant
 
 import (
+	"context"
 	"slices"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/nwverse/persona/server/internal/proto"
+	"github.com/nwverse/persona/server/internal/transcript"
 )
 
 func TestSupervisionBatchImmediateSignals(t *testing.T) {
@@ -119,6 +121,111 @@ func TestSupervisionBatchImmediateReleasesWholeRecipientDigest(t *testing.T) {
 	if len(s.supervise.pending) != 0 || !s.supervise.batch["conv1"].IsZero() {
 		t.Fatalf("released recipient still has batch state: pending=%v batch=%v", s.supervise.pending, s.supervise.batch)
 	}
+}
+
+func TestSupervisionBatchImmediateRescreensReleasedIdleWake(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		next     time.Duration
+		stop     bool
+		needsYou bool
+		wantIdle bool
+	}{
+		{name: "future wakeup suppresses idle"},
+		{name: "future wakeup suppresses idle beside needs you", needsYou: true},
+		{name: "expired wakeup still sends idle", next: -time.Minute, wantIdle: true},
+		{name: "stop true still sends idle", stop: true, wantIdle: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s, f, todo := newSupervisedService(t)
+			shortSupervise(t, s)
+			s.superviseTimes.cooldown = time.Hour
+			sid := todo.Agents[0].SessionID
+			now := time.Now()
+			s.toldRecipient("conv1", now)
+			sess := proto.Session{SessionID: sid, MachineID: "box", Cwd: "/code/app", Agent: "claude", Status: proto.StatusDone,
+				State: proto.StateUnread, LastText: "synthetic turn complete", UpdatedAt: now.Add(-time.Minute)}
+			f.setSessions("box", sess)
+			idle := superviseSignal{Todo: todo.ID, Kind: sigIdle, Key: "turn-wake", Detail: "synthetic idle", At: now.Add(-time.Minute)}
+			s.queueSignal(idle)
+			waitFor(t, "the idle signal to be held", func() bool {
+				s.supervise.mu.Lock()
+				defer s.supervise.mu.Unlock()
+				return !s.supervise.pending[idle.id()].batchUntil.IsZero()
+			})
+			if got := len(assistantSendsTo(f, "conv1")); got != 0 {
+				t.Fatalf("idle signal was not batched: %d sends", got)
+			}
+
+			// The wake is scheduled after the idle was held, as happens while a digest waits for its recipient's deadline.
+			sess.Loop = &proto.LoopInfo{Kind: "wakeup", NextAt: now.Add(time.Hour)}
+			if tc.next != 0 {
+				sess.Loop.NextAt = now.Add(tc.next)
+			}
+			if tc.stop {
+				meta := transcript.Meta{Loop: sess.Loop}
+				transcript.ParseLine(1, []byte(`{"type":"assistant","timestamp":"2026-11-22T10:00:00Z","message":{"role":"assistant","content":[{"type":"tool_use","id":"wake-stop","name":"ScheduleWakeup","input":{"stop":true}}]}}`), &meta)
+				sess.Loop = meta.Loop
+			}
+			immediate := superviseSignal{Todo: todo.ID, Kind: sigReport, Report: upReportQuestion,
+				Key: "question", Detail: "synthetic question", At: now}
+			if tc.needsYou {
+				sess.State = proto.StateNeedsYou
+				sess.PendingInteractions = 1
+				immediate.Kind, immediate.Report = sigNeedsYou, ""
+				immediate.Key, immediate.Detail = "needs-you", "synthetic answer needed"
+			}
+			f.setSessions("box", sess)
+			s.queueSignal(immediate)
+			waitFor(t, "the immediate digest", func() bool { return len(assistantSendsTo(f, "conv1")) == 1 })
+			text, _ := lastSendTo(f, "conv1")["text"].(string)
+			if !strings.Contains(text, "signal="+immediate.Kind) && !strings.Contains(text, "+"+immediate.Kind) { // a report joins its turn's stop (joinTurnReports)
+				t.Fatalf("immediate signal was not delivered: %s", text)
+			}
+			if got := strings.Contains(text, "signal="+sigIdle); got != tc.wantIdle {
+				t.Fatalf("idle delivered = %v, want %v: %s", got, tc.wantIdle, text)
+			}
+			if !tc.wantIdle {
+				s.supervise.mu.Lock()
+				deferred, ok := s.supervise.pending[idle.id()]
+				s.supervise.mu.Unlock()
+				if !ok || deferred.batchTo != "" || !deferred.batchUntil.IsZero() {
+					t.Fatalf("deferred idle retained its released batch: pending=%v signal=%+v", ok, deferred)
+				}
+			}
+		})
+	}
+	t.Run("queued drain rechecks future wake", func(t *testing.T) {
+		s, f, todo := newSupervisedService(t)
+		shortSupervise(t, s)
+		sid := todo.Agents[0].SessionID
+		now := time.Now()
+		f.setSessions("box", proto.Session{SessionID: sid, MachineID: "box", Cwd: "/code/app", Agent: "claude", Status: proto.StatusDone,
+			State: proto.StateUnread, LastText: "synthetic turn complete", UpdatedAt: now.Add(-time.Minute),
+			Loop: &proto.LoopInfo{Kind: "wakeup", NextAt: now.Add(time.Hour)}})
+		idle := superviseSignal{Todo: todo.ID, Kind: sigIdle, Key: "turn-wake", Detail: "synthetic idle", At: now.Add(-time.Minute)}
+		msg := relayMsg{From: superviseTool, Tool: superviseTool, Text: "synthetic supervision", Signals: encodeDigestSignals([]superviseSignal{idle}), At: now}
+		if n, err := s.queueRelayDurable("conv1", msg); err != nil || n != 1 {
+			t.Fatalf("queue synthetic supervision: n=%d err=%v", n, err)
+		}
+		s.relays.mu.Lock()
+		queued := s.relays.st.Queue["conv1"][0]
+		s.relays.mu.Unlock()
+		s.supervise.mu.Lock()
+		s.supervise.init()
+		s.supervise.mu.Unlock()
+
+		_, stale, keep := s.recheckQueuedDigest(context.Background(), "conv1", queued)
+		if keep || !stale {
+			t.Fatalf("future-wakeup idle remained in the drained digest: stale=%v keep=%v", stale, keep)
+		}
+		s.supervise.mu.Lock()
+		_, deferred := s.supervise.pending[idle.id()]
+		s.supervise.mu.Unlock()
+		if !deferred {
+			t.Fatal("the queued future-wakeup idle was not restored for rescreening")
+		}
+	})
 }
 
 func TestSupervisionBatchRealRecipientsDoNotHoldEachOther(t *testing.T) {

@@ -53,12 +53,13 @@ func (h *Hub) adminNetworkView(r *http.Request) map[string]any {
 	return map[string]any{
 		"listen": h.cfg.Listen, "public_url": publicURL, "public_url_from_env": identity.Getenv("PERSONA_PUBLIC_URL") != "",
 		"tls": tls, "advertise": advertise,
-		"advertise_ipv6": public.AdvertiseIPv6 == nil || *public.AdvertiseIPv6,
+		"advertise_ipv6": (public.AdvertiseIPv6 == nil && !h.cfg.Security.PrivateNetworkOnly) || (public.AdvertiseIPv6 != nil && *public.AdvertiseIPv6),
 		"advertise_lan":  public.AdvertiseLAN == nil || *public.AdvertiseLAN,
 		"endpoints":      h.endpointList(),
 		"security": map[string]any{
 			"trusted_cidrs": trusted, "allow_public_plaintext": h.cfg.Security.AllowPublicPlaintext,
 			"plaintext_loopback_only": h.cfg.Security.PlaintextLoopbackOnly,
+			"private_network_only":    h.cfg.Security.PrivateNetworkOnly,
 		},
 		"admin": map[string]any{
 			"access": scope.access, "cidrs": cidrs, "session_hours": file.sessionLifetime(), "from_env": scope.fromEnv,

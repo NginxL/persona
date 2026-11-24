@@ -1,0 +1,10 @@
+{
+  "agent_pair": "--machine 和 --session 必须同时提供，且都不能为空",
+  "create_usage": "用法：personad create-direction <名称> --project <项目标识> [--machine <机器 ID> --session <会话 ID>]\n  退出码：0 已创建（输出方向 JSON），1 失败，2 用法或输入无效，4 不可用，130 已中断",
+  "id_required": "需要一个非空方向 ID",
+  "invalid_flags": "参数无效：{reason}",
+  "name_required": "需要一个非空名称，并用引号括起来",
+  "progress_required": "--reached、--doing 和 --needs-you 至少需要一个",
+  "project_required": "必须提供 --project",
+  "write_usage": "用法：personad write-progress <方向 ID> [--reached <文本>] [--doing <文本>] [--needs-you <文本>] [--link <URL> ...]\n  退出码：0 已写入（输出方向 JSON），1 失败，2 用法或输入无效，4 不可用，130 已中断"
+}

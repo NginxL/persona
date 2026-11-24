@@ -18,7 +18,7 @@
       },
       "key": {
         "type": "string",
-        "description": "the setting, from list (inbox.rules, mail.accounts, extension.<id>…)"
+        "description": "the setting, from list (inbox.rules, mail.accounts, extension.\u003cid\u003e…)"
       },
       "value": {
         "type": [

@@ -92,12 +92,12 @@ describe("task detail completion check with the real REST client", () => {
     expect(result()?.textContent).toContain("Tests remain.");
   });
 
-  it("asks the hub to apply the result and says what it applied (#4867)", async () => {
+  it("asks the hub to apply the result and always leaves a done verdict awaiting review (#4867, #5732)", async () => {
     await render(); await click();
     expect(checks[0].init.body).toBe('{"apply":true}');
     await answer({ ...completed, applied: true });
-    expect(result()?.textContent).toContain("Applied: the task is marked complete.");
-    expect(result()?.textContent).not.toContain("has not marked the task complete");
+    expect(result()?.textContent).toContain("Applied: the task now waits for its supervisor's review.");
+    expect(result()?.textContent).not.toContain("marked complete");
     expect(traffic.filter(({ init }) => init.method && init.method !== "GET")).toHaveLength(1); // the hub applies it, not the page
     await click(); await answer({ ...completed, verdict: "not_done", would_close: false, applied: true });
     expect(result()?.textContent).toContain("Applied: this verdict is kept on the task, which stays open.");

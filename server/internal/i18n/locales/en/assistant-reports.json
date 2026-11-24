@@ -1,4 +1,5 @@
 {
+  "manual_terminal_resume": "Open the Agent’s terminal and use Resume there. The decision is still open.",
   "title": "Task progress: {n}",
   "title_needs": "{n} need your call",
   "tag_report": "Report",
@@ -56,6 +57,8 @@
   "verdict_take": "Take the recommendation",
   "verdict_taken": "Taken: the recommendation went to its agent",
   "decision_handled_in_agent": "Handled in the original conversation",
+  "decision_superseded": "Superseded by supervisor",
+  "decision_superseded_reason": "Superseded by supervisor: {reason}",
   "verdict_reply_hint": "Reply to this: “OK” to close it; anything else goes into the todo's decisions and back to its agent",
   "verdict_decide_hint": "Reply to this: “OK” takes the recommendation; or write your choice. Either goes into the todo's decisions and to its agent",
   "verdict_decide_hint_none": "Reply to this with your choice: it goes into the todo's decisions and to its agent",
@@ -121,6 +124,8 @@
   "decision_response_explain_first": "Tell me the background first",
   "decision_response_noted": "Answered “{response}”: passed to its supervisor, nothing was taken",
   "decision_chosen_noted": "Chosen: {option}. Kept in the todo's decisions and sent to its agent",
+  "decision_chosen_recorded": "Chosen: {option}. Kept in the to-do's decisions",
+  "decision_chosen_for_supervisor": "Chosen: {option}. Kept in the to-do for supervisor follow-up",
   "verdict_taken_supervisor": "Taken: it went to the task's supervisor, not its Agent",
   "decision_chosen_supervisor": "Chosen: {option}. Kept in the to-do's decisions and passed to its supervisor",
   "delivery_verification_unavailable": "Task {task} is not accepted: delivery status temporarily cannot be verified for {pr} ({reason}). This does not mean the work is unfinished. Keep its current state and check again when verification is available; do not request another merge or deployment, park, or cancel solely because verification is unavailable.",

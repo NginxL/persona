@@ -89,6 +89,21 @@ func TestRoutineCheckRun(t *testing.T) {
 	}
 }
 
+func TestRoutineCheckApprovalUnaffectedByReversibleSettingsSwitch(t *testing.T) {
+	s, _ := newReversibleSettingService(t, true)
+	shown := make(chan proto.Interaction, 1)
+	go answerArchiveCard(t, s, false, shown)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	approved, err := s.approveRoutineCheck(ctx, "server", "conv1", &routineCheck{RoutineCheckParams: proto.RoutineCheckParams{Command: "check", Timeout: 1}})
+	if err != nil || approved {
+		t.Fatalf("run_if approval = %v, %v", approved, err)
+	}
+	if card := <-shown; card.Kind != proto.IxPermission || card.ToolName != "schedule_routine" {
+		t.Fatalf("run_if card: %+v", card)
+	}
+}
+
 func TestRoutineCheckUsesTaskExecutionComputer(t *testing.T) {
 	for _, previous := range []string{"", "previous"} {
 		t.Run("previous="+previous, func(t *testing.T) {

@@ -29,6 +29,7 @@ import persona.core.designsystem.LocalAppFeedback
 import persona.core.designsystem.PersonaTheme
 import persona.core.domain.inbox.InboxItem
 import persona.core.navigation.Navigator
+import persona.core.inbox.*
 
 /**
  * The instruction entry where the decisions put it: on the real event page, above the stale notice and the suggestion

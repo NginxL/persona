@@ -54,3 +54,30 @@ func TestCompletedTodoPreservesParentAgentMetadata(t *testing.T) {
 		t.Fatalf("sparse metadata did not round trip independently: %s, %v", raw, err)
 	}
 }
+
+func TestCompletedTodoPreservesDispatchCreationMetadata(t *testing.T) {
+	var original Session
+	original.SetCreationID("creation-1")
+	original.SetCompletedTodo(&TodoRef{ID: "done", Title: "Completed task"})
+	withoutTodo := original
+	withoutTodo.SetCompletedTodo(nil)
+	if withoutTodo.Hierarchy == nil || withoutTodo.CreationID() != "creation-1" {
+		t.Fatal("clearing completed ownership discarded dispatch creation metadata")
+	}
+	withoutCreation := original
+	withoutCreation.SetCreationID("")
+	if withoutCreation.CompletedTodo() == nil || withoutCreation.CompletedTodo().ID != "done" ||
+		original.CreationID() != "creation-1" || original.CompletedTodo() == nil {
+		t.Fatal("clearing dispatch creation metadata discarded completed ownership or changed the original")
+	}
+	checkWire(t, "completed ownership beside dispatch creation metadata", original)
+	raw, err := json.Marshal(original)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded Session
+	if err := json.Unmarshal(raw, &decoded); err != nil || decoded.CreationID() != "creation-1" ||
+		decoded.CompletedTodo() == nil || decoded.CompletedTodo().ID != "done" || decoded.Todo != nil {
+		t.Fatalf("creation and completed ownership did not round trip independently: %s, %v", raw, err)
+	}
+}

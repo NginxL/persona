@@ -31,6 +31,9 @@ type PlaceCounts struct {
 // PlaceCounts counts the items Options selects by their place. It reads the current membership, as Counts does
 // without a cursor (Since is validated and otherwise ignored); a cursor's frozen view has no place counts.
 func (i *Index) PlaceCounts(options Options) (PlaceCounts, error) {
+	if options.Search != "" {
+		return PlaceCounts{}, failure("invalid_query", "search does not support counts")
+	}
 	o, err := validate(options)
 	if err != nil {
 		return PlaceCounts{}, err
@@ -55,7 +58,7 @@ func (i *Index) PlaceCounts(options Options) (PlaceCounts, error) {
 		}
 		out.Total++
 		needs := 0
-		if stateOf(r.item, f.Roots) == "needs_you" {
+		if stateOf(r.item, f.Roots, f.CrossMachineHierarchy) == "needs_you" {
 			needs = 1
 		}
 		for _, at := range [...]struct {

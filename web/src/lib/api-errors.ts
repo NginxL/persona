@@ -26,16 +26,28 @@ export function errorSignature(e: APIErrorInfo): string {
 
 /** The starts of Claude Code's answer when the model call itself failed, besides "API Error:" (the hub's
  *  APIErrorMarkers): the turn did not run. */
-const MODEL_MARKERS = ["There's an issue with the selected model", "Failed to authenticate", "OAuth token has expired", "Invalid API key", "Not logged in ·"];
+const MODEL_MARKERS = ["There's an issue with the selected model", "Failed to authenticate", "OAuth token has expired", "Invalid API key", "Not logged in ·", "Request too large"];
 
 /** What a gateway that can't take Claude Code's on-demand tool loading names in its 400 (the hub's
  *  tool_search_unsupported, read here too for an older hub). */
 const TOOL_SEARCH = ["toolsearch", "tool_search", "tool search", "defer_loading", "tool_reference"];
 const STATUS_400 = /^\s*400\b/;
 
+/** Model API failures caused by accumulated pictures in a conversation exceeding API size/count/dimension limits (#13045). */
+const IMAGE_LIMIT_MARKERS = ["request too large", "request_too_large", "could not be processed and was removed", "many-image requests"];
+
+export const IMAGE_LIMIT_CODE = "images_too_large";
+
+/** Whether the failed turn's text describes an image-limit failure (#13045). */
+export function imageLimitError(text?: string): boolean {
+  const s = (text ?? "").toLowerCase();
+  return IMAGE_LIMIT_MARKERS.some((m) => s.includes(m));
+}
+
 function fixCode(s: string): string | undefined {
   if (s.includes("safeguards flagged this message") || s.includes("[frontier_llm]")) return "safeguards";
   if ((STATUS_400.test(s) || s.includes("not representable")) && TOOL_SEARCH.some((m) => s.includes(m))) return "tool_search_unsupported";
+  if (imageLimitError(s)) return IMAGE_LIMIT_CODE;
   if (s.trimStart().startsWith("not logged in")) return "not_logged_in";
   if (s.includes("issue with the selected model")) return "model_route";
   if (s.includes("invalid api key") || s.includes("failed to authenticate") || s.includes("oauth token has expired")) return "auth_failed";
@@ -89,6 +101,7 @@ export function parseRetryAPIError(text?: string): APIErrorInfo | null {
 function explain(s: string, status?: number): [string, boolean | undefined] {
   if (unrecoverableError(s)) return [t("lib-api-errors.conversation_invalid"), false];
   if (fixCode(s) === "safeguards") return [t("lib-api-errors.safeguards"), false];
+  if (imageLimitError(s)) return [t("lib-api-errors.images_too_large"), false];
   if (s.trimStart().startsWith("not logged in")) return [t("lib-api-errors.not_logged_in"), false];
   if (s.includes("invalid api key")) return [t("lib-api-errors.bad_key"), false];
   if (s.includes("issue with the selected model")) return [t("lib-api-errors.bad_model"), false];

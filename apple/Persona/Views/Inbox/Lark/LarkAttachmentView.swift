@@ -2,11 +2,47 @@ import PhotosUI
 import SwiftUI
 import QuickLook
 
+/// Local attachment thumbnails, decoded once per attachment and requested pixel size.
+@MainActor final class LarkAttachmentThumbnailCache {
+    static let shared = LarkAttachmentThumbnailCache()
+
+    private let images = NSCache<NSString, UIImage>()
+    private var inflight: [String: Task<UIImage?, Never>] = [:]
+    private let decode: (@Sendable (Data, CGFloat) -> UIImage?)?
+
+    init(decode: (@Sendable (Data, CGFloat) -> UIImage?)? = nil) {
+        self.decode = decode
+        images.countLimit = 64
+        images.totalCostLimit = 32 << 20
+    }
+
+    func image(for attachment: LarkAttachment, maxPixel: CGFloat) async -> UIImage? {
+        guard let data = attachment.thumbnail else { return nil }
+        let key = "\(attachment.id.uuidString)#\(maxPixel)"
+        if let image = images.object(forKey: key as NSString) { return image }
+        if let task = inflight[key] { return await task.value }
+        let decode = decode
+        let task = Task.detached(priority: .userInitiated) {
+            if let decode { return decode(data, maxPixel) }
+            return LarkMedia.decode(data, maxPixel: maxPixel)
+        }
+        inflight[key] = task
+        let image = await task.value
+        inflight[key] = nil
+        if let image {
+            let cost = Int(image.size.width * image.size.height * image.scale * image.scale * 4)
+            images.setObject(image, forKey: key as NSString, cost: cost)
+        }
+        return image
+    }
+}
+
 /// A local attachment is inspectable both before sending and while waiting for its server copy.
 struct LarkAttachmentView: View {
     var attachment: LarkAttachment
     var compact = false
     @State private var image: ImagePayload?
+    @State private var thumbnail: UIImage?
     @State private var preview: URL?
     @State private var loading = false
     @Environment(AppModel.self) private var model
@@ -30,9 +66,9 @@ struct LarkAttachmentView: View {
                     }
                 } label: {
                     Group {
-                        if let data = attachment.thumbnail, let img = UIImage(data: data) {
-                            let size = LarkImagePart.displaySize(width: img.size.width, height: img.size.height)
-                            Image(uiImage: img).resizable().scaledToFit()
+                        if let thumbnail {
+                            let size = LarkImagePart.displaySize(width: thumbnail.size.width, height: thumbnail.size.height)
+                            Image(uiImage: thumbnail).resizable().scaledToFit()
                                 .frame(width: compact ? Theme.Size.box72 : size.width,
                                        height: compact ? Theme.Size.box72 : size.height)
                                 .clipShape(.rect(cornerRadius: Theme.Radius.control))
@@ -58,6 +94,13 @@ struct LarkAttachmentView: View {
         .quickLookPreview($preview)
         .fullScreenCover(isPresented: Binding(get: { image != nil }, set: { if !$0 { image = nil } })) {
             if let image { ImageViewer(items: [ViewerImage(payload: image, title: attachment.name)], index: 0) }
+        }
+        .task(id: "\(attachment.id.uuidString)#\(compact)") {
+            thumbnail = nil
+            // Three times the compact 72 pt square and the full 240 × 300 pt bounds.
+            let decoded = await LarkAttachmentThumbnailCache.shared.image(for: attachment, maxPixel: compact ? 216 : 900)
+            guard !Task.isCancelled else { return }
+            thumbnail = decoded
         }
     }
 }

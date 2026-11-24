@@ -22,7 +22,7 @@ import { effortLabel } from "../lib/routines";
 import { modelLabel } from "../lib/session-models";
 import { useFullAgentSessions } from "../lib/sessions";
 import { stateCount, stateName } from "../lib/state-labels";
-import { makeSessionLookup, type SessionLookup, type Todo } from "../lib/todos";
+import { isCancelled, makeSessionLookup, type SessionLookup, type Todo } from "../lib/todos";
 import type { Machine } from "../lib/types";
 import { AgentMark } from "../ui/AgentMark";
 import { Button, cx, useNow } from "../ui/atoms";
@@ -53,6 +53,7 @@ function stateWord(n: Pick<GraphNode, "state" | "waitsStart">): string {
     case "review": return t("assistant-tasks.review_pending");
     case "stopped": return stateName("follow_up");
     case "done": return stateName("done");
+    case "cancelled": return t("lib-todos.review_cancelled");
     case "failed": return stateName("failed");
   }
 }
@@ -66,6 +67,7 @@ const TAG: Record<NodeState, { tag: string; dot: string }> = {
   review: { tag: "bg-green-tint text-green", dot: "var(--status-unread)" },
   stopped: { tag: "bg-field text-ink-2", dot: "var(--ink-3)" },
   done: { tag: "bg-field text-ink-3", dot: "" },
+  cancelled: { tag: "bg-field text-ink-3", dot: "" },
   failed: { tag: "bg-field text-red", dot: "var(--red)" },
 };
 
@@ -78,7 +80,7 @@ function StateTag({ node }: { node: Pick<GraphNode, "state" | "waitsStart"> }) {
   const tone = TAG[node.state];
   return (
     <span className={cx("inline-flex h-5 shrink-0 items-center gap-1 rounded-chip px-1.5 text-xs leading-4 font-medium whitespace-nowrap", tone.tag)} data-node-state={node.state}>
-      {node.state === "done" ? <Icon name="check" size={11} /> : <Dot color={tone.dot} />}
+      {node.state === "done" ? <Icon name="check" size={11} /> : node.state === "cancelled" ? <Icon name="x" size={11} /> : <Dot color={tone.dot} />}
       {stateWord(node)}
     </span>
   );
@@ -106,7 +108,7 @@ function detail(node: GraphNode, now: number): string {
   switch (node.state) {
     case "queued": return node.waitsStart ? t("request-graph.waits_start") : t("request-graph.waits_for", { names: names(node.waitsFor) });
     case "working": return node.since !== undefined ? shortDuration(Math.max(0, now - node.since)) : "";
-    case "needs_you": case "failed": case "review": return node.ask;
+    case "needs_you": case "failed": case "review": case "cancelled": return node.ask;
     case "done": return node.todo?.done_at ? clock(node.todo.done_at) : "";
     default: return "";
   }
@@ -157,12 +159,14 @@ export default function TodoRequestGraph({ todos, lookup, machines, selectedId, 
       <div className="min-h-0 min-w-0 flex-1 overflow-auto overscroll-contain" data-graph-zone="">
         {/* as wide as the widest request, so every request's rule runs the whole way when the page scrolls sideways */}
         <div className="w-max min-w-full">
-          {graph.active.length === 0 && graph.done.length === 0 ? <Empty /> : graph.active.length === 0 ? <AllDone /> : null}
+          {graph.active.length === 0 && graph.done.length === 0 && graph.cancelled.length === 0 ? <Empty />
+            : graph.active.length === 0 && graph.cancelled.length === 0 ? <AllDone /> : null}
           {graph.active.map((req) => (
             <RequestBlock key={req.key} req={req} shared={shared} hot={hot?.req === req.key ? hot.key : null}
               onHot={(key) => setHot(key ? { req: req.key, key } : null)} />
           ))}
-          {graph.done.length > 0 && <DoneFold done={graph.done} shared={shared} hot={hot} onHot={setHot} />}
+          {graph.done.length > 0 && <RequestFold requests={graph.done} outcome="done" shared={shared} hot={hot} onHot={setHot} />}
+          {graph.cancelled.length > 0 && <RequestFold requests={graph.cancelled} outcome="cancelled" shared={shared} hot={hot} onHot={setHot} />}
         </div>
       </div>
       <QueuedStrip rows={queue} selectedId={selectedId} onHot={setHot} onOpenTodo={onOpenTodo} />
@@ -245,6 +249,8 @@ const quoteLine = (req: GraphRequest) => t("request-graph.root_quote", { words: 
 function RootCard({ req, at, selected, tips, onOpenTodo, onHot }: { req: GraphRequest; at: { x: number; y: number; h: number }; selected: boolean; tips: TipApi; onOpenTodo: (id: string) => void; onHot: (key: string | null) => void }) {
   const done = req.nodes.filter((n) => n.state === "done").length;
   const label = rootLabel(req);
+  const cancelled = req.root ? isCancelled(req.root) : false;
+  const cancelReason = cancelled ? req.root!.cancelled_reason || req.root!.done_reason || "" : "";
   const th = tipHandlers(tips, () => (
     <>
       <p className="text-xs text-tooltip-muted">{label}{req.at ? ` · ${clock(req.at)}` : ""}</p>
@@ -267,10 +273,17 @@ function RootCard({ req, at, selected, tips, onOpenTodo, onHot }: { req: GraphRe
       </span>
       <span className="mt-1.5 line-clamp-2 max-h-8 shrink-0 overflow-hidden text-xs leading-4 break-words text-ink" data-root-words="">{req.title}</span>
       {req.quote && <span className="mt-1 h-4 shrink-0 truncate text-xs leading-4 text-ink-3" data-root-quote="">{quoteLine(req)}</span>}
-      <span className="mt-auto flex h-4 items-center gap-1.5 text-xs leading-4 text-ink-3 tabular-nums">
-        {req.nodes.length > 1 && <Progress done={done} total={req.nodes.length} />}
-        <span className="truncate">{req.nodes.length > 1 ? t("request-graph.progress", { done, total: req.nodes.length }) : t("request-graph.pieces", { count: req.nodes.length })}</span>
-      </span>
+      {cancelled ? (
+        <span className="mt-auto flex h-4 min-w-0 items-center gap-1.5 text-xs leading-4 text-ink-3" data-root-cancelled="">
+          <Icon name="x" size={11} className="shrink-0" />
+          <span className="truncate">{cancelReason ? t("todos.cancelled_reason", { reason: cancelReason }) : t("lib-todos.review_cancelled")}</span>
+        </span>
+      ) : (
+        <span className="mt-auto flex h-4 items-center gap-1.5 text-xs leading-4 text-ink-3 tabular-nums">
+          {req.nodes.length > 1 && <Progress done={done} total={req.nodes.length} />}
+          <span className="truncate">{req.nodes.length > 1 ? t("request-graph.progress", { done, total: req.nodes.length }) : t("request-graph.pieces", { count: req.nodes.length })}</span>
+        </span>
+      )}
     </>
   );
   const cls = cx("absolute flex flex-col overflow-hidden rounded-control bg-canvas px-2.5 py-2 text-left", selected && "ring-2 ring-accent");
@@ -515,7 +528,7 @@ function NodeTip({ node, req, machines, now }: { node: GraphNode; req: GraphRequ
         {stateWord(node)}
         {node.state === "working" && line ? ` · ${line}` : ""}
       </p>
-      {(node.state === "needs_you" || node.state === "failed" || node.state === "review") && line && <p className="break-words whitespace-pre-line">{line}</p>}
+      {(node.state === "needs_you" || node.state === "failed" || node.state === "review" || node.state === "cancelled") && line && <p className="break-words whitespace-pre-line">{line}</p>}
       {node.waitsStart && <p className="text-xs break-words">{t("request-graph.waits_start")}</p>}
       {waits.length > 0 && (
         <div>
@@ -559,29 +572,30 @@ function NodeTip({ node, req, machines, now }: { node: GraphNode; req: GraphRequ
   );
 }
 
-// ── finished requests ───────────────────────────────────────
+// ── finished or cancelled requests ──────────────────────────
 
-/** How many finished requests show at a time once the fold is open. */
-const DONE_PAGE = 30;
+/** How many closed requests show at a time once a fold is open. */
+const FOLD_PAGE = 30;
 
-function DoneFold({ done, shared, hot, onHot }: { done: GraphRequest[]; shared: Shared; hot: Hot; onHot: (h: Hot) => void }) {
+function RequestFold({ requests, outcome, shared, hot, onHot }: { requests: GraphRequest[]; outcome: "done" | "cancelled"; shared: Shared; hot: Hot; onHot: (h: Hot) => void }) {
   const [open, setOpen] = useState(false);
-  const [shown, setShown] = useState(DONE_PAGE);
+  const [shown, setShown] = useState(FOLD_PAGE);
   const [opened, setOpened] = useState<string | null>(null);
+  const cancelled = outcome === "cancelled";
   return (
-    <div className="px-3 py-2" data-graph-done="">
+    <div className="px-3 py-2" data-graph-done={!cancelled ? "" : undefined} data-graph-cancelled={cancelled ? "" : undefined}>
       <button type="button" aria-expanded={open} onClick={() => setOpen((v) => !v)}
         className="flex h-7 items-center gap-1.5 rounded-control px-1.5 text-xs font-medium text-ink-2 transition-colors hover:bg-hover">
         <Icon name="chevronRight" size={12} className={cx("text-ink-3 transition-transform", open && "rotate-90")} />
-        {t("request-graph.done_fold", { count: done.length })}
+        {t(cancelled ? "request-graph.cancelled_fold" : "request-graph.done_fold", { count: requests.length })}
       </button>
       {open && (
         <ul className="mt-1 space-y-0.5">
-          {done.slice(0, shown).map((req) => (
-            <li key={req.key} data-done-request={req.key}>
+          {requests.slice(0, shown).map((req) => (
+            <li key={req.key} data-done-request={!cancelled ? req.key : undefined} data-cancelled-request={cancelled ? req.key : undefined}>
               <button type="button" aria-expanded={opened === req.key} onClick={() => setOpened((v) => (v === req.key ? null : req.key))}
                 className="flex h-7 w-full min-w-0 items-center gap-2 rounded-control px-1.5 text-left text-xs transition-colors hover:bg-hover">
-                <Icon name="check" size={12} className="shrink-0 text-green" />
+                <Icon name={cancelled ? "x" : "check"} size={12} className={cx("shrink-0", cancelled ? "text-ink-3" : "text-green")} />
                 <span className="min-w-0 flex-1 truncate text-ink-2">{req.title}</span>
                 <span className="shrink-0 text-ink-3 tabular-nums">{t("request-graph.pieces", { count: req.nodes.length })}</span>
                 {req.finished > 0 && <span className="w-24 shrink-0 truncate text-right text-ink-3 tabular-nums">{clock(new Date(req.finished).toISOString())}</span>}
@@ -592,10 +606,10 @@ function DoneFold({ done, shared, hot, onHot }: { done: GraphRequest[]; shared: 
               )}
             </li>
           ))}
-          {done.length > shown && (
+          {requests.length > shown && (
             <li>
-              <Button tone="quiet" size="sm" className="whitespace-nowrap" onClick={() => setShown((n) => n + DONE_PAGE)}>
-                {t("request-graph.show_more", { count: Math.min(DONE_PAGE, done.length - shown) })}
+              <Button tone="quiet" size="sm" className="whitespace-nowrap" onClick={() => setShown((n) => n + FOLD_PAGE)}>
+                {t("request-graph.show_more", { count: Math.min(FOLD_PAGE, requests.length - shown) })}
               </Button>
             </li>
           )}

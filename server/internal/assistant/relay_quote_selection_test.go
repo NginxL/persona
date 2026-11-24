@@ -126,9 +126,10 @@ func TestQuoteExactWordsAndItemIDs(t *testing.T) {
 }
 
 func TestQuoteMeetingBoundary(t *testing.T) {
+	needsRecordingModule(t) // a path of the recording module's
 	d := newDispatchPolicyHarness(t)
 	now := time.Now()
-	d.s.justMe.now = func() time.Time { return now }
+	recClock(d.s, func() time.Time { return now })
 	public := ownerItem("trail-map", "prepare the trail map")
 	question := ownerItem("meeting-question", "choose a sample color")
 	question.ClientMsgID = "just-me-example"
@@ -280,6 +281,7 @@ func TestQuotePartsShareOneRelayAllowance(t *testing.T) {
 }
 
 func TestQuoteChecksMeetingMarkAfterTranscriptRead(t *testing.T) {
+	needsRecordingModule(t) // a path of the recording module's
 	d := newDispatchPolicyHarness(t)
 	d.f.setItems(ownerItem("trail-map", "prepare the trail map"))
 	d.f.hookReads(receiptHooks{after: func(read int) {

@@ -240,3 +240,55 @@ func TestSearchMarkdownKeepsFoldedWordsWithoutHiddenHTML(t *testing.T) {
 		t.Fatal("search changed the legacy preview's HTML behavior")
 	}
 }
+
+func TestFinalWorkReportInlineCodeAndIndentedFences(t *testing.T) {
+	const report = "### Persona work report\n\n- Status: done\n- Merged: yes\n- Deployed: n/a\n- Did: Checked fence parsing.\n\n---"
+	for _, tc := range []struct {
+		name  string
+		reply string
+		want  bool
+	}{
+		{
+			name:  "inline triple-backtick code span at start of prose line",
+			reply: "```persona-view``` cards stay visible.\n\n" + report,
+			want:  true,
+		},
+		{
+			name:  "inline multi-backtick span wrapping single backtick",
+			reply: "``` `status` ``` was updated.\n\n" + report,
+			want:  true,
+		},
+		{
+			name:  "four-space indented fence line before report",
+			reply: "Example:\n\n    ```md\n    sample\n\n" + report,
+			want:  true,
+		},
+		{
+			name:  "tab-indented fence line before report",
+			reply: "Example:\n\n\t```md\n\tsample\n\n" + report,
+			want:  true,
+		},
+		{
+			name:  "three-space indented unclosed fence still suppresses report",
+			reply: "   ```md\n" + report,
+			want:  false,
+		},
+		{
+			name:  "four-space indented fence inside open fence does not close it",
+			reply: "```md\n    ```\n" + report,
+			want:  false,
+		},
+		{
+			name:  "tilde fence with backticks in info string still opens fence",
+			reply: "~~~`md`\n" + report,
+			want:  false,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, ok := FinalWorkReport(tc.reply)
+			if ok != tc.want {
+				t.Fatalf("FinalWorkReport(%q) ok = %v (report=%+v), want %v", tc.reply, ok, got, tc.want)
+			}
+		})
+	}
+}

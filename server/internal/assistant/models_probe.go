@@ -378,6 +378,7 @@ func (t probeTarget) do(ctx context.Context, method, endpoint string, body []byt
 		req.Header.Set(hd[0], hd[1])
 	}
 	modelhttp.SetDefaultUserAgent(req.Header)
+	modelhttp.Source{Role: "background"}.ApplyForURL(req.Header, endpoint) // a provider test or model list, no Agent's
 	modelhttp.SetOpenCodeSession(req.Header, endpoint, t.sessionID)
 	if req.Header.Get("anthropic-version") == "" {
 		req.Header.Set("anthropic-version", "2023-06-01")

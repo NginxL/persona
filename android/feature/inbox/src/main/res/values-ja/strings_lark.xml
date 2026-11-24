@@ -2,7 +2,6 @@
 <resources>
     <string name="inbox_lark_latest_failed">最新のメッセージを読み込めませんでした。もう一度お試しください。</string>
     <string name="inbox_lark_older_failed">以前のメッセージを読み込めませんでした。もう一度お試しください。</string>
-    <string name="inbox_lark_messages_failed">メッセージを読み込めませんでした。もう一度お試しください。</string>
     <string name="inbox_lark_sent_refresh_failed">メッセージは送信しましたが、更新できませんでした。もう一度お試しください。</string>
     <string name="inbox_lark_unconfirmed">配信を確認できません。自動で再送信はしません。</string>
     <string name="inbox_lark_check_unfinished">確認が完了しませんでした。しばらくしてからもう一度お試しください。</string>
@@ -42,13 +41,8 @@
         <item quantity="other">全%1$d件の記録を表示</item>
     </plurals>
     <string name="inbox_lark_chat_history">チャット履歴</string>
-    <string name="inbox_lark_not_paired">まずハブとペアリングしてください</string>
-    <string name="inbox_lark_incomplete">メッセージ履歴の同期がまだ完了していません</string>
-    <string name="inbox_lark_card_partial">カードの一部は表示されていません</string>
     <string name="inbox_lark_card_action">操作</string>
-    <string name="inbox_lark_image_unavailable">画像は利用できません</string>
     <string name="inbox_lark_card_image">カードの画像</string>
-    <string name="inbox_lark_content_unsupported">このコンテンツはまだ表示できません</string>
     <string name="inbox_lark_card_unsupported">このカードはまだ表示できません</string>
     <string name="inbox_lark_processing">処理中…</string>
     <string name="inbox_lark_action_failed">操作に失敗しました</string>
@@ -69,7 +63,6 @@
     <string name="inbox_lark_thread_older">以前の返信を表示</string>
     <string name="inbox_lark_thread_no_reply">この接続はまだスレッドへの返信に対応していません</string>
     <string name="inbox_lark_thread_reply">スレッドに返信</string>
-    <string name="inbox_lark_thread_failed">返信を読み込めませんでした。もう一度お試しください。</string>
     <string name="inbox_lark_emoji_default">デフォルト</string>
     <string name="inbox_lark_emoji_group">絵文字</string>
     <string name="inbox_lark_react">リアクション</string>
@@ -99,31 +92,10 @@
     <string name="inbox_moments_no_comments_title">コメントはまだありません</string>
     <string name="inbox_moments_no_comments_text">この投稿にはまだコメントがありません。</string>
     <string name="inbox_moments_reply_to">\@%1$sへの返信：</string>
-    <string name="inbox_lark_emoji_thumbsup">いいね</string>
-    <string name="inbox_lark_emoji_done">完了</string>
-    <string name="inbox_lark_emoji_heart">ハート</string>
-    <string name="inbox_lark_emoji_smile">笑顔</string>
-    <string name="inbox_lark_emoji_laugh">大笑い</string>
-    <string name="inbox_lark_emoji_surprised">驚き</string>
-    <string name="inbox_lark_emoji_cry">涙</string>
-    <string name="inbox_lark_emoji_clap">拍手</string>
-    <string name="inbox_lark_emoji_fire">炎</string>
-    <string name="inbox_lark_emoji_party">お祝い</string>
-    <string name="inbox_lark_emoji_thinking">考え中</string>
-    <string name="inbox_lark_emoji_muscle">頑張れ</string>
-    <string name="inbox_lark_emoji_wave">バイバイ</string>
-    <string name="inbox_lark_emoji_fist">グータッチ</string>
-    <string name="inbox_lark_emoji_shake">握手</string>
-    <string name="inbox_lark_emoji_rose">バラ</string>
-    <string name="inbox_lark_emoji_beer">ビール</string>
-    <string name="inbox_lark_emoji_cake">ケーキ</string>
-    <string name="inbox_lark_emoji_coffee">コーヒー</string>
     <!-- Between people's names in a list. -->
     <string name="inbox_lark_name_separator">、</string>
     <!-- Between the parts of a line: kind, title, duration. -->
     <string name="inbox_lark_part_separator">、</string>
-    <string name="inbox_lark_emoji_ok">OK</string>
-    <string name="inbox_lark_emoji_jiayi">+1</string>
     <string name="inbox_lark_pins_title">ピン留め</string>
     <string name="inbox_lark_pins_loading">ピン留めを読み込み中…</string>
     <string name="inbox_lark_pins_empty_title">ピン留めはまだありません</string>

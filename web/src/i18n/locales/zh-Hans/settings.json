@@ -13,6 +13,8 @@
   "agent_preferences": "Agent 偏好",
   "reply_motion": "回复动效",
   "reply_motion_hint": "新到的回复逐词淡入；系统开了「减弱动态效果」时不播。",
+  "starred_messages": "消息收藏",
+  "starred_messages_hint": "在侧栏显示「消息收藏」，并在消息菜单里提供收藏 / 取消收藏。关闭时已收藏的消息会保留。",
   "sidebar_terminals": "侧边栏显示终端",
   "sidebar_terminals_hint": "在 Agent 按机器分组里，每台电脑的 Agent 下面列出它终端里的普通 shell，点开就是「终端」页。默认关；只对这个浏览器生效。",
   "avatar": "形象",
@@ -151,6 +153,9 @@
   "sidebar_pages_up": "把「{name}」上移",
   "sidebar_pages_down": "把「{name}」下移",
   "sidebar_pages_show": "「{name}」放在侧栏上",
+  "sidebar_more_show": "显示「更多」",
+  "sidebar_more_hint_on": "收起来的页面可以从「更多」打开。",
+  "sidebar_more_hint_off": "「更多」已隐藏；里面的页面仍可通过搜索或已有链接打开。重新开启即可恢复。",
   "sidebar_groups_new": "新建分组",
   "sidebar_groups_name": "分组名称",
   "sidebar_groups_save": "保存",
@@ -186,5 +191,9 @@
   "herdr_tab_name_saving": "正在保存会话命名设置…",
   "show_botmux_inventory": "电脑上的“同时显示 botmux 会话”开关决定哪些会话会传到 Hub。",
   "show_botmux_computers": "打开电脑",
-  "botmux_saving": "保存中…"
+  "botmux_saving": "保存中…",
+  "sort_by_activity": "Agents 按最近更新排序",
+  "sort_by_activity_hint": "关闭时保持固定顺序；开启后按最近活动排序，且只在鼠标离开侧栏时才重新排序。",
+  "show_agents_filter": "Agents 列表显示筛选",
+  "show_agents_filter_hint": "在 Agents 列表上显示「筛选」按钮和条件。关闭时隐藏并清除已有筛选。"
 }

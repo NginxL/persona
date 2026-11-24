@@ -2,6 +2,7 @@
 // a retry keeps the exact operation/epoch after an uncertain response.
 import { t } from "../i18n";
 import { api } from "./api";
+import { uuid } from "./format";
 import type { ModelPick, Session } from "./types";
 
 export const ASSISTANT_SEGMENTS_FEATURE = "assistant_segments";
@@ -22,7 +23,7 @@ export async function prepareConversationSwitch(session: Session, pick: ModelPic
   const state = await conversationSwitchState(session);
   if (!state.enabled || !Number.isSafeInteger(state.epoch) || state.epoch < 1) throw new Error(t("chat-modelpanel.switch_unavailable"));
   return { ...pick, source_machine_id: session.machine_id, machine_id: session.machine_id,
-    operation_id: crypto.randomUUID(), expected_epoch: state.epoch, permission_mode: session.permission_mode };
+    operation_id: uuid(), expected_epoch: state.epoch, permission_mode: session.permission_mode };
 }
 export async function submitConversationSwitch(session: Session, request: ConversationSwitchRequest): Promise<void> {
   await api(`${path(session)}/switch`, { method: "POST", json: request });

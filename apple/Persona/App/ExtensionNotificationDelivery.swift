@@ -1,4 +1,3 @@
-#if canImport(UIKit)
 import UIKit
 
 /// Keeps the request alive when the user taps a background button; when the system's time runs out, cancels it and calls the delegate's completion exactly once.
@@ -33,4 +32,3 @@ import UIKit
         completion()
     }
 }
-#endif

@@ -98,6 +98,23 @@ describe("the setup a Persona chat's next message runs on", () => {
     expect(assistantPillView(side, sideSetup, gwInfo, gwList).model).toBe("route-a/gemini-4-carbon");
     expect(assistantPanel(sideSetup, gwInfo, () => gwList).state.current?.model).toBe("gemini-4-carbon");
   });
+
+  it("reads an Antigravity launcher's configured variant when the catalog marks no default", () => {
+    const model = "gemini-4-hydrogen-xhigh";
+    const launchers: AssistantLaunchers = { launchers: [{ name: "agy", agent: "agy", source: "persona", model }], unavailable: [] };
+    const catalog: ModelList = { list: { agent: "agy", models: [{ id: model, name: "Gemini 4 Hydrogen (XHigh)", default_effort: "xhigh" }] } };
+    const setup = { provider: "agy", source: "pick" } as const;
+    expect(assistantPillView(chat({ session: undefined }), setup, launchers, catalog)).toMatchObject({ model: "Gemini 4 Hydrogen", effort: "xhigh" });
+  });
+
+  it("shows the picked variant's effort while the running session still reports the previous model", () => {
+    const model = "gemini-4-neon-xhigh";
+    const catalog: ModelList = { list: { agent: "agy", models: [{ id: model, name: "Gemini 4 Neon (XHigh)", default_effort: "xhigh" }] } };
+    const c = chat({ session: session({ agent: "agy", launcher: "agy", model: "gemini-4-neon-medium", effort: "medium", model_pick: { launcher: "agy", model } }) });
+    const setup = assistantSetup(c, undefined);
+    expect(setup.effort).toBeUndefined();
+    expect(assistantPillView(c, setup, undefined, catalog)).toMatchObject({ model: "Gemini 4 Neon", effort: "xhigh" });
+  });
   it("treats an older node's Chinese default placeholder exactly like an empty launcher model", () => {
     const withModel = (model?: string): AssistantLaunchers => ({
       launchers: [{ name: "claude", source: "builtin", ...(model ? { model } : {}) }],

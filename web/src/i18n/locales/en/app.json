@@ -32,5 +32,7 @@
   "new_version": "A new version is available",
   "new_version_reload": "Reload",
   "title_request": "Request",
-  "title_compare_runs": "Compare runs"
+  "title_compare_runs": "Compare runs",
+  "title_space": "Space",
+  "title_new_space": "New space"
 }

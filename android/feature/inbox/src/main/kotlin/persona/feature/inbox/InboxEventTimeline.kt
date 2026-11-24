@@ -16,7 +16,6 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import persona.core.contracts.GroupKeys
@@ -31,15 +30,18 @@ import persona.core.designsystem.JSourceMark
 import persona.core.designsystem.JTag
 import persona.core.designsystem.MarkSize
 import persona.core.designsystem.PersonaTheme
+import persona.core.designsystem.ReadingContent
 import persona.core.designsystem.Tokens
 import persona.core.designsystem.channelBrand
 import persona.core.designsystem.currentLocale
+import persona.core.designsystem.currentTextDensities
 import persona.core.designsystem.icons.PersonaIcons
 import persona.core.designsystem.rowPadding
 import persona.core.designsystem.text
 import persona.core.domain.sort.AgentPreferences
 import persona.core.domain.sort.AgentSession
 import persona.core.domain.sort.stateWord
+import persona.core.inbox.*
 
 /** The shared icon meaning checked by spec/fixtures/inbox/timeline.json, independent of the platform glyph. */
 internal fun chainIconMeaning(entry: InboxChainEntry): String {
@@ -178,17 +180,23 @@ private fun ChainRow(
     val time = chainTime(entry.at, currentLocale, clock(), zone)
     val agent = chainAgentSession(entry, sessions)
     val agentState = if (showsAgentState(record.event.chain, entry, sessions)) agent?.let { it.stateWord(mutes.mutes(it)).text() } else null
-    val stackReportedBody = reported && open && LocalDensity.current.fontScale >= ReportedLargeTextScale
+    val densities = currentTextDensities()
+    val readingScale = densities.readingDensity?.fontScale ?: densities.interfaceDensity.fontScale
+    val stackReportedBody = reported && open && readingScale >= ReportedLargeTextScale
     val body: @Composable (Modifier) -> Unit = { modifier ->
-        Text(words, modifier, style = PersonaTheme.type.callout,
-            color = if (reported) palette.ink2 else palette.ink, maxLines = if (open) Int.MAX_VALUE else 2, overflow = TextOverflow.Ellipsis,
-            onTextLayout = { layout ->
-                if (reported && !open) {
-                    val nowClipped = layout.lineCount > 0 &&
-                        layout.getLineEnd(layout.lineCount - 1, visibleEnd = true) < words.trimEnd().length
-                    if (clipped != nowClipped) clipped = nowClipped
-                }
-            })
+        val drawBody: @Composable () -> Unit = {
+            Text(words, modifier, style = PersonaTheme.type.callout,
+                color = if (reported) palette.ink2 else palette.ink, maxLines = if (open) Int.MAX_VALUE else 2, overflow = TextOverflow.Ellipsis,
+                onTextLayout = { layout ->
+                    if (reported && !open) {
+                        val nowClipped = layout.lineCount > 0 &&
+                            layout.getLineEnd(layout.lineCount - 1, visibleEnd = true) < words.trimEnd().length
+                        if (clipped != nowClipped) clipped = nowClipped
+                    }
+                })
+        }
+        // A collapsed original is a preview; only its expanded long-form body follows the retained reading scale.
+        if (reported && open) ReadingContent { drawBody() } else drawBody()
     }
     JRow(onClick = when (target) {
         ChainTarget.None -> null
@@ -221,9 +229,14 @@ private fun ChainRow(
     }
     if (open && target == ChainTarget.Inline && (!reported || entry.messages.isNotEmpty())) Column(Modifier.fillMaxWidth().padding(start = rowPadding, end = rowPadding, bottom = Tokens.Space.m),
         verticalArrangement = Arrangement.spacedBy(Tokens.Space.xs)) {
-        if (!reported) entry.detail?.takeIf { it.isNotBlank() }?.let { Text(it, style = PersonaTheme.type.callout, color = palette.ink2) }
+        if (!reported) entry.detail?.takeIf { it.isNotBlank() }?.let {
+            ReadingContent { Text(it, style = PersonaTheme.type.callout, color = palette.ink2) }
+        }
         entry.messages.forEach { message ->
-            Text(stringResource(R.string.inbox_suggestion_row, message.sender, message.text), style = PersonaTheme.type.callout, color = palette.ink2)
+            ReadingContent {
+                Text(stringResource(R.string.inbox_suggestion_row, message.sender, message.text),
+                    style = PersonaTheme.type.callout, color = palette.ink2)
+            }
         }
     }
 }

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"slices"
+	"time"
 
 	"github.com/nwverse/persona/server/internal/nodeupdate"
 	"github.com/nwverse/persona/server/internal/proto"
@@ -41,12 +42,19 @@ func (n *Node) handleUpdate(ctx context.Context, method string, params json.RawM
 		if err := json.Unmarshal(params, &p); err != nil {
 			return nil, err
 		}
-		return n.updater.Commit(ctx, p.ID, func() error {
+		if p.HandoffGraceSeconds != nil && (*p.HandoffGraceSeconds < 0 || *p.HandoffGraceSeconds > proto.MaxNodeUpdateHandoffGraceSeconds) {
+			return nil, fmt.Errorf("handoff_grace_seconds must be between 0 and %d", proto.MaxNodeUpdateHandoffGraceSeconds)
+		}
+		result, err := n.updater.Commit(ctx, p.ID, func() error {
 			if updateWouldCut(AssistantsBusy(), n.sessionList(ctx, true), n.starts.listed(nil)) {
 				return &rpc.Error{Code: proto.CodeNodeUpdateBusy, Message: "node_update_busy: Agent 仍在工作或等待操作，请稍后重试"}
 			}
 			return nil
 		})
+		if err == nil && p.HandoffGraceSeconds != nil {
+			n.reload.SetGrace(time.Duration(*p.HandoffGraceSeconds) * time.Second)
+		}
+		return result, err
 	case "node.update.abort":
 		var p proto.NodeUpdateAbortParams
 		if err := json.Unmarshal(params, &p); err != nil {

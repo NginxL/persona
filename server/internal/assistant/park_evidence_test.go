@@ -13,7 +13,7 @@ import (
 
 // Use the public tool's JSON contract so these tests still compile against the pre-change production code.
 func parkEvidenceArgs(kind string) map[string]any {
-	e := map[string]any{"kind": kind, "target": "reviewer-a", "wake": "The named reviewer replies in the linked thread"}
+	e := map[string]any{"kind": kind, "next_actor": "external", "target": "reviewer-a", "wake": "The named reviewer replies in the linked thread"}
 	a := map[string]any{"verdict": "parked", "reason": "The requested review is outside the Agent's control",
 		"waiting_on": "someone_else", "until": "3d", "evidence": e}
 	switch kind {
@@ -79,6 +79,16 @@ func TestParkEvidenceRefusesIncompleteOrUnsentBeforeMutation(t *testing.T) {
 		{"owner choice kind", "owner_priority", nil, "evidence.kind"},
 		{"blank target", "person_reply", func(a map[string]any) { a["evidence"].(map[string]any)["target"] = "  " }, "evidence.target"},
 		{"missing wake", "person_reply", func(a map[string]any) { delete(a["evidence"].(map[string]any), "wake") }, "evidence.wake"},
+		{"next actor missing", "external_event", func(a map[string]any) { delete(a["evidence"].(map[string]any), "next_actor") }, "evidence.next_actor"},
+		{"next actor unknown", "external_event", func(a map[string]any) { a["evidence"].(map[string]any)["next_actor"] = "unknown" }, "evidence.next_actor"},
+		{"next actor owner on an external event", "external_event", func(a map[string]any) {
+			a["reason"] = "The owner must request approval before the job can run"
+			e := a["evidence"].(map[string]any)
+			e["next_actor"], e["target"], e["wake"] = "owner", "approval request", "The approval is recorded"
+		}, "only the owner can take the next step: use needs_user"},
+		{"next actor owner on a date wait", "date", func(a map[string]any) {
+			a["evidence"].(map[string]any)["next_actor"] = "owner"
+		}, "only the owner can take the next step: use needs_user"},
 		{"no contact", "person_reply", func(a map[string]any) { delete(a["evidence"].(map[string]any), "contact") }, "evidence.contact"},
 		{"no channel", "person_reply", func(a map[string]any) { delete(parkEvidenceContact(a), "channel") }, "contact.channel"},
 		{"no sender", "person_reply", func(a map[string]any) { delete(parkEvidenceContact(a), "sender") }, "contact.sender"},
@@ -218,6 +228,36 @@ func TestParkEvidenceLegacyReadsDoNotInventContacts(t *testing.T) {
 				t.Fatal("merely loading legacy parking woke someone")
 			}
 		})
+	}
+}
+
+func TestParkEvidenceReadsLegacyTypedWaitWithoutNextActor(t *testing.T) {
+	database := taskRecoveryDatabase(t)
+	s, _, todo := newSupervisedServiceOn(t, database)
+	const saved = `{"kind":"external_event","target":"upstream run","wake":"The run finishes","url":"https://example.org/runs/1","recorded_by":"conv1"}`
+	var evidence ParkEvidence
+	if err := json.Unmarshal([]byte(saved), &evidence); err != nil {
+		t.Fatal(err)
+	}
+	at := time.Now().UTC().Add(-time.Hour)
+	if _, _, err := s.updateSupervision(context.Background(), todo.ID, func(v *Supervision) bool {
+		v.State = "parked"
+		v.Reviews = []TaskReview{{At: at, Verdict: "parked", Reason: "Wait for the run", WaitingOn: "external_event",
+			Until: at.Add(24 * time.Hour), Parks: 1, Evidence: &evidence}}
+		return true
+	}); err != nil {
+		t.Fatal(err)
+	}
+	again, f := restartedOn(t, database)
+	listed := listedTodos(t, again)[todo.ID]
+	v := listed["supervision"].(map[string]any)
+	p := v["parked"].(map[string]any)
+	var want map[string]any
+	if err := json.Unmarshal([]byte(saved), &want); err != nil {
+		t.Fatal(err)
+	}
+	if v["state"] != "parked" || !reflect.DeepEqual(p["evidence"], want) || listed["ask"] != nil || len(f.pushed()) != 0 {
+		t.Fatalf("loading a typed legacy park changed its state or evidence, or asked the owner: %v", listed)
 	}
 }
 

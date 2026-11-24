@@ -14,7 +14,8 @@ fun DirectionTree.todoSections(): List<Direction> = directions.filter { it.tasks
 /**
  * The To-dos page's rows grouped by direction: each section of [todoSections] with the page's rows for its tasks, in the
  * tree's order. [placed] is the page's row for each to-do id it lists (after search and filter); a task the page does
- * not list and a done row ([isDone]: those stay in the Completed fold) are left out, and so is a section left empty.
+ * not list and a terminal row ([isDone]: Completed or Cancelled stays in its own fold) are left out, and so is a section
+ * left empty.
  */
 fun <T> DirectionTree.todoRows(placed: Map<String, T>, isDone: (T) -> Boolean): List<Pair<Direction, List<T>>> =
     todoSections().mapNotNull { direction ->

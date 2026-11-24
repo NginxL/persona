@@ -129,7 +129,7 @@
     <string name="agents_row_loop_next">循环，下次 %1$s</string>
     <string name="agents_row_loop_pending">循环，下次时间待更新</string>
     <string name="agents_row_background">后台 %1$d</string>
-    <string name="agents_row_subagents">子 Agent %1$d</string>
+    <string name="agents_row_subagents">子智能体 %1$d</string>
     <string name="agents_row_queued">待发 %1$d</string>
     <string name="agents_row_draft">草稿</string>
     <string name="agents_row_draft_attachments">草稿含附件</string>
@@ -457,6 +457,12 @@
     <string name="agents_todo_decision_keep_editing">继续填写</string>
     <string name="agents_todo_notes_empty">点击编辑添加任务说明与要求…</string>
     <string name="agents_todo_auto_reason">自动完成理由：%1$s</string>
+    <string name="agents_todo_cancelled">已取消</string>
+    <string name="agents_todo_cancelled_reason">取消原因：%1$s</string>
+    <string name="agents_todo_lineage">任务接手记录</string>
+    <string name="agents_todo_lineage_current">当前任务</string>
+    <string name="agents_todo_lineage_continues">接手自 %1$s</string>
+    <string name="agents_todo_lineage_superseded">由新卡 %1$s 接手</string>
     <string name="agents_todo_hold_pr">停在 PR</string>
     <string name="agents_todo_due">截止 %1$s</string>
     <string name="agents_todo_was_due">已过截止 %1$s</string>
@@ -468,6 +474,7 @@
     <string name="agents_todo_hold_user">要你点头</string>
     <string name="agents_todo_hold_agent">Agent 能接着做</string>
     <string name="agents_todo_hold_other">等别人 / CI / 环境</string>
+    <string name="agents_todo_hold_supervisor">督办先看</string>
     <string name="agents_todo_active_agents">正在做的 Agent</string>
     <string name="agents_todo_no_agents">暂无分配的 Agent</string>
     <string name="agents_todo_no_agents_hint">点击底部「交给 Agent」指派任务。</string>
@@ -543,9 +550,10 @@
     <string name="agents_page_more">加载更多</string>
     <string name="agents_page_previous">加载之前的会话</string>
     <!-- To-do status sections (#3206, docs/assistant/todo-status-sop.md) -->
-    <string name="agents_todos_section_waiting">需要你</string>
+    <string name="agents_todos_section_waiting">等你处理</string>
     <string name="agents_todos_section_working">工作中</string>
     <string name="agents_todos_section_just_done">刚做完</string>
+    <string name="agents_todos_section_awaiting_review">已交付·待看</string>
     <string name="agents_todos_section_pr">PR 待合并</string>
     <string name="agents_todos_section_other">其他未完成</string>
     <string name="agents_todos_section_shelved">已搁置</string>
@@ -577,6 +585,7 @@
     <string name="agents_todo_restore">恢复</string>
     <string name="agents_todo_seen">知道了</string>
     <string name="agents_todo_seen_moved">已移到「已完成」</string>
+    <string name="agents_todo_seen_moved_open">已移到「其他未完成」</string>
     <string name="agents_todo_seen_undo">撤销</string>
     <string name="agents_todo_seen_failed">操作失败：%1$s</string>
     <string name="agents_todo_pr_moved">%1$s · %2$s有动静</string>

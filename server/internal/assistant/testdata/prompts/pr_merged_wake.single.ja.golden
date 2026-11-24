@@ -1,0 +1,1 @@
+交付 PR https://github.com/example/app/pull/42 がマージされ、他に未完了の交付 PR は残っていません。done_when を独立して確認し、マージのみが残っていた場合は task_review(accepted) で承認・クローズし、マージ後の手順（デプロイや検証など）が残っている場合はそのまま継続してください。

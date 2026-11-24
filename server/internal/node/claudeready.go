@@ -10,7 +10,12 @@ import (
 
 	"github.com/nwverse/persona/server/internal/host"
 	"github.com/nwverse/persona/server/internal/proto"
+	"github.com/nwverse/persona/server/internal/screen"
 )
+
+// screenDialog is a dialog read off a pane (screen.ParseDialog); named here, where waitReady's screen variable
+// shadows the screen package.
+type screenDialog = screen.Dialog
 
 // claudeStartWait is how long a new tab's shell may take to run claude: on a machine busy with a dozen agents,
 // loading ~/.zshrc took most of a minute (#1396). claudeReadyWait is how long claude then has to show its input box.
@@ -79,6 +84,8 @@ func (n *Node) waitReady(ctx context.Context, pane string, probe *startProbe) (*
 	shellSaid := ""         // a not-found line the tab's shell printed after the command, of something else than it
 	bypassTries := 0        // times the Bypass Permissions confirmation was accepted (acceptBypass)
 	gone := 0               // looks in a row at which the pane's host listed no such pane (errNoOrcaTerminal)
+	dialogLooks := 0        // looks in a row at which a dialog none of claudeStartDialogs is was on screen
+	var dialog *screenDialog
 	for time.Now().Before(deadline) {
 		select {
 		case <-ctx.Done():
@@ -95,41 +102,47 @@ func (n *Node) waitReady(ctx context.Context, pane string, probe *startProbe) (*
 		if ownEvidence && !echoed {
 			echoed = probe.echoed(screen)
 		}
-		if keys := trustKeys(screen); keys != nil {
-			started()
-			_ = n.sendKeys(ctx, pane, keys...)
-			readyStreak = 0
-			time.Sleep(time.Second)
-			continue
-		}
-		// A machine that never ran claude stops at its first-run screens: the style picker is answered with its default
-		// and the security notes with Enter (the folder's trust dialog comes next, above), and a screen that waits for a
-		// person ends the wait now instead of at the timeout.
-		if keys := firstRunKeys(screen); keys != nil {
-			_ = n.sendKeys(ctx, pane, keys...)
-			readyStreak = 0
-			time.Sleep(time.Second)
-			continue
-		}
-		// Claude Code's Bypass Permissions confirmation, on a start Persona itself asked for bypass because the user chose
-		// it (Allow all on the task or the New session sheet): "Yes, I accept" is that same choice, so it is pressed here.
-		// Any other start that meets it (a launcher's own flag, no mode chosen) still stops below with what to do (#3294).
-		if probe != nil && probe.acceptBypass {
-			if keys := bypassConfirmKeys(screen); keys != nil {
+		// The start-up dialogs the node answers by itself (startdialogs.go claudeStartDialogs): the folder's trust, the
+		// first-run style picker and security notes, the offer to make auto mode the default (declined: the user's
+		// settings stay as they are), and Claude Code's Bypass Permissions confirmation, on a start Persona itself asked
+		// for bypass because the user chose it (Allow all on the task or the New session sheet): "Yes, I accept" is that
+		// same choice. Any other start that meets the confirmation still stops below with what to do (#3294).
+		if d, keys := matchStartDialog(claudeStartDialogs, screen, probe != nil && probe.acceptBypass); d != nil {
+			if d.Name == startDialogBypass {
 				if bypassTries >= bypassConfirmTries {
 					return nil, errors.New(bypassNotAccepted)
 				}
 				bypassTries++
-				started()
 				log.Printf("start in pane %s: accepting Claude Code's Bypass Permissions confirmation (the start asked for bypass)", pane)
-				_ = n.sendKeys(ctx, pane, keys...)
-				readyStreak = 0
-				time.Sleep(time.Second)
-				continue
+			} else if d.Name == startDialogAutoMode {
+				log.Printf("start in pane %s: declining Claude Code's offer to make auto mode the default (keys %v)", pane, keys)
 			}
+			if d.Started {
+				started()
+			}
+			_ = n.sendKeys(ctx, pane, keys...)
+			readyStreak, dialogLooks = 0, 0
+			time.Sleep(time.Second)
+			continue
 		}
 		if reason := firstRunScreen(unframed(screen)); reason != "" {
 			return nil, errors.New(reason)
+		}
+		// A dialog the node does not know, on a start (probe: not a wait for a running claude's box again): counted
+		// here, reported below once it stayed unknownDialogLooks looks with claude come and not reported blocked.
+		if probe != nil {
+			if dialog = unknownStartDialog(screen); dialog != nil {
+				dialogLooks++
+			} else {
+				dialogLooks = 0
+			}
+		}
+		stuck := func() error {
+			if running && dialog != nil && dialogLooks >= unknownDialogLooks {
+				log.Printf("start in pane %s: an unrecognized dialog blocks it: %q", pane, dialog.Question)
+				return unknownDialogError(dialog)
+			}
+			return nil
 		}
 		a, err := n.paneAgent(ctx, pane)
 		if gone = goneLooks(gone, err); gone >= paneGoneLooks && !running {
@@ -168,6 +181,9 @@ func (n *Node) waitReady(ctx context.Context, pane string, probe *startProbe) (*
 					return nil, errors.New("claude exited before showing its input box")
 				}
 			}
+			if err := stuck(); err != nil {
+				return nil, err
+			}
 			readyStreak = 0
 			continue
 		}
@@ -176,6 +192,9 @@ func (n *Node) waitReady(ctx context.Context, pane string, probe *startProbe) (*
 		started()
 		if a.AgentStatus == proto.StatusBlocked {
 			return a, nil // some other dialog; the phone shows it as a screen interaction
+		}
+		if err := stuck(); err != nil {
+			return nil, err
 		}
 		// An Orca fork that cannot read claude's title once the tab is renamed reports no state until claude's first hook
 		// (#4438): with claude in front, the screen decides, as long as it does not show a turn running.

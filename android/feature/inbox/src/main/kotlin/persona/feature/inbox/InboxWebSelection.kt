@@ -9,6 +9,7 @@ import android.view.View
 import android.webkit.WebView
 import androidx.compose.runtime.staticCompositionLocalOf
 import org.json.JSONTokener
+import persona.core.inbox.*
 
 /** Text picked on a page opened from the inbox. */
 data class InboxWebSelection(val title: String, val url: String, val text: String)

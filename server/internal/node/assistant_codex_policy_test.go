@@ -178,6 +178,7 @@ func TestCodexPersistedModeSurvivesRestartAndAppliesNextTurn(t *testing.T) {
 	}
 	want := initial
 	want.AppMode = proto.ModeBypass
+	want.AppModeExplicit = true
 	if !reflect.DeepEqual(restored, want) {
 		t.Fatalf("session identity changed: %+v", restored)
 	}

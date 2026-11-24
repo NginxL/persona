@@ -2,6 +2,7 @@
 <resources>
     <string name="chat_plan_approve_stepwise">Approve, confirm each step</string>
     <string name="chat_menu_fork">Branch to new chat</string>
+    <string name="chat_menu_fork_wait_turn">Wait for the current turn to finish</string>
     <string name="chat_menu_forked">Branched to a new chat</string>
     <string name="chat_menu_fork_failed">Couldn\'t branch: %1$s</string>
     <string name="chat_menu_rewind">Rewind to here</string>
@@ -28,4 +29,11 @@
     <string name="chat_tool_open_subagent">View sub-agent</string>
     <string name="chat_tool_no_answer">No answer</string>
     <string name="chat_computer_pill_opens">Show the steps</string>
+    <string name="chat_menu_star">Star</string>
+    <string name="chat_menu_unstar">Unstar</string>
+    <string name="chat_starred_saved">Starred</string>
+    <string name="chat_starred_saving">Saving starred message</string>
+    <string name="chat_starred_removed">Message unstarred</string>
+    <string name="chat_starred_undo">Undo</string>
+    <string name="chat_starred_failed">Couldn\'t update starred message</string>
 </resources>

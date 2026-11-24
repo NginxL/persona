@@ -11,6 +11,10 @@ private final class ShadowEffectRecorder: @unchecked Sendable {
     let effects = Mutex<[Effect]>([])
 }
 
+private func assertBackgroundAccess(_ operation: String) {
+    assert(!Thread.isMainThread, "CoreContinuityShadow \(operation) must stay off the main thread")
+}
+
 public final class CoreContinuityShadow: @unchecked Sendable {
     public struct Mismatch: Error, Equatable, Sendable {
         public let domain: String
@@ -29,6 +33,7 @@ public final class CoreContinuityShadow: @unchecked Sendable {
     private let effects: ShadowEffectRecorder
 
     public init(chat: String) throws {
+        assertBackgroundAccess("creation")
         self.chat = chat
         let changes = ChangeRecorder()
         let effects = ShadowEffectRecorder()
@@ -42,13 +47,22 @@ public final class CoreContinuityShadow: @unchecked Sendable {
     }
 
     public func dispatch(_ action: Action) throws { try client.dispatch(action) }
-    public func drain() throws -> ChatPatch { try client.drain(chat: chat) }
-    public func flush() throws { try client.flush() }
+    public func drain() throws -> ChatPatch {
+        assertBackgroundAccess("drain")
+        return try client.drain(chat: chat)
+    }
+    public func flush() throws {
+        assertBackgroundAccess("flush")
+        try client.flush()
+    }
     public func wakeChatIDs() -> [String] { changes.values.withLock { $0.map(\.0) } }
     public func effectsSnapshot() -> [Effect] { effects.effects.withLock { $0 } }
     public func drainEffects() -> [Effect] { effects.effects.withLock { current in
         defer { current.removeAll() }
         return current
     } }
-    public func close() { client.close() }
+    public func close() {
+        assertBackgroundAccess("close")
+        client.close()
+    }
 }

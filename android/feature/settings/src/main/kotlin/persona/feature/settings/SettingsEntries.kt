@@ -90,6 +90,8 @@ data class SettingsServices(
     val agentsDisplay: persona.core.domain.sort.AgentListDisplaySettings? = null,
     /** Settings › Standing Authorizations on the paired hub; null in demo mode. */
     val standing: StandingAuthorizationsSource? = null,
+    /** What each extension may read of personal information (#13500), the default manager's; null in demo mode. */
+    val extensionTrust: persona.core.contracts.api.ExtensionTrustSource? = null,
     /** Device-local Developing Persona records; never scoped to or synchronized with a hub. */
     val developing: DevelopingDiagnostics? = null,
 )

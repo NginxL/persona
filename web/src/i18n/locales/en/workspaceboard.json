@@ -112,5 +112,13 @@
   "bulk_undo": "Undo last change",
   "selection_hint": "Only visible workspaces are selected. Agents keep running.",
   "bulk_saving": "Updating workspaces…",
-  "activity": "Activity"
+  "activity": "Activity",
+  "mode_project": "New project",
+  "project_name": "Project name",
+  "project_app": "Desktop app",
+  "project_persona": "Persona only",
+  "create_project": "Create project",
+  "create_project_hint": "Use an existing folder or enter a new folder inside an existing parent folder. The project is added without starting a conversation.",
+  "project_desktop_unavailable": "Codex and Claude project creation is currently unavailable because project names cannot be synced to their desktop sidebars. Create the project in the desktop app, then bind it here under Existing workspaces.",
+  "project_directory_placeholder": "Full path of the project folder (an existing or new folder)"
 }

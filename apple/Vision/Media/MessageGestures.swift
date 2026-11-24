@@ -1,4 +1,3 @@
-#if os(visionOS)
 import SwiftUI
 import UIKit
 
@@ -23,4 +22,3 @@ struct LongPressAt: Gesture {
             .onEnded { _ in changed(.ended) }
     }
 }
-#endif

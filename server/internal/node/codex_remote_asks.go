@@ -151,13 +151,24 @@ func (c *codexRemote) request(m codexMessage) {
 			return
 		}
 		res, ok, err := c.n.ask(ctx, ix)
+		if err == nil && ok && !res.Dismiss {
+			c.mu.Lock()
+			waitReady := c.threads[r.ThreadID].ready
+			c.mu.Unlock()
+			if waitReady != nil {
+				select {
+				case <-waitReady:
+				case <-ctx.Done():
+				}
+			}
+		}
 		c.mu.Lock()
 		current := c.asks[key] == ask
 		if current {
 			delete(c.asks, key)
 		}
-		joined := c.threads[r.ThreadID].joined
-		ready := c.ready && joined
+		cur := c.threads[r.ThreadID]
+		ready := c.ready && cur.joined && !cur.provisional
 		c.mu.Unlock()
 		if !current || !ready || ctx.Err() != nil || err != nil || !ok || res.Dismiss {
 			return

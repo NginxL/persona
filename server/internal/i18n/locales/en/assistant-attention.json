@@ -1,0 +1,4 @@
+{
+  "store": "Couldn't read or save the attention mode. Try again.",
+  "invalid": "This attention mode isn't valid. Choose a mode and a time between 1 minute and 24 hours."
+}

@@ -48,6 +48,8 @@ struct TodosModeBar<ListControls: View>: View {
     /// The list view's own controls at the trailing end, where the calendar has its day / week / month (the phone's
     /// filter and sort, #3740).
     @ViewBuilder var listControls: ListControls
+    /// The calendar's options (Show Done): not for a calendar of open to-dos alone (To-dos' Upcoming, #10465).
+    var options = true
     @StoredValue("todos.calendar.showDone") private var showDone = true
 
     private var viewChoice: some View {
@@ -82,7 +84,11 @@ struct TodosModeBar<ListControls: View>: View {
             ViewThatFits(in: .horizontal) {
                 bar
                 VStack(alignment: .leading, spacing: Theme.Space.xs) {
-                    HStack(spacing: Theme.Space.m) { viewChoice; Spacer(minLength: Theme.Space.s); optionsMenu }
+                    HStack(spacing: Theme.Space.m) {
+                        viewChoice
+                        Spacer(minLength: Theme.Space.s)
+                        if options { optionsMenu }
+                    }
                     modeChoice
                 }
                 .padding(.horizontal, Theme.Space.page)
@@ -121,7 +127,7 @@ struct TodosModeBar<ListControls: View>: View {
             }
             if view == .calendar {
                 modeChoice
-                optionsMenu
+                if options { optionsMenu }
             } else {
                 listControls
             }
@@ -132,8 +138,8 @@ struct TodosModeBar<ListControls: View>: View {
 }
 
 extension TodosModeBar where ListControls == EmptyView {
-    init(view: Binding<TodosViewMode>, mode: Binding<TodoCalendarMode>, grouping: Binding<TodosGrouping>? = nil) {
-        self.init(view: view, mode: mode, grouping: grouping) { EmptyView() }
+    init(view: Binding<TodosViewMode>, mode: Binding<TodoCalendarMode>, grouping: Binding<TodosGrouping>? = nil, options: Bool = true) {
+        self.init(view: view, mode: mode, grouping: grouping, listControls: { EmptyView() }, options: options)
     }
 }
 
@@ -165,6 +171,12 @@ struct TodoCalendarView: View {
     var open: (String) -> Void
     /// Back to the list ("N without a due date").
     var showList: () -> Void
+    /// Where each to-do stands, for its colour: given by the V1 list from the hub's view (#10465, Upcoming's calendar);
+    /// nil works it out from its Agents' sessions, as the to-dos page always has.
+    var state: ((TodoItem) -> TaskState)? = nil
+    /// A tap on an empty slot: given by the V1 list, whose New To-Do saves on the device first (#10465); nil opens the
+    /// calendar's own sheet (`TodoQuickAddSheet`), as the to-dos page always has.
+    var add: ((TodoCalendarSlot) -> Void)? = nil
 
     @StoredValue("todos.calendar.showDone") private var showDone = true
     @State private var adding: TodoCalendarSlot?
@@ -236,11 +248,21 @@ struct TodoCalendarView: View {
     // MARK: What is shown
 
     private var entries: [CalendarEntry] {
-        let lookup = TodosLogic.makeSessionLookup(AppModel.shared.allSessions(inFront: inFront))
-        let source = TodoEntrySource(todos: todos, state: { TodosLogic.todoStatus($0, lookup: lookup) }, showDone: showDone)
+        let source = TodoEntrySource(todos: todos, state: state ?? sessionState, showDone: showDone)
         // The day view's strip shows the whole week's dots.
         let range = TodoCalendar.range(mode == .day ? .week : mode, anchor: anchor, calendar: calendar)
         return source.entries(in: range, calendar: calendar, now: .now)
+    }
+
+    /// What an empty slot's tap does: the caller's New To-Do, else the calendar's own sheet.
+    private func addAt(_ slot: TodoCalendarSlot) {
+        if let add { add(slot) } else { adding = slot }
+    }
+
+    /// Each to-do's state from its Agents' sessions (every session read, so only without `state`).
+    private var sessionState: (TodoItem) -> TaskState {
+        let lookup = TodosLogic.makeSessionLookup(AppModel.shared.allSessions(inFront: inFront))
+        return { TodosLogic.todoStatus($0, lookup: lookup) }
     }
 
     @ViewBuilder private func content(wide: Bool) -> some View {
@@ -252,14 +274,14 @@ struct TodoCalendarView: View {
                     .padding(.top, Theme.Space.s)
                 TodoCalendarTimeline(
                     days: [calendar.startOfDay(for: anchor)], entries: TodoCalendar.on(anchor, entries, calendar: calendar),
-                    narrow: false, showsDayHeader: false, open: openEntry, pickDay: { go(to: $0) }, add: { adding = $0 },
+                    narrow: false, showsDayHeader: false, open: openEntry, pickDay: { go(to: $0) }, add: addAt,
                     moves: moves)
             }
             .id(TodoCalendar.range(.week, anchor: anchor, calendar: calendar).start)
         case .week:
             TodoCalendarTimeline(
                 days: TodoCalendar.days(.week, anchor: anchor, calendar: calendar), entries: entries,
-                narrow: !wide, showsDayHeader: true, open: openEntry, pickDay: { show(.day, $0) }, add: { adding = $0 },
+                narrow: !wide, showsDayHeader: true, open: openEntry, pickDay: { show(.day, $0) }, add: addAt,
                 moves: moves)
                 .padding(.top, Theme.Space.s)
                 .id(TodoCalendar.range(.week, anchor: anchor, calendar: calendar).start)
@@ -441,9 +463,6 @@ struct TodoQuickAddSheet: View {
                 SheetConfirm(id: "todo.calendar.newAdd", name: String(localized: "Add [Beautiful U I Bridge 7a8a11]"),
                              disabled: trimmed.isEmpty || saving, action: add)
             }
-            #if os(macOS)
-            .macSheet()
-            #endif
         }
         .formSheetDetents([.medium])
         .onAppear { typing = true }

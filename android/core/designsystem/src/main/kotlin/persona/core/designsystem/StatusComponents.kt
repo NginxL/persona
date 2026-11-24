@@ -302,7 +302,7 @@ fun StatusLine(
         AppStyle.Board -> Modifier.clip(shape).background(palette.surface).border(1.dp, palette.line, shape)
     }
     Row(
-        modifier.fillMaxWidth().padding(horizontal = if (style == AppStyle.Brief) 6.dp.dense else 10.dp.dense, vertical = 4.dp.dense).then(frame).then(click)
+        modifier.fillMaxWidth().padding(horizontal = if (style == AppStyle.Brief) 6.dp.dense else 10.dp.dense, vertical = Tokens.Space.xxs).then(frame).then(click)
             .heightIn(min = 40.dp.row).padding(horizontal = 12.dp.dense, vertical = 8.dp.dense)
             .semantics(mergeDescendants = true) { liveRegion = LiveRegionMode.Polite },
         horizontalArrangement = Arrangement.spacedBy(8.dp.dense), verticalAlignment = Alignment.CenterVertically,

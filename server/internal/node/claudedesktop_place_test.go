@@ -73,13 +73,15 @@ func TestDesktopSessionsAreInTheirProject(t *testing.T) {
 	writeTranscriptIn(t, dir, inNotes, drafts, "claude-desktop")
 	writeTranscriptIn(t, dir, cli, tree, "cli")
 	_, third := useDesktopDirs(t)
-	origin := func(dir string) string {
+	// Each entry names the folder its session runs in, as the app writes it (writeDesktopEntry's own cwd is a
+	// placeholder): the index's cwd comes before the transcript's when there is no originCwd (#7063).
+	field := func(key, dir string) string {
 		b, _ := json.Marshal(dir)
-		return `,"originCwd":` + string(b)
+		return `,"` + key + `":` + string(b)
 	}
-	writeDesktopEntry(t, third, inTree, inTree, false, nil, origin(repo))
-	writeDesktopEntry(t, third, noOrigin, noOrigin, false, nil, "")
-	writeDesktopEntry(t, third, inNotes, inNotes, false, nil, origin(notes))
+	writeDesktopEntry(t, third, inTree, inTree, false, nil, field("cwd", tree)+field("originCwd", repo))
+	writeDesktopEntry(t, third, noOrigin, noOrigin, false, nil, field("cwd", tree))
+	writeDesktopEntry(t, third, inNotes, inNotes, false, nil, field("cwd", drafts)+field("originCwd", notes))
 
 	awaitGitPlace(t, gitPlaces, tree) // read in the background: the first list after a start may not have it yet
 	rows := map[string]proto.Session{}

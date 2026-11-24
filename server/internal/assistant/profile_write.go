@@ -129,6 +129,10 @@ func (s *Service) putSettings(w http.ResponseWriter, r *http.Request) {
 		apierr.Write(w, http.StatusBadRequest, orderErr)
 		return
 	}
+	if in.CacheKeepaliveMinutes != nil && (*in.CacheKeepaliveMinutes < 1 || *in.CacheKeepaliveMinutes > 55) || in.CacheKeepaliveMax != nil && (*in.CacheKeepaliveMax < 1 || *in.CacheKeepaliveMax > 144) {
+		apierr.Write(w, http.StatusBadRequest, i18n.Err("assistant-profile.bad_cache_keepalive"))
+		return
+	}
 	if m := in.IdleAutoCompactMinutes; m != nil && (*m < minIdleAutoCompactMinutes || *m > maxIdleAutoCompactMinutes) {
 		apierr.Write(w, http.StatusBadRequest, i18n.Err("assistant-profile.bad_idle_auto_compact_minutes"))
 		return
@@ -267,6 +271,15 @@ func (s *Service) putSettings(w http.ResponseWriter, r *http.Request) {
 		if in.MainTasksQuiet != nil {
 			v.MainTasksQuiet = in.MainTasksQuiet
 		}
+		if in.CacheKeepalive != nil {
+			v.CacheKeepalive = in.CacheKeepalive
+		}
+		if in.CacheKeepaliveMinutes != nil {
+			v.CacheKeepaliveMinutes = in.CacheKeepaliveMinutes
+		}
+		if in.CacheKeepaliveMax != nil {
+			v.CacheKeepaliveMax = in.CacheKeepaliveMax
+		}
 		if in.IdleAutoCompact != nil {
 			v.IdleAutoCompact = in.IdleAutoCompact
 		}
@@ -381,6 +394,12 @@ func (s *Service) putSettings(w http.ResponseWriter, r *http.Request) {
 		if in.InboxSignals != nil {
 			v.InboxSignals = in.InboxSignals
 		}
+		if in.InboxTodoForward != nil {
+			v.InboxTodoForward = in.InboxTodoForward
+		}
+		if in.PREventsRouteToAgent != nil {
+			v.PREventsRouteToAgent = in.PREventsRouteToAgent
+		}
 		if in.InboxPost != nil {
 			v.InboxPost = in.InboxPost
 		}
@@ -424,6 +443,15 @@ func (s *Service) putSettings(w http.ResponseWriter, r *http.Request) {
 		s.mcpChanges.notify()
 	}
 	s.settingsChanged(ctx)
+	// Revoke already captured requests as part of a policy edit. Forwarding stays
+	// available; only a subsequent genuine request can rearm the snapshot.
+	if (in.CacheKeepalive != nil || in.CacheKeepaliveMinutes != nil || in.CacheKeepaliveMax != nil) && cacheKeepaliveOf(before) != cacheKeepaliveOf(s.settings(ctx)) {
+		clearCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+		defer cancel()
+		for _, ref := range s.cacheKeepaliveRefs(ctx, before) {
+			_ = s.call(clearCtx, ref.MachineID, "assistant.cache_clear", map[string]any{"session_id": ref.SessionID}, nil)
+		}
+	}
 	if in.SupervisionBatchMinutes != nil && supervisionBatchMinutesOf(s.settings(ctx)) != supervisionBatchMinutesOf(before) {
 		s.rescheduleSupervision()
 	}

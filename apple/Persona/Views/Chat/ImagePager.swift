@@ -1,4 +1,3 @@
-#if os(iOS) || os(visionOS)
 import PersonaKit
 import SwiftUI
 import UIKit
@@ -419,4 +418,3 @@ final class ZoomScrollView: UIScrollView, UIScrollViewDelegate {
         }
     }
 }
-#endif

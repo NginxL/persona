@@ -13,7 +13,6 @@ import (
 	"github.com/nwverse/persona/server/internal/assistantwire"
 	"github.com/nwverse/persona/server/internal/connector"
 	"github.com/nwverse/persona/server/internal/i18n"
-	"github.com/nwverse/persona/server/internal/mail"
 )
 
 // ---- the routes: the manager's ----
@@ -287,10 +286,22 @@ func (h *Manager) inboxConfigView(ctx context.Context) assistantwire.InboxConfig
 	slices.Sort(out.Extensions)
 	if h.cfg != nil {
 		out.Agent = h.cfg.Inbox.Agent
+		out.ReplyPolicy = cloneReplyPolicyConfig(h.cfg.Inbox.ReplyPolicy)
 	}
 	out.LarkAccount = h.inboxLarkAccount(ctx)
 	if h.mail != nil {
 		out.Translate = h.mailTargets(ctx)
+	}
+	return out
+}
+
+func cloneReplyPolicyConfig(in assistantwire.InboxReplyPolicyConfig) assistantwire.InboxReplyPolicyConfig {
+	out := in
+	if len(in.Categories) > 0 {
+		out.Categories = make(map[string]string, len(in.Categories))
+		for k, v := range in.Categories {
+			out.Categories[k] = v
+		}
 	}
 	return out
 }
@@ -336,9 +347,9 @@ func (h *Manager) inboxMailBody(ctx context.Context, ref assistantwire.InboxMail
 	switch {
 	case text != "":
 	case ref.Readable:
-		text = strings.TrimSpace(mail.ReadableText(m.HTML))
+		text = strings.TrimSpace(h.mail.ReadableText(m.HTML))
 	default:
-		text = strings.TrimSpace(mail.PlainText(m.HTML))
+		text = strings.TrimSpace(h.mail.PlainText(m.HTML))
 	}
 	return assistantwire.InboxMailMessage{From: mailAddress(m.From), To: mailAddresses(m.To), Cc: mailAddresses(m.Cc), Date: m.Date,
 		Subject: m.Subject, Text: text}, nil

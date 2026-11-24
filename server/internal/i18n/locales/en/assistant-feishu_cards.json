@@ -206,5 +206,9 @@
   "board_nudged": "nudged",
   "board_verdict": "{title}: {verdict}",
   "moved_to_todos": "Moved to to-dos",
-  "model_list_truncated": "List truncated; use model settings to see all models."
+  "model_list_truncated": "List truncated; use model settings to see all models.",
+  "by_assistant": "Answered by the assistant: {how}",
+  "by_default": "Taken by default: {how}",
+  "by_terminal": "Decided in the terminal: {how}",
+  "by_other": "Answered for the user: {how}"
 }

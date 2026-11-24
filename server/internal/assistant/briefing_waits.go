@@ -4,112 +4,26 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
-	"errors"
-	"fmt"
-	"reflect"
 	"slices"
 	"strings"
 	"time"
 
 	"github.com/nwverse/persona/server/internal/i18n"
+	"github.com/nwverse/persona/server/internal/modapi"
 	"github.com/nwverse/persona/server/internal/prompts"
 	"github.com/nwverse/persona/server/internal/proto"
 )
-
-// BriefingWaits tunes the deterministic wait lists, not the supervisor's own signals. The defaults deliberately
-// reuse the existing supervision floors: a working agent is stalled after 20 minutes, any other silent session after
-// two hours, an offline agent is orphaned after ten minutes, and an unanswered card waits three minutes. MaxRows is a
-// display bound per direction; owner-wait rows are always kept in full.
-type BriefingWaits struct {
-	StalledMinutes int `json:"stalled_minutes"`
-	SilentMinutes  int `json:"silent_minutes"`
-	OrphanMinutes  int `json:"orphan_minutes"`
-	CardMinutes    int `json:"card_minutes"`
-	MaxRows        int `json:"max_rows"`
-}
-
-func defaultBriefingWaits() BriefingWaits {
-	return BriefingWaits{StalledMinutes: int(superviseStallMin / time.Minute), SilentMinutes: int(superviseSilentMin / time.Minute),
-		OrphanMinutes: int(orphanOfflineAfter / time.Minute), CardMinutes: int(superviseNeedsAfter / time.Minute), MaxRows: 15}
-}
-
-func briefingWaitsOf(cfg Settings) BriefingWaits {
-	out := defaultBriefingWaits()
-	if cfg.BriefingWaits != nil {
-		out = *cfg.BriefingWaits
-	}
-	return out
-}
-
-func (w BriefingWaits) validate() error {
-	for _, n := range []int{w.StalledMinutes, w.SilentMinutes, w.OrphanMinutes, w.CardMinutes} {
-		if n < 1 || n > 7*24*60 {
-			return errors.New("minute thresholds must be whole numbers, 1–10080")
-		}
-	}
-	if w.MaxRows < 1 || w.MaxRows > 100 {
-		return errors.New("max_rows must be a whole number, 1–100")
-	}
-	return nil
-}
-
-func (w BriefingWaits) stallAfter(expect int) time.Duration {
-	return max(time.Duration(w.StalledMinutes)*time.Minute, time.Duration(expect)*time.Minute*3/2)
-}
-
-func (w BriefingWaits) silentAfter(expect int) time.Duration {
-	return max(time.Duration(w.SilentMinutes)*time.Minute, time.Duration(expect)*time.Minute*3/2)
-}
-
-func (s *Service) getBriefingWaits(ctx context.Context) (string, error) {
-	raw, err := json.Marshal(briefingWaitsOf(s.settings(ctx)))
-	return string(raw), err
-}
-
-// setBriefingWaits is an ordinary persona_settings change: the tool only prepares a before/after card, and the
-// existing approval path calls apply. null restores the defaults documented in ownSettings.
-func (s *Service) setBriefingWaits(ctx context.Context, raw json.RawMessage) (*ownChange, error) {
-	var next *BriefingWaits
-	if err := json.Unmarshal(raw, &next); err != nil {
-		return nil, errors.New("value must be the whole BriefingWaits object, or null for the defaults")
-	}
-	if next != nil {
-		if err := next.validate(); err != nil {
-			return nil, err
-		}
-	}
-	before := briefingWaitsOf(s.settings(ctx))
-	after := defaultBriefingWaits()
-	if next != nil {
-		after = *next
-	}
-	if reflect.DeepEqual(before, after) {
-		return &ownChange{summary: "assistant.briefing_waits is unchanged"}, nil
-	}
-	if s.store() == nil {
-		return nil, errors.New("no database on this hub")
-	}
-	words := func(w BriefingWaits) string {
-		return fmt.Sprintf("stalled=%dm, silent=%dm, orphan=%dm, cards=%dm, max_rows=%d", w.StalledMinutes, w.SilentMinutes, w.OrphanMinutes, w.CardMinutes, w.MaxRows)
-	}
-	return &ownChange{cardText: func(l i18n.Lang) string {
-		return i18n.T(l, "assistant-settings_tool.change_briefing_waits", i18n.Args{"before": words(before), "after": words(after)})
-	}, apply: func(ctx context.Context) (string, error) {
-		if _, err := s.updateSettings(ctx, func(v *Settings) error { v.BriefingWaits = next; return nil }); err != nil {
-			return "", err
-		}
-		s.settingsChanged(ctx)
-		return "assistant.briefing_waits updated; the next briefing's deterministic wait lists use it.", nil
-	}}, nil
-}
 
 // briefDirections reads the same task, review, queue, session and interaction ledgers as supervision. It does not ask
 // a model to infer why work stopped. A task with no dispatch attempt is counted only; a queue is an attempt even before
 // its first agent exists. Tasks whose supervisor is not a current direction (notably the background supervisor) belong
 // to main, so leader-dispatched and main-dispatched work are both covered.
 func (s *Service) briefDirections(ctx context.Context, now time.Time, l i18n.Lang, web string) ([]prompts.BriefDirection, []prompts.BriefDisabledRoutine) {
-	cfg, waits := s.settings(ctx), briefingWaitsOf(s.settings(ctx))
+	cfg := s.settings(ctx)
+	waits, ok := s.briefingWaits(cfg)
+	if !ok { // the briefing module is off: no wait rows to work out
+		return nil, nil
+	}
 	ids := make([]string, 0, len(cfg.Leaders)+1)
 	if cfg.Main != "" {
 		ids = append(ids, cfg.Main)
@@ -163,7 +77,7 @@ func (s *Service) briefDirections(ctx context.Context, now time.Time, l i18n.Lan
 	cards := map[string][]proto.Interaction{}
 	var loose []proto.Interaction
 	for _, ix := range s.pendingInteractions() {
-		if s.interactionEnded(ix.ID) || now.Sub(ix.CreatedAt) < time.Duration(waits.CardMinutes)*time.Minute {
+		if s.interactionEnded(ix.ID) || now.Sub(ix.CreatedAt) < waits.CardAfter() {
 			continue
 		}
 		if t, ok := s.todoOfSession(ctx, ix.MachineID, ix.SessionID); ok {
@@ -225,45 +139,29 @@ func (s *Service) briefDirections(ctx context.Context, now time.Time, l i18n.Lan
 		dirs[i].Waits = append(dirs[i].Waits, w)
 	}
 	for i := range dirs {
-		foldBriefDirection(&dirs[i], waits.MaxRows)
+		foldBriefDirection(&dirs[i], waits)
 	}
 	return dirs, s.briefDisabledRoutines(ctx, now, l, names)
 }
 
-func briefOwnerWait(kind string) bool {
-	return kind == "needs_user" || kind == "question" || kind == "permission" || kind == "private"
-}
-
-func foldBriefDirection(d *prompts.BriefDirection, maxRows int) {
-	slices.SortStableFunc(d.Waits, func(a, b prompts.BriefWait) int {
-		if ao, bo := briefOwnerWait(a.Kind), briefOwnerWait(b.Kind); ao != bo {
-			if ao {
-				return -1
-			}
-			return 1
-		}
-		if c := a.Since.Compare(b.Since); c != 0 {
-			return c
-		}
-		return strings.Compare(a.TodoID+a.InteractionID, b.TodoID+b.InteractionID)
-	})
-	// Owner describes the direction, not its rows: the same non-owner-wait bound applies to main and every leader.
-	kept := make([]prompts.BriefWait, 0, len(d.Waits))
-	others := 0
-	for _, w := range d.Waits {
-		if briefOwnerWait(w.Kind) || others < maxRows {
-			kept = append(kept, w)
-		}
-		if !briefOwnerWait(w.Kind) {
-			others++
-		}
+// foldBriefDirection orders and bounds d's rows as the briefing module's wait rules say (owner waits first and never
+// folded; the others bounded, the rest counted in More).
+func foldBriefDirection(d *prompts.BriefDirection, waits modapi.WaitRules) {
+	rows := make([]modapi.WaitRow, len(d.Waits))
+	for i, w := range d.Waits {
+		rows[i] = modapi.WaitRow{Kind: w.Kind, Since: w.Since, Key: w.TodoID + w.InteractionID}
 	}
-	d.More = max(0, others-maxRows)
+	keep, more := waits.Fold(rows)
+	kept := make([]prompts.BriefWait, 0, len(keep))
+	for _, i := range keep {
+		kept = append(kept, d.Waits[i])
+	}
+	d.More = more
 	d.Waits = kept
 }
 
 func (s *Service) briefTaskWait(ctx context.Context, t Todo, agents []proto.Session, cards []proto.Interaction, queue *TaskQueue,
-	now time.Time, waits BriefingWaits, reachable map[string]bool, lists map[string]map[string]proto.Session, failed map[string]bool) (prompts.BriefWait, bool) {
+	now time.Time, waits modapi.WaitRules, reachable map[string]bool, lists map[string]map[string]proto.Session, failed map[string]bool) (prompts.BriefWait, bool) {
 	base := prompts.BriefWait{TodoID: t.ID, Title: clip(oneLine(t.Title), 80)}
 	v := t.Supervision
 	if v != nil {
@@ -300,7 +198,11 @@ func (s *Service) briefTaskWait(ctx context.Context, t Todo, agents []proto.Sess
 		return w, true
 	}
 	if queue != nil {
-		base.Kind, base.WaitingOn, base.Since, base.Until, base.Reason = "capacity", "capacity", queue.QueuedAt, queue.NextAt, clip(oneLine(queue.Reason), 120)
+		until := queue.NextAt
+		if queue.Key == workspaceQueueKey {
+			until = time.Time{}
+		}
+		base.Kind, base.WaitingOn, base.Since, base.Until, base.Reason = "capacity", "capacity", queue.QueuedAt, until, clip(oneLine(queue.Reason), 120)
 		return base, true
 	}
 	if len(t.Agents) > 0 {
@@ -337,7 +239,7 @@ func (s *Service) briefTaskWait(ctx context.Context, t Todo, agents []proto.Sess
 					base.Kind, base.WaitingOn, base.Since, base.Reason = "orphaned", "technical", since, o.Reason
 					return base, true
 				}
-				if now.Sub(since) >= time.Duration(waits.OrphanMinutes)*time.Minute {
+				if now.Sub(since) >= waits.OrphanAfter() {
 					base.Kind, base.WaitingOn, base.Since, base.Reason = "orphaned", "technical", since, o.Reason
 					return base, true
 				}
@@ -366,9 +268,9 @@ func (s *Service) briefTaskWait(ctx context.Context, t Todo, agents []proto.Sess
 	// The task is as live as its most recently active agent. An old stopped session must not make a task with another
 	// active agent look stalled; the threshold (working vs. silent) comes from that latest session's state.
 	if !moved.IsZero() {
-		after := waits.silentAfter(expect)
+		after := waits.SilentAfter(expect)
 		if latest.State == proto.StateWorking {
-			after = waits.stallAfter(expect)
+			after = waits.StalledAfter(expect)
 		}
 		if now.Sub(moved) >= after {
 			base.Kind, base.WaitingOn, base.Since = "stalled", "technical", moved
@@ -391,7 +293,7 @@ func (s *Service) briefTaskWait(ctx context.Context, t Todo, agents []proto.Sess
 				stoppedAt = at
 			}
 		}
-		if !stoppedAt.IsZero() && now.Sub(stoppedAt) >= waits.silentAfter(expect) {
+		if !stoppedAt.IsZero() && now.Sub(stoppedAt) >= waits.SilentAfter(expect) {
 			base.Kind, base.WaitingOn, base.Since, base.Reason = "stalled", "technical", stoppedAt, orphanClosed
 			return base, true
 		}

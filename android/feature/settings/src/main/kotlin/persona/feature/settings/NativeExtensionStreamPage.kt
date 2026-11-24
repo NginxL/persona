@@ -169,7 +169,7 @@ internal fun NativeExtensionStreamPage(adapter: NativeExtensionStreamAdapter, ti
             commit()
             action.push?.let { push(it); return@launch }
             if (action.pop) { back(); return@launch }
-            action.open?.let { if (ExtensionViewText.isHttps(it)) runCatching { uri.openUri(it) }; return@launch }
+            action.open?.let { if (ExtensionViewText.isHttps(it)) { val _ = runCatching { uri.openUri(it) } }; return@launch }
             if (!session.event(key, action.id, event, value, expectedTree = tree,
                 draftsAtPress = drafts.takeIf { action.submit },
                 onQueued = { queued -> if (done != null && adapter.targets.size < 64) adapter.targets[queued.eventId] = tree to done })) refused()
@@ -207,7 +207,7 @@ internal fun NativeExtensionStreamPage(adapter: NativeExtensionStreamAdapter, ti
             press = { item, action -> press(key, item, action) },
             edit = { name, value -> scope.launch { session.edit(name, JsonPrimitive(value), expectedTree = displayedTree) } },
             choose = { item -> displayedTree?.let { choosing = NativeStreamChoice(item, it) } },
-            open = { url -> if (currentShown && ExtensionViewText.isHttps(url)) runCatching { uri.openUri(url) } },
+            open = { url -> if (currentShown && ExtensionViewText.isHttps(url)) { val _ = runCatching { uri.openUri(url) } } },
             segment = { item, value ->
                 if (item.action?.confirm.isNullOrBlank()) scope.launch { session.edit(key, JsonPrimitive(value), expectedTree = displayedTree) }
                 item.action?.let { press(key, item, it, mapOf(item.name.orEmpty() to value), "change") }

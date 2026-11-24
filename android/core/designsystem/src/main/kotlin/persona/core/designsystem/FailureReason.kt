@@ -12,6 +12,7 @@ import java.io.IOException
  * Resolve it with [UiText.text] in composition or [UiText.resolve] outside it.
  */
 fun failureReasonText(error: Throwable): UiText {
+    if (error is persona.core.contracts.api.LauncherRetryUnsupportedException) return operationFeedback(error).text
     if (error is IOException) {
         val failure = HubFailure.from(error)
         if (failure.code in setOf("kb_disabled", "kb_unavailable", "kb_read_only", "assistant_offline") ||

@@ -18,46 +18,12 @@ import persona.core.designsystem.JNotice
 import persona.core.designsystem.Status
 import persona.core.designsystem.Tokens
 import persona.core.designsystem.icons.PhIcons
+import persona.core.inbox.*
 
 // New items waiting for triage (#1773): since #1644 an extension's new items enter the inbox only once the model has
 // sorted them, and the hub says in GET /api/v1/inbox `triage` how many wait and why (server/internal/hub/
 // inbox_admit.go). While some wait, a banner over the list says so: the same words, place and tone on the web, iOS
 // and Android.
-
-/** How triage stands; null from an older hub, which sends none. */
-@Serializable
-data class InboxTriage(
-    /** ok | unconfigured | paused | error | timeout | behind. */
-    val state: String = "",
-    /** The state for people, the hub's own words; may be empty. */
-    val reason: String? = null,
-    val waiting: Int = 0,
-    val sources: List<InboxTriageSource> = emptyList(),
-) {
-    companion object {
-        /** The model use "Set up" opens: "Inbox triage", the one that sorts the inbox (Settings › Models). */
-        const val Purpose = "inbox.triage"
-
-        /** The response's `triage`; anything else (missing, not an object, unreadable) is none. */
-        fun decode(json: JsonElement?): InboxTriage? = (json as? JsonObject)?.let {
-            runCatching { JsonCodec.decodeFromJsonElement(serializer(), it) }.getOrNull()
-        }
-    }
-}
-
-/** One source's share of the waiting items. */
-@Serializable
-data class InboxTriageSource(
-    val source: String = "",
-    val name: String? = null,
-    val state: String = "",
-    val reason: String? = null,
-    val waiting: Int = 0,
-    /** timeout | rate_limited | failed: the hub could not read it this round, so its items are the last round's. */
-    @SerialName("read_error") val readError: String? = null,
-    /** That, for people, in the hub's words. */
-    @SerialName("read_reason") val readReason: String? = null,
-)
 
 /** The banner's words, and whether it offers "Set up" (the model is not set up). */
 data class InboxTriageBanner(val text: String, val configure: Boolean)

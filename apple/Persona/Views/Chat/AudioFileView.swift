@@ -205,7 +205,6 @@ struct AudioFileView: View {
             } label: {
                 Text("Speed \(Self.speedText(model.speed))").font(Theme.Font.caption).lineLimit(1)
             }
-            .arrowlessMenu()
             .accessibilityIdentifier("audio-speed")
             Spacer()
         }

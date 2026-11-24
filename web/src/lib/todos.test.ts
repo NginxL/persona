@@ -5,24 +5,26 @@ import {
   DECISIONS_FIRST,
   shownDecisions,
   heldDelivery,
-  isAutoDone,
   isCancelled,
+  isAutoDone,
   isRemovable,
   TODO_STATUS_INFO,
+  TODO_STATUS_RANK,
+  todoRank,
   todoStatusLabel,
+  waitsForOwner,
   buildTodoAgentGroups,
   dockAgents,
   findTodoForSpace,
-  formatAgentSource,
-  formatTodoContext,
   interruption,
   isOverdue,
   isSpacesSupported,
   makeSessionLookup,
   mostUrgentAgent,
-  resolveLinkCurrentTodoId,
+  responsibleOf,
   runningSubagents,
   sortTodos,
+  shownStatus,
   strikesThrough,
   stoppedReason,
   taskNow,
@@ -32,6 +34,7 @@ import {
   type TodoAgent,
   type TodoSpace,
 } from "./todos";
+import { cancellationReason, formatAgentSource, formatTodoContext, resolveLinkCurrentTodoId } from "./todo-details";
 import type { AgentMutes } from "./agent-groups";
 import { machineSessionOrder } from "./herdr-tree";
 import { BOARD_ORDER, boardSectionOf } from "./task-board";
@@ -163,6 +166,48 @@ describe("待办状态计算 (todoStatus)", () => {
   });
 });
 
+describe("当前轮决定已不再处理 (#8262)", () => {
+  const round = "2026-11-10T10:00:00Z";
+  const waiting: Todo = {
+    id: "dismissed",
+    title: "选择发布路径",
+    created_at: "2026-11-10T09:00:00Z",
+    updated_at: round,
+    agents: [],
+    supervision: {
+      supervisor: "main",
+      state: "needs_user",
+      reviews: [{ at: round, verdict: "needs_user" }],
+    },
+    pr_url: "https://example.com/pull/42",
+    pr_status: { url: "https://example.com/pull/42", state: "open", draft: false, review: "pending", checks: "none", conflicts: false, checked_at: round },
+  };
+  const dismissed: Todo = {
+    ...waiting,
+    decision_review: { review_at: round, dismissal_id: "dismiss-current-round" },
+  };
+
+  it("同一轮 dismissal 不再显示或排名为等你，开放 PR 和工作状态仍按自身投影", () => {
+    for (const status of ["follow_up", "working"] as const) {
+      expect(waitsForOwner(dismissed)).toBe(false);
+      expect(shownStatus(dismissed, status)).toBe(status);
+      expect(todoStatusLabel(dismissed, status)).toBe(TODO_STATUS_INFO[status].label);
+      expect(todoRank(dismissed, status)).toBe(TODO_STATUS_RANK[status]);
+    }
+  });
+
+  it("未 dismiss 或新一轮 review 仍然等你", () => {
+    for (const current of [
+      waiting,
+      { ...dismissed, supervision: { ...waiting.supervision!, reviews: [{ at: "2026-11-10T11:00:00Z", verdict: "needs_user" as const }] } },
+    ]) {
+      expect(waitsForOwner(current)).toBe(true);
+      expect(shownStatus(current, "follow_up")).toBe("needs_you");
+      expect(todoRank(current, "follow_up")).toBe(0);
+    }
+  });
+});
+
 describe("Agent 没开起来的任务 (#1077 / #1142)", () => {
   const failed: Todo = {
     id: "t9",
@@ -241,6 +286,7 @@ describe("待办列表排序 (sortTodos)", () => {
     const review = { supervisor: "main", state: "pending_review" as const };
     const todos: Todo[] = [
       { id: "done", title: "", created_at: at, updated_at: "", done_at: at },
+      { id: "cancelled", title: "", created_at: "2026-11-07T10:00:00Z", updated_at: "", done_at: at, done_by: "cancelled", cancelled_at: at },
       { id: "stopped", title: "", created_at: at, updated_at: "", agents: on("s-idle") },
       { id: "unread", title: "", created_at: at, updated_at: "", agents: on("s-unread") },
       { id: "not-started", title: "", created_at: at, updated_at: "", agents: [] },
@@ -252,7 +298,7 @@ describe("待办列表排序 (sortTodos)", () => {
       { id: "needs", title: "", created_at: at, updated_at: "", agents: on("s-needs") },
     ];
     const sorted = sortTodos(todos, lookup);
-    expect(sorted.map((t) => t.id)).toEqual(["needs", "interrupted", "review-stopped", "review-unread", "failed", "working", "not-started", "unread", "stopped", "done"]);
+    expect(sorted.map((t) => t.id)).toEqual(["needs", "interrupted", "review-stopped", "review-unread", "failed", "working", "not-started", "unread", "stopped", "done", "cancelled"]);
     // the same order as the board's sections
     const sections = sorted.map((t) => BOARD_ORDER.indexOf(boardSectionOf({ todo: t, status: todoStatus(t, lookup) })));
     expect(sections).toEqual([...sections].sort((a, b) => a - b));
@@ -694,6 +740,49 @@ describe("弹窗关联目标判定 (resolveLinkCurrentTodoId)", () => {
   });
 });
 
+describe("交付与等待处理的状态标签 (#5732)", () => {
+  const base: Todo = { id: "t", title: "交付任务", created_at: "2026-11-04T06:00:00Z", updated_at: "2026-11-04T08:00:00Z" };
+
+  it("pending_review 和未验收的 live 的短标签都是待验收，不显示未开始", () => {
+    const pending = { ...base, supervision: { supervisor: "main", state: "pending_review" as const } };
+    expect(todoStatusLabel(pending, "not_started")).toBe("待验收");
+    expect(shownStatus(pending, "not_started")).toBe("unread");
+    const live = { ...base, delivery: { state: "live" as const, at: "2026-11-04T08:00:00Z" } };
+    expect(todoStatusLabel(live, "not_started")).toBe("待验收");
+    expect(shownStatus(live, "not_started")).toBe("unread");
+  });
+
+  it("open concern 的 live 不冒用普通交付状态", () => {
+    const concern = { ...base, kind: "concern", delivery: { state: "live" as const, at: "2026-11-04T08:00:00Z" } };
+    expect(todoStatusLabel(concern, "not_started")).toBe("未开始");
+    expect(shownStatus(concern, "not_started")).toBe("not_started");
+  });
+
+  it("pending_review 的 open concern 短标签仍是待验收", () => {
+    const concern = { ...base, kind: "concern", supervision: { supervisor: "main", state: "pending_review" as const } };
+    expect(todoStatusLabel(concern, "not_started")).toBe("待验收");
+    expect(shownStatus(concern, "not_started")).toBe("unread");
+  });
+
+  it("needs_user 复用待处理标签，而不是普通的需要你", () => {
+    const waiting = { ...base, supervision: { supervisor: "main", state: "needs_user" as const } };
+    expect(todoStatusLabel(waiting, "follow_up")).toBe("待处理");
+    expect(shownStatus(waiting, "follow_up")).toBe("needs_you");
+  });
+
+  it("用户已完成优先于账本里遗留的 needs_user 和待决定 ask", () => {
+    const done = {
+      ...base,
+      done_at: "2026-11-04T09:00:00Z",
+      done_by: "user" as const,
+      supervision: { supervisor: "main", state: "needs_user" as const },
+      ask: { outcome: "decide" as const, verdict: "needs_user", asked_at: "2026-11-04T08:30:00Z" },
+    };
+    expect(todoStatusLabel(done, "done")).toBe("已完成");
+    expect(shownStatus(done, "done")).toBe("done");
+  });
+});
+
 describe("自动完成 (docs/assistant/todos.md「Automatic completion」)", () => {
   const base = { id: "t", title: "统一连接器 logo 尺寸", created_at: "2026-11-04T06:00:00Z", updated_at: "2026-11-04T08:00:00Z" };
   it("hub 判断做完后关掉的任务标「自动完成」", () => {
@@ -904,6 +993,33 @@ describe("任务卡片的进度 (taskNow, #1583)", () => {
   });
 });
 
+describe("取消是独立状态，不是完成 (#5732)", () => {
+  const closed: Todo = { id: "cancelled", title: "Cancelled", created_at: "2026-11-02T10:00:00Z", updated_at: "2026-11-02T11:00:00Z", done_at: "2026-11-02T11:00:00Z", done_by: "review", done_reason: "Not needed" };
+  it("reads the additive projection and the legacy supervision marker", () => {
+    const current = { ...closed, cancelled_at: closed.done_at, cancelled_reason: "Superseded" };
+    expect(isCancelled(current)).toBe(true);
+    expect(cancellationReason(current)).toBe("Superseded");
+    expect(todoStatusLabel(current, "done")).toBe("已取消");
+    const legacy = { ...closed, supervision: { supervisor: "main", state: "cancelled" as const } };
+    expect(isCancelled(legacy)).toBe(true);
+    expect(cancellationReason(legacy)).toBe("Not needed");
+    expect(todoStatusLabel(legacy, "done")).toBe("已取消");
+    expect(isCancelled(closed)).toBe(false);
+  });
+
+  it("does not reuse the old cancelled verdict after reopening and explicit completion", () => {
+    const cancelled = { ...closed, cancelled_at: closed.done_at };
+    const reopened = { ...cancelled, done_at: null, done_by: "", cancelled_at: null, reopened_at: "2026-11-03T09:00:00Z" };
+    for (const doneBy of ["", "auto"]) {
+      const completed: Todo = { ...reopened, done_at: "2026-11-03T10:00:00Z", done_by: doneBy,
+        supervision: { supervisor: "main", state: "cancelled" } };
+      expect(isCancelled(completed)).toBe(false);
+      expect(cancellationReason(completed)).toBe("");
+      expect(todoStatusLabel(completed, "done")).not.toBe("已取消");
+    }
+  });
+});
+
 describe("a to-do's decisions shown (#6447)", () => {
   const list = Array.from({ length: 12 }, (_, i) => `d${i + 1}`);
 
@@ -934,6 +1050,18 @@ describe("strikesThrough (#11677)", () => {
     expect(strikesThrough(cancelled, false)).toBe(true);
     // still open (reopened): the row is not struck
     expect(strikesThrough({ ...cancelled, done_at: null }, true)).toBe(false);
+  });
+
+  it("strikes every cancellation representation accepted for Cancelled filing", () => {
+    const representations = [
+      td({ done_by: "cancelled" }),
+      td({ cancelled_at: at }),
+      td({ done_by: "review", cancelled_at: at }),
+    ];
+    for (const cancelled of representations) {
+      expect(isCancelled(cancelled)).toBe(true);
+      expect(strikesThrough(cancelled, false)).toBe(true);
+    }
   });
 
   it("leaves an accepted, deployed, auto-completed or owner-ticked task plain", () => {
@@ -1000,5 +1128,51 @@ describe("striking a finished to-do's title through (#11677)", () => {
 
   it("never strikes an open row, including a failed start waiting on the owner", () => {
     expect(strikesThrough(failed, true)).toBe(false);
+  });
+});
+
+describe("responsible party (#12712)", () => {
+  const base: Todo = {
+    id: "t-resp",
+    title: "External tracking",
+    created_at: "2026-11-22T01:00:00Z",
+    updated_at: "2026-11-22T01:00:00Z",
+    agents: [],
+  };
+
+  it("normalizes valid responsible entries and ignores invalid or empty ones", () => {
+    expect(responsibleOf(base)).toBeUndefined();
+    expect(responsibleOf({ responsible: { kind: "session", name: "  ops-watch  ", machine_id: " box-1 ", session_id: " s-1 " } }))
+      .toEqual({ kind: "session", name: "ops-watch", machine_id: "box-1", session_id: "s-1" });
+    expect(responsibleOf({ responsible: { kind: "person", name: "Alex" } }))
+      .toEqual({ kind: "person", name: "Alex" });
+    expect(responsibleOf({ responsible: { kind: "person", name: "   " } })).toBeUndefined();
+    expect(responsibleOf({ responsible: { kind: "agent" as "person", name: "bot" } })).toBeUndefined();
+  });
+
+  it("derives follow_up instead of not_started when responsible is set without active linked agents", () => {
+    const withSession: Todo = { ...base, responsible: { kind: "session", name: "ops-watch" } };
+    const withPerson: Todo = { ...base, responsible: { kind: "person", name: "Alex" } };
+    expect(todoStatus(withSession)).toBe("follow_up");
+    expect(todoStatus(withPerson)).toBe("follow_up");
+    expect(todoStatus(base)).toBe("not_started");
+  });
+
+  it("keeps linked Persona agent precedence when both linked agent and responsible are set", () => {
+    const working = mockSession("mac-1", "s1", "working");
+    const needs = mockSession("mac-1", "s2", "needs_you");
+    const lookup = makeSessionLookup([working, needs]);
+    const withWorking: Todo = {
+      ...base,
+      responsible: { kind: "person", name: "Alex" },
+      agents: [{ machine_id: "mac-1", session_id: "s1", linked_at: "2026-11-22T01:00:00Z" }],
+    };
+    const withNeeds: Todo = {
+      ...base,
+      responsible: { kind: "session", name: "ops-watch" },
+      agents: [{ machine_id: "mac-1", session_id: "s2", linked_at: "2026-11-22T01:00:00Z" }],
+    };
+    expect(todoStatus(withWorking, lookup)).toBe("working");
+    expect(todoStatus(withNeeds, lookup)).toBe("needs_you");
   });
 });

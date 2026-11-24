@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/nwverse/persona/server/internal/connector/github"
 	"github.com/nwverse/persona/server/internal/db"
+	"github.com/nwverse/persona/server/internal/githubwire"
 	"github.com/nwverse/persona/server/internal/proto"
 	"github.com/nwverse/persona/server/internal/rpc"
 )
@@ -102,10 +102,13 @@ func TestCIWatchCancellationAndOutboxRestart(t *testing.T) {
 
 type fakeCIExtensions struct {
 	ExtensionTools
-	call func(context.Context, string, int) (github.PRCheckSnapshot, time.Time, bool, error)
+	call func(context.Context, string, int) (githubwire.PRCheckSnapshot, time.Time, bool, error)
 }
 
-func (f fakeCIExtensions) PRChecks(ctx context.Context, repo string, number int) (github.PRCheckSnapshot, time.Time, bool, error) {
+// ConnectorTool: none of its tools is a connector's.
+func (f fakeCIExtensions) ConnectorTool(string) bool { return false }
+
+func (f fakeCIExtensions) PRChecks(ctx context.Context, repo string, number int) (githubwire.PRCheckSnapshot, time.Time, bool, error) {
 	return f.call(ctx, repo, number)
 }
 
@@ -120,12 +123,12 @@ func TestCIConnectorPreferredAndRateLimit(t *testing.T) {
 	s.putWork(ctx, e)
 	reset := turnEnd.Add(50 * time.Minute)
 	calls := 0
-	s.ext = fakeCIExtensions{call: func(_ context.Context, repo string, number int) (github.PRCheckSnapshot, time.Time, bool, error) {
+	s.ext = fakeCIExtensions{call: func(_ context.Context, repo string, number int) (githubwire.PRCheckSnapshot, time.Time, bool, error) {
 		calls++
 		if repo != "example/repo" || number != 12 {
 			t.Errorf("target %s #%d", repo, number)
 		}
-		return github.PRCheckSnapshot{}, reset, true, nil
+		return githubwire.PRCheckSnapshot{}, reset, true, nil
 	}}
 	nodeCalls := 0
 	f.answerNode("git.pr", func(_ string, _ json.RawMessage) (any, error) { nodeCalls++; return nil, nil })
@@ -146,10 +149,10 @@ func TestCIWatchCancelledDuringPoll(t *testing.T) {
 	startCIWatch(c, &e, turnEnd, "", "")
 	s.putWork(ctx, e)
 	entered, release, done := make(chan struct{}), make(chan struct{}), make(chan struct{})
-	s.ext = fakeCIExtensions{call: func(context.Context, string, int) (github.PRCheckSnapshot, time.Time, bool, error) {
+	s.ext = fakeCIExtensions{call: func(context.Context, string, int) (githubwire.PRCheckSnapshot, time.Time, bool, error) {
 		close(entered)
 		<-release
-		return github.PRCheckSnapshot{Pending: true, Count: 1}, time.Time{}, true, nil
+		return githubwire.PRCheckSnapshot{Pending: true, Count: 1}, time.Time{}, true, nil
 	}}
 	go func() {
 		s.workWake(ctx, s.newWorkView(ctx), [2]string{"box", "ci"}, turnEnd.Add(time.Minute))
@@ -244,9 +247,9 @@ func TestCIWatchRespectsMachineAndGuestPrivacy(t *testing.T) {
 				t.Fatal(err)
 			}
 			connectorCalls, nodeCalls := 0, 0
-			s.ext = fakeCIExtensions{call: func(context.Context, string, int) (github.PRCheckSnapshot, time.Time, bool, error) {
+			s.ext = fakeCIExtensions{call: func(context.Context, string, int) (githubwire.PRCheckSnapshot, time.Time, bool, error) {
 				connectorCalls++
-				return github.PRCheckSnapshot{Count: 1}, time.Time{}, true, nil
+				return githubwire.PRCheckSnapshot{Count: 1}, time.Time{}, true, nil
 			}}
 			f.answerNode("git.pr", func(_ string, _ json.RawMessage) (any, error) { nodeCalls++; return nil, nil })
 			e := db.SessionWork{MachineID: "box", SessionID: "ci", Work: proto.WorkState{CI: &proto.WorkCI{Repo: "example/repo", Number: 12}}}
@@ -425,9 +428,9 @@ func TestCIWatchOldResultCannotWakeNewTurn(t *testing.T) {
 		f.mu.Unlock()
 	}
 	setHub(s, h)
-	s.ext = fakeCIExtensions{call: func(context.Context, string, int) (github.PRCheckSnapshot, time.Time, bool, error) {
+	s.ext = fakeCIExtensions{call: func(context.Context, string, int) (githubwire.PRCheckSnapshot, time.Time, bool, error) {
 		armed = true
-		return github.PRCheckSnapshot{Count: 1, Fingerprint: "old", Failures: []string{"old failure"}}, time.Time{}, true, nil
+		return githubwire.PRCheckSnapshot{Count: 1, Fingerprint: "old", Failures: []string{"old failure"}}, time.Time{}, true, nil
 	}}
 	sends := 0
 	f.answerNode(DeviceSessionSendOnce, func(_ string, _ json.RawMessage) (any, error) { sends++; return map[string]any{}, nil })
@@ -483,7 +486,7 @@ func TestCIWatchTrustChangesDuringRead(t *testing.T) {
 			at := turnEnd.Add(3 * time.Minute)
 			e := db.SessionWork{MachineID: "box", SessionID: "ci", TurnAt: turnEnd, WakeAt: &at, Work: proto.WorkState{Phase: proto.WorkBlocked, On: proto.WaitExternal, Wait: "CI", WakeAt: &at, CI: &proto.WorkCI{Number: 12, Repo: "example/repo", Observed: "hash", ObservedAt: turnEnd}}}
 			s.putWork(ctx, e)
-			s.ext = fakeCIExtensions{call: func(context.Context, string, int) (github.PRCheckSnapshot, time.Time, bool, error) {
+			s.ext = fakeCIExtensions{call: func(context.Context, string, int) (githubwire.PRCheckSnapshot, time.Time, bool, error) {
 				if kind == "work" {
 					f.mu.Lock()
 					f.hello.Assistant.WorkMachines = []string{"box"}
@@ -491,7 +494,7 @@ func TestCIWatchTrustChangesDuringRead(t *testing.T) {
 				} else if err := s.guestSet(ctx, "box", "ci", []string{"other"}); err != nil {
 					t.Fatal(err)
 				}
-				return github.PRCheckSnapshot{Count: 1, Fingerprint: "hash", Failures: []string{"sensitive"}}, time.Time{}, true, nil
+				return githubwire.PRCheckSnapshot{Count: 1, Fingerprint: "hash", Failures: []string{"sensitive"}}, time.Time{}, true, nil
 			}}
 			sends := 0
 			f.answerNode(DeviceSessionSendOnce, func(_ string, _ json.RawMessage) (any, error) { sends++; return map[string]any{}, nil })
@@ -579,12 +582,12 @@ func TestCIWatchRetriesTransientConnectorFailure(t *testing.T) {
 	startCIWatch(c, &e, turnEnd, "", "")
 	s.putWork(ctx, e)
 	calls := 0
-	s.ext = fakeCIExtensions{call: func(context.Context, string, int) (github.PRCheckSnapshot, time.Time, bool, error) {
+	s.ext = fakeCIExtensions{call: func(context.Context, string, int) (githubwire.PRCheckSnapshot, time.Time, bool, error) {
 		calls++
 		if calls == 1 {
-			return github.PRCheckSnapshot{}, time.Time{}, true, errors.New("GitHub GET /checks: 503 temporarily unavailable")
+			return githubwire.PRCheckSnapshot{}, time.Time{}, true, errors.New("GitHub GET /checks: 503 temporarily unavailable")
 		}
-		return github.PRCheckSnapshot{Count: 1, Fingerprint: "ready"}, time.Time{}, true, nil
+		return githubwire.PRCheckSnapshot{Count: 1, Fingerprint: "ready"}, time.Time{}, true, nil
 	}}
 	f.answerNode("git.pr", func(_ string, _ json.RawMessage) (any, error) { return nil, errors.New("unknown method git.pr") })
 	sends := 0
@@ -722,12 +725,12 @@ func TestCIWatchURLWithoutSessionDirectory(t *testing.T) {
 	}
 	s.putWork(ctx, e)
 	calls := 0
-	s.ext = fakeCIExtensions{call: func(_ context.Context, repo string, n int) (github.PRCheckSnapshot, time.Time, bool, error) {
+	s.ext = fakeCIExtensions{call: func(_ context.Context, repo string, n int) (githubwire.PRCheckSnapshot, time.Time, bool, error) {
 		calls++
 		if repo != "example/repo" || n != 12 {
 			t.Fatalf("wrong PR %s #%d", repo, n)
 		}
-		return github.PRCheckSnapshot{Count: 1, Fingerprint: "ready"}, time.Time{}, true, nil
+		return githubwire.PRCheckSnapshot{Count: 1, Fingerprint: "ready"}, time.Time{}, true, nil
 	}}
 	sends := 0
 	f.answerNode(DeviceSessionSendOnce, func(_ string, _ json.RawMessage) (any, error) { sends++; return map[string]any{}, nil })
@@ -778,8 +781,8 @@ func TestCIOutboxDoesNotSendWhenPersistenceFails(t *testing.T) {
 	at := turnEnd.Add(3 * time.Minute)
 	e := db.SessionWork{MachineID: "box", SessionID: "ci", TurnAt: turnEnd, WakeAt: &at, Work: proto.WorkState{Phase: proto.WorkBlocked, On: proto.WaitExternal, Wait: "CI", WakeAt: &at, CI: &proto.WorkCI{Repo: "example/repo", Number: 12, Observed: "ready", ObservedAt: turnEnd}}}
 	s.putWork(ctx, e)
-	s.ext = fakeCIExtensions{call: func(context.Context, string, int) (github.PRCheckSnapshot, time.Time, bool, error) {
-		return github.PRCheckSnapshot{Count: 1, Fingerprint: "ready"}, time.Time{}, true, nil
+	s.ext = fakeCIExtensions{call: func(context.Context, string, int) (githubwire.PRCheckSnapshot, time.Time, bool, error) {
+		return githubwire.PRCheckSnapshot{Count: 1, Fingerprint: "ready"}, time.Time{}, true, nil
 	}}
 	sends := 0
 	f.answerNode(DeviceSessionSendOnce, func(_ string, _ json.RawMessage) (any, error) { sends++; return map[string]any{}, nil })
@@ -1277,9 +1280,9 @@ func TestCIWatchReopenedTodoSurvivesTwoRestarts(t *testing.T) {
 				t.Fatal("second restart failed")
 			}
 			calls := 0
-			second.ext = fakeCIExtensions{call: func(context.Context, string, int) (github.PRCheckSnapshot, time.Time, bool, error) {
+			second.ext = fakeCIExtensions{call: func(context.Context, string, int) (githubwire.PRCheckSnapshot, time.Time, bool, error) {
 				calls++
-				return github.PRCheckSnapshot{Count: 1, Pending: true, Fingerprint: "pending"}, time.Time{}, true, nil
+				return githubwire.PRCheckSnapshot{Count: 1, Pending: true, Fingerprint: "pending"}, time.Time{}, true, nil
 			}}
 			second.workWake(ctx, second.newWorkView(ctx), [2]string{"box", "ci"}, time.Now())
 			got := entryOf(t, second, "ci")
@@ -1360,8 +1363,8 @@ func TestCIWatchUnusableSourcesFallBack(t *testing.T) {
 			startCIWatch(c, &e, turnEnd, "", "")
 			s.putWork(ctx, e)
 			if tc.connectorErr != nil {
-				s.ext = fakeCIExtensions{call: func(context.Context, string, int) (github.PRCheckSnapshot, time.Time, bool, error) {
-					return github.PRCheckSnapshot{}, time.Time{}, true, tc.connectorErr
+				s.ext = fakeCIExtensions{call: func(context.Context, string, int) (githubwire.PRCheckSnapshot, time.Time, bool, error) {
+					return githubwire.PRCheckSnapshot{}, time.Time{}, true, tc.connectorErr
 				}}
 			}
 			f.answerNode("git.pr", func(_ string, _ json.RawMessage) (any, error) { return nil, tc.nodeErr })
@@ -1408,11 +1411,11 @@ func TestCIWatchPendingAndRateLimitsDoNotExhaustSourceRetries(t *testing.T) {
 	e.Work.CI.SourceErrors = 2
 	s.putWork(ctx, e)
 	limited := true
-	s.ext = fakeCIExtensions{call: func(context.Context, string, int) (github.PRCheckSnapshot, time.Time, bool, error) {
+	s.ext = fakeCIExtensions{call: func(context.Context, string, int) (githubwire.PRCheckSnapshot, time.Time, bool, error) {
 		if limited {
-			return github.PRCheckSnapshot{}, turnEnd.Add(20 * time.Minute), true, nil
+			return githubwire.PRCheckSnapshot{}, turnEnd.Add(20 * time.Minute), true, nil
 		}
-		return github.PRCheckSnapshot{Count: 1, Pending: true, Fingerprint: "pending"}, time.Time{}, true, nil
+		return githubwire.PRCheckSnapshot{Count: 1, Pending: true, Fingerprint: "pending"}, time.Time{}, true, nil
 	}}
 	s.workWake(ctx, s.newWorkView(ctx), [2]string{"box", "ci"}, turnEnd.Add(time.Minute))
 	got := entryOf(t, s, "ci")

@@ -41,6 +41,7 @@ import persona.core.navigation.Navigator
 import persona.feature.inbox.*
 import persona.feature.inbox.InboxRepository
 import java.io.File
+import persona.core.inbox.*
 
 /**
  * An inbox item whose body its connector's extension draws (inbox_item, #1683), on the JVM with Robolectric's native

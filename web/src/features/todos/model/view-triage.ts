@@ -21,7 +21,7 @@ function ruleOf(view: TodoSummary, section: TriageSection): TriageRule {
   if (section === "just_done" || section === "done") {
     if (view.phase === "done") return "closed";
     const settled = SAME_RULE.get(view.line?.key ?? "");
-    if (settled === "accepted" || settled === "deployed") return settled;
+    if (settled === "accepted") return settled;
     return section === "done" ? "seen" : "finished_unseen";
   }
   return BY_SECTION[section] ?? "rest";
@@ -34,7 +34,7 @@ const SAME_RULE = new Map<string, TriageRule>([
   ["pr_open", "pr_open"],
   ["parked", "parked"],
   ["accepted", "accepted"],
-  ["deployed", "deployed"],
+  ["canceled", "cancelled"],
 ]);
 const BY_SECTION: Partial<Record<TriageSection, TriageRule>> = { waiting: "agent_asks", working: "agent_running", parked: "parked", shelved: "stale" };
 
@@ -61,8 +61,9 @@ export function drawnFromView(local: TriageResult, now: number): TriageResult {
       const rest = g.members.filter((m) => !viewed(m));
       for (const m of g.members) {
         if (!knownView(m.view)) continue;
-        const section = legacyOf(m.view)!;
-        const t: Triage = { section, rule: ruleOf(m.view, section), last: g.triage.get(m.id)!.last };
+        const before = g.triage.get(m.id)!;
+        const section = legacyOf(m.view, before.rule === "closed" && before.section === "just_done")!;
+        const t: Triage = { section, rule: ruleOf(m.view, section), last: before.last };
         fromView.push({ view: m.view, group: { key: m.id, section, lead: m, members: [m], triage: new Map([[m.id, t]]), last: t.last } });
       }
       if (rest.length === g.members.length) kept[s].push(g);
@@ -102,8 +103,8 @@ export function drawnFromView(local: TriageResult, now: number): TriageResult {
         const t = g.triage.get(m.id)!;
         todoCounts[t.section]++;
         if (openAsDrawn(m, t)) open++;
-        // closed, accepted or deployed as today; from a view, closed (Someday is neither open nor finished)
-        else if (knownView(m.view) ? m.view.phase === "done" : t.section !== "shelved") finished++;
+        // closed or accepted as today; from a view, closed (Someday is neither open nor finished)
+        else if (t.section !== "cancelled" && (knownView(m.view) ? m.view.phase === "done" : t.section !== "shelved")) finished++;
       }
-  return { sections, todoCounts, open, shelved: todoCounts.shelved, finished };
+  return { sections, todoCounts, open, shelved: todoCounts.shelved, finished, cancelled: todoCounts.cancelled };
 }

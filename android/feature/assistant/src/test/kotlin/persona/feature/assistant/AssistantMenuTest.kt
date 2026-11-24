@@ -50,22 +50,25 @@ class AssistantMenuTest {
     @Before fun setup() = AssistantManagerChoice.choose("hub", null, "assistant")
     @After fun cleanup() = AssistantManagerChoice.reset()
 
+    // A module's action (Modules.kt), as the voice module offers "Voice chat" while the hub runs a voice extension.
+    private val moduleAction = persona.core.moduleapi.ModuleMenuAction("example.chat", "Voice chat", PersonaIcons.voiceChannel) {}
+
     @Test fun theItemsComeInIosOrderAndSections() {
-        assertEquals(listOf(listOf(ConnectionDetails, Knowledge, Details, Voice, BackToMain),
+        assertEquals(listOf(listOf(ConnectionDetails, Knowledge, Details, ModuleItem(moduleAction), BackToMain),
             listOf(CopyDirectory, CopyInfo, CopySessionId, CopyDiagnostics), listOf(SessionInfo, Interrupt)),
-            assistantMenu(offline = true, voice = true, main = main, active = side, compact = false, newMain = false, working = true))
+            assistantMenu(offline = true, modules = listOf(moduleAction), main = main, active = side, compact = false, newMain = false, working = true))
         // The main conversation: no way back to it, its own actions, nothing to interrupt while it rests.
         assertEquals(listOf(listOf(Knowledge, Details), listOf(CopyDirectory, CopyInfo, CopySessionId, CopyDiagnostics),
             listOf(Compact, NewMain), listOf(SessionInfo)),
-            assistantMenu(offline = false, voice = false, main = main, active = main, compact = true, newMain = true, working = false))
+            assistantMenu(offline = false, modules = emptyList(), main = main, active = main, compact = true, newMain = true, working = false))
         // Clear context (#5100) between them, as the web's menu has it; alone when the hub offers only it.
         assertEquals(listOf(Compact, ClearContext, NewMain),
-            assistantMenu(offline = false, voice = false, main = main, active = main, compact = true, newMain = true, working = false, clear = true)[2])
+            assistantMenu(offline = false, modules = emptyList(), main = main, active = main, compact = true, newMain = true, working = false, clear = true)[2])
         assertEquals(listOf(ClearContext),
-            assistantMenu(offline = false, voice = false, main = main, active = main, compact = false, newMain = false, working = false, clear = true)[2])
+            assistantMenu(offline = false, modules = emptyList(), main = main, active = main, compact = false, newMain = false, working = false, clear = true)[2])
         // A blank page copies what a new conversation would use, and has no session to show or stop.
         assertEquals(listOf(listOf(Knowledge, Details, BackToMain), listOf(CopyDirectory, CopyInfo)),
-            assistantMenu(offline = false, voice = false, main = main, active = null, compact = false, newMain = false, working = true))
+            assistantMenu(offline = false, modules = emptyList(), main = main, active = null, compact = false, newMain = false, working = true))
     }
 
     @Test fun copyInfoSaysWhichConversationWhereAndHowToGoOn() {
@@ -152,10 +155,10 @@ class AssistantMenuTest {
 
     @Test fun everyItemHasIosIconForItsMeaning() {
         // iOS `AssistantTopBar.menuItems`: Theme.Icon.offline / knowledge / person / home / folder / copy / id / diagnostics /
-        // compactContext / newConversation / info / interrupt; Android's Voice chat takes the voice-chat icon.
+        // compactContext / newConversation / info / interrupt. A module's action brings its own icon.
         val expected = mapOf(
             ConnectionDetails to PersonaIcons.offline, Knowledge to PersonaIcons.knowledge, Details to PersonaIcons.person,
-            Voice to PersonaIcons.voiceChannel, BackToMain to PersonaIcons.home, CopyDirectory to PersonaIcons.folder,
+            BackToMain to PersonaIcons.home, CopyDirectory to PersonaIcons.folder,
             CopyInfo to PersonaIcons.copy, CopySessionId to PersonaIcons.id, CopyDiagnostics to PersonaIcons.diagnostics,
             Compact to PersonaIcons.compactContext, NewMain to PersonaIcons.newConversation, SessionInfo to PersonaIcons.info,
             // Clear context: the web's mark for it; the icon set has no meaning of iOS's eraser (only its pane /clear has one).

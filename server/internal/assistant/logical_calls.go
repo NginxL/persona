@@ -70,6 +70,13 @@ func (s *Service) logicalCall(ctx context.Context, machine, method string, raw j
 	if ctx.Value(logicalSourceKey{}) != nil || ctx.Value(historySourceKey{}) != nil {
 		return nil, false, nil
 	}
+	if method == DeviceSessionGet {
+		// One session's row is the manager's to answer from its projected list (logicalDevices.Session: the public
+		// root shows its active segment, a private segment is not found), never a node's: a node knows no
+		// session.get, and the fleet hides the active segment's physical id, so rewriting to it made every
+		// switched conversation look gone and no further switch could start.
+		return nil, false, nil
+	}
 	st, ok := s.store().(logicalConversationStore)
 	if !ok {
 		return nil, false, nil

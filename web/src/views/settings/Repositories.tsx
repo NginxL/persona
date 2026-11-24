@@ -2,23 +2,28 @@
 import { useEffect, useRef, useState } from "react";
 import { t } from "../../i18n";
 import { api, credentialOwner, errorText, getToken, HubTimeoutError, pastHub } from "../../lib/api";
+import { sendDraft } from "../../lib/drafts";
 import { parseRepository, remoteHost, type RepositoryIdentity as Identity } from "../../lib/repository-identity";
 import { MANAGER_HEADER } from "../../lib/manager-choice";
+import { navigate } from "../../lib/router";
 import {
-  isExtensionProvider, loadRepositoryProviders, repositoryProviderName, repositorySource, validProviderName, validRepositoryIdentity,
-  type RepositoryBinding as Binding, type RepositoryProvider,
+  isExtensionProvider, loadRepositoryProviders, repositoryProviderName, repositorySource, validProviderName, validRepositoryIdentity, validTaskWorkflow,
+  type RepositoryBinding as Binding, type RepositoryProvider, type RepositoryTaskWorkflow,
 } from "../../lib/task-repositories";
 import { Button, Dialog, Loading, toast } from "../../ui/atoms";
 import { RepositoryMark } from "../../ui/RepositoryMark";
+import { ChoiceRows, Disclosure } from "./ProviderFields";
+import { repositoryAssistantPrompt } from "./repository-assistant-prompt";
 import { Group, Pill, Row, settingsInputClass } from "./SettingsParts";
 
-type Draft = { id?: string; url: string; provider: string; name: string; aliases: string; purpose: string };
+type Draft = { id?: string; url: string; provider: string; name: string; aliases: string; purpose: string; task_workflow: "" | RepositoryTaskWorkflow };
 type Reply = { manager: string; repositories?: Binding[]; repository?: Binding; identity?: Identity; provider_name?: string; receipt?: string };
 /** An extension source's reading of an address (`key`: its source and the address), or why it could not read it. */
 type Preview = { key: string; identity?: Identity; name?: string; error?: string };
-const blank = (): Draft => ({ url: "", provider: "", name: "", aliases: "", purpose: "" });
+const blank = (): Draft => ({ url: "", provider: "", name: "", aliases: "", purpose: "", task_workflow: "" });
 const validBinding = (value?: Binding): value is Binding => validRepositoryIdentity(value) && typeof value.id === "string"
-  && validProviderName(value.provider_name) && typeof value.verified_at === "string" && Number.isFinite(Date.parse(value.verified_at));
+  && validProviderName(value.provider_name) && validTaskWorkflow(value.task_workflow)
+  && typeof value.verified_at === "string" && Number.isFinite(Date.parse(value.verified_at));
 /** How long typing pauses before an extension source is asked to read the address. */
 const PREVIEW_PAUSE_MS = 400;
 
@@ -31,6 +36,7 @@ export function Repositories({ manager, owner }: { manager: string; owner: strin
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
   const [draft, setDraft] = useState<Draft | null>(null);
+  const [workflowOpen, setWorkflowOpen] = useState(false);
   const [removing, setRemoving] = useState<Binding | null>(null);
   // The sources of repositories, built-ins first; undefined until read (or when it could not be read): only the
   // built-ins are offered then, and no saved row is said to be unavailable.
@@ -62,6 +68,10 @@ export function Repositories({ manager, owner }: { manager: string; owner: strin
   const identity: Identity | undefined = !draft ? undefined : !extensionId ? parseRepository(draft.url, draft.provider)
     : keep ? original : previewed?.identity;
   const needsCheck = !original || original.canonical_url !== identity?.canonical_url || original.provider !== identity?.provider;
+  const hasAddress = !!draft?.url.trim();
+  const invalidAddress = hasAddress && !identity && !extensionId;
+  const sourceUnavailable = !!extensionId && !!providers && source?.state !== "available";
+  const sourceProblem = sourceUnavailable || (!!source && !onHost && !identity) || !!previewed?.error;
   useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
   const current = () => alive.current && owner === credentialOwner();
   const managerNow = useRef(manager);
@@ -121,6 +131,7 @@ export function Repositories({ manager, owner }: { manager: string; owner: strin
   const body = () => ({
     url: identity!.canonical_url, provider: identity!.provider, name: draft!.name,
     aliases: draft!.aliases.split(",").map((v) => v.trim()).filter(Boolean), purpose: draft!.purpose,
+    ...(draft!.task_workflow === "shared_branch" ? { task_workflow: draft!.task_workflow } : {}),
   });
   const save = () => run("save", async () => {
     const result = await request(draft!.id ? `/${encodeURIComponent(draft!.id)}` : "", draft!.id ? "PUT" : "POST", body());
@@ -149,12 +160,24 @@ export function Repositories({ manager, owner }: { manager: string; owner: strin
     } });
   });
   const edit = (value: Binding) => {
-    setError(""); setPreview(undefined);
-    setDraft({ id: value.id, url: value.canonical_url, provider: value.provider, name: value.name ?? "", aliases: value.aliases?.join(", ") ?? "", purpose: value.purpose ?? "" });
+    setError(""); setPreview(undefined); setWorkflowOpen(false);
+    setDraft({
+      id: value.id, url: value.canonical_url, provider: value.provider, name: value.name ?? "",
+      aliases: value.aliases?.join(", ") ?? "", purpose: value.purpose ?? "",
+      task_workflow: value.task_workflow ?? "",
+    });
   };
   // The list first, the sources beside it: the list never waits on them.
   const refresh = () => { void load(); loadProviders(); };
   const showSources = !!providers && (!!sources?.length || !!rows?.some((value) => isExtensionProvider(value.provider)));
+  const askAssistant = (details?: Draft) => {
+    setDraft(null); setError("");
+    sendDraft("persona-new", { type: "replace", text: repositoryAssistantPrompt(details) });
+    navigate("/persona/new");
+  };
+  const connectAction = draft && <Button className="touch-hit" disabled={!!busy} onClick={() => askAssistant(draft)}>
+    {t("settings-repositories.ask_assistant")}
+  </Button>;
   const field = (key: "url" | "name" | "aliases" | "purpose", label: string, max: number) => (
     <label className="block text-xs text-ink-2">{label}
       <input className={`${settingsInputClass} mt-1`} value={draft![key]} maxLength={max} disabled={!!busy} autoComplete="off" spellCheck={false}
@@ -167,7 +190,7 @@ export function Repositories({ manager, owner }: { manager: string; owner: strin
     </Row>
     {expanded && <div className="space-y-3 px-4 py-3">
       <div className="flex flex-wrap gap-2">
-        <Button disabled={!!busy || rows === null} onClick={() => { setError(""); setPreview(undefined); setDraft(blank()); }}>{t("settings-repositories.bind")}</Button>
+        <Button disabled={!!busy || rows === null} onClick={() => { setError(""); setPreview(undefined); setWorkflowOpen(false); setDraft(blank()); }}>{t("settings-repositories.bind")}</Button>
         <Button tone="quiet" disabled={!!busy} onClick={refresh}>{t("settings-repositories.refresh")}</Button>
       </div>
       {!!busy && <Loading label={t(busy === "save" ? needsCheck ? "settings-repositories.checking" : "settings-repositories.saving" : "common.loading")} />}
@@ -185,24 +208,37 @@ export function Repositories({ manager, owner }: { manager: string; owner: strin
         {isExtensionProvider(value.provider) && <SavedSource provider={value.provider} name={sourceName(value)} state={providers && (repositorySource(value, providers)?.state ?? "missing")} />}
         {value.aliases?.length ? <p className="text-label text-ink-2">{t("settings-repositories.aliases")}: {value.aliases.join(", ")}</p> : null}
         {value.purpose && <p className="break-words text-xs text-ink-2">{value.purpose}</p>}
+        {value.task_workflow === "shared_branch" && <p data-repository-workflow className="text-xs text-ink-2">{t("settings-repositories.task_workflow_row", { value: t("settings-repositories.task_workflow_shared_branch") })}</p>}
         <p className="text-xs text-ink-3">{t("settings-repositories.verified", { time: new Date(value.verified_at).toLocaleString() })}</p>
       </div>)}
-      {showSources && <div className="space-y-2 border-t border-line pt-3" data-repository-sources>
-        <h3 className="text-meta font-medium text-ink">{t("settings-repositories.sources")}</h3>
-        <p className="text-xs leading-relaxed text-ink-3">{t("settings-repositories.sources_hint")}</p>
-        <ul className="space-y-1.5">
-          {providers!.map((value) => <li key={value.id} data-repository-source={value.id} className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
-            <RepositoryMark provider={value.id} />
-            <span className="text-meta text-ink">{value.name}</span>
-            {value.builtin ? <span className="text-xs text-ink-3">{t("settings-repositories.builtin")}</span>
-              : <span className="min-w-0 break-all font-mono text-xs text-ink-3">{value.hosts.join(", ")}</span>}
-            {value.state === "off" && <Pill>{t("settings-repositories.unavailable")}</Pill>}
-          </li>)}
-        </ul>
-      </div>}
+      <div className="space-y-2 border-t border-line pt-3" data-repository-sources={showSources ? "" : undefined}>
+        {showSources && <>
+          <h3 className="text-meta font-medium text-ink">{t("settings-repositories.sources")}</h3>
+          <p className="text-xs leading-relaxed text-ink-3">{t("settings-repositories.sources_hint")}</p>
+          <ul className="space-y-1.5">
+            {providers!.map((value) => <li key={value.id} data-repository-source={value.id} className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
+              <RepositoryMark provider={value.id} />
+              <span className="text-meta text-ink">{value.name}</span>
+              {value.builtin ? <span className="text-xs text-ink-3">{t("settings-repositories.builtin")}</span>
+                : <span className="min-w-0 break-all font-mono text-xs text-ink-3">{value.hosts.join(", ")}</span>}
+              {value.state === "off" && <Pill>{t("settings-repositories.unavailable")}</Pill>}
+            </li>)}
+          </ul>
+        </>}
+        <Button tone="quiet" className="touch-hit" disabled={!!busy} onClick={() => askAssistant()}>{t("settings-repositories.ask_add_source")}</Button>
+      </div>
     </div>}
     <Dialog open={!!draft} onClose={() => { if (!busy) { setDraft(null); setError(""); } }} title={t(draft?.id ? "settings-repositories.edit_title" : "settings-repositories.bind")}
-      footer={<><Button disabled={!!busy} onClick={() => { setDraft(null); setError(""); }}>{t("common.cancel")}</Button><Button tone="primary" busy={busy === "save"} disabled={!!busy || !identity} onClick={() => void save()}>{t(draft?.id ? "settings-repositories.save" : "settings-repositories.check_save")}</Button></>}>
+      footer={<div className="w-full space-y-2">
+        {draft && error && <div className="space-y-2">
+          <p role="alert" className="text-xs text-red">{error}</p>
+          {connectAction}
+        </div>}
+        <div className="flex justify-end gap-2">
+          <Button disabled={!!busy} onClick={() => { setDraft(null); setError(""); }}>{t("common.cancel")}</Button>
+          <Button tone="primary" busy={busy === "save"} disabled={!!busy || !identity} onClick={() => void save()}>{t(draft?.id ? "settings-repositories.save" : "settings-repositories.check_save")}</Button>
+        </div>
+      </div>}>
       {draft && <div className="space-y-3">
         {field("url", t("settings-repositories.url"), 2048)}
         <label className="block text-xs text-ink-2">{t("settings-repositories.provider")}
@@ -227,15 +263,34 @@ export function Repositories({ manager, owner }: { manager: string; owner: strin
           <p>{!needsCheck ? t("settings-repositories.edit_check") : extensionId ? t("settings-repositories.unchecked_extension", { provider: previewed?.name || extensionName })
             : t("settings-repositories.unchecked")}</p>
         </div>}
-        {draft.url && !identity && !extensionId && <p role="status" className="text-label text-ink-2">{t(sources?.length ? "settings-repositories.invalid_url_sources" : "settings-repositories.invalid_url")}</p>}
-        {draft.url && !identity && extensionId && <ExtensionStatus name={extensionName} source={source} known={!!providers} onHost={onHost}
-          waiting={!!previewKey && !previewed} error={previewed?.error} onRetry={retryPreview} />}
+        {invalidAddress && <p role="status" className="text-label text-ink-2">{t(sources?.length ? "settings-repositories.invalid_url_sources" : "settings-repositories.invalid_url")}</p>}
+        {hasAddress && extensionId && (!identity || sourceUnavailable) && <ExtensionStatus name={extensionName} source={source} known={!!providers} onHost={onHost}
+          waiting={!!previewKey && !previewed} error={previewed?.error} />}
+        {!error && hasAddress && (invalidAddress || sourceProblem) && <div className="flex flex-wrap items-center gap-2">
+          {previewed?.error && <Button tone="quiet" className="touch-hit" onClick={retryPreview}>{t("settings-repositories.retry")}</Button>}
+          {connectAction}
+        </div>}
         {field("name", t("settings-repositories.name"), 80)}
         {field("aliases", t("settings-repositories.aliases"), 809)}
         {field("purpose", t("settings-repositories.purpose"), 500)}
+        <Disclosure
+          title={t("settings-repositories.task_workflow")}
+          badge={draft.task_workflow === "shared_branch" ? t("settings-repositories.task_workflow_shared_branch") : undefined}
+          open={workflowOpen}
+          onToggle={() => setWorkflowOpen((open) => !open)}
+        >
+          <ChoiceRows
+            label={t("settings-repositories.task_workflow")}
+            at={draft.task_workflow === "shared_branch" ? 1 : 0}
+            onPick={(i) => { if (!busy) setDraft({ ...draft, task_workflow: i === 1 ? "shared_branch" : "isolated" }); }}
+            options={[
+              { label: t("settings-repositories.task_workflow_isolated"), hint: t("settings-repositories.task_workflow_isolated_hint") },
+              { label: t("settings-repositories.task_workflow_shared_branch"), hint: t("settings-repositories.task_workflow_shared_branch_hint") },
+            ]}
+          />
+        </Disclosure>
         <p className="text-xs leading-relaxed text-ink-3">{extensionId ? t("settings-repositories.check_hint_extension", { provider: extensionName }) : t("settings-repositories.check_hint")}</p>
         {busy === "save" && <Loading label={t(needsCheck ? "settings-repositories.checking" : "settings-repositories.saving")} />}
-        {error && <p role="alert" className="text-xs text-red">{error}</p>}
       </div>}
     </Dialog>
     <Dialog open={!!removing} onClose={() => { if (!busy) { setRemoving(null); setError(""); } }} title={t("settings-repositories.unbind_title")}
@@ -262,17 +317,14 @@ function SavedSource({ provider, name, state }: { provider: string; name: string
 }
 
 /**
- * Where an extension's address stands before its source answers: reading it, why it can't, or the source's refusal
- * with Try again. `known`: the sources were read; until then only the hub's answer says the source is unavailable.
+ * Where an extension's address stands before its source answers: reading it, why it can't, or the source's refusal.
+ * `known`: the sources were read; until then only the hub's answer says the source is unavailable.
  */
-function ExtensionStatus({ name, source, known, onHost, waiting, error, onRetry }: {
-  name: string; source?: RepositoryProvider; known: boolean; onHost: boolean; waiting: boolean; error?: string; onRetry: () => void;
+function ExtensionStatus({ name, source, known, onHost, waiting, error }: {
+  name: string; source?: RepositoryProvider; known: boolean; onHost: boolean; waiting: boolean; error?: string;
 }) {
   if (known && (!source || source.state !== "available")) return <p role="status" className="text-label text-ink-2">{t("settings-repositories.source_unavailable", { provider: name })}</p>;
   if (known && source && !onHost) return <p role="status" className="text-label text-ink-2">{t("settings-repositories.host_mismatch", { provider: name, hosts: source.hosts.join(", ") })}</p>;
   if (waiting) return <Loading label={t("settings-repositories.previewing", { provider: name })} />;
-  return error ? <div className="space-y-2" data-repository-preview-failed>
-    <p role="status" className="text-label text-ink-2">{error}</p>
-    <Button tone="quiet" onClick={onRetry}>{t("settings-repositories.retry")}</Button>
-  </div> : null;
+  return error ? <p role="status" className="text-label text-ink-2">{error}</p> : null;
 }

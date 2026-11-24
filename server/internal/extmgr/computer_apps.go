@@ -162,11 +162,13 @@ func (h *Manager) rememberApps(ctx context.Context, m *Machine, apps []approvedA
 	return h.putApprovedApps(ctx, all)
 }
 
-// approveApps asks on the phone about the apps this call names that m has not always allowed (or every time: those
-// never remembered, a call whose apps are not all known). asked: a card was shown; ok: go ahead. known: as appsOn.
-func (h *Manager) approveApps(ctx context.Context, m *Machine, by asker, tool string, names []string, whole bool, args json.RawMessage, known []protectedapps.App) (asked, ok bool) {
+// approveAppsOutcome asks on the phone about the apps this call names that m has not always allowed (or every time:
+// those never remembered, a call whose apps are not all known). asked: a card was shown; ok: go ahead; outcome: how its
+// card ended (proto.Resolution.Outcome; "" when none was shown), a refusal being the user's own decline only when it is
+// proto.OutcomeDeclined. known: as appsOn.
+func (h *Manager) approveAppsOutcome(ctx context.Context, m *Machine, by asker, tool string, names []string, whole bool, args json.RawMessage, known []protectedapps.App) (asked, ok bool, outcome string) {
 	if !h.cua().approval() {
-		return false, true
+		return false, true, ""
 	}
 	apps := h.appsOn(ctx, m, names, known)
 	all, err := h.approvedApps(ctx)
@@ -185,7 +187,7 @@ func (h *Manager) approveApps(ctx context.Context, m *Machine, by asker, tool st
 		}
 	}
 	if whole && len(need) == 0 {
-		return false, true
+		return false, true, ""
 	}
 	l := h.userLang()
 	shown := make([]string, 0, len(need))
@@ -213,6 +215,7 @@ func (h *Manager) approveApps(ctx context.Context, m *Machine, by asker, tool st
 	}
 	r, _ := h.waitInteraction(ctx, ix)
 	ok = r.Allow != nil && *r.Allow
+	outcome = r.Outcome()
 	if ok && r.Always && remember {
 		if err := h.rememberApps(ctx, m, need); err != nil {
 			h.logf("[%s] keeping the apps allowed: %v", m.cfg.ID, err)
@@ -220,7 +223,7 @@ func (h *Manager) approveApps(ctx context.Context, m *Machine, by asker, tool st
 			h.logf("[%s] %d app(s) always allowed for the assistant", m.cfg.ID, len(need))
 		}
 	}
-	return true, ok
+	return true, ok, outcome
 }
 
 // computerAppsOwner binds an opt-in request to the manager whose settings the client displayed. The hub routes

@@ -63,7 +63,7 @@ data class MailAccountForm(
 
 /**
  * A mail provider whose clients sign in with an authorization code made in its web mail, not the account's password. The hub says the
- * same steps for the same domains (server/internal/mail/preset.go, Guide; iOS CodeGuide): change them together.
+ * same steps for the same domains (server/internal/modules/mail/preset.go, Guide; iOS CodeGuide): change them together.
  */
 data class CodeGuide(val provider: Provider, val webMail: String) {
     enum class Provider(@StringRes val steps: Int, @StringRes val open: Int) {

@@ -89,9 +89,10 @@ type webPushQueued struct {
 }
 
 type webPusher struct {
-	store Store
-	logf  func(string, ...any)
-	now   func() time.Time
+	store   Store
+	quiesce *writeQuiescer
+	logf    func(string, ...any)
+	now     func() time.Time
 	// client posts to the push services; check vets an endpoint (tests let their own server through).
 	client     *http.Client
 	check      func(string) (string, error)
@@ -104,10 +105,15 @@ type webPusher struct {
 	keyMu sync.Mutex // making the key: one at a time
 	keys  webpush.Keys
 
-	saveMu sync.Mutex // one write of the list at a time, the latest state
-	mu     sync.Mutex
-	subs   map[string]webSub // by device
-	last   map[string]webDelivery
+	saveMu         sync.Mutex // one write of the list at a time, the latest state
+	mu             sync.Mutex
+	subs           map[string]webSub // by device
+	last           map[string]webDelivery
+	pendingForgets []webSub
+	// pendingPushes holds per-subscription queue heads deferred while a
+	// snapshot pause prevented creating the hub's first VAPID key; each entry's
+	// done channel stays open until replayed so newer dispatches cannot overtake it.
+	pendingPushes []*webPushQueued
 
 	queueMu sync.Mutex
 	tails   map[webPushSubscription]*webPushQueued // the last dispatch queued for each browser endpoint
@@ -144,30 +150,44 @@ func newWebPusher(store Store, logf func(string, ...any)) *webPusher {
 // key is the hub's VAPID key pair, made and stored the first time it is needed. A pair another hub process stored
 // meanwhile (blue-green) wins over the one made here: what is stored is what is read back.
 func (w *webPusher) key(ctx context.Context) (webpush.Keys, error) {
+	keys, _, err := w.keyOrDefer(ctx, nil)
+	return keys, err
+}
+
+func (w *webPusher) keyOrDefer(ctx context.Context, onPaused func()) (webpush.Keys, bool, error) {
 	if w == nil {
-		return webpush.Keys{}, errors.New("web push: no pusher")
+		return webpush.Keys{}, false, errors.New("web push: no pusher")
 	}
 	w.keyMu.Lock()
 	defer w.keyMu.Unlock()
 	if w.keys.Valid() {
-		return w.keys, nil
+		return w.keys, false, nil
 	}
 	if w.store != nil {
 		var stored webpush.Keys
 		if ok, err := w.store.Setting(ctx, webPushKeysSetting, &stored); err != nil {
-			return webpush.Keys{}, err
+			return webpush.Keys{}, false, err
 		} else if ok && stored.Valid() {
 			w.keys = stored
-			return stored, nil
+			return stored, false, nil
+		}
+		if !quiesceHeld(ctx) {
+			if !w.quiesce.beginOrDefer(onPaused) {
+				if onPaused != nil {
+					return webpush.Keys{}, true, nil
+				}
+				return webpush.Keys{}, false, i18n.Err("hub-selfupdate.err_quiesced")
+			}
+			defer w.quiesce.end()
 		}
 	}
 	made, err := webpush.NewKeys()
 	if err != nil {
-		return webpush.Keys{}, err
+		return webpush.Keys{}, false, err
 	}
 	if w.store != nil {
 		if err := w.store.PutSetting(ctx, webPushKeysSetting, made); err != nil {
-			return webpush.Keys{}, err
+			return webpush.Keys{}, false, err
 		}
 		var stored webpush.Keys
 		if ok, err := w.store.Setting(ctx, webPushKeysSetting, &stored); err == nil && ok && stored.Valid() {
@@ -176,10 +196,35 @@ func (w *webPusher) key(ctx context.Context) (webpush.Keys, error) {
 	}
 	w.keys = made
 	w.logf("web push: made the VAPID key")
-	return made, nil
+	return made, false, nil
 }
 
-// currentKey is the key without making one ("" when none was made yet).
+// resumeWrites replays subscription drops and first-key dispatches deferred
+// while a snapshot paused writes.
+func (w *webPusher) resumeWrites() {
+	if w == nil {
+		return
+	}
+	w.mu.Lock()
+	forgets := w.pendingForgets
+	w.pendingForgets = nil
+	pushes := w.pendingPushes
+	w.pendingPushes = nil
+	w.mu.Unlock()
+	for _, queued := range pushes {
+		key := webPushSubscription{device: queued.sub.Device, endpoint: queued.sub.Endpoint}
+		go w.runQueued(key, nil, queued)
+	}
+	if len(forgets) == 0 {
+		return
+	}
+	go func() {
+		for _, s := range forgets {
+			w.forgetIfCurrent(s)
+		}
+	}()
+}
+
 func (w *webPusher) currentKey() string {
 	if w == nil {
 		return ""
@@ -332,6 +377,14 @@ func (w *webPusher) signedOut(credential string) {
 
 // forgetIfCurrent drops a subscription the push service says is no more, while it is still that one.
 func (w *webPusher) forgetIfCurrent(s webSub) {
+	if !w.quiesce.beginOrDefer(func() {
+		w.mu.Lock()
+		w.pendingForgets = append(w.pendingForgets, s)
+		w.mu.Unlock()
+	}) {
+		return
+	}
+	defer w.quiesce.end()
 	dropped := false
 	_ = w.save(func(next map[string]webSub) bool {
 		cur, ok := next[s.Device]
@@ -377,15 +430,23 @@ func (w *webPusher) noted(s webSub, status int, err error) {
 // push posts plaintext to s, tried again after each of retryWaits while the failure may pass. It returns the push
 // service's status (0: none came) and, when it did not take it, why. A subscription that is gone is dropped.
 func (w *webPusher) push(ctx context.Context, s webSub, plaintext []byte, m webpush.Message) (int, error) {
-	keys, err := w.key(ctx)
+	status, _, err := w.deliver(ctx, s, plaintext, m, nil)
+	return status, err
+}
+
+func (w *webPusher) deliver(ctx context.Context, s webSub, plaintext []byte, m webpush.Message, onPaused func()) (int, bool, error) {
+	keys, deferred, err := w.keyOrDefer(ctx, onPaused)
+	if deferred {
+		return 0, true, nil
+	}
 	if err != nil {
 		w.noted(s, 0, err)
-		return 0, err
+		return 0, false, err
 	}
 	if s.Key != "" && s.Key != keys.Public {
 		err := errors.New("subscribed with another key")
 		w.noted(s, 0, err)
-		return 0, err
+		return 0, false, err
 	}
 	status, err := w.postOnce(ctx, s, keys, plaintext, m)
 	for _, wait := range w.retryWaits {
@@ -401,13 +462,13 @@ func (w *webPusher) push(ctx context.Context, s webSub, plaintext []byte, m webp
 	if webpush.Gone(status) {
 		w.forgetIfCurrent(s) // before noted: what it tells (tests) finds the subscription gone
 		w.noted(s, status, err)
-		return status, err
+		return status, false, err
 	}
 	w.noted(s, status, err)
 	if err != nil {
 		w.logf("web push %s: %v", cmp.Or(s.Browser, s.Device), err)
 	}
-	return status, err
+	return status, false, err
 }
 
 func (w *webPusher) postOnce(ctx context.Context, s webSub, keys webpush.Keys, plaintext []byte, m webpush.Message) (int, error) {
@@ -440,24 +501,36 @@ func (w *webPusher) dispatch(s webSub, plaintext []byte, m webpush.Message) {
 	previous := w.tails[key]
 	w.tails[key] = queued
 	w.queueMu.Unlock()
-	go func() {
-		defer func() {
-			close(queued.done)
-			w.queueMu.Lock()
-			if w.tails[key] == queued { // a newer dispatch owns the queue now; its completion cleans it up
-				delete(w.tails, key)
-			}
-			w.queueMu.Unlock()
-		}()
-		if previous != nil {
-			<-previous.done
+	go w.runQueued(key, previous, queued)
+}
+
+func (w *webPusher) runQueued(key webPushSubscription, previous, queued *webPushQueued) {
+	deferred := false
+	defer func() {
+		if deferred {
+			// Keep queued.done open and queued in w.tails[key] until
+			// resumeWrites replays it, preserving FIFO order for later dispatches.
+			return
 		}
-		// Queued waiting is not part of the delivery's timeout. Cancellation, Gone and every other return from push
-		// still close done above, allowing the next dispatch to proceed.
-		ctx, cancel := context.WithTimeout(context.Background(), webPushTimeout*time.Duration(len(w.retryWaits)+1)+10*time.Second)
-		defer cancel()
-		_, _ = w.push(ctx, queued.sub, queued.plaintext, queued.message)
+		close(queued.done)
+		w.queueMu.Lock()
+		if w.tails[key] == queued { // a newer dispatch owns the queue now; its completion cleans it up
+			delete(w.tails, key)
+		}
+		w.queueMu.Unlock()
 	}()
+	if previous != nil {
+		<-previous.done
+	}
+	// Queued waiting is not part of the delivery's timeout. Cancellation, Gone and every other non-deferred return
+	// still close done above, allowing the next dispatch to proceed.
+	ctx, cancel := context.WithTimeout(context.Background(), webPushTimeout*time.Duration(len(w.retryWaits)+1)+10*time.Second)
+	defer cancel()
+	_, deferred, _ = w.deliver(ctx, queued.sub, queued.plaintext, queued.message, func() {
+		w.mu.Lock()
+		w.pendingPushes = append(w.pendingPushes, queued)
+		w.mu.Unlock()
+	})
 }
 
 // webPushNotify sends a notify event (notifyWSFrom's msgIn) to every subscribed browser with no Persona page open

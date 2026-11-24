@@ -266,7 +266,8 @@ func (n *Node) planSwitch(ctx context.Context, id string, ps proto.PendingSwitch
 	if err != nil {
 		return nil, err
 	}
-	forward := modelExecution{Model: ps.Model, PlanThen: n.planThen(id)}
+	sourceState, _ := n.state.get(id)
+	forward := modelExecution{Source: sourceState.ModelSource, Model: ps.Model, PlanThen: n.planThen(id)}
 	if st, _ := n.state.get(id); forward.Model == "" && st.Launcher == ps.Launcher && n.offLauncher(id) {
 		forward.Model = st.Model // back on the launcher it was started on (offlauncher.go): with the model it ran there
 	}
@@ -850,7 +851,7 @@ func (n *Node) liveBackground(path string, since time.Time) int {
 // lets --resume bring back the model the conversation last ran), and the mode a plan goes on in. Not the transcript's
 // model: a gateway may answer under another name than the id it takes.
 func (n *Node) ranExecution(id string, prev sessionState) modelExecution {
-	ex := modelExecution{Model: prev.Model, Fingerprint: prev.ModelFingerprint, PlanThen: prev.PlanThen}
+	ex := modelExecution{Source: prev.ModelSource, Model: prev.Model, Fingerprint: prev.ModelFingerprint, PlanThen: prev.PlanThen}
 	n.mu.Lock()
 	var picked string
 	if m, ok := n.modes[id]; ok && m.Model != nil {

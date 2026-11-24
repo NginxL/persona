@@ -73,6 +73,13 @@ final class AssistantEntriesFixtureTests: XCTestCase {
             XCTAssertEqual(content.count(.needsYou), c.expected.needs_you.count, c.name)
             XCTAssertEqual(content.count(.running), c.expected.running.count, c.name)
             XCTAssertEqual(content.count(.finished), (c.expected.finished ?? []).count, c.name)
+            // the badge is the list: grouped by supervising conversation (the main chat folding background rounds), the
+            // tray lists every Needs You row once and nothing else (#12974)
+            let groups = ActionTrayContent.grouped(content.needsYou, conversation: i.conversation,
+                                                   origin: { id in i.todos.first { $0.id == id }?.origin }, title: { _ in nil })
+            if !groups.isEmpty {
+                XCTAssertEqual(groups.flatMap(\.rows).map(\.id).sorted(), content.needsYou.map(\.id).sorted(), "\(c.name): grouped rows")
+            }
             let reviewing = got.running.filter { row in
                 guard case .task(let id, let status, _) = row, let todo = i.todos.first(where: { $0.id == id }) else { return false }
                 return AssistantEntries.saysSupervisorReview(todo, status: status, now: now)

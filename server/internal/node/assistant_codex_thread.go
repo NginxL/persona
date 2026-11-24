@@ -194,9 +194,11 @@ func (c *codexConn) deliver(ctx context.Context, live, text string, images []pro
 			ID string `json:"id"`
 		} `json:"turn"`
 	}
+	sentAt := time.Now()
 	if err := c.call(ctx, "turn/start", params, &res); err != nil {
 		return err
 	}
+	n.ttft.arm(c.p.id, sentAt, res.Turn.ID)
 	c.mu.Lock()
 	if res.Turn.ID != "" {
 		c.turnID = res.Turn.ID

@@ -3,6 +3,7 @@ package assistant
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"slices"
 	"strings"
@@ -27,9 +28,12 @@ func lessonsEnv(t *testing.T, on bool) (*Service, *fakeHub, Todo) {
 		Status: proto.StatusDone, LastText: outcomeReply})
 	f.outcome = `{"outcome":"修好了","links":[],"decisions":[],"pitfalls":[]}`
 	f.lessons = lessonsAnswer
-	if on {
-		setSettings(t, s, func(v *Settings) { v.TaskLessons = new(true) })
-	}
+	setSettings(t, s, func(v *Settings) {
+		v.Main = "conv1" // #5732: acceptance comes from the supervising main conversation, not Origin alone.
+		if on {
+			v.TaskLessons = new(true)
+		}
+	})
 	s.superviseTodo(context.Background(), todo.ID, "conv1", []string{"横屏不再崩溃"}, 0)
 	return s, f, todoNow(s, todo.ID)
 }
@@ -96,6 +100,55 @@ func TestTaskLessonsLearnedFromAReworkedTask(t *testing.T) {
 	s.learnTaskLessons(context.Background(), todo, *todoNow(s, todo.ID).DoneAt)
 	if n := len(lessonsAsked(f)); n != 1 {
 		t.Fatalf("a completion already learned from asked the model again (%d)", n)
+	}
+}
+
+// The model gets a separate, bounded list of the most recently deleted lessons so it can skip a paraphrase.
+func TestTaskLessonsShowsRecentDeletionsToTheModel(t *testing.T) {
+	s, f, todo := lessonsEnv(t, true)
+	e := kbEng(t, s)
+	const slug = "天气-app"
+	appendTestLesson(t, e, slug, "lesson-live", kb.LessonImprovement, "Run a focused check first.", time.Now())
+	if _, err := e.UpdateProjectLessons(slug, func(kb.ProjectLessons) ([]kb.ProjectMemoryRecord, error) {
+		var records []kb.ProjectMemoryRecord
+		for i := range 13 {
+			id := fmt.Sprintf("lesson-before-delete-%d", i)
+			text := fmt.Sprintf("Check device layout %d before handing in.", i)
+			records = append(records,
+				kb.ProjectMemoryRecord{ID: id, Type: kb.ProjectMemoryLesson, Kind: kb.LessonImprovement, Conclusion: text},
+				kb.ProjectMemoryRecord{ID: fmt.Sprintf("lesson-deleted-%d", i), Type: kb.ProjectMemoryLessonRetired,
+					SupersedesID: id, Kind: kb.LessonImprovement, Conclusion: text})
+		}
+		return records, nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	f.mu.Lock()
+	f.lessons = `{"lessons":[
+		{"kind":"improvement","text":"Check the device layout before handoff.","same_as":"lesson-deleted-0"},
+		{"kind":"improvement","text":"Include the test result with the handoff.","same_as":""}]}`
+	f.mu.Unlock()
+	acceptAfterRework(t, s, todo)
+	asked := lessonsAsked(f)
+	if len(asked) != 1 {
+		t.Fatalf("the lessons model was asked %d times, want once", len(asked))
+	}
+	call := asked[0]
+	if !strings.Contains(call.System, "哪怕换了说法，也不要输出这条经验") {
+		t.Fatalf("the model's instructions do not say to omit paraphrases of deleted lessons:\n%s", call.System)
+	}
+	known, deleted, ok := strings.Cut(call.User, "用户已删除、不应重新学习的经验：")
+	if !ok || !strings.Contains(known, "[lesson-live]") || strings.Contains(known, "[lesson-deleted-") || strings.Contains(deleted, "[lesson-live]") {
+		t.Fatalf("the model's input does not separate live and deleted lessons:\n%s", call.User)
+	}
+	if strings.Count(deleted, "[lesson-deleted-") != 12 || strings.Contains(deleted, "[lesson-deleted-0]") ||
+		!strings.Contains(deleted, "[lesson-deleted-12] improvement：Check device layout 12 before handing in.") {
+		t.Fatalf("the model's input does not contain the twelve newest tombstones:\n%s", deleted)
+	}
+	// The write still checks tombstones beyond the prompt's limit.
+	live := e.ProjectLessons(slug).Live
+	if len(live) != 2 || live[0].Conclusion != "Include the test result with the handoff." || live[1].ID != "lesson-live" {
+		t.Fatalf("live = %+v, want the unrelated new lesson and the existing live lesson", live)
 	}
 }
 
@@ -175,9 +228,8 @@ func TestPlanLessonsMergesAndHonoursDeletions(t *testing.T) {
 	same := kb.ProjectMemoryRecord{ID: "lesson-b", Type: kb.ProjectMemoryLesson, Kind: kb.LessonWastedStep,
 		Conclusion: "Run the focused test before the whole suite.", Seen: 1, RecordedAt: "2026-11-02T00:00:00Z", Sources: []string{"todo-3"}}
 	cur := kb.ProjectLessons{Live: []kb.ProjectMemoryRecord{same, old},
-		Retired: []kb.ProjectMemoryRecord{{ID: "lesson-x", Type: kb.ProjectMemoryLessonRetired, SupersedesID: "lesson-c",
-			Kind: kb.LessonImprovement, Conclusion: "Always rebuild everything."}},
-		IDs: map[string]bool{"lesson-a": true, "lesson-b": true, "lesson-c": true, "lesson-x": true}}
+		RetiredTextByID: map[string]string{"lesson-x": "Always rebuild everything.", "lesson-c": "Always rebuild everything."},
+		IDs:             map[string]bool{"lesson-a": true, "lesson-b": true, "lesson-c": true, "lesson-x": true}}
 	key := lessonKey("todo-9", now)
 	got := planLessons(cur, "todo-9", key, now, []foundLesson{
 		{Kind: kb.LessonMissingContext, Text: "Staging needs a separate token.", SameAs: "lesson-a"},
@@ -360,11 +412,26 @@ func TestProjectLessonRoutes(t *testing.T) {
 	if len(view.Lessons) != 1 || view.Lessons[0].ID != "lesson-b" {
 		t.Fatalf("after delete = %+v", view)
 	}
-	// A deleted lesson is not learned again, even said another way.
-	now := time.Now()
-	if again := planLessons(e.ProjectLessons("天气-app"), "todo-new", lessonKey("todo-new", now), now,
-		[]foundLesson{{Kind: kb.LessonMissingContext, Text: "ask the owner, which account to use first"}}); again != nil {
-		t.Fatalf("a deleted lesson came back: %+v", again)
+	cur := e.ProjectLessons("天气-app")
+	if len(cur.Retired) != 1 {
+		t.Fatalf("after delete: found %d tombstones, want one", len(cur.Retired))
+	}
+	for _, tc := range []struct {
+		name, text, sameAs string
+	}{
+		{name: "edited text", text: "ask the owner, which account to use first"},
+		{name: "original text", text: "Ask which account to use."},
+		{name: "tombstone ID", text: "Confirm the account before starting.", sameAs: cur.Retired[0].ID},
+		{name: "edited ID", text: "Confirm the account before starting.", sameAs: edited.ID},
+		{name: "original ID", text: "Confirm the account before starting.", sameAs: "lesson-a"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			now := time.Now()
+			found := []foundLesson{{Kind: kb.LessonMissingContext, Text: tc.text, SameAs: tc.sameAs}}
+			if again := planLessons(cur, "todo-new", lessonKey("todo-new", now), now, found); len(again) > 0 {
+				t.Fatalf("a deleted lesson came back: %+v", again)
+			}
+		})
 	}
 	if w := serve(s, http.MethodGet, "/api/v1/kb/projects/no-such-project/lessons", ""); w.Code != http.StatusNotFound {
 		t.Fatalf("an unknown project got %d", w.Code)

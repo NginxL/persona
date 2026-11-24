@@ -11,7 +11,7 @@ import persona.android.navigation.terminalLink
 import persona.core.navigation.MachinesRoute
 import persona.core.navigation.TerminalPanesRoute
 import persona.core.navigation.RouteInput
-import persona.feature.knowledge.KnowledgeRoute
+import persona.core.navigation.KnowledgeRoute
 import persona.core.contracts.api.PairingRequest
 import persona.core.navigation.AppTab
 import persona.core.navigation.ResolvedRoute
@@ -30,7 +30,6 @@ private val pages = mapOf(
     "mail" to ResolvedRoute(AppTab.Persona, persona.core.navigation.SettingsPageRoute(persona.core.navigation.SettingsPage.Mail)),
     "feishu" to ResolvedRoute(AppTab.Persona, persona.core.navigation.SettingsPageRoute(persona.core.navigation.SettingsPage.Feishu)),
     "catalog" to ResolvedRoute(AppTab.Persona, ComponentCatalogRoute),
-    "voice" to ResolvedRoute(AppTab.Persona, persona.core.navigation.VoiceRoute("voice", "语音")),  // i18n-ignore: debug launch arguments, developer-only
     "channels" to ResolvedRoute(AppTab.Persona, persona.core.navigation.SettingsPageRoute(persona.core.navigation.SettingsPage.Channels)),
     "feishu-bot" to ResolvedRoute(AppTab.Persona, persona.core.navigation.SettingsPageRoute(persona.core.navigation.SettingsPage.FeishuBot)),
     "managers" to ResolvedRoute(AppTab.Persona, persona.core.navigation.SettingsPageRoute(persona.core.navigation.SettingsPage.Managers)),
@@ -41,6 +40,10 @@ private val pages = mapOf(
     "translate" to ResolvedRoute(AppTab.Persona, persona.core.navigation.SettingsPageRoute(persona.core.navigation.SettingsPage.Translation)),
     "triage" to ResolvedRoute(AppTab.Persona, persona.core.navigation.SettingsPageRoute(persona.core.navigation.SettingsPage.Triage)),
 )
+
+/** A carried module's page for captures (`debug.openPage voice`); its modules open on the Persona tab. */
+private fun modulePage(name: String): ResolvedRoute? =
+    persona.android.Modules.carried.debugPages()[name]?.let { ResolvedRoute(AppTab.Persona, it) }
 
 class DebugLaunchAdapter : LaunchAdapter {
     override val tools = DebugStatePreview()
@@ -72,7 +75,7 @@ class DebugLaunchAdapter : LaunchAdapter {
         // App-only pages and links are resolved here instead of by the shared parser.
         val catalog = arguments.remove("debug.openCatalog") == "true"
         val link = arguments.remove("debug.openLink")
-        val page = arguments.remove("debug.openPage")?.let { requireNotNull(pages[it] ?: managementPage(it)) { "Unknown debug page" } }
+        val page = arguments.remove("debug.openPage")?.let { requireNotNull(pages[it] ?: modulePage(it) ?: managementPage(it)) { "Unknown debug page" } }
         // Settings › Assistant opens one of its parts for captures: notes, memory, memory-file, memory-edit, memory-delete, machine, launcher, timezone, move.
         arguments.remove("debug.assistantSettings")?.let { persona.feature.assistant.settings.AssistantSettingsPreview.open = it }
         // "Model configuration" opens "Add model provider" (manual | preset) with persona://open?target=settings&page=modelconfig.
@@ -82,8 +85,8 @@ class DebugLaunchAdapter : LaunchAdapter {
         arguments.remove("debug.translateChats")?.let { persona.feature.settings.TranslationPreview.picking = it == "1" }
         // "New session" (debug.openPage new-agent) takes steps once loaded: launcher:<name>, effort:<level>, model:<id>, models[:<query>].
         arguments.remove("debug.newAgent")?.let { persona.feature.agents.NewAgentPreview.steps = it }
-        // "Voice chat" on an emulator without audio (-no-audio): silence up, nothing played, a made-up level for the orb.
-        if (arguments.remove("debug.voiceAudio") == "fake") persona.feature.voice.VoiceDebug.useFakeAudio()
+        // Each carried module takes its own debug arguments (Modules.kt), e.g. the voice module's fake audio.
+        persona.android.Modules.carried.modules.forEach { it.debugArguments(arguments) }
         return LaunchInput(
             resolve = { router ->
                 when {

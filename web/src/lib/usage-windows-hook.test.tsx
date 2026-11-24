@@ -19,7 +19,7 @@ vi.mock("./api", async (original) => ({
     }),
 }));
 
-import { useUsageWindows, useUsageWindowsReady } from "./usage-windows";
+import { useHiddenUsageProviders, useUsageWindows, useUsageWindowsReady } from "./usage-windows";
 import { ApiError } from "./api";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -29,7 +29,8 @@ const account = (id: string): UsageAccount => ({ id, provider: "claude", name: i
 function Bars() {
   const accounts = useUsageWindows();
   const ready = useUsageWindowsReady();
-  return <p data-ready={String(ready)}>{accounts.map((a) => a.id).join(",")}</p>;
+  const hidden = useHiddenUsageProviders();
+  return <p data-ready={String(ready)} data-hidden={hidden.join(",")}>{accounts.map((a) => a.id).join(",")}</p>;
 }
 
 let root: Root | undefined;
@@ -62,6 +63,14 @@ describe("useUsageWindows", () => {
     expect(Array.from(host.querySelectorAll("p"), (p) => p.textContent)).toEqual(["A", "A"]);
     backToFront();
     expect(calls).toHaveLength(2);
+  });
+
+  it("passes on canonical hidden providers (#13179), and none from a hub without the field", async () => {
+    await settle(() => calls[0].resolve({ accounts: [], hidden_providers: ["Claude", "codex", "agy"] }));
+    expect(host.querySelector("p")?.getAttribute("data-hidden")).toBe("claude,codex,antigravity");
+    backToFront();
+    await settle(() => calls[1].resolve({ accounts: [] }));
+    expect(host.querySelector("p")?.getAttribute("data-hidden")).toBe("");
   });
 
   it("keeps the newer reply when the older one lands after it", async () => {

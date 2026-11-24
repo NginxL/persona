@@ -56,7 +56,7 @@ final class MeetingAfterUITests: XCTestCase {
                       "Recording Details opened no recording page:\n\(app.debugDescription)")
     }
 
-    /// The minutes still being written: the summary card says so in its place.
+    /// The minutes still being written: the navigation title and the pending summary are both present.
     @MainActor func testTheMinutesOnTheirWay() throws {
         let hub = try mockHub()
         try minutes(hub, ["mode": "pending"])
@@ -64,6 +64,7 @@ final class MeetingAfterUITests: XCTestCase {
         let summary = element(app, "meeting-after-summary")
         XCTAssertTrue(summary.waitForExistence(timeout: 45), "no summary card:\n\(app.debugDescription)")
         XCTAssertTrue(element(app, "meeting-after-minutes").waitForExistence(timeout: 30), "the card doesn't say where the minutes are")
+        XCTAssertTrue(app.navigationBars.staticTexts["会议"].firstMatch.exists, "no Meeting title in the navigation bar")
         try shot(app, "pending")
     }
 

@@ -123,9 +123,14 @@ internal fun isAssistantPath(url: HttpUrl): Boolean {
     if (url.queryParameter("space") != null) return false
     val api = apiSegments(url) ?: return false
     // One conversation's routes are not the page's: the hub sends them to the conversation's manager (byConversation),
-    // which naming the page's pick would override.
-    return api.firstOrNull() == "assistant" && !(api.size > 2 && api[1] == "conversations")
+    // which naming the page's pick would override. The tracks, their kinds and what extensions may read are the default
+    // manager's (#13500, docs/assistant/managers.md "Clients"), as the spaces' `?space=` routes are.
+    return api.firstOrNull() == "assistant" && !(api.size > 2 && api[1] == "conversations") &&
+        !(api.size > 1 && api[1] in DefaultManagerAssistantRoutes)
 }
+
+/** `…/api/v1/assistant/<segment>…` routes that are the default manager's whichever assistant the page shows. */
+private val DefaultManagerAssistantRoutes = setOf("tracks", "track-kinds", "extension-trust")
 
 /**
  * The requests that are the current assistant's (docs/assistant/managers.md "Clients"): the assistant page's
@@ -393,7 +398,7 @@ class HubHttpClient(
      */
     fun evictConnections() {
         if (closed.get()) return
-        runCatching { client.dispatcher.executorService.execute { client.connectionPool.evictAll() } }
+        val _ = runCatching { client.dispatcher.executorService.execute { client.connectionPool.evictAll() } }
     }
 
     private val closed = AtomicBoolean()
@@ -461,9 +466,9 @@ fun HttpUrl.hubResolve(reference: String): HttpUrl? {
 /**
  * Callers parse the response wherever they run, often on the main thread (Android forbids network reads there:
  * NetworkOnMainThreadException), so by default the body is read here on OkHttp's thread. Streaming downloads pass
- * buffered = false and read inside Dispatchers.IO themselves.
+ * buffered = false and read inside Dispatchers.IO themselves. Public for modules' own hub calls (`:module:*`, #13433).
  */
-internal suspend fun Call.awaitResponse(buffered: Boolean = true): Response = suspendCancellableCoroutine { continuation ->
+suspend fun Call.awaitResponse(buffered: Boolean = true): Response = suspendCancellableCoroutine { continuation ->
     continuation.invokeOnCancellation { cancel() }
     enqueue(object : Callback {
         override fun onFailure(call: Call, e: IOException) {

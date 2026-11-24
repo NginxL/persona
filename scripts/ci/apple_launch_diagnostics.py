@@ -7,9 +7,12 @@ import os
 from pathlib import Path
 import re
 import selectors
+import signal
 import stat
 import subprocess
+import sys
 import tempfile
+import threading
 import time
 import uuid
 
@@ -23,7 +26,7 @@ PROCESSES = ("CoreSimulatorService", "launchd_sim", "runningboardd", "SpringBoar
              "installd", "assertiond", "debugserver", "Persona")
 RUNTIME_PROCESSES = ("simdiskimaged", "cryptexd")
 SECRET = re.compile(r"environment|DYLD_|bearer\s|token=|password|secret|credential", re.I)
-COLLECTION_ERRORS = (OSError, ValueError, TypeError, KeyError, AttributeError, subprocess.SubprocessError)
+COLLECTION_ERRORS = (OSError, subprocess.SubprocessError, ValueError)
 
 
 class ScopeValidationError(ValueError):
@@ -135,26 +138,7 @@ def read_scope_file(path, error_type=ScopeContextFieldsError):
 
 
 def scope(output, now):
-    try:
-        context = json.loads(read_scope_file(output / CONTEXT))
-        if not isinstance(context, dict) or set(context) != {"udid", "bundle_id", "started_at"}:
-            raise ScopeContextFieldsError()
-    except (json.JSONDecodeError, TypeError, ValueError):
-        raise ScopeContextFieldsError() from None
-    identity(context["udid"], context["bundle_id"])
-    if read_scope_file(output / "simulator.log", ScopeOwnedSimulatorError).strip() != context["udid"]:
-        raise ScopeOwnedSimulatorError()
-    try:
-        start = datetime.fromisoformat(context["started_at"])
-    except (TypeError, ValueError):
-        raise ScopeContextTimeError() from None
-    if start.utcoffset() != timedelta(0) or start > now or now - start > timedelta(hours=2):
-        raise ScopeContextTimeError()
-    # Never widen to the rest of the job, even if a later full-suite phase fails.
-    end = min(now, start + timedelta(seconds=READINESS_SECONDS))
-    if end <= start:
-        raise ScopeContextTimeError()
-    return context, start, end
+    return observation_scope(output, now)
 
 
 def bounded_output(command, timeout=TIMEOUT, limit=MAX_BYTES):
@@ -208,7 +192,7 @@ def ndjson(raw):
     return entry
 
 
-def relevant(entry, udid, bundle, start, end):
+def relevant(entry, udid, bundle, start, end, pids=()):
     """Launchd may omit the UDID, so require a process allowlist and one owned anchor."""
     try:
         message = entry["eventMessage"]
@@ -221,12 +205,316 @@ def relevant(entry, udid, bundle, start, end):
     if process in RUNTIME_PROCESSES:
         if not re.search(r"mount|cryptex|duplicate|disappear|23A8464|iOS[ _]26\.0", message, re.I):
             return None
+        if not anchored(udid, message):
+            return None
     elif process in PROCESSES:
-        if not (anchored(udid, message) or anchored(bundle, message) or anchored(bundle + ".tests", message)):
+        anchored_pids = {entry["processIdentifier"]} if entry.get("processIdentifier") in pids else set()
+        # These three launch services also report their client in a structured
+        # field. Do not treat an arbitrary numeric message as ownership proof.
+        if process in {"launchd_sim", "assertiond", "debugserver", "runningboardd", "testmanagerd"}:
+            for key in ("pid", "targetPid", "clientPid", "processID", "processIdentifier"):
+                if isinstance(entry.get(key), int) and entry[key] in pids:
+                    anchored_pids.add(entry[key])
+            for match in re.finditer(r"(?<![\w.-])(?:pid|process(?:Identifier|ID)?)\s*(?:[:=]|\s)\s*(\d+)(?!\d)", message, re.I):
+                if int(match.group(1)) in pids:
+                    anchored_pids.add(int(match.group(1)))
+        if not (anchored(udid, message) or anchored(bundle, message) or
+                anchored(bundle + ".tests", message) or anchored_pids):
             return None
     else:
         return None
     return {"timestamp": stamp.isoformat(), "process": process, "eventMessage": message}
+
+
+REAPER = r'''
+import os, signal, sys, time
+parent, group = int(sys.argv[1]), int(sys.argv[2])
+deadline = time.monotonic() + float(sys.argv[3])
+signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
+while time.monotonic() < deadline:
+    try:
+        os.kill(parent, 0)
+    except ProcessLookupError:
+        break
+    time.sleep(min(0.1, max(0, deadline - time.monotonic())))
+try:
+    os.killpg(group, signal.SIGKILL)
+except ProcessLookupError:
+    pass
+'''
+
+
+class LiveLog:
+    """One owned log child, a draining reader, and a separate fail-closed status."""
+
+    def __init__(self, command, destination, deadline, udid, bundle):
+        self.command = command
+        self.destination = destination
+        self.deadline = deadline
+        self.udid, self.bundle = udid, bundle
+        self.pgid = os.getpgid(0)
+        self.log_pgid = None
+        self.lock = threading.RLock()
+        self.status = "collection incomplete"
+        self.raw_bytes = 0
+        self.pending = []
+        self.kept = []
+        self.partial = bytearray()
+        self.pids = set()
+        self.process = None
+        self.reaper = None
+        self.thread = None
+        self.stderr = None
+        self.stderr_thread = None
+        self.stderr_bytes = 0
+        self.exit_code = None
+        self.pre_stop_code = None
+        self.stopped = False
+        self.reader_error = None
+        self.terminated = False
+        self.timed_out = False
+
+    def publish(self):
+        with self.lock:
+            encoded = json.dumps(self.kept, ensure_ascii=False).encode()
+            if len(encoded) > MAX_BYTES:
+                raise OutputLimitError("live launch log export exceeded byte limit")
+            count = len(self.kept)
+            self.status = "captured"
+        publish(self.destination / "live-launch.json", encoded)
+        publish(self.destination / "live-launch.status.txt",
+                f"captured {count} scoped live events; diagnosis still required\n"
+                if count else "no scoped live launch events; no cause established\n")
+
+    def fail(self, category):
+        with self.lock:
+            if self.status != "collection incomplete":
+                return
+            self.status = category
+            (self.destination / "live-launch.json").unlink(missing_ok=True)
+            publish(self.destination / "live-launch.status.txt",
+                    f"unavailable: live-log-{category}; no launch cause established\n")
+
+    def correlate(self, pids):
+        with self.lock:
+            if not pids:
+                return
+            self.pids.update(pids)
+            pending, self.pending = self.pending, []
+            for entry in pending:
+                self.retain(entry)
+
+    def retain(self, entry):
+        item = relevant(entry, self.udid, self.bundle, self.start, self.deadline, self.pids)
+        if item:
+            self.kept.append(item)
+        elif self.pids:
+            return
+        elif len(json.dumps(self.pending + [entry], ensure_ascii=False).encode()) > MAX_BYTES:
+            raise OutputLimitError("uncorrelated live launch log exceeded byte limit")
+        else:
+            self.pending.append(entry)
+        if len(json.dumps(self.kept, ensure_ascii=False).encode()) > MAX_BYTES:
+            raise OutputLimitError("live launch log export exceeded byte limit")
+
+    def consume(self, raw):
+        with self.lock:
+            self.raw_bytes += len(raw)
+            if self.raw_bytes > RAW_LOG_BYTES:
+                raise OutputLimitError("raw live launch log exceeded byte limit")
+            self.partial.extend(raw)
+            while True:
+                try:
+                    newline = self.partial.index(10)
+                except ValueError:
+                    break
+                entry, self.partial = self.partial[:newline], self.partial[newline + 1:]
+                self.retain(ndjson(entry))
+            if len(self.partial) > MAX_BYTES:
+                raise OutputLimitError("single live launch event exceeded byte limit")
+
+    def read(self):
+        try:
+            for raw in iter(self.process.stdout.readline, b""):
+                self.consume(raw)
+            if self.partial:
+                self.consume(b"\n")
+        except COLLECTION_ERRORS + (json.JSONDecodeError,) as error:
+            self.reader_error = error
+            if isinstance(error, (TimeoutError, subprocess.TimeoutExpired)):
+                category = "timeout"
+            elif isinstance(error, OutputLimitError):
+                category = "output-limit"
+            elif isinstance(error, StreamParseError):
+                category = "parse-failure"
+            else:
+                category = "read-failure"
+            self.fail(category)
+        finally:
+            self.process.stdout.close()
+            self.exit_code = self.process.poll()
+
+    def drain_stderr(self):
+        try:
+            while self.stderr.read(4096):
+                self.stderr_bytes += 4096
+                if self.stderr_bytes > RAW_LOG_BYTES:
+                    # A bounded failure still closes the pipe; raw stderr is never exported.
+                    self.fail("output-limit")
+                    break
+        except OSError:
+            self.fail("read-failure")
+        finally:
+            self.stderr.close()
+
+    def close_owned_group(self):
+        """Stop only the dedicated log group, never the watcher or xcodebuild."""
+        if self.log_pgid is None:
+            return
+        try:
+            os.killpg(self.log_pgid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        # Wait for the leader and the independent stdout/stderr EOF. Descendant
+        # processes that ignore TERM cannot retain the stream past this point.
+        try:
+            self.process.wait(timeout=2)
+        except subprocess.TimeoutExpired:
+            self.process.kill()
+            self.process.wait(timeout=2)
+
+    def stop(self, timeout=2):
+        if self.process is None or self.thread is None or self.stderr_thread is None:
+            return
+        if self.pre_stop_code is None:
+            self.pre_stop_code = self.process.poll()
+        self.stopped = True
+        if self.reaper is not None and self.reaper.poll() is None:
+            try:
+                os.killpg(self.reaper.pid, signal.SIGTERM)
+            except ProcessLookupError:
+                pass
+            try:
+                self.reaper.wait(timeout=2)
+            except subprocess.TimeoutExpired:
+                os.killpg(self.reaper.pid, signal.SIGKILL)
+                self.reaper.wait(timeout=2)
+        deadline = time.monotonic() + timeout
+        try:
+            if self.process.poll() is None:
+                os.killpg(self.log_pgid, signal.SIGTERM)
+                self.terminated = True
+            self.thread.join(timeout=timeout)
+            self.stderr_thread.join(timeout=max(0, deadline - time.monotonic()))
+        except ProcessLookupError:
+            pass
+        if self.thread.is_alive() or self.stderr_thread.is_alive():
+            self.timed_out = True
+            self.close_owned_group()
+        if self.process.poll() is None:
+            try:
+                self.process.wait(timeout=2)
+            except subprocess.TimeoutExpired:
+                self.process.kill()
+                self.process.wait(timeout=2)
+        self.thread.join(timeout=2)
+        self.stderr_thread.join(timeout=2)
+        if self.thread.is_alive() or self.stderr_thread.is_alive():
+            self.fail("read-timeout")
+            raise TimeoutError("live log reader did not finish")
+        if self.status != "collection incomplete":
+            return
+        if self.reader_error is not None:
+            return
+        if self.timed_out:
+            self.fail("stop-timeout")
+        elif self.pre_stop_code:
+            self.fail("command-failure")
+        else:
+            self.publish()
+
+
+def live_command():
+    predicate = "(" + " OR ".join(f'process == "{name}"' for name in PROCESSES + RUNTIME_PROCESSES) + ")"
+    return ["/usr/bin/log", "stream", "--style", "ndjson", "--info", "--debug", "--predicate", predicate]
+
+
+def observation_scope(output, now, regular=False):
+    """Resolve the existing phone/regular fixture without borrowing the other's scope."""
+    context_name = "regular-readiness-context.json" if regular else CONTEXT
+    simulator_name = "regular-simulator.log" if regular else "simulator.log"
+    try:
+        context = json.loads(read_scope_file(output / context_name))
+        if not isinstance(context, dict) or set(context) != {"udid", "bundle_id", "started_at"}:
+            raise ScopeContextFieldsError()
+    except (json.JSONDecodeError, TypeError, ValueError):
+        raise ScopeContextFieldsError() from None
+    identity(context["udid"], context["bundle_id"])
+    if read_scope_file(output / simulator_name, ScopeOwnedSimulatorError).strip() != context["udid"]:
+        raise ScopeOwnedSimulatorError()
+    try:
+        start = datetime.fromisoformat(context["started_at"])
+    except (TypeError, ValueError):
+        raise ScopeContextTimeError() from None
+    if start.utcoffset() != timedelta(0) or start > now or now - start > timedelta(hours=2):
+        raise ScopeContextTimeError()
+    end = min(now, start + timedelta(seconds=READINESS_SECONDS))
+    if end <= start:
+        raise ScopeContextTimeError()
+    return context, start, end
+
+
+def start_live_log(scope_root, destination, deadline=None, popen=subprocess.Popen,
+                   now=lambda: datetime.now(timezone.utc), regular=False):
+    """Start before the test child; leave the owned shell process group intact."""
+    current = now()
+    # The regular fixture has its own context file in the same explicit output root.
+    context, start, _ = observation_scope(scope_root, current, regular=regular)
+    # Live observation runs forward from now, so it must not inherit the
+    # `observation_scope` end, which is already clamped to `now` for the
+    # historical collector. The live window closes at the scope's readiness
+    # horizon, optionally narrowed by an explicit caller deadline. Falling
+    # back to `current` here would freeze the live filter at startup and
+    # shrink the watchdog lifetime to ~10 seconds.
+    end = start + timedelta(seconds=READINESS_SECONDS)
+    if deadline is not None:
+        end = min(end, deadline)
+    destination.mkdir(parents=True, exist_ok=True)
+    live = LiveLog(live_command(), destination, end, context["udid"], context["bundle_id"])
+    publish(destination / "live-launch.status.txt", "unavailable: live-log-collection-incomplete; no launch cause established\n")
+    (destination / "live-launch.json").unlink(missing_ok=True)
+    try:
+        live.process = popen(live.command, stdin=subprocess.DEVNULL,
+                             stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                             bufsize=0, start_new_session=True)
+        live.stderr = live.process.stderr
+        live.log_pgid = os.getpgid(live.process.pid)
+        if live.log_pgid != live.process.pid or live.log_pgid == live.pgid:
+            live.process.kill()
+            live.process.wait(timeout=2)
+            live.fail("group-validation-failure")
+            return live
+    except (OSError, subprocess.SubprocessError):
+        live.fail("startup-failure")
+        return live
+    live.start = start
+    # The watchdog owns a separate session and records only the validated log
+    # PGID. Parent death or its hard deadline reaps that group without ever
+    # signalling the watcher, xcodebuild, or the watchdog itself.
+    lifetime = max(1, (end - current).total_seconds() + 10)
+    try:
+        live.reaper = popen([sys.executable, "-c", REAPER, str(os.getpid()), str(live.log_pgid), str(lifetime)],
+                            stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                            start_new_session=True)
+    except (OSError, subprocess.SubprocessError):
+        live.close_owned_group()
+        live.fail("startup-failure")
+        return live
+    live.thread = threading.Thread(target=live.read, name="bounded-live-launch-log", daemon=True)
+    live.thread.start()
+    live.stderr_thread = threading.Thread(target=live.drain_stderr, name="bounded-live-launch-stderr", daemon=True)
+    live.stderr_thread.start()
+    return live
 
 
 def stream_output(command, start, end, udid, bundle, timeout=TIMEOUT):
@@ -290,12 +578,14 @@ def stream_output(command, start, end, udid, bundle, timeout=TIMEOUT):
 def collect(output, destination, reader=bounded_output, now=None, stream_reader=stream_output, scope_root=None):
     status = destination / "simulator-launch.status.txt"
     evidence = destination / "simulator-launch.json"
-    context = destination / CONTEXT
+    context = destination / ("regular-readiness-context.json" if destination.name == "live-regular-readiness" else CONTEXT)
     category = "publication"
     try:
         invalidate(status, evidence, context)
         category = "scope-validation"
-        context_data, start, end = scope(scope_root or output, now or datetime.now(timezone.utc))
+        context_data, start, end = observation_scope(
+            scope_root or output, now or datetime.now(timezone.utc),
+            regular=destination.name == "live-regular-readiness")
         udid, bundle = context_data["udid"], context_data["bundle_id"]
         predicate = ("(" + " OR ".join(f'process == "{name}"' for name in PROCESSES + RUNTIME_PROCESSES) +
                      f') AND (eventMessage CONTAINS[c] "{udid}" OR eventMessage CONTAINS "{bundle}"' +
@@ -338,7 +628,8 @@ def collect(output, destination, reader=bounded_output, now=None, stream_reader=
     except StatusPublicationError:
         invalidate(status, evidence, context)
         raise
-    except COLLECTION_ERRORS as error:
+    except (OSError, subprocess.SubprocessError, ValueError, StreamParseError,
+            OutputLimitError, ScopeValidationError) as error:
         invalidate(status, evidence, context)
         if isinstance(error, ScopeValidationError):
             unavailable(status, error.category)

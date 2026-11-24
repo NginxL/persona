@@ -2,7 +2,7 @@
 // full and not folded into "N more" under another card of the same agent. It rides on that history entry only: the
 // sidebar, a notification or a new tab open the chat without it.
 import type { Route } from "./router";
-import { requestHome } from "./child-sessions";
+import { requestHome, requestHomeMachine } from "./child-sessions";
 import { isSide, sideFoldOn } from "./side-fold";
 import type { Interaction } from "./types";
 
@@ -29,9 +29,10 @@ export function focusedFirst<T extends Pick<Interaction, "id">>(cards: T[], id: 
  *  parent's page, where it is answered (#5120); a lead's worker's opens the worker's link, which is the lead's page with
  *  the worker in its Team panel (#5180, App); a side session's opens the side's link, which is its parent's page with
  *  the side in its Side sessions panel, and a card of a row that belongs to a side the side's link too (#7944, App). */
-export function requestRoute(ix: Pick<Interaction, "id" | "machine_id" | "session_id" | "folded_under" | "folded_as" | "folded_side">): Route {
+export function requestRoute(ix: Pick<Interaction, "id" | "machine_id" | "session_id" | "folded_under" | "folded_under_machine_id" | "folded_as" | "folded_side">): Route {
   if (ix.session_id === "") return { name: "request", id: ix.id };
   if (isSide(ix)) return { name: "session", mid: ix.machine_id, sid: ix.session_id };
   if (ix.folded_side && sideFoldOn()) return { name: "session", mid: ix.machine_id, sid: ix.folded_side };
-  return { name: "session", mid: ix.machine_id, sid: ix.folded_as === "worker" ? ix.session_id : requestHome(ix) };
+  if (ix.folded_as === "worker") return { name: "session", mid: ix.machine_id, sid: ix.session_id };
+  return { name: "session", mid: requestHomeMachine(ix), sid: requestHome(ix) };
 }

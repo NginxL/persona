@@ -28,6 +28,7 @@ import persona.core.designsystem.*
  */
 object AssistantSidebarShade {
     const val Conversation = "conversation"
+    const val Starred = "starred"
     const val Inbox = "inbox"
     const val Messages = "messages"
     const val Todos = "todos"
@@ -36,8 +37,12 @@ object AssistantSidebarShade {
     const val Schedule = "schedule"
     const val Health = "health"
     const val None = "none"
+    /** The new space form (#13500): [space] of [SpacesModel.NEW], a word no space's address may be. */
+    const val NewSpace = "space:new"
 
     fun agent(key: SessionKey) = "agent:${key.path}"
+    /** A domain space's row (#13500). */
+    fun space(slug: String) = "space:$slug"
 }
 
 /** The Agents list supplies the scroll viewport and places the footer below its Needs You jump. */
@@ -100,6 +105,10 @@ fun AssistantSidebarContent(
         ?: AssistantSnapshot(manager = choice.manager, managerId = choice.shown)
     val base = LocalAssistantHost.current?.management
     val management = remember(base, choice.hubId, choice.shown) { base?.forManager(choice.shown) }
+    // The domain spaces (#13500): the page opens them, so they show only where the page is the real assistant's.
+    val sidebarHost = LocalAssistantSidebarHost.current
+    val spaces = rememberSpaces(choice.hubId, base,
+        enabled = !demo && sidebarHost != null && repository is persona.core.contracts.api.AssistantConversations)
     val conversationArranger = remember(management, repository, demo) {
         management?.takeUnless { demo }?.let { api ->
             ConversationArranger(
@@ -209,6 +218,9 @@ fun AssistantSidebarContent(
         query, remember(groups) { (groups.directions + groups.others).distinctBy { it.sessionId } },
         knownChats.withConversationTag(history.activeTag), searchOn, management, "${choice.hubId.orEmpty()}|${choice.shown}",
         activeTag = history.activeTag)
+    val fullSearchChats = remember(openChats, groups.directions, groups.externalDirections) {
+        openChats + groups.directions.filter { it.sessionId in groups.externalDirections }
+    }
     Column(Modifier.fillMaxHeight()) {
         failure?.let { JNotice(it, status = Status.NeedsYou) }
         Box(Modifier.weight(1f)) {
@@ -286,19 +298,24 @@ fun AssistantSidebarContent(
                 merged = merged,
                 showSchedule = merged == null || (management != null && !demo),
                 onAgentSearch = { openSearch(true) },
-                arranger = conversationArranger, arrangeScope = operationScope, onArrange = beginArrange)
+                arranger = conversationArranger, arrangeScope = operationScope, onArrange = beginArrange,
+                spaces = spaces?.sidebar,
+                onSpace = { slug -> sidebarHost?.openSpace = slug; onAction(AssistantSidebarAction.Space) },
+                onNewSpace = { sidebarHost?.openSpace = SpacesModel.NEW; onAction(AssistantSidebarAction.Space) },
+                frontSpace = sidebarHost?.spaceInFront)
             JToastHost(toast, Modifier.align(Alignment.TopCenter))
         }
     }
     if (fullSearchOpen && fullWindowSearch) {
         AssistantFullSearch(
-            chats = openChats,
+            chats = fullSearchChats,
             known = knownChats,
             searchOn = searchOn,
             management = management,
             hubKey = "${choice.hubId.orEmpty()}|${choice.shown}",
             words = words,
             names = received.directionNames,
+            externalDirections = groups.externalDirections,
             backgroundId = received.backgroundSupervisor,
             activeTag = history.activeTag,
             mainKey = received.mainSession,
@@ -311,10 +328,10 @@ fun AssistantSidebarContent(
             agentMachines = merged?.agentMachines.orEmpty(),
             pinnedAgents = merged?.pinnedAgents.orEmpty(),
             agentsFirst = searchAgentsFirst,
-            onOpenAgent = { key ->
+            onOpenAgent = if (merged == null && onOpenAgent == null) null else ({ key ->
                 fullSearchOpen = false
-                merged?.onSearchAgent?.invoke(key)
-            },
+                if (merged != null) merged.onSearchAgent(key) else onOpenAgent?.invoke(key)
+            }),
         )
     }
     ConversationHistoryDialogs(history, received.conversations, operationScope, onOpen = onOpen,

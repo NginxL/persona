@@ -13,6 +13,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import persona.core.contracts.SessionKey
+import persona.core.inbox.*
 
 internal const val INBOX_HAND_OFF_UNDO_MILLIS = 5_000L
 internal const val INBOX_HAND_OFF_LISTED_TARGETS = 12

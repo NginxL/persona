@@ -11,6 +11,7 @@ import persona.core.contracts.LarkMomentsCommentsResponse
 import persona.core.contracts.LarkMomentsPost
 import persona.core.contracts.api.AssistantManagerChoice
 import persona.core.domain.inbox.InboxItem
+import persona.core.inbox.*
 
 @RunWith(AndroidJUnit4::class)
 @Config(sdk = [35])

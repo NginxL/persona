@@ -30,7 +30,10 @@ func main() {
 		return
 	}
 	if len(os.Args) > 1 && os.Args[1] == "node-update-check" {
-		_ = json.NewEncoder(os.Stdout).Encode(nodeupdate.Check{Version: version, OS: runtime.GOOS, Arch: runtime.GOARCH})
+		_ = json.NewEncoder(os.Stdout).Encode(nodeupdate.Check{
+			Version: version, OS: runtime.GOOS, Arch: runtime.GOARCH,
+			AdoptionMarker: os.Getenv("FIXTURE_LEGACY_ADOPTION") == "",
+		})
 		return
 	}
 	if len(os.Args) == 5 && os.Args[1] == "node-update-watch" && os.Args[4] == "--managed-ready" {

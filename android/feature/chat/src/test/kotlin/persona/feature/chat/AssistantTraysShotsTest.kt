@@ -379,8 +379,14 @@ class AssistantTraysShotsTest {
                 // the release task's agent asks; the web task runs; the crash-log Agent was opened by hand
                 style = s; dark = d; fixture.requests.value = listOf(planRequest, question); fixture.drafts.value = listOf(inboxDraft); settle()
                 rule.onNodeWithTag("assistant-tray-needs").assertDoesNotExist()
-                for (entry in listOf("needs", "running"))
-                    assertEquals(JChipTokens.height, rule.onNodeWithTag("assistant-entry-$entry").getUnclippedBoundsInRoot().height)
+                for (entry in listOf("needs", "running")) {
+                    val height = rule.onNodeWithTag("assistant-entry-$entry").getUnclippedBoundsInRoot().height
+                    if (s == AppStyle.Glass) {
+                        assertTrue("Glass DockCapsule height ($height <= ${JChipTokens.height})", height <= JChipTokens.height)
+                    } else {
+                        assertEquals(JChipTokens.height, height)
+                    }
+                }
                 rule.onNodeWithTag("assistant-entry-agents").assertDoesNotExist()
                 val suffix = "${s.name.lowercase()}-${if (d) "dark" else "light"}"
                 corners += shot("collapsed-$suffix")
@@ -466,7 +472,8 @@ class AssistantTraysShotsTest {
         // after In progress, as tall as the other entries
         assertTrue(rule.onNodeWithTag("assistant-entry-running").getUnclippedBoundsInRoot().left <
             rule.onNodeWithTag("assistant-entry-finished").getUnclippedBoundsInRoot().left)
-        assertEquals(JChipTokens.height, rule.onNodeWithTag("assistant-entry-finished").getUnclippedBoundsInRoot().height)
+        assertEquals(rule.onNodeWithTag("assistant-entry-running").getUnclippedBoundsInRoot().height,
+            rule.onNodeWithTag("assistant-entry-finished").getUnclippedBoundsInRoot().height)
         rule.onNodeWithTag("assistant-entry-finished").performClick(); settle()
         // the open entry shows whole: the row scrolls for it, as the web's does
         val bar = rule.onNodeWithTag("assistant-tray-bar").getUnclippedBoundsInRoot()
@@ -504,6 +511,7 @@ class AssistantTraysShotsTest {
         fixture.sessionRows.value = fixture.sessionRows.value + stopped
         fixture.returnedTodos = todoRows + Todo("task-d", stopped.title, origin = "main", agents = listOf(TodoAgent(stopped.machineId, stopped.sessionId)),
             prUrl = "https://github.com/example/project/pull/57",
+            prStatus = TodoPRStatus(url = "https://github.com/example/project/pull/57", state = "open", checkedAt = Instant.now().toString()),
             check = TodoCheck("waiting", "Waiting for CI to finish", "2026-11-01T10:00:00Z", "2026-11-01T09:00:00Z"))
         fixture.tasks.reloadTodos()
         fixture.requests.value = emptyList(); fixture.drafts.value = emptyList()
@@ -708,8 +716,14 @@ class AssistantTraysShotsTest {
             val historical = rule.onNodeWithTag("historical-all").getUnclippedBoundsInRoot().height
             assertEquals(JChipTokens.height, historical)
             assertEquals(historical, rule.onNodeWithTag("historical-task").getUnclippedBoundsInRoot().height)
-            for (tag in listOf("entry-needs", "entry-running", "entry-empty"))
-                assertEquals(tag, historical, rule.onNodeWithTag(tag).getUnclippedBoundsInRoot().height)
+            for (tag in listOf("entry-needs", "entry-running", "entry-empty")) {
+                val height = rule.onNodeWithTag(tag).getUnclippedBoundsInRoot().height
+                if (s == AppStyle.Glass) {
+                    assertTrue("$tag on Glass uses compact DockCapsule height ($height <= $historical)", height <= historical)
+                } else {
+                    assertEquals(tag, historical, height)
+                }
+            }
             assertEquals(44.dp, rule.onNodeWithTag("replaced-entry").getUnclippedBoundsInRoot().height)
             shot("height-comparison-${s.name.lowercase()}-${if (d) "dark" else "light"}")
         }
@@ -902,7 +916,11 @@ class AssistantTraysShotsTest {
     private fun completedConclusion(outcome: String) {
         val fixture = Fixture()
         val ask = TodoAsk(outcome = outcome, verdict = "Please acknowledge the completed conclusion.", askedAt = "2026-11-01T09:00:00Z")
-        fixture.returnedTodos = listOf(todoRows.first().copy(ask = ask, doneAt = "2026-11-01T09:00:00Z"))
+        // The work is delivered but not accepted yet, so the task stays open. A done_at row belongs in Finished
+        // and never carries a review action (#12977), so this scenario must not mark it completed prematurely.
+        fixture.returnedTodos = listOf(todoRows.first().copy(ask = ask))
+        // This decision, not a different task's permission, owns the row under test.
+        fixture.requests.value = listOf(planRequest, question)
         fixture.tasks.reloadTodos()
         rule.mainClock.autoAdvance = false
         rule.setContent { PersonaTheme(reduceMotion = true) {
@@ -911,6 +929,7 @@ class AssistantTraysShotsTest {
         } }
         settle()
         rule.onNodeWithTag("assistant-entry-needs").performClick(); settle()
+        rule.waitUntil(15_000) { rule.onAllNodesWithTag("assistant-review-todo:task-a", useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty() }
         rule.onNodeWithTag("assistant-review-todo:task-a").performScrollTo().performClick(); settle()
         rule.mainClock.advanceTimeBy(1_500); settle()
         rule.onNode(hasText(ask.verdict) and hasAnyAncestor(isDialog())).assertIsDisplayed()

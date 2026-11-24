@@ -2,6 +2,7 @@
 // Agent rows" says. The model is the composer's model pill (#5032), not the usage row's.
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
+import { t } from "../../i18n";
 import { setAgentDetails } from "../../lib/context-usage";
 import type { Session } from "../../lib/types";
 import { ContextMeter } from "./ContextMeter";
@@ -36,9 +37,9 @@ describe("ContextMeter", () => {
     expect(html).toContain("text-orange");
     expect(html).toContain("/compact");
   });
-  it("shows nothing while the window is unknown, the model alone included", () => {
+  it("shows nothing for a model without any observed usage", () => {
     setAgentDetails(true);
-    expect(renderToStaticMarkup(<ContextMeter session={{ ...s, context_window: undefined }} />)).toBe("");
+    expect(renderToStaticMarkup(<ContextMeter session={{ ...s, context_tokens: undefined, context_window: undefined }} />)).toBe("");
   });
   it("names both shares for assistive technology and in the tooltip", () => {
     const html = renderToStaticMarkup(<ContextMeter session={s} />);
@@ -56,6 +57,50 @@ describe("ContextMeter", () => {
     expect(html).toContain('aria-label="上下文 39%（已用），还剩 61%"');
     expect(html).not.toContain("progressbar");
     expect(html).not.toContain("opus");
-    expect(renderToStaticMarkup(<ContextMeter session={{ ...s, context_window: undefined }} compact />)).toBe("");
+    expect(renderToStaticMarkup(<ContextMeter session={{ ...s, context_tokens: 0 }} compact />)).toBe("");
+  });
+  it("shows current agy context ahead of cumulative usage when the window is unknown", () => {
+    const html = renderToStaticMarkup(
+      <ContextMeter session={{ ...s, agent: "agy", model: "custom", context_tokens: 7200, context_window: 0 }}
+        items={[{ id: "1", seq: 1, role: "assistant", kind: "text", usage: [{ in: 25_000 }] }]} />,
+    );
+    expect(html).toContain(t("context.current_tokens", { tokens: "7.2k" }));
+    expect(html).not.toMatch(/progressbar|%|25.0k/);
+  });
+  it("shows a compact token pill when context window is unknown but item token usage exists", () => {
+    const html = renderToStaticMarkup(
+      <ContextMeter
+        session={{ ...s, context_tokens: undefined, context_window: undefined, assistant: true }}
+        items={[{ id: "1", seq: 1, role: "assistant", kind: "text", usage: [{ in: 2500, out: 1500 }] }]}
+        assistant
+      />,
+    );
+    expect(html).toContain("4.0k tok");
+    expect(html).not.toContain("progressbar");
+  });
+  it("deduplicates subagent reports by per-field maxima so the pill total matches aggregateSessionTokens", () => {
+    const html = renderToStaticMarkup(
+      <ContextMeter
+        session={{ ...s, context_tokens: undefined, context_window: undefined }}
+        items={[
+          {
+            id: "1",
+            seq: 1,
+            role: "assistant",
+            kind: "text",
+            usage: [{ id: "sub-1", model: "anthropic/claude-opus-4-5", in: 1200, out: 400 }],
+          },
+          {
+            id: "2",
+            seq: 2,
+            role: "assistant",
+            kind: "text",
+            usage: [{ id: "sub-1", model: "claude-opus-4-5-20250929", in: 900, out: 700 }],
+          },
+        ]}
+      />,
+    );
+    // max(1200, 900) + max(400, 700) = 1900 -> 1.9k tok (not max(1600, 1600) = 1.6k tok)
+    expect(html).toContain("1.9k tok");
   });
 });

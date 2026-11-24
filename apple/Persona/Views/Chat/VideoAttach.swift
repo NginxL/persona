@@ -485,10 +485,11 @@ nonisolated enum AttachedVideos {
 }
 
 extension View {
-    /// A composer's Photos picker: pictures and videos, four at most, in the library's own encoding (a video is
-    /// compressed here, and only when it has to be: `VideoPrep`).
-    func mediaPicker(isPresented: Binding<Bool>, selection: Binding<[PhotosPickerItem]>) -> some View {
-        photosPicker(isPresented: isPresented, selection: selection, maxSelectionCount: 4, matching: .any(of: [.images, .videos]),
+    /// A composer's Photos picker: pictures and videos, `limit` at most (the hub's pictures and the videos' own, #12973;
+    /// pictures past the hub's go as files), in the library's own encoding (a video is compressed here, and only when it
+    /// has to be: `VideoPrep`).
+    func mediaPicker(isPresented: Binding<Bool>, selection: Binding<[PhotosPickerItem]>, limit: Int) -> some View {
+        photosPicker(isPresented: isPresented, selection: selection, maxSelectionCount: max(1, limit), matching: .any(of: [.images, .videos]),
                      preferredItemEncoding: .current)
     }
 }

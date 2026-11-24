@@ -20,7 +20,7 @@ import { foldedState } from "./child-sessions";
 import type { DirectionAgent, DirectionTask, DirectionTree } from "./direction-tree";
 import type { PlanTask, TaskPlan } from "./feed";
 import { reviewState } from "./supervision";
-import { acceptedAtRest, interruption, isAutoDone, openAsk, taskNow, todoStatus, type SessionLookup, type Todo, type TodoStatus } from "./todos";
+import { acceptedAtRest, interruption, isAutoDone, isCancelled, openAsk, taskNow, todoStatus, type SessionLookup, type Todo, type TodoStatus } from "./todos";
 import type { AgentState, Session, Subagent } from "./types";
 
 // ── what a piece is and where it stands ─────────────────────
@@ -33,12 +33,13 @@ import type { AgentState, Session, Subagent } from "./types";
  *   review    it says it is done and waits to be accepted;
  *   stopped   its Agents ended their turn and nothing brings them back;
  *   done      closed;
+ *   cancelled closed by cancellation, with its own outcome rather than Done;
  *   failed    its Agent did not start (start_error).
  */
-export type NodeState = "queued" | "ready" | "working" | "needs_you" | "review" | "stopped" | "done" | "failed";
+export type NodeState = "queued" | "ready" | "working" | "needs_you" | "review" | "stopped" | "done" | "cancelled" | "failed";
 
 /** Where a state sorts: what waits on the owner first, then the work going on, then what waits, the closed last. */
-const STATE_RANK: Record<NodeState, number> = { needs_you: 0, failed: 1, review: 2, working: 3, ready: 4, queued: 5, stopped: 6, done: 7 };
+const STATE_RANK: Record<NodeState, number> = { needs_you: 0, failed: 1, review: 2, working: 3, ready: 4, queued: 5, stopped: 6, done: 7, cancelled: 8 };
 
 export type AgentRole = "lead" | "worker" | "spawned" | "subagent" | "before";
 
@@ -142,10 +143,12 @@ export interface GraphRequest {
 }
 
 export interface Graph {
-  /** Not done, the most active first. */
+  /** Not done or wholly cancelled, the most active first. */
   active: GraphRequest[];
   /** Done, the latest finished first. */
   done: GraphRequest[];
+  /** Terminal requests containing a cancellation, kept apart from both active work and Done. */
+  cancelled: GraphRequest[];
 }
 
 export interface GraphInput {
@@ -432,11 +435,13 @@ export function agentTree(agents: readonly NodeAgent[]): TreeRow[] {
  *               reported done (report_to_supervisor), its ask is "please verify" / a conclusion, or the hub closed it
  *               as done (done_by auto) and the user has not looked at it yet;
  *    working    everything else still open: working, waiting, stopped, not started;
- *    accepted   closed: accepted by its supervisor, marked done by the user, closed after the user saw it. */
-export type PieceStep = "needs_me" | "review" | "working" | "accepted";
+ *    accepted   closed: accepted by its supervisor, marked done by the user, closed after the user saw it;
+ *    cancelled  closed by cancellation, never counted as accepted or done. */
+export type PieceStep = "needs_me" | "review" | "working" | "accepted" | "cancelled";
 
 /** Where a to-do stands; `status` is its todoStatus. */
 export function pieceStep(todo: Todo, status: TodoStatus): PieceStep {
+  if (isCancelled(todo)) return "cancelled";
   if (status === "failed") return "needs_me";
   if (todo.done_at) return isAutoDone(todo) && !todo.seen_at ? "review" : "accepted";
   const ask = openAsk(todo);
@@ -501,7 +506,8 @@ function todoNode(todo: Todo, data: GraphData, title?: string): GraphNode {
   const active = (todo.agents ?? []).filter((a) => !a.released_at);
   const sessions = active.map((a) => lookup(a.machine_id, a.session_id)).filter((s): s is Session => Boolean(s));
   let state: NodeState;
-  if (todo.start_error) state = "failed";
+  if (step === "cancelled") state = "cancelled";
+  else if (todo.start_error) state = "failed";
   else if (step === "accepted") state = "done";
   else if (step === "review") state = "review";
   else if (step === "needs_me") state = "needs_you";
@@ -513,12 +519,14 @@ function todoNode(todo: Todo, data: GraphData, title?: string): GraphNode {
   const asking = sessions.find((s) => foldedState(s) === "needs_you");
   const cut = sessions.map((s) => interruption(s)).find(Boolean);
   const text = state === "failed" ? todo.start_error ?? ""
+    : state === "cancelled" ? todo.cancelled_reason || todo.done_reason || ""
     : state === "needs_you" ? ask?.question?.trim() || ask?.verdict?.trim() || asking?.asks?.trim() || cut?.reason || ""
     : state === "review" ? ask?.verdict?.trim() || todo.supervision?.progress?.line || "" : "";
   const working = sessions.filter((s) => foldedState(s) === "working").map((s) => ms(s.state_since)).filter((v): v is number => v !== undefined);
   const since = state === "working" ? (working.length ? Math.min(...working) : undefined)
     : state === "needs_you" ? ms(ask?.asked_at) ?? ms(asking?.state_since)
     : state === "done" ? ms(todo.done_at)
+    : state === "cancelled" ? ms(todo.cancelled_at) ?? ms(todo.done_at)
     : ms(todo.created_at);
   const agents = nodeAgents(todo, data);
   return {
@@ -630,7 +638,7 @@ function finish(req: Omit<GraphRequest, "edges" | "layers" | "rows" | "done" | "
   // edges again: a piece that just became queued is drawn dashed
   for (const e of edges) e.dashed = byKey.get(e.to)?.state === "queued";
   const todos = [...(req.root ? [req.root] : []), ...req.nodes.flatMap((n) => (n.todo ? [n.todo] : []))];
-  const done = req.nodes.length > 0 && req.nodes.every((n) => n.state === "done") && (!req.root || isDoneTodo(req.root));
+  const done = req.nodes.length > 0 && req.nodes.every((n) => n.state === "done") && (!req.root || isDoneTodo(req.root) && !isCancelled(req.root));
   const touched = Math.max(0, ms(req.plan?.created_at) ?? 0, ...todos.map((t) => ms(t.updated_at) ?? ms(t.created_at) ?? 0));
   const finished = Math.max(0, ...todos.map((t) => ms(t.done_at) ?? 0));
   const merged = req.nodes.length === 1 && sameWords(req.title, req.nodes[0].title) && (!req.root || mergesWithRoot(req.root, req.nodes[0]));
@@ -649,12 +657,18 @@ function finish(req: Omit<GraphRequest, "edges" | "layers" | "rows" | "done" | "
  * Either one split keeps both cards (request-graph.test.ts "root × piece").
  */
 export function mergesWithRoot(root: Todo, piece: GraphNode): boolean {
+  if (isCancelled(root)) return false // the root's own cancellation and reason must stay visible beside the piece
   const rootDone = isDoneTodo(root);
   const pieceDone = piece.todo ? isDoneTodo(piece.todo) : piece.state === "done";
   return rootDone === pieceDone && (rootDone || piece.state !== "done");
 }
 
 const rank = (r: GraphRequest) => Math.min(STATE_RANK.done + 1, ...r.nodes.map((n) => STATE_RANK[n.state]));
+
+/** A terminal request with a cancelled root or piece has its own outcome. An open root or piece keeps the request active,
+ *  where its cancelled pieces remain visible without being counted as Done. */
+const isCancelledRequest = (r: GraphRequest) => !r.done && (r.nodes.some((n) => n.state === "cancelled") || Boolean(r.root && isCancelled(r.root)))
+  && r.nodes.every((n) => n.state === "done" || n.state === "cancelled") && (!r.root || isDoneTodo(r.root));
 
 /** Every request, from the to-dos and the plans (see the head of this file). */
 export function buildGraph({ todos: all, plans, data }: GraphInput): Graph {
@@ -722,9 +736,10 @@ export function buildGraph({ todos: all, plans, data }: GraphInput): Graph {
     }
     out.push(finish({ key, kind: g.kind, ...heading, at, root: g.root, plan: g.plan, nodes }, wants, byId));
   }
-  const active = out.filter((r) => !r.done).sort((a, b) => rank(a) - rank(b) || b.touched - a.touched || a.key.localeCompare(b.key));
+  const active = out.filter((r) => !r.done && !isCancelledRequest(r)).sort((a, b) => rank(a) - rank(b) || b.touched - a.touched || a.key.localeCompare(b.key));
   const done = out.filter((r) => r.done).sort((a, b) => b.finished - a.finished || a.key.localeCompare(b.key));
-  return { active, done };
+  const cancelled = out.filter(isCancelledRequest).sort((a, b) => b.finished - a.finished || a.key.localeCompare(b.key));
+  return { active, done, cancelled };
 }
 
 // ── what is still queued ────────────────────────────────────

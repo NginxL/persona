@@ -252,7 +252,7 @@ func (n *Node) useEngineChoice(ctx context.Context, c proto.EngineChoice) error 
 	n.engEpoch++
 	epoch := n.engEpoch
 	n.hostAgents, n.layouts, n.agents, n.panePIDs, n.lastList = nil, nil, map[string]host.Agent{}, map[string]panePID{}, ""
-	n.lastPanes, n.onAgentsList = nil, nil
+	n.lastPanes, n.onAgentsList, n.agyBound, n.agyReports = nil, nil, nil, nil
 	n.mu.Unlock()
 	n.sent.forget() // the new engine's list goes once even when the old one's was the same (sessions_sent.go)
 	n.endTermStreams("the machine's terminal engine changed")

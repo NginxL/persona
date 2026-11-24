@@ -71,4 +71,18 @@ struct LiveActivityStepTests {
         #expect(state(assistant: true, island: .none).showsNothing)
         #expect(!state(phase: .done).showsNothing)
     }
+
+    /// #12982: one Fleet card. The running activity updated last stays (its stale date is the latest); an ended one
+    /// (iOS's eight hours, still on the Lock Screen) never does; none running keeps none.
+    @Test func keepsOneActivity() {
+        typealias C = LiveActivityController.Candidate
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let ended = C(id: "ended", running: false, staleDate: now.addingTimeInterval(3600))
+        let older = C(id: "older", running: true, staleDate: now)
+        let newer = C(id: "newer", running: true, staleDate: now.addingTimeInterval(600))
+        #expect(LiveActivityController.kept([ended, older, newer]) == "newer")
+        #expect(LiveActivityController.kept([newer, older]) == "newer")
+        #expect(LiveActivityController.kept([ended]) == nil)
+        #expect(LiveActivityController.kept([]) == nil)
+    }
 }

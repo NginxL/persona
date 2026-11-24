@@ -79,5 +79,7 @@
   "temporary_session": "Temporary session",
   "runs": "Runs",
   "runs_hint": "Start this task {count} times, each in a worktree of its own, and compare the results.",
-  "start_runs": "Start {count}"
+  "start_runs": "Start {count}",
+  "desktop_unavailable": "The {app} desktop launcher is unavailable on this computer. Choose another launcher to continue.",
+  "desktop_project_detached": "The original desktop project is no longer selected."
 }

@@ -1,0 +1,7 @@
+{
+  "full_device": "Continuing in a new chat requires a full device.",
+  "unavailable": "This chat cannot be continued here.",
+  "target_missing": "The previous Agent’s folder or launcher is unavailable.",
+  "empty": "The previous chat has no history to carry over.",
+  "launcher_missing": "The previous launcher is unavailable."
+}

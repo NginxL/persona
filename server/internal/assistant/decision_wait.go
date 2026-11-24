@@ -11,9 +11,12 @@ import (
 // and without a card: it is on its to-do at once (Needs you in the apps, the board), and the next briefing with facts
 // lists it under "To verify" with its recommendation, where it is answered. It is the same ask as any decision's
 // (acceptAsk, ForBriefing set while it waits for a briefing), so its default, its recheck and the owner's fixed
-// answers are unchanged. A decision that cannot be undone or that other people will see, and one no daily briefing
-// with facts is due for in time (decisionWaits), is pushed as before. One that no briefing brought to the owner is
-// pushed after all (sweepWaitingDecisions), so it is late at worst, never lost.
+// answers are unchanged. A decision that cannot be undone or that other people will see, and one a daily briefing
+// with facts is on but not due for in time (decisionWaits), is pushed as before. One that the briefing on did not
+// bring to the owner is pushed after all (sweepWaitingDecisions), so it is late at worst, never lost. With no daily
+// briefing with facts on at all, a decision that can wait is never pushed: it stays in Needs you, where the owner
+// answers it, and its reversible default is taken at its deadline as any other's (the supervisor's call that it can
+// wait is not overruled by the owner's choice not to have briefings, 11-23).
 
 const (
 	// decisionWaitDeadline: a decision is held only when a briefing is due at least this long before its deadline, so
@@ -31,7 +34,6 @@ const (
 const (
 	waitNoNeverDefault = "it cannot be undone or other people will see it"
 	waitNoDeadline     = "its deadline is within 12 hours"
-	waitNoBriefing     = "no daily briefing with facts is on"
 	waitNoBriefingSoon = "no daily briefing is due within 24 hours"
 	waitNoBriefingTime = "no daily briefing is due at least 12 hours before its deadline"
 	waitNotKept        = "it could not be kept as held"
@@ -50,7 +52,7 @@ func (s *Service) decisionWaits(ctx context.Context, why string, deadline time.T
 	}
 	switch due := s.briefingDue(ctx, now); {
 	case due.IsZero():
-		return false, waitNoBriefing
+		return true, "" // no briefing at all: Needs you only, never a push
 	case due.Sub(now) > decisionWaitFor:
 		return false, waitNoBriefingSoon
 	case !deadline.IsZero() && due.After(deadline.Add(-decisionWaitDeadline)):
@@ -89,11 +91,12 @@ func (s *Service) briefingDue(ctx context.Context, now time.Time) time.Time {
 }
 
 // waitOver says why decision a, held for a briefing since it was raised, is pushed after all at now ("": it still
-// waits). briefed: a daily briefing with facts is still on.
+// waits). briefed: a daily briefing with facts is on. With none on, nothing will bring it to the owner but Needs you,
+// and it stays there unpushed (decisionWaits).
 func waitOver(a *acceptAsk, briefed bool, now time.Time) string {
 	switch {
 	case !briefed:
-		return "no daily briefing with facts is on any more"
+		return ""
 	case now.Sub(a.AskedAt) >= decisionWaitFor:
 		return "no briefing brought it to the owner within 24 hours"
 	case !a.Deadline.IsZero() && a.DueAt.IsZero() && !now.Before(a.Deadline.Add(-decisionWaitNotice)):

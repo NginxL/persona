@@ -271,7 +271,7 @@ class AgentsPaginationScreenTest {
         val search = rule.onNode(hasSetTextAction())
         search.performTextInput("OA")
         search.assertTextContains("OA")
-        search.performSemanticsAction(SemanticsActions.SetSelection) { it(1, 1, false) }
+        search.performSemanticsAction(SemanticsActions.SetSelection) { val _ = it(1, 1, false) }
         search.performTextInput("R")
         search.assertTextContains("ORA")
             .assert(SemanticsMatcher.expectValue(SemanticsProperties.TextSelectionRange, TextRange(2)))

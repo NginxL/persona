@@ -16,6 +16,32 @@ export const PERSONA_EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max']
 const MAX_MODELS = 200
 const DEFAULT_CLI_TIMEOUT_MS = 25_000
 
+/** Check whether the next non-whitespace, non-comment character in `text` from `pos` is `}` or `]`. */
+function closesContainerNext(text, pos) {
+  let j = pos
+  while (j < text.length) {
+    const c = text[j]
+    const n = text[j + 1]
+    if (c === ' ' || c === '\t' || c === '\r' || c === '\n') {
+      j++
+      continue
+    }
+    if (c === '/' && n === '/') {
+      j += 2
+      while (j < text.length && text[j] !== '\n') j++
+      continue
+    }
+    if (c === '/' && n === '*') {
+      j += 2
+      while (j < text.length && !(text[j] === '*' && text[j + 1] === '/')) j++
+      j += 2
+      continue
+    }
+    return c === '}' || c === ']'
+  }
+  return false
+}
+
 /** Strip JSONC comments (`//`, `/* ... *\/`) and trailing commas outside string literals. */
 export function stripJsonc(text) {
   let out = ''
@@ -50,10 +76,14 @@ export function stripJsonc(text) {
       i += 2
       continue
     }
+    if (ch === ',' && closesContainerNext(text, i + 1)) {
+      i++
+      continue
+    }
     out += ch
     i++
   }
-  return out.replace(/,(\s*[}\]])/g, '$1')
+  return out
 }
 
 /** Read the configured default model from `<configDir>/opencode.jsonc` or `opencode.json` ("" if absent/unreadable). */
@@ -87,12 +117,12 @@ export function splitModelId(raw) {
   const s = typeof raw === 'string' ? raw.trim() : ''
   if (!s) return { providerID: '', modelID: '' }
   const slash = s.indexOf('/')
-  if (slash > 0 && slash < s.length - 1) {
-    return { providerID: s.slice(0, slash), modelID: s.slice(slash + 1) }
-  }
   const colon = s.indexOf(':')
-  if (colon > 0 && colon < s.length - 1) {
-    return { providerID: s.slice(0, colon), modelID: s.slice(colon + 1) }
+  const validSlash = slash > 0 && slash < s.length - 1
+  const validColon = colon > 0 && colon < s.length - 1
+  const sep = validSlash && validColon ? Math.min(slash, colon) : validSlash ? slash : validColon ? colon : -1
+  if (sep > 0) {
+    return { providerID: s.slice(0, sep), modelID: s.slice(sep + 1) }
   }
   return { providerID: '', modelID: s }
 }

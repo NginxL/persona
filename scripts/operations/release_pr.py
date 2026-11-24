@@ -115,11 +115,26 @@ def next_version(repository, beta, requested="", runner=subprocess.check_output,
     return version
 
 
+def feature_subject(subject):
+    if re.match(r"(?:feat|feature)(?:\([^)]*\))?\s*:", subject):
+        return True
+    # Some client features use an imperative subject without Conventional Commits. Only recognize an
+    # explicit addition, not every imperative verb: "Fix", "Test" and "Document" remain patch changes.
+    if re.match(r"add(?:s|ed)?\s+\S", subject, re.IGNORECASE):
+        return True
+    client = re.match(r"(?:android|ios|iphone|ipad|watch|watchos|web|desktop)(?:\([^)]*\))?:\s+(.+)", subject, re.IGNORECASE)
+    if not client:
+        return False
+    # Platform-qualified features also use imperative nouns: "saved prompts" or "location sharing".
+    action = client.group(1).split(None, 1)[0].lower().rstrip("s")
+    return action in {"add", "support", "enable", "introduce", "implement", "save", "saved"}
+
+
 def stable_version(stable_tag, subjects):
     match = STABLE.fullmatch(stable_tag)
     if not match:
         raise ReleaseError("latest stable release has no semantic version")
-    if any(re.match(r"(?:feat|feature)(?:\([^)]*\))?\s*:", subject) for subject in subjects):
+    if any(feature_subject(subject) for subject in subjects):
         major, minor, _ = map(int, match.groups())
         return "%d.%d.0" % (major, minor + 1)
     major, minor, patch = map(int, match.groups())

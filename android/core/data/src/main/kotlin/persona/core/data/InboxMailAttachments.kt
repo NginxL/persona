@@ -3,8 +3,8 @@ package persona.core.data
 import persona.core.contracts.api.MailAttachment
 import persona.core.contracts.api.MailReference
 import persona.core.contracts.api.MailTransport
-import persona.feature.inbox.MailAttachmentFile
-import persona.feature.inbox.MailAttachmentTransport
+import persona.core.inbox.MailAttachmentFile
+import persona.core.inbox.MailAttachmentTransport
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 

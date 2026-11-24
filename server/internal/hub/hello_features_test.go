@@ -7,6 +7,7 @@ import (
 	"slices"
 	"testing"
 
+	"github.com/nwverse/persona/server/internal/extwire"
 	"github.com/nwverse/persona/server/internal/proto"
 )
 
@@ -43,5 +44,35 @@ func TestHelloAndHealthCarryTheHubsFeatures(t *testing.T) {
 		if listed := slices.Contains(want, f); listed != (f != wireUnknownFeature) {
 			t.Errorf("wire samples' flag %q listed by the hub: %v", f, listed)
 		}
+	}
+}
+
+func TestExtensionReportsCannotPublishModuleFeatures(t *testing.T) {
+	h := newTestHub(t)
+	h.keepExtReport("extension", &extwire.Report{Features: []string{"modules", "module.briefing", "extension.feature"}})
+	got := h.features()
+	if slices.Contains(got, "modules") || slices.Contains(got, "module.briefing") {
+		t.Fatalf("extension report published reserved module features: %v", got)
+	}
+	if !slices.Contains(got, "extension.feature") {
+		t.Fatalf("ordinary extension feature was filtered: %v", got)
+	}
+}
+
+func TestModuleFeaturesFollowDefaultManagerHello(t *testing.T) {
+	h := newTestHub(t)
+	var p busPresence
+	if err := json.Unmarshal([]byte(`{"id":"assistant","features":["modules","module.briefing"]}`), &p); err != nil {
+		t.Fatal(err)
+	}
+	h.bus.current = map[string]*busConn{"assistant": {presence: p}}
+	if got := h.features(); !slices.Contains(got, "modules") || !slices.Contains(got, "module.briefing") {
+		t.Fatalf("module features missing after manager hello: %v", got)
+	}
+	h.bus.mu.Lock()
+	delete(h.bus.current, "assistant")
+	h.bus.mu.Unlock()
+	if got := h.features(); slices.Contains(got, "modules") || slices.Contains(got, "module.briefing") {
+		t.Fatalf("module features remain after their manager disconnected: %v", got)
 	}
 }

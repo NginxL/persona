@@ -11,9 +11,9 @@ import (
 	"github.com/nwverse/persona/server/internal/proto"
 )
 
-// Spot-check reviews (#3128, supervise_sample.go): below 100%, a finished supervised task whose done_when all pass the
-// judge's own check and whose work is live is closed by the judge, and only a sampled share still waits for the main
-// conversation's task_review. At the default (100%) every finished task waits for task_review, as before.
+// Spot-check reviews (#3128, supervise_sample.go): below 100%, the judge records its own checks as delivery evidence.
+// Every finished supervised task still waits for the main conversation's task_review; a judge never accepts or closes
+// one, including a task outside the sampled share (#5732).
 
 // The judge's answer for newSupervisedService's task (its two criteria), each check met or not, with the delivery.
 func judgeWithChecks(delivery string, met1, met2 bool) string {
@@ -45,37 +45,28 @@ func sampleAt(t *testing.T, s *Service, pct int) {
 	setSettings(t, s, func(v *Settings) { v.ReviewSamplePercent = &pct })
 }
 
-// Not sampled, all criteria checkable and met, live: the judge closes the task. Its review is the judge's, with each
-// criterion's evidence; the main conversation gets nothing to review.
-func TestJudgeClosesATaskThatPassedItsCheck(t *testing.T) {
+// A passed judge check is delivery evidence, never acceptance. Even when sampling would skip review, the task stays
+// open for the main conversation with its conclusion (#5732).
+func TestJudgeCheckDeliversWithoutClosing(t *testing.T) {
 	s, f, todo := newSupervisedService(t)
 	sampleAt(t, s, 0)
 	finishTurn(t, s, f, judgeWithChecks("live", true, true))
-	waitFor(t, "closed by the judge", func() bool { return todoNow(s, todo.ID).DoneAt != nil })
+	waitFor(t, "delivered for review", func() bool { return todoNow(s, todo.ID).Supervision.State == reviewPending })
 	cur := todoNow(s, todo.ID)
+	if cur.DoneAt != nil || cur.Check == nil || cur.Check.Verdict != verdictDone {
+		t.Fatalf("delivered task %+v", cur)
+	}
 	v := cur.Supervision
-	if v.State != reviewAccepted || len(v.Reviews) != 1 || v.Reviews[0].By != reviewerJudge || len(v.Reviews[0].Checks) != 2 ||
-		!v.Reviews[0].Checks[0].Met || v.Reviews[0].Checks[0].Criterion != "PR 合并到 master" ||
-		!strings.Contains(v.Reviews[0].Checks[0].Evidence, "pull/7") {
-		t.Fatalf("supervision %+v", v)
+	if len(v.Reviews) != 0 {
+		t.Fatalf("judge accepted without the supervisor: %+v", v)
 	}
-	if !strings.HasPrefix(cur.DoneReason, "判官核对通过") {
-		t.Fatalf("done reason %q", cur.DoneReason)
-	}
-	if len(v.Criteria) != 2 || v.Criteria[0].State != "met" || v.Criteria[0].By != reviewerJudge ||
-		v.Criteria[0].At == nil || v.Criteria[0].Evidence != v.Reviews[0].Checks[0].Evidence {
-		t.Fatalf("judge criteria: %+v", v.Criteria)
-	}
-	if _, ok := reviewSignal(s, todo.ID); ok {
-		t.Fatal("the main conversation still gets it to review")
+	if g, ok := reviewSignal(s, todo.ID); !ok || g.Detail != "PR 已合并并上线" {
+		t.Fatalf("review signal %+v (%v)", g, ok)
 	}
 }
 
 // A sampled task that passed still waits for task_review, its supervision message saying it is a spot check.
 func TestSampledTaskStillWaitsForReview(t *testing.T) {
-	old := spotCheck
-	spotCheck = func(string, string, int) bool { return true }
-	t.Cleanup(func() { spotCheck = old })
 	s, f, todo := newSupervisedService(t)
 	sampleAt(t, s, 20)
 	finishTurn(t, s, f, judgeWithChecks("live", true, true))
@@ -84,7 +75,7 @@ func TestSampledTaskStillWaitsForReview(t *testing.T) {
 		t.Fatal("a sampled task was closed")
 	}
 	g, ok := reviewSignal(s, todo.ID)
-	if !ok || !strings.HasPrefix(g.Detail, "抽查") {
+	if !ok || g.Detail != "PR 已合并并上线" {
 		t.Fatalf("review signal %+v (%v)", g, ok)
 	}
 }
@@ -160,25 +151,6 @@ func TestJudgeAsksForChecksOnlyWhenSampling(t *testing.T) {
 	}
 }
 
-func TestSpotCheckedShare(t *testing.T) {
-	n := 0
-	for i := range 2000 {
-		id := fmt.Sprintf("todo_%d", i)
-		if spotChecked(id, "w", 0) || !spotChecked(id, "w", 100) {
-			t.Fatalf("%s: 0%% or 100%% not absolute", id)
-		}
-		if spotChecked(id, "w", 25) {
-			n++
-		}
-		if spotChecked(id, "w", 25) != spotChecked(id, "w", 25) {
-			t.Fatal("not stable")
-		}
-	}
-	if n < 400 || n > 600 {
-		t.Fatalf("25%% sampled %d of 2000", n)
-	}
-}
-
 // PUT /api/v1/assistant takes the share (0–100) and GET says the one in effect.
 func TestReviewSamplePercentSetting(t *testing.T) {
 	s, _, _ := newSupervisedService(t)
@@ -215,12 +187,17 @@ func TestJudgeLeavesAReworkRoundToTheSupervisor(t *testing.T) {
 	}
 }
 
-// A task reopened after the judge closed it is not closed by the judge again: it was reopened for a reason.
+// A task reopened after supervisor acceptance is delivered for review again, never closed by the judge (#5732).
 func TestJudgeLeavesAReopenedTaskToTheSupervisor(t *testing.T) {
 	s, f, todo := newSupervisedService(t)
 	sampleAt(t, s, 0)
 	finishTurn(t, s, f, judgeWithChecks("live", true, true))
-	waitFor(t, "closed by the judge", func() bool { return todoNow(s, todo.ID).DoneAt != nil })
+	waitFor(t, "the first review", func() bool { return todoNow(s, todo.ID).Supervision.State == reviewPending })
+	reviewTask(t, s, todo.ID, map[string]any{"verdict": "accepted", "note": "验收通过",
+		"checks": completeReviewChecks(todoNow(s, todo.ID))})
+	if todoNow(s, todo.ID).DoneAt == nil {
+		t.Fatal("supervisor acceptance did not close the task")
+	}
 	if err := s.reopenTodo(context.Background(), todo.ID); err != nil {
 		t.Fatal(err)
 	}

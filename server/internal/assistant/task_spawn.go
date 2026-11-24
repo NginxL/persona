@@ -60,8 +60,10 @@ func (s *Service) taskSpawn(ctx context.Context, machine, session string, args j
 	}
 	if mode == "" {
 		mode = "plan"
-		if assignment != nil && assignment.Permission != "" {
-			mode = assignment.Permission
+		if assignment != nil {
+			// Prefer durable evidence of the assignment's actual start. Falling back to its caller-owned mode is
+			// conservative; inferring Allow all from the launcher could broaden a real plan-mode parent.
+			mode = firstNonEmpty(assignment.StartPermission, assignment.Permission, mode)
 		}
 	}
 	project := t.Project
@@ -70,11 +72,12 @@ func (s *Service) taskSpawn(ctx context.Context, machine, session string, args j
 			project = d.Project
 		}
 	}
+	assignmentLauncherDefault := assignment != nil && assignment.LauncherDefaultModel && s.startLauncher(ctx, assignment.Launcher) == parent.Launcher
 	child := PlanTask{TodoID: t.ID, Project: project, Supervisor: t.Supervision.Supervisor,
 		Title: a.Title, Prompt: a.Prompt, Machine: machine, Cwd: parent.Cwd,
 		Launcher: parent.Launcher, Model: s.taskSpawnModel(ctx, machine, parent, assignment), Effort: parent.Effort,
 		Permission: mode, Readonly: mode == "plan", preservePermission: true,
-		launcherDefaultModel: parent.RequestedModel != nil && *parent.RequestedModel == ""}
+		LauncherDefaultModel: assignmentLauncherDefault || parent.RequestedModel != nil && *parent.RequestedModel == ""}
 	// A caller disconnecting must not abandon a start before its ownership is recorded.
 	startCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Minute)
 	defer cancel()
@@ -99,6 +102,10 @@ func (s *Service) taskSpawn(ctx context.Context, machine, session string, args j
 		stopErr := s.call(stopCtx, mid, deviceSessionStop, map[string]any{"session_id": sid}, nil)
 		return "", fmt.Errorf("child %s/%s was not linked: %w; stop result: %v; tell your supervisor", mid, sid, err, stopErr)
 	}
+	s.recordSubagentLink(mid, sid, machine, session, proto.SubagentOriginSpawned)
+	if s.fleetOn() {
+		go s.publishSessions(mid)
+	}
 	t, ok = s.ensureSupervisor(startCtx, t.ID)
 	if !ok {
 		return "", fmt.Errorf("child %s/%s was linked, but the task closed or lost its supervisor; tell your supervisor", mid, sid)
@@ -111,8 +118,13 @@ func (s *Service) taskSpawn(ctx context.Context, machine, session string, args j
 // An assignment identifies its own Agent's model. Other managed sessions report the exact launch argument,
 // including an empty value for the launcher's default. Only older or observed sessions need a catalog lookup.
 func (s *Service) taskSpawnModel(ctx context.Context, machine string, parent proto.Session, assignment *PlanTask) string {
-	if assignment != nil && assignment.Model != "" && s.startLauncher(ctx, assignment.Launcher) == parent.Launcher {
-		return assignment.Model
+	if assignment != nil && s.startLauncher(ctx, assignment.Launcher) == parent.Launcher {
+		if assignment.LauncherDefaultModel {
+			return ""
+		}
+		if assignment.Model != "" {
+			return assignment.Model
+		}
 	}
 	if parent.RequestedModel != nil {
 		return *parent.RequestedModel

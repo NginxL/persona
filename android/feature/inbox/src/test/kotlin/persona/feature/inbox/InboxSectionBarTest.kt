@@ -70,6 +70,7 @@ import persona.core.navigation.AppTab
 import persona.core.navigation.InboxItemRoute
 import persona.core.navigation.InboxRoute
 import persona.core.navigation.Navigator
+import persona.core.inbox.*
 
 /**
  * The Inbox's section bar on Android (#9053, docs/assistant/inbox.md "Section bar"): it opens on Needs you, whatever

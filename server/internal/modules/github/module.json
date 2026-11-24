@@ -1,0 +1,8 @@
+{
+  "$schema": "../../../../schema/module.schema.json",
+  "id": "github",
+  "api": 1,
+  "origin": "builtin",
+  "title": "GitHub",
+  "feature": "module.github"
+}

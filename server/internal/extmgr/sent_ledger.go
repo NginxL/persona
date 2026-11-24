@@ -16,7 +16,7 @@ import (
 	"github.com/nwverse/persona/server/internal/connector/serve"
 	"github.com/nwverse/persona/server/internal/db"
 	"github.com/nwverse/persona/server/internal/extension"
-	"github.com/nwverse/persona/server/internal/mail"
+	"github.com/nwverse/persona/server/internal/mailwire"
 	"github.com/nwverse/persona/server/internal/proto"
 	"github.com/nwverse/persona/server/internal/rpc"
 )
@@ -147,7 +147,7 @@ func sentTarget(action string, args json.RawMessage) (map[string]any, string) {
 		if t, brief, ok := githubTarget(action, args); ok {
 			return t, brief
 		}
-	case mail.ToolSend:
+	case mailwire.ToolSend:
 		if t, brief, ok := mailTarget(args); ok {
 			return t, brief
 		}
@@ -182,11 +182,11 @@ func githubTarget(action string, args json.RawMessage) (map[string]any, string, 
 }
 
 func mailTarget(args json.RawMessage) (map[string]any, string, bool) {
-	var req mail.SendRequest
+	var req mailwire.SendRequest
 	if json.Unmarshal(args, &req) != nil || len(req.To) == 0 {
 		return nil, "", false
 	}
-	emails := func(list []mail.Address) []string {
+	emails := func(list []mailwire.Address) []string {
 		var out []string
 		for _, a := range list {
 			out = append(out, cutRunes(cleanText(a.Email), sentValueMost))

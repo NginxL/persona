@@ -62,6 +62,7 @@ internal fun ReadinessActionId.settingsDestination(launcher: String?, machine: S
     ReadinessActionId.AddComputer -> AddComputerRoute()
     ReadinessActionId.ConfirmComputer -> AddComputerRoute(confirm = machine.orEmpty())
     ReadinessActionId.ConnectModel -> ModelPurposeRoute("assistant")
+    ReadinessActionId.PickModel -> SettingsPageRoute(SettingsPage.ModelConfig)
     ReadinessActionId.EditProvider -> launcher?.takeIf(String::isNotBlank)?.let(::ModelProviderRoute) ?: SettingsPageRoute(SettingsPage.Providers)
     else -> null
 }

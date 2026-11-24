@@ -16,9 +16,9 @@ class ApiClientAccessTest {
                 .setBody("""{"error":"unauthorized"}"""))
             var revoked = 0
             val api = ApiClient(hub.url("/").toString(), "t", onUnauthorized = { revoked++ })
-            runCatching { api.raw("GET", "/api/v1/sessions") }
+            val _ = runCatching { api.raw("GET", "/api/v1/sessions") }
             assertEquals(0, revoked)
-            runCatching { api.raw("GET", "/api/v1/sessions") }
+            val _ = runCatching { api.raw("GET", "/api/v1/sessions") }
             assertEquals(1, revoked)
         }
     }

@@ -58,6 +58,23 @@ esac
 
 func externalAssistantFixture(t *testing.T, warm ...bool) (*cliFixture, string, modelExecution, func(string)) {
 	t.Helper()
+	trustRoot, err := os.MkdirTemp("", "external-assistant-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(trustRoot, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	trustRoot, err = filepath.EvalSymlinks(trustRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(trustRoot) })
+	previousRoot := externalAdapterTrustRoot
+	externalAdapterTrustRoot = trustRoot
+	t.Cleanup(func() { externalAdapterTrustRoot = previousRoot })
+	// The fake home, working directories and adapter runtime files must share this boundary too.
+	t.Setenv("TMPDIR", trustRoot)
 	f := cliTest(t)
 	t.Setenv(agentSandboxEnv, "off")
 	managedFiles, managedDirs := claudeManagedSettings, claudeManagedSettingsDirs

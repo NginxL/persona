@@ -125,33 +125,16 @@ extension View {
     /// pill under the round ⋯ (#502). visionOS draws a glass platter under the label, a blank white pill once the
     /// tertiary ⋯ fades into it. iOS unchanged.
     @ViewBuilder func labelOnlyMenu() -> some View {
-        #if os(macOS)
-        menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).fixedSize()
-        #elseif os(visionOS)
+        #if os(visionOS)
         menuStyle(.button).buttonStyle(.plain)
         #else
         self
         #endif
     }
 
-    /// A `Menu` that keeps the button the system draws for it, without the Mac's ⌄ beside the label: a ⋯ among a
-    /// toolbar's bordered buttons (the file viewer's, next to Done). iOS unchanged.
-    @ViewBuilder func arrowlessMenu() -> some View {
-        #if os(macOS)
-        menuIndicator(.hidden).fixedSize()
-        #else
-        self
-        #endif
-    }
-
-    /// A button in a settings form (`SettingsForm`): the phone's themed button; on the Mac the system's standard push
-    /// button (prominent: the default-looking one), as System Settings has them, not a tinted capsule (#1221).
+    /// A button in a settings form (`SettingsForm`): the themed button.
     @ViewBuilder func formButton(prominent: Bool = false) -> some View {
-        #if os(macOS)
-        if prominent { buttonStyle(.borderedProminent) } else { buttonStyle(.bordered) }
-        #else
         themedButton(prominent: prominent)
-        #endif
     }
 
     /// Glass buttons in the glass styles, bordered ones in Lark, soft raised pills in Clay / Island. Picks the system
@@ -159,15 +142,7 @@ extension View {
     /// stack overflowed (crash on opening a chat in the glass styles).
     /// Primary and secondary decisions on a pending draft use large targets, not compact utility buttons.
     @ViewBuilder func draftDecisionButton(prominent: Bool = false) -> some View {
-        #if os(macOS)
-        if StyleSpec.current.buttons == .glass {
-            buttonStyle(MacCapsuleButton(prominent: prominent, minimumHeight: Theme.Size.tapTarget)).controlSize(.large)
-        } else {
-            themedButton(prominent: prominent).controlSize(.large)
-        }
-        #else
         themedButton(prominent: prominent).controlSize(.large)
-        #endif
     }
 
     /// The style's button; capped at the interface's largest size like everything but reading content, with the Large
@@ -180,12 +155,7 @@ extension View {
         switch StyleSpec.current.buttons {
         case .glass:
             // .glassProminent keeps its full color when disabled (iOS 26.0): an empty composer's send looked tappable.
-            #if os(macOS)
-            // The Mac's glass styles took their colors from the window, not from us: the prominent one drew its label
-            // cyan on the blue (about 3.2:1), the plain one turned solid blue in the active window (2026-11-02). Both
-            // drawn here (`MacCapsuleButton`).
-            buttonStyle(MacCapsuleButton(prominent: prominent))
-            #elseif os(visionOS)
+            #if os(visionOS)
             // visionOS has no .glassProminent: its windows are glass already, and the system's prominent style is the filled one.
             if prominent { buttonStyle(.borderedProminent).modifier(DimWhenDisabled()) } else { buttonStyle(.bordered) }
             #else

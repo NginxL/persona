@@ -84,20 +84,21 @@ func TestPlacesThatSealAreKnown(t *testing.T) {
 		"internal/extmgr/extension_market_edit.go":     1, // plugin_markets.token_sealed
 		"internal/extmgr/extension_market_routes.go":   1, // plugin_markets.token_sealed
 		"internal/extension/registry_settings.go":      1, // plugin_secrets
-		"internal/mail/store.go":                       4, // its box, encrypt and its calls: mail_accounts
-		"internal/mail/oauth.go":                       1, // the OAuth state, in the sign-in URL only
-		"internal/mail/microsoft.go":                   1, // mail.microsoft_client
+		"internal/modules/mail/store.go":               4, // its box, encrypt and its calls: mail_accounts
+		"internal/modules/mail/oauth.go":               1, // the OAuth state, in the sign-in URL only
+		"internal/modules/mail/microsoft.go":           1, // mail.microsoft_client
 		// other keys
-		"internal/assistant/kb_owner.go":    1, // handles.key's cipher for the owner record
-		"internal/hub/secretkey.go":         3, // the hub's own secret.key
-		"internal/hub/peer_pair.go":         2, // the hub's key: linked hubs' tokens
-		"internal/hub/devices_service.go":   1, // the hub's key: the computers' connector credentials
-		"internal/hub/push_transport.go":    1, // a phone's push key (pushcrypto)
-		"internal/pushcrypto/pushcrypto.go": 1, // HPKE to a phone
-		"internal/webpush/webpush.go":       1, // RFC 8291 to a browser's subscription keys: a message, never stored
-		"internal/proto/secretenv.go":       1, // HPKE to a node's one-time stage key: a hand-off, never stored
-		"internal/relay/relay.go":           1, // the push relay's grants
-		"internal/screenlink/udp_wire.go":   1, // a live screen's UDP packets: keys from the direct route's TLS exporter, never stored
+		"internal/assistant/kb_owner.go":                       1, // handles.key's cipher for the owner record
+		"internal/hub/secretkey.go":                            3, // the hub's own secret.key
+		"internal/hub/peer_pair.go":                            2, // the hub's key: linked hubs' tokens
+		"internal/hub/devices_service.go":                      1, // the hub's key: the computers' connector credentials
+		"internal/hub/push_transport.go":                       1, // a phone's push key (pushcrypto)
+		"internal/pushcrypto/pushcrypto.go":                    1, // HPKE to a phone
+		"internal/webpush/webpush.go":                          1, // RFC 8291 to a browser's subscription keys: a message, never stored
+		"internal/proto/secretenv.go":                          1, // HPKE to a node's one-time stage key: a hand-off, never stored
+		"internal/proto/secretstore.go":                        1, // HPKE to the provider node's one-time key: write values, never stored by Persona
+		"internal/relay/relay.go":                              1, // the push relay's grants
+		"internal/modules/screen-share/screenlink/udp_wire.go": 1, // a live screen's UDP packets: keys from the direct route's TLS exporter, never stored
 	}
 	lineComment := regexp.MustCompile(`(?m)^\s*//.*$`) // comments may name them freely
 	seal := regexp.MustCompile(`\.Seal\(|sealKey\(|\.encrypt\(|SealWith\(|secretkey\.New`)

@@ -65,4 +65,39 @@ struct CardSourceTests {
         permission.kind = .permission
         #expect(CardSource.item(for: permission, in: items) == nil)
     }
+
+    // View in Chat from the assistant's pager into a task's Agent chat (#12625, `CardSource.source`).
+
+    @Test func aTasksApprovalIsFoundByItsCall() {
+        let items = [
+            item(1, "user", .text, "Run the widget tests"),
+            item(2, "assistant", .text, "Running them now."),
+            item(3, "assistant", .toolUse, call: "toolu_bash", tool: "Bash"),
+        ]
+        var ix = Interaction(id: "ix", machineID: "m", sessionID: "s", kind: .permission)
+        ix.toolUseID = "toolu_bash"
+        #expect(CardSource.source(for: ix, in: items) == "2#0")
+        // `item(for:)` stays for questions alone (the chat's own cards)
+        #expect(CardSource.item(for: ix, in: items) == nil)
+    }
+
+    @Test func aTerminalCardGoesToTheNewestQuestion() {
+        let items = [
+            item(1, "assistant", .text, "First, one thing."),
+            item(2, "assistant", .toolUse, call: "toolu_1", tool: "AskUserQuestion", input: asking("Old?")),
+            item(3, "user", .text, "Go on"),
+            item(4, "assistant", .text, "One more question."),
+            item(5, "assistant", .toolUse, call: "toolu_2", tool: "AskUserQuestion", input: asking("New?")),
+            item(6, "assistant", .toolUse, call: "toolu_3", tool: "Bash"),
+        ]
+        let screen = Interaction(id: "scr", machineID: "m", sessionID: "s", kind: .screen)
+        #expect(CardSource.source(for: screen, in: items) == "4#0")
+        // A chat that never asked: none, the chat opens at its newest message.
+        #expect(CardSource.source(for: screen, in: [item(1, "user", .text, "hi")]) == nil)
+    }
+
+    @Test func aCardWhoseCallIsNotLoadedHasNoSourceYet() {
+        let items = [item(1, "assistant", .text, "Hello")]
+        #expect(CardSource.source(for: card("Which?", call: "toolu_gone"), in: items) == nil)
+    }
 }

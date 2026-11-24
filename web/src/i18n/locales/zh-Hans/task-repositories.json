@@ -41,6 +41,7 @@
   "link_invalid": "请使用此仓库的 Issue 或 PR 链接。",
   "issue": "Issue",
   "pull_request": "合并请求",
+  "pr_conflict": "冲突",
   "remove_link": "移除 {link}",
   "options": "{name} 的选项",
   "no_links": "尚未关联仓库",

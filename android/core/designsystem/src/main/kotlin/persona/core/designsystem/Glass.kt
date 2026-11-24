@@ -130,7 +130,9 @@ internal fun Modifier.homeNavigationGlassSurface(interactive: Boolean): Modifier
 fun Modifier.floatingSurface(shape: RoundedCornerShape, accentEdge: Color? = null): Modifier {
     val palette = PersonaTheme.palette
     val state = LocalGlassSource.current
-    val edge = Brush.verticalGradient(listOf(accentEdge ?: palette.strokeTop, palette.strokeBottom))
+    val edgeTop = accentEdge ?: palette.strokeTop
+    val edgeBottom = palette.strokeBottom
+    val edge = remember(edgeTop, edgeBottom) { Brush.verticalGradient(listOf(edgeTop, edgeBottom)) }
     if (PersonaTheme.style != AppStyle.Glass) {
         return this.clip(shape).background(palette.surfaceOpaque).border(1.dp, accentEdge ?: palette.line, shape)
     }
@@ -141,12 +143,16 @@ fun Modifier.floatingSurface(shape: RoundedCornerShape, accentEdge: Color? = nul
     return when {
         state == null || PersonaTheme.glass == GlassLevel.Solid ->
             this.clip(shape).background(palette.surfaceOpaque.copy(alpha = 0.97f)).border(1.dp, edge, shape)
-        PersonaTheme.glass == GlassLevel.Liquid -> this
-            .hazeGlass(HazeInput.Sources(state), style = GlassStyle.regular.then { shape(shape); tint(tint) })
-            .border(1.dp, edge, shape)
-        else -> this.clip(shape)
-            .hazeBlur(HazeInput.Sources(state), style = HazeBlurStyle { blurRadius(FloatingGlassBlurRadius); colorEffects(listOf(HazeColorEffect.tint(tint))) })
-            .border(1.dp, edge, shape)
+        PersonaTheme.glass == GlassLevel.Liquid -> {
+            val style = remember(shape, tint) { GlassStyle.regular.then { shape(shape); tint(tint) } }
+            this.hazeGlass(HazeInput.Sources(state), style = style).border(1.dp, edge, shape)
+        }
+        else -> {
+            val blurStyle = remember(tint) {
+                HazeBlurStyle { blurRadius(FloatingGlassBlurRadius); colorEffects(listOf(HazeColorEffect.tint(tint))) }
+            }
+            this.clip(shape).hazeBlur(HazeInput.Sources(state), style = blurStyle).border(1.dp, edge, shape)
+        }
     }
 }
 

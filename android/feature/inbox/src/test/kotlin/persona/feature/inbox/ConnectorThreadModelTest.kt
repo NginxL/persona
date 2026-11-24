@@ -12,6 +12,7 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import persona.core.contracts.api.*
+import persona.core.inbox.*
 
 /** The connector thread page's paging, quote jumps and reply outcomes, against a fake hub API. */
 class ConnectorThreadModelTest {

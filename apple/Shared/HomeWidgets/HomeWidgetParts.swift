@@ -140,13 +140,15 @@ struct HomeRing: View {
     var width: CGFloat = HomeWidgetTokens.ringStroke
     /// Drawn in dashes: a computer that is offline.
     var dashed = false
+    /// Intake and health cells show only the track at zero; existing widget rings keep their original marker.
+    var showsZeroArc = true
     @Environment(\.widgetRenderingMode) private var mode
 
     var body: some View {
         ZStack {
             Circle().stroke(mode == .fullColor ? HomeWidgetTokens.track : HomeWidgetTokens.trackMono,
                             style: StrokeStyle(lineWidth: width, dash: dashed ? [width * 0.4, width * 0.9] : []))
-            if !dashed {
+            if !dashed && (showsZeroArc || fraction > 0) {
                 Circle().trim(from: 0, to: max(0.002, min(1, fraction)))
                     .stroke(style: StrokeStyle(lineWidth: width, lineCap: .round))
                     .rotationEffect(.degrees(-90))

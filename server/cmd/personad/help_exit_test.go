@@ -25,9 +25,9 @@ func TestHelpExitsZero(t *testing.T) {
 		args []string
 		want string
 	}{
-		{[]string{"-h"}, named(usage) + "\n"},
-		{[]string{"--help"}, named(usage) + "\n"},
-		{[]string{"help"}, named(usage) + "\n"},
+		{[]string{"-h"}, named(usageText()) + "\n"},
+		{[]string{"--help"}, named(usageText()) + "\n"},
+		{[]string{"help"}, named(usageText()) + "\n"},
 		{[]string{"hub", "-h"}, hubHelp},
 		{[]string{"hub", "--help"}, hubHelp},
 		{[]string{"hub", "help"}, hubHelp},
@@ -58,7 +58,7 @@ func TestHelpExitsZero(t *testing.T) {
 		}
 	}
 	for _, want := range []string{"\n  personad tool ", "\n" + hubcli.Usage + "\n"} {
-		if !strings.Contains(usage, want) {
+		if !strings.Contains(usageText(), want) {
 			t.Errorf("the usage lacks %q", want)
 		}
 	}

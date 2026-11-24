@@ -223,13 +223,13 @@ class AgentFilterCapsuleTest {
     private fun fadeWidth(textScale: Float) = with(rule.density) { (AgentFilterTokens.fade * textScale).toPx() }
 
     @Test fun aChoiceWiderThanTheStripStartsWhereTheClearMiddleBeginsSoItsFirstWordIsNotDimmed() {
-        show(english, width = 360.dp, fontScale = 2f)
+        show(english, width = 240.dp, fontScale = 2f)
         rule.runOnIdle { selected = 4 }
         rule.waitForIdle()
         val strip = bounds("agents-status-scroll")
         val choice = bounds("agents-status-4")
-        assertTrue("\"Waiting in the background\" is wider than the strip at 200%", choice.width > strip.width)
-        assertEquals(strip.left + fadeWidth(2f), choice.left, 2f)
+        assertTrue("\"Waiting in the background\" must still overflow at the cap: $choice / $strip", choice.width > strip.width)
+        assertEquals(strip.left + fadeWidth(InterfaceFontScaleCap), choice.left, 2f)
     }
 
     @Test fun aChoiceWiderThanTheClearMiddleButNotThanTheStripStartsThereToo() {

@@ -20,7 +20,8 @@ const CodeSecretHandoffElsewhere = "secret_handoff_elsewhere"
 // client and to extensions that read cards, and the manager keeps the references. The hub reads the providers only, to
 // record a refused approval on each.
 type SecretHandoffInput struct {
-	Variables []SecretHandoffVariable `json:"variables"`
+	StoreOperation string                  `json:"store_operation,omitempty"`
+	Variables      []SecretHandoffVariable `json:"variables"`
 	// Agent is the Agent's name (its tab's), MachineName the computer it starts on, Cwd and Prompt where it runs and
 	// the start of what it is asked: for the card to show (Cwd and Prompt not in its summary, which is also the push's
 	// text).

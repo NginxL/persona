@@ -120,16 +120,128 @@ func (b *todoBook) linkedNow(key [2]string) bool {
 	return false
 }
 
+// delayedDoneCreationStore is the database's guarded automatic link for an exact done creation-id. Stores without it
+// must not fall back to the manual upsert, which could override a newer manual membership.
+type delayedDoneCreationStore interface {
+	AutoLinkUnlinkedTodoAgentOfDoneTask(ctx context.Context, todoID, machineID, sessionID, title, cwd, agent, startError, source, via string, linkedAt time.Time) (bool, []string, error)
+}
+
+// linkDelayedDoneCreation handles a session whose persisted creation id names a card closed after its start outcome
+// became unknown. It is not a general done-card auto-link: only that exact identity qualifies, prior/dismissed links are
+// left alone, and the session does not fall through to workspace or chat adoption. handled means the done identity was
+// recognized (including an already linked session), so the ordinary open-todo passes must skip it; linked reports a new
+// retained link whose change notifications the outer autoLinkTodos caller publishes with the others.
+func (s *Service) linkDelayedDoneCreation(machine string, c proto.Session, creationID, startError string) (handled, linked bool) {
+	key := [2]string{machine, c.SessionID}
+	s.todos.writing.Lock()
+	s.todos.mu.RLock()
+	target := s.todos.todos[creationID]
+	done := target != nil && target.DoneAt != nil
+	eligible := done && s.todos.activeBySession[key] == ""
+	if eligible {
+		for _, a := range target.Agents {
+			if a.MachineID == machine && a.SessionID == c.SessionID {
+				eligible = false // automatic links are never reactivated, including dismissed ones
+				break
+			}
+		}
+	}
+	s.todos.mu.RUnlock()
+	if !done {
+		s.todos.writing.Unlock()
+		return false, false
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if !eligible {
+		s.todos.writing.Unlock()
+		s.retractStartUnknown(ctx, creationID)
+		return true, false
+	}
+	linked, err := s.writeDelayedDoneCreation(ctx, creationID, machine, c, startError, time.Now().UTC())
+	s.todos.writing.Unlock()
+	if err != nil {
+		s.logf("todos: delayed creation-id link %s on %s/%s: %v", creationID, machine, c.SessionID, err)
+	}
+	// The exact done identity is confirmed on every handled path, not only after insertion. The provisional unknown
+	// result is stale even when membership was already present, dismissed, or guarded by a newer manual choice (#5732).
+	s.retractStartUnknown(ctx, creationID)
+	return true, linked
+}
+
+// writeDelayedDoneCreation persists an exact done creation-id with the same guards as every other automatic link.
+// todoBook.writing is held. The database commits first; memory mirrors only an actual insert and its released ids, so a
+// newer manual membership that made the guarded insert a no-op is never overridden locally either.
+func (s *Service) writeDelayedDoneCreation(ctx context.Context, todoID, machine string, c proto.Session, startError string, linkedAt time.Time) (bool, error) {
+	st := s.todoDB()
+	if st == nil {
+		if err := s.writeTodoAgentLink(ctx, todoID, machine, c.SessionID, c.Title, c.Cwd, c.Agent, startError, "assistant_start", todoID, true); err != nil {
+			return false, err
+		}
+		return true, nil
+	}
+	safe, ok := st.(delayedDoneCreationStore)
+	if !ok {
+		return false, fmt.Errorf("store lacks guarded done creation-id auto-link")
+	}
+	inserted, released, err := safe.AutoLinkUnlinkedTodoAgentOfDoneTask(ctx, todoID, machine, c.SessionID, c.Title, c.Cwd, c.Agent, startError, "assistant_start", todoID, linkedAt)
+	if err != nil || !inserted {
+		return false, err
+	}
+	s.todos.mu.Lock()
+	defer s.todos.mu.Unlock()
+	for _, oid := range released {
+		other := s.todos.todos[oid]
+		if other == nil {
+			continue
+		}
+		for i := range other.Agents {
+			a := &other.Agents[i]
+			if a.MachineID == machine && a.SessionID == c.SessionID && a.ReleasedAt == nil {
+				a.ReleasedAt = &linkedAt
+				other.UpdatedAt = linkedAt
+			}
+		}
+	}
+	target := s.todos.todos[todoID]
+	if target != nil {
+		// The guarded insert proved no target row existed. Keep that rule in memory too: no dismissed row is revived.
+		found := false
+		for _, a := range target.Agents {
+			found = found || a.MachineID == machine && a.SessionID == c.SessionID
+		}
+		if !found {
+			target.Agents = append(target.Agents, TodoAgent{MachineID: machine, SessionID: c.SessionID, LinkedAt: linkedAt, Title: c.Title,
+				Cwd: c.Cwd, Agent: c.Agent, StartError: startError, Source: "assistant_start", Via: todoID})
+			target.UpdatedAt = linkedAt
+		}
+	}
+	return true, nil
+}
+
 // autoLinkTodos links the online agents of machine that join a todo on their own: spawned by an agent of an open todo
 // (persona_from, the session's spawn_from), or in a workspace linked to one; never one that works for another todo
-// now, or that was ever on the todo (dismissed included). Memory first, so the report says it at once; the store
-// after, undone when it fails. True when any was linked.
+// now, or that was ever on the todo (dismissed included). Open-todo links are memory first, so the report says them at
+// once, then go to the store and are undone when it fails; the delayed done-creation path above uses the direct durable
+// write shared with the immediate start confirmations. True when any was linked, so the caller publishes every change.
 func (s *Service) autoLinkTodos(machine string, sessions []proto.Session) bool {
+	startErrors := s.startErrorsOf(machine, sessions)
+	doneCreations := map[[2]string]bool{}
+	doneLinked := false
+	for _, c := range sessions {
+		if c.Status == proto.StatusOffline {
+			continue
+		}
+		if creationID := c.CreationID(); creationID != "" {
+			handled, linked := s.linkDelayedDoneCreation(machine, c, creationID, startErrors.of(c))
+			doneCreations[[2]string{machine, c.SessionID}] = handled
+			doneLinked = doneLinked || linked
+		}
+	}
+
 	s.todos.writing.Lock()
-	defer s.todos.writing.Unlock()
 	now := time.Now().UTC()
 	var pending []pendingAutoLink
-	startErrors := s.startErrorsOf(machine, sessions)
 
 	s.todos.mu.Lock()
 	link := func(c proto.Session, target *Todo, source, via string) {
@@ -165,15 +277,26 @@ func (s *Service) autoLinkTodos(machine string, sessions []proto.Session) bool {
 			continue
 		}
 		key := [2]string{machine, c.SessionID}
+		if doneCreations[key] {
+			continue
+		}
 
-		// 1. Spawned derivation: <todo_id>@<parent machine>/<parent session>
+		// 1. Assistant start: a to-do made before session.start carries the same creation id. This links an
+		// unanswered start without guessing from cwd or adopting a manually opened session (#5732).
+		if creationID := c.CreationID(); creationID != "" && s.todos.activeBySession[key] == "" {
+			if target, ok := s.todos.todos[creationID]; ok && target.DoneAt == nil {
+				link(c, target, "assistant_start", creationID)
+			}
+		}
+
+		// 2. Spawned derivation: <todo_id>@<parent machine>/<parent session>
 		if todoID, parent, ok := strings.Cut(c.SpawnFrom, "@"); ok && s.todos.activeBySession[key] == "" {
 			if target, ok := s.todos.todos[todoID]; ok && target.DoneAt == nil {
 				link(c, target, "spawned", parent)
 			}
 		}
 
-		// 2. Space auto link
+		// 3. Space auto link
 		if s.todos.activeBySession[key] == "" {
 			if spKey := sessionSpaceKey(machine, c); spKey != "" {
 				if targetID, ok := s.todos.spacesByKey[spKey]; ok {
@@ -203,6 +326,7 @@ func (s *Service) autoLinkTodos(machine string, sessions []proto.Session) bool {
 		}
 	}
 	s.todos.mu.Unlock()
+	s.todos.writing.Unlock()
 
 	if len(pending) > 0 {
 		if st := s.todoDB(); st != nil {
@@ -239,6 +363,9 @@ func (s *Service) autoLinkTodos(machine string, sessions []proto.Session) bool {
 						item.agent, item.startError, item.source, item.via, item.linkedAt)
 					if err == nil && inserted {
 						s.todos.writing.Unlock()
+						if item.source == "assistant_start" {
+							s.retractStartUnknown(ctx, item.todoID)
+						}
 						continue
 					}
 					// The store has it otherwise (an error, a row memory did not know of: one just dismissed, or a link by hand since).
@@ -255,9 +382,17 @@ func (s *Service) autoLinkTodos(machine string, sessions []proto.Session) bool {
 					s.todosChanged(ctx)
 				}
 			}()
+		} else {
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			for _, item := range pending {
+				if item.source == "assistant_start" {
+					s.retractStartUnknown(ctx, item.todoID)
+				}
+			}
 		}
 	}
-	return len(pending) > 0
+	return doneLinked || len(pending) > 0
 }
 
 // updateTodoAgentSnapshots keeps the title and start error of the agents that work for todos as their sessions now
@@ -572,7 +707,8 @@ func (s *Service) todoReport(ctx context.Context) *TodoReport {
 	}
 	completed := map[[2]string]*Todo{}
 	for _, t := range s.todos.todos {
-		if t.DoneAt == nil {
+		// CompletedTodo is a "Completed" navigation label, not a closed-row dump: cancellation is a separate outcome (#5732).
+		if t.DoneAt == nil || t.Cancelled() {
 			continue
 		}
 		for _, a := range t.Agents {

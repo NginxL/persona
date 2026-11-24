@@ -5,6 +5,7 @@
 import { act, useEffect, useReducer } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { LEGACY_SCHEME } from "../../lib/compatibility";
 import type { Item, Session } from "../../lib/types";
 
 // a mouse (fine pointer) or a touch screen alone, per test
@@ -18,7 +19,12 @@ vi.hoisted(() => {
 });
 
 const IDLE: Session = { machine_id: "hub", session_id: "c1", title: "Conversation", cwd: "/code", status: "idle" };
-const captured = vi.hoisted(() => ({ session: undefined as Session | undefined }));
+const captured = vi.hoisted(() => ({
+  session: undefined as Session | undefined,
+  features: [] as string[],
+  assistantMain: undefined as string | undefined,
+  ownerOffline: undefined as string | undefined,
+}));
 
 vi.mock("./Composer", async (importOriginal) => ({
   ...await importOriginal<typeof import("./Composer")>(),
@@ -35,13 +41,25 @@ vi.mock("../../lib/store", async (importOriginal) => {
     useStore: <T,>(select: (s: ReturnType<typeof store.getState>) => T) => {
       const [, changed] = useReducer((n: number) => n + 1, 0);
       useEffect(() => store.subscribe(changed), []);
-      return select({ ...store.getState(), sessions: { hub: captured.session ? [captured.session] : [] } });
+      const base = store.getState();
+      return select({
+        ...base,
+        features: captured.features,
+        assistant: captured.assistantMain ? { ...(base.assistant ?? { machine_id: "hub", conversations: [] }), main: captured.assistantMain } : base.assistant,
+        sessions: { hub: captured.session ? [captured.session] : [] },
+      });
     },
   };
 });
+const openPanelSpy = vi.hoisted(() => vi.fn());
 vi.mock("../../lib/panel", async (importOriginal) => ({
   ...await importOriginal<typeof import("../../lib/panel")>(),
   usePanel: () => null,
+  openPanel: openPanelSpy,
+}));
+vi.mock("../ManagerParts", async (importOriginal) => ({
+  ...await importOriginal<typeof import("../ManagerParts")>(),
+  useManagerOffline: () => captured.ownerOffline,
 }));
 vi.mock("../../lib/router", async (importOriginal) => ({
   ...await importOriginal<typeof import("../../lib/router")>(),
@@ -71,7 +89,9 @@ vi.mock("../../ui/atoms", async (importOriginal) => ({
 
 const { ChatView } = await import("./ChatView");
 const { toast } = await import("../../ui/atoms");
-const { getState, setOutbox } = await import("../../lib/store");
+const { onModelPicker } = await import("../../lib/model-switch");
+const { onPermissionPicker } = await import("../../lib/permissions-command");
+const { getState, setOutbox, upsertSession } = await import("../../lib/store");
 const { resetOutboxClaimsForTests, resetRestoredForTests } = await import("../../lib/outbox");
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -81,7 +101,9 @@ const msg = (id: string, seq: number, role: "user" | "assistant", text: string, 
 const failedTurn = [msg("u1", 1, "user", "接着把命名改完"), msg("e1", 2, "assistant", OVERLOADED)];
 
 const json = (v: unknown, status = 200) => new Response(JSON.stringify(v), { status, headers: { "Content-Type": "application/json" } });
-let bodies: { client_msg_id: string; text: string }[];
+let bodies: { client_msg_id: string; text: string; images?: { mime: string; data: string }[] }[];
+let compactCalls: string[];
+let clearCalls: string[];
 let reply: () => Response;
 let host: HTMLDivElement;
 let root: Root;
@@ -100,6 +122,10 @@ beforeEach(() => {
   localStorage.clear();
   resetRestoredForTests();
   resetOutboxClaimsForTests();
+  captured.features = [];
+  captured.assistantMain = undefined;
+  captured.ownerOffline = undefined;
+  openPanelSpy.mockClear();
   for (const key of Object.keys(getState().outbox)) setOutbox(key, []);
   captured.session = IDLE;
   media.fine = false;
@@ -107,8 +133,19 @@ beforeEach(() => {
   vi.mocked(toast).mockClear();
   transcript.items = failedTurn;
   bodies = [];
+  compactCalls = [];
+  clearCalls = [];
   vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
-    if (!String(input).endsWith("/messages") || !init?.body) return Promise.resolve(json({}));
+    const url = String(input);
+    if (url.endsWith("/compact") && init?.method === "POST") {
+      compactCalls.push(url);
+      return Promise.resolve(json({ ok: true }));
+    }
+    if (url.endsWith("/assistant/main/clear") && init?.method === "POST") {
+      clearCalls.push(url);
+      return Promise.resolve(json({ ok: true }));
+    }
+    if (!url.endsWith("/messages") || !init?.body) return Promise.resolve(json({}));
     bodies.push(JSON.parse(String(init.body)));
     return Promise.resolve(reply());
   }));
@@ -252,5 +289,331 @@ describe("the error the Persona conversation stopped on", () => {
     expect(banner()).toBeNull();
     expect(inChat()).not.toBeNull();
     expect(button(inChat(), "重试")).toBeUndefined();
+  });
+});
+
+describe("image-limit Compact and send again (#13045)", () => {
+  const TOO_LARGE = "Request too large (max 32MB). Accumulated images and attachments in the conversation pushed the request over the limit.";
+
+  const clickCompactAndResend = async (control = banner()!.querySelector<HTMLButtonElement>('[data-testid="compact-and-resend"]')!) => {
+    act(() => control.click());
+    await act(async () => vi.dynamicImportSettled());
+    await flush();
+  };
+
+  it("runs assistant_compact and resends the failed message once compaction succeeds", async () => {
+    captured.features = ["assistant_compact"];
+    captured.session = { ...IDLE, assistant: true, turn_error_code: "images_too_large" };
+    transcript.items = [msg("u1", 1, "user", "帮我对比这几张截图"), msg("e1", 2, "assistant", TOO_LARGE)];
+    await draw(true);
+    expect(banner()!.textContent).toContain("这个对话里的图片太多或太大，超出了模型限制。");
+    const btn = banner()!.querySelector<HTMLButtonElement>('[data-testid="compact-and-resend"]');
+    expect(btn?.textContent).toBe("压缩并重发");
+    expect(button(banner(), "重试")).toBeUndefined();
+
+    await clickCompactAndResend(btn!);
+    expect(compactCalls).toHaveLength(1);
+    expect(compactCalls[0]).toContain("/assistant/conversations/c1/compact");
+    expect(bodies).toEqual([]);
+
+    // Compaction runs and finishes -> resend fires automatically.
+    captured.session = { ...captured.session, compaction: { state: "running", started_at: "2026-11-22T12:00:00Z" } };
+    act(() => upsertSession(captured.session!));
+    await flush();
+    expect(bodies).toEqual([]);
+
+    captured.session = { ...captured.session, compaction: { state: "done", started_at: "2026-11-22T12:00:00Z", finished_at: "2026-11-22T12:00:05Z" } };
+    act(() => upsertSession(captured.session!));
+    await flush();
+    expect(bodies.map((b) => b.text)).toEqual(["帮我对比这几张截图"]);
+  });
+
+  it("does not resend when assistant compaction fails", async () => {
+    captured.features = ["assistant_compact"];
+    captured.session = { ...IDLE, assistant: true, turn_error_code: "images_too_large" };
+    transcript.items = [msg("u1", 1, "user", "帮我对比这几张截图"), msg("e1", 2, "assistant", TOO_LARGE)];
+    await draw(true);
+    await clickCompactAndResend();
+    captured.session = { ...captured.session, compaction: { state: "failed", started_at: "2026-11-22T12:00:00Z", finished_at: "2026-11-22T12:00:03Z", error: "too short" } };
+    act(() => upsertSession(captured.session!));
+    await flush();
+    expect(bodies).toEqual([]);
+  });
+
+  it("sends /compact and resends after boundary + idle on terminal Claude Code", async () => {
+    captured.session = { ...IDLE, agent: "claude", turn_error_code: "images_too_large" };
+    transcript.items = [msg("u1", 1, "user", "看看这些界面差异"), msg("e1", 2, "assistant", TOO_LARGE)];
+    await draw(false);
+    const btn = banner()!.querySelector<HTMLButtonElement>('[data-testid="compact-and-resend"]');
+    expect(btn?.textContent).toBe("压缩并重发");
+    expect(button(banner(), "重试")).toBeUndefined();
+
+    await clickCompactAndResend(btn!);
+    expect(bodies.map((b) => b.text)).toEqual(["/compact"]);
+
+    // Terminal works, writes compact_boundary, then returns idle -> resends original message.
+    captured.session = { ...captured.session, status: "working", state: "working" };
+    act(() => upsertSession(captured.session!));
+    await draw(false);
+    transcript.items = [
+      ...transcript.items,
+      { id: "c1", seq: 3, role: "assistant", kind: "notice", compact: { trigger: "manual" }, text: "上下文已压缩", ts: "2026-11-22T12:00:05Z" } as Item,
+    ];
+    captured.session = { ...captured.session, status: "idle", state: "idle", turn_error_code: undefined };
+    act(() => upsertSession(captured.session!));
+    await draw(false);
+    expect(bodies.map((b) => b.text)).toEqual(["/compact", "看看这些界面差异"]);
+  });
+
+  it("hides Compact and send again when compaction is not supported", async () => {
+    // Assistant without assistant_compact hub feature.
+    captured.features = [];
+    captured.session = { ...IDLE, assistant: true, turn_error_code: "images_too_large" };
+    transcript.items = [msg("u1", 1, "user", "看看图"), msg("e1", 2, "assistant", TOO_LARGE)];
+    await draw(true);
+    expect(banner()!.textContent).toContain("这个对话里的图片太多或太大，超出了模型限制。");
+    expect(banner()!.querySelector('[data-testid="compact-and-resend"]')).toBeNull();
+
+    // Non-Claude agent session (Codex).
+    captured.session = { ...IDLE, agent: "codex", turn_error_code: "images_too_large" };
+    await draw(false);
+    expect(banner()!.textContent).toContain("这个对话里的图片太多或太大，超出了模型限制。");
+    expect(banner()!.querySelector('[data-testid="compact-and-resend"]')).toBeNull();
+    expect(button(banner(), "重试")).toBeUndefined();
+  });
+
+  it("preserves inline images and rich context/file tags when compacting and resending", async () => {
+    captured.features = ["assistant_compact"];
+    captured.session = { ...IDLE, assistant: true, turn_error_code: "images_too_large" };
+    const richPrompt = '<persona-context kind="edit" title="Doc">line 1</persona-context>\n<persona-file kind="file" path="/tmp/a.pdf" name="a.pdf"/>\n[Image #1] 帮我看看这张图';
+    transcript.items = [
+      msg("u1#0", 1, "user", richPrompt),
+      { id: "u1#1", seq: 1, role: "user", kind: "image", image: { mime: "image/png", data: "UE5H" }, ts: "2026-11-12T08:00:00Z" } as Item,
+      msg("e1", 2, "assistant", TOO_LARGE),
+    ];
+    await draw(true);
+    await clickCompactAndResend();
+    expect(compactCalls).toHaveLength(1);
+
+    captured.session = { ...captured.session, compaction: { state: "done", started_at: "2026-11-22T12:00:00Z", finished_at: "2026-11-22T12:00:05Z" } };
+    act(() => upsertSession(captured.session!));
+    await flush();
+    expect(bodies).toHaveLength(1);
+    const tag = `(?:persona|${LEGACY_SCHEME})`;
+    expect(bodies[0].text).toMatch(new RegExp(`<${tag}-context kind="edit" title="Doc">line 1</${tag}-context>`));
+    expect(bodies[0].text).toMatch(new RegExp(`<${tag}-file kind="file" path="/tmp/a\\.pdf" name="a\\.pdf"/>`));
+    expect(bodies[0].text).toContain("帮我看看这张图");
+    expect(bodies[0].images).toEqual([{ mime: "image/png", data: "UE5H" }]);
+  });
+
+  it("withholds automatic resend when image bytes are unrecoverable and aborts before compaction if lazy image fetch fails", async () => {
+    // Statically unrecoverable image-only message (no data, no lazy): button hidden.
+    captured.features = ["assistant_compact"];
+    captured.session = { ...IDLE, assistant: true, turn_error_code: "images_too_large" };
+    transcript.items = [
+      { id: "u1", seq: 1, role: "user", kind: "image", ts: "2026-11-12T08:00:00Z" } as Item,
+      msg("e1", 2, "assistant", TOO_LARGE),
+    ];
+    await draw(true);
+    expect(banner()!.querySelector('[data-testid="compact-and-resend"]')).toBeNull();
+
+    // Lazy image fetch returns 404 -> aborts BEFORE calling POST .../compact and shows error toast.
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes("/image")) return Promise.resolve(new Response(null, { status: 404 }));
+      if (url.endsWith("/compact") && init?.method === "POST") {
+        compactCalls.push(url);
+        return Promise.resolve(json({ ok: true }));
+      }
+      if (!url.endsWith("/messages") || !init?.body) return Promise.resolve(json({}));
+      bodies.push(JSON.parse(String(init.body)));
+      return Promise.resolve(reply());
+    }));
+    transcript.items = [
+      msg("u2#0", 1, "user", "看看这张截图"),
+      { id: "u2#1", seq: 1, role: "user", kind: "image", image: { mime: "image/png", lazy: true }, ts: "2026-11-12T08:00:00Z" } as Item,
+      msg("e2", 2, "assistant", TOO_LARGE),
+    ];
+    await draw(true);
+    await clickCompactAndResend();
+    expect(compactCalls).toEqual([]);
+    expect(bodies).toEqual([]);
+    expect(vi.mocked(toast)).toHaveBeenCalled();
+  });
+
+  it("resends a failed slash-command user turn verbatim instead of walking to an earlier prompt", async () => {
+    captured.session = { ...IDLE, agent: "claude", turn_error_code: "images_too_large" };
+    transcript.items = [
+      msg("u0", 1, "user", "更早的无关消息"),
+      msg("a0", 2, "assistant", "好的"),
+      msg("u1", 3, "user", "/clear"),
+      msg("e1", 4, "assistant", TOO_LARGE),
+    ];
+    await draw(false);
+    await clickCompactAndResend();
+    expect(bodies.map((b) => b.text)).toEqual(["/compact"]);
+
+    captured.session = { ...captured.session, status: "working", state: "working" };
+    act(() => upsertSession(captured.session!));
+    await draw(false);
+    transcript.items = [
+      ...transcript.items,
+      { id: "c1", seq: 5, role: "assistant", kind: "notice", compact: { trigger: "manual" }, text: "上下文已压缩", ts: "2026-11-22T12:00:05Z" } as Item,
+    ];
+    captured.session = { ...captured.session, status: "idle", state: "idle", turn_error_code: undefined };
+    act(() => upsertSession(captured.session!));
+    await draw(false);
+    expect(bodies.map((b) => b.text)).toEqual(["/compact", "/clear"]);
+  });
+
+  it("does not resend on terminal Claude Code if an older boundary is paged in while idle or if /compact fails with an API error", async () => {
+    captured.session = { ...IDLE, agent: "claude", turn_error_code: "images_too_large" };
+    transcript.items = [msg("u1", 10, "user", "看看这些界面差异"), msg("e1", 11, "assistant", TOO_LARGE)];
+    await draw(false);
+    await clickCompactAndResend();
+    expect(bodies.map((b) => b.text)).toEqual(["/compact"]);
+
+    // Older boundary paged in while still idle -> must NOT trigger resend.
+    transcript.items = [
+      { id: "c0", seq: 3, role: "assistant", kind: "notice", compact: { trigger: "auto" }, text: "上下文已压缩", ts: "2026-11-22T11:00:00Z" } as Item,
+      ...transcript.items,
+    ];
+    await draw(false);
+    expect(bodies.map((b) => b.text)).toEqual(["/compact"]);
+
+    // Terminal works, then emits both a boundary and an API error -> must fail without resending.
+    captured.session = { ...captured.session, status: "working", state: "working" };
+    act(() => upsertSession(captured.session!));
+    await draw(false);
+    transcript.items = [
+      ...transcript.items,
+      { id: "c1", seq: 12, role: "assistant", kind: "notice", compact: { trigger: "manual" }, text: "上下文已压缩", ts: "2026-11-22T12:00:05Z" } as Item,
+      msg("e2", 13, "assistant", "API Error: 500 compact failed"),
+    ];
+    captured.session = { ...captured.session, status: "idle", state: "idle" };
+    act(() => upsertSession(captured.session!));
+    await draw(false);
+    expect(bodies.map((b) => b.text)).toEqual(["/compact"]);
+  });
+
+  it("handles main-chat /clear locally via onSend command path instead of posting it to /messages", async () => {
+    captured.features = ["assistant_compact", "assistant_main_clear"];
+    captured.assistantMain = "c1";
+    captured.session = { ...IDLE, assistant: true, turn_error_code: "images_too_large" };
+    transcript.items = [msg("u1", 1, "user", "/clear"), msg("e1", 2, "assistant", TOO_LARGE)];
+    await draw(true);
+    await clickCompactAndResend();
+    expect(compactCalls).toHaveLength(1);
+
+    captured.session = { ...captured.session, compaction: { state: "done", started_at: "2026-11-22T12:00:00Z", finished_at: "2026-11-22T12:00:05Z" } };
+    act(() => upsertSession(captured.session!));
+    await flush();
+    expect(clearCalls).toHaveLength(1);
+    expect(bodies).toEqual([]);
+  });
+
+  it("handles agent /workflows locally via openBackgroundPanel instead of posting it to /messages", async () => {
+    captured.session = { ...IDLE, agent: "claude", turn_error_code: "images_too_large" };
+    transcript.items = [msg("u1", 1, "user", "/workflows"), msg("e1", 2, "assistant", TOO_LARGE)];
+    await draw(false);
+    await clickCompactAndResend();
+    expect(bodies.map((b) => b.text)).toEqual(["/compact"]);
+
+    captured.session = { ...captured.session, status: "working", state: "working" };
+    act(() => upsertSession(captured.session!));
+    await draw(false);
+    transcript.items = [
+      ...transcript.items,
+      { id: "c1", seq: 3, role: "assistant", kind: "notice", compact: { trigger: "manual" }, text: "上下文已压缩", ts: "2026-11-22T12:00:05Z" } as Item,
+    ];
+    captured.session = { ...captured.session, status: "idle", state: "idle", turn_error_code: undefined };
+    act(() => upsertSession(captured.session!));
+    await draw(false);
+    expect(openPanelSpy).toHaveBeenCalledTimes(1);
+    expect(bodies.map((b) => b.text)).toEqual(["/compact"]);
+  });
+
+  it("hides Compact and send again for assistant conversations when the owning manager is offline", async () => {
+    captured.features = ["assistant_compact"];
+    captured.ownerOffline = "Manager offline";
+    captured.session = { ...IDLE, assistant: true, manager: "m2", turn_error_code: "images_too_large" };
+    transcript.items = [msg("u1", 1, "user", "帮我看看这张图"), msg("e1", 2, "assistant", TOO_LARGE)];
+    await draw(true);
+    expect(banner()!.textContent).toContain("这个对话里的图片太多或太大，超出了模型限制。");
+    expect(banner()!.querySelector('[data-testid="compact-and-resend"]')).toBeNull();
+  });
+
+  it("opens the local /model picker instead of posting to /messages when registered", async () => {
+    const modelSpy = vi.fn();
+    const unsubModel = onModelPicker("hub/c1", modelSpy);
+    try {
+      captured.session = { ...IDLE, agent: "claude", turn_error_code: "images_too_large" };
+      transcript.items = [msg("u1", 1, "user", "/model"), msg("e1", 2, "assistant", TOO_LARGE)];
+      await draw(false);
+      await clickCompactAndResend();
+      expect(bodies.map((b) => b.text)).toEqual(["/compact"]);
+
+      captured.session = { ...captured.session, status: "working", state: "working" };
+      act(() => upsertSession(captured.session!));
+      await draw(false);
+      transcript.items = [
+        ...transcript.items,
+        { id: "c1", seq: 3, role: "assistant", kind: "notice", compact: { trigger: "manual" }, text: "上下文已压缩", ts: "2026-11-22T12:00:05Z" } as Item,
+      ];
+      captured.session = { ...captured.session, status: "idle", state: "idle", turn_error_code: undefined };
+      act(() => upsertSession(captured.session!));
+      await draw(false);
+      expect(modelSpy).toHaveBeenCalledTimes(1);
+      expect(bodies.map((b) => b.text)).toEqual(["/compact"]);
+    } finally {
+      unsubModel();
+    }
+  });
+
+  it("opens the local /permissions picker instead of posting to /messages when registered", async () => {
+    const permSpy = vi.fn();
+    const unsubPerm = onPermissionPicker("hub/c1", permSpy);
+    try {
+      captured.session = { ...IDLE, agent: "claude", turn_error_code: "images_too_large" };
+      transcript.items = [msg("u2", 10, "user", "/permissions"), msg("e2", 11, "assistant", TOO_LARGE)];
+      await draw(false);
+      await clickCompactAndResend();
+      expect(bodies.map((b) => b.text)).toEqual(["/compact"]);
+
+      captured.session = { ...captured.session, status: "working", state: "working" };
+      act(() => upsertSession(captured.session!));
+      await draw(false);
+      transcript.items = [
+        ...transcript.items,
+        { id: "c2", seq: 12, role: "assistant", kind: "notice", compact: { trigger: "manual" }, text: "上下文已压缩", ts: "2026-11-22T12:00:10Z" } as Item,
+      ];
+      captured.session = { ...captured.session, status: "idle", state: "idle", turn_error_code: undefined };
+      act(() => upsertSession(captured.session!));
+      await draw(false);
+      expect(permSpy).toHaveBeenCalledTimes(1);
+      expect(bodies.map((b) => b.text)).toEqual(["/compact"]);
+    } finally {
+      unsubPerm();
+    }
+  });
+
+  it("falls back to sending /model as text when no local model picker is registered", async () => {
+    captured.session = { ...IDLE, agent: "claude", turn_error_code: "images_too_large" };
+    transcript.items = [msg("u1", 1, "user", "/model"), msg("e1", 2, "assistant", TOO_LARGE)];
+    await draw(false);
+    await clickCompactAndResend();
+    expect(bodies.map((b) => b.text)).toEqual(["/compact"]);
+
+    captured.session = { ...captured.session, status: "working", state: "working" };
+    act(() => upsertSession(captured.session!));
+    await draw(false);
+    transcript.items = [
+      ...transcript.items,
+      { id: "c1", seq: 3, role: "assistant", kind: "notice", compact: { trigger: "manual" }, text: "上下文已压缩", ts: "2026-11-22T12:00:05Z" } as Item,
+    ];
+    captured.session = { ...captured.session, status: "idle", state: "idle", turn_error_code: undefined };
+    act(() => upsertSession(captured.session!));
+    await draw(false);
+    expect(bodies.map((b) => b.text)).toEqual(["/compact", "/model"]);
   });
 });

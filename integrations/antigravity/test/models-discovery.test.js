@@ -18,8 +18,10 @@ function fixture(t) {
       marker: process.env.DISCOVERY_TEST_MARKER,
     }))
     console.log('Fetching available models...')
-    console.log('gemini-future-medium\\tGemini Future (medium)')
-    console.log('gemini-future-high\\tGemini Future (high)')
+    console.log('gemini-4-neon-xhigh\\tGemini 4 Neon (XHigh)')
+    console.log('gemini-4-neon-medium\\tGemini 4 Neon (Medium)')
+    console.log('gemini-4-hydrogen-max\\tGemini 4 Hydrogen (Max)')
+    console.log('gemini-4-hydrogen-xhigh\\tGemini 4 Hydrogen (XHigh)')
   `)
   const bin = join(directory, 'agy')
   writeFileSync(bin, `#!/bin/sh\nexec '${process.execPath}' '${fake}' "$@"\n`)
@@ -40,8 +42,10 @@ for (const value of [undefined, '1', 'false']) {
 
     assert.deepEqual(f.received(), { args: ['models'], autoUpdate: 'true', marker: 'inherited' })
     assert.deepEqual(models, [
-      { id: 'gemini-future-medium', name: 'Gemini Future (medium)', default: false, efforts: ['medium', 'high'], default_effort: 'medium' },
-      { id: 'gemini-future-high', name: 'Gemini Future (high)', default: false, efforts: ['medium', 'high'], default_effort: 'high' },
+      { id: 'gemini-4-neon-xhigh', name: 'Gemini 4 Neon (XHigh)', default: false, efforts: ['medium', 'xhigh'], default_effort: 'xhigh' },
+      { id: 'gemini-4-neon-medium', name: 'Gemini 4 Neon (Medium)', default: false, efforts: ['medium', 'xhigh'], default_effort: 'medium' },
+      { id: 'gemini-4-hydrogen-max', name: 'Gemini 4 Hydrogen (Max)', default: false, efforts: ['xhigh', 'max'], default_effort: 'max' },
+      { id: 'gemini-4-hydrogen-xhigh', name: 'Gemini 4 Hydrogen (XHigh)', default: false, efforts: ['xhigh', 'max'], default_effort: 'xhigh' },
     ])
     assert.deepEqual(env, before)
   })

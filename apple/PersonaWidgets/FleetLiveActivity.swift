@@ -402,11 +402,21 @@ struct FleetLockScreen: View {
         VStack(alignment: .leading, spacing: 9) {
             HStack(spacing: 10) {
                 FleetFace(size: FleetLiveActivity.lockFace, state: FleetPersona.state(state, stale: stale), look: state.drawnLook)
-                FleetCounts(state: state, short: FleetStatsLine.count(state) > 1)
-                Spacer(minLength: 0)
-                FleetStatsLine(state: state)
+                if stale {
+                    // What the hub said last is no longer known to be true (#12982): no counts, no requests, only that
+                    // it is waiting; the app ends or refreshes the card when it is back.
+                    Label("Waiting for hub…", systemImage: "wifi.exclamationmark").font(.subheadline).foregroundStyle(.secondary)
+                        .lineLimit(1)
+                    Spacer(minLength: 0)
+                } else {
+                    FleetCounts(state: state, short: FleetStatsLine.count(state) > 1)
+                    Spacer(minLength: 0)
+                    FleetStatsLine(state: state)
+                }
             }
-            if !stale, let act = state.firstActionable {
+            if stale {
+                EmptyView()
+            } else if let act = state.firstActionable {
                 // Allow / Approve need Face ID first (authenticationRequired); Deny works locked.
                 FleetRow(item: act, showTitle: state.details)
                 FleetActionRow(item: act)
@@ -415,9 +425,7 @@ struct FleetLockScreen: View {
             } else if let first = state.items.first, first.needsYou {
                 FleetRow(item: first, showTitle: false)
             }
-            if stale {
-                Label("Waiting for hub…", systemImage: "wifi.exclamationmark").font(.caption2).foregroundStyle(.secondary)
-            } else if state.details, state.firstActionable == nil, state.hidden(showing: FleetLiveActivity.rows) > 0 {
+            if !stale, state.details, state.firstActionable == nil, state.hidden(showing: FleetLiveActivity.rows) > 0 {
                 Text(FleetText.more(state.hidden(showing: FleetLiveActivity.rows))).font(.caption).foregroundStyle(.secondary)
                     .padding(.leading, 15)
             }

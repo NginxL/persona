@@ -74,7 +74,8 @@ func startFileCommand(text string) (string, bool) {
 type herdrFail struct{ Code, Message string }
 
 // connDeadline bounds one connection: a client that never writes its line cannot hold up the calls behind it.
-const connDeadline = 5 * time.Second
+// PaneCloseIf keeps its connection idle during the final safety checks.
+const connDeadline = 30 * time.Second
 
 func newFakeHerdr(t *testing.T, concurrent ...bool) *fakeHerdr {
 	t.Helper()

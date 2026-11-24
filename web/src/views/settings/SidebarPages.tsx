@@ -7,7 +7,7 @@ import { useState } from "react";
 import { t } from "../../i18n";
 import {
   addPageGroup, arrangeSections, EXTENSION_CAP, getSidebarPrefs, inList, LOCKED, movePageGroup, ordered, pageGroups, removePageGroup, renamePageGroup,
-  resetSidebarPrefs, restoreSidebarPrefs, setPageGroup, setPageOrder, setPageShown, useSidebarPrefs, chosen,
+  resetSidebarPrefs, restoreSidebarPrefs, setPageGroup, setPageOrder, setPageShown, setMoreShown, useSidebarPrefs, chosen, moreShown,
 } from "../../lib/sidebar-pages";
 import { useStartPageSynced } from "../../lib/start-page";
 import { Button, cx, IconButton, toast } from "../../ui/atoms";
@@ -173,6 +173,14 @@ export function SidebarPagesGroup() {
           </div>
         );
       })}
+      <div data-sidebar-more className="flex min-h-11 items-center gap-3 border-t border-line px-3 py-2">
+        <span className="flex size-7 shrink-0 items-center justify-center rounded-control bg-inset text-ink-2 shadow-hairline"><Icon name="more" size={14} /></span>
+        <div className="min-w-0 flex-1">
+          <div className="text-[13px] text-ink">{t("settings.sidebar_more_show")}</div>
+          <div className="mt-0.5 break-words text-[11.5px] text-ink-3">{t(moreShown(prefs) ? "settings.sidebar_more_hint_on" : "settings.sidebar_more_hint_off")}</div>
+        </div>
+        <Switch on={moreShown(prefs)} onChange={setMoreShown} label={t("settings.sidebar_more_show")} />
+      </div>
       <div className="flex min-h-11 items-center px-3 py-1.5">
         {editing === "+" ? (
           <NameField initial="" label={t("settings.sidebar_groups_name")} onCancel={() => setEditing(null)} onDone={(v) => (v.trim() && addPageGroup(ids, v), setEditing(null))} />

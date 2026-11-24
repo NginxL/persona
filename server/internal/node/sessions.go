@@ -56,17 +56,24 @@ func (n *Node) sessionListIn(ctx context.Context, refreshAgents bool, pass *code
 	}
 	n.mu.Lock()
 	agents := make(map[string]host.Agent, len(n.agents))
-	agyRuntimeIDs := map[string]string{}
 	for id, agent := range n.agents {
 		agents[id] = agent
-		if agent.Agent == agyAgent && agent.AgentStatus != proto.StatusOffline && agent.AgentStatus != proto.StatusInterrupted {
-			if conversation := n.agyConversationLocked(id, agent.PaneID); conversation != "" {
-				agyRuntimeIDs[id] = agyAgent + "-" + conversation
-			}
-		}
 	}
 	onList := n.onAgentsList // replaced whole with n.agents (setAgentsAt), never changed in place
 	n.mu.Unlock()
+
+	agyConversations := map[string]string{}
+	agyRuntimeIDs := map[string]string{}
+	for id, agent := range agents {
+		if agent.Agent == agyAgent {
+			if conversation := n.agyConversation(id, agent.PaneID); conversation != "" {
+				agyConversations[id] = conversation
+				if agent.AgentStatus != proto.StatusOffline && agent.AgentStatus != proto.StatusInterrupted {
+					agyRuntimeIDs[id] = agyAgent + "-" + conversation
+				}
+			}
+		}
+	}
 
 	// One slice for the whole list, sized from the last one, filtered where it is (#2826): grown from nil and copied again
 	// into the rows kept, with the runtimes' rows in a third, a list of 300 rows (1,520 bytes each) took about 4.8 MB.
@@ -160,8 +167,8 @@ func (n *Node) sessionListIn(ctx context.Context, refreshAgents bool, pass *code
 		if p := n.transcriptPath(id); p != "" {
 			if st, err := os.Stat(p); err == nil {
 				m := n.meta(p, st)
-				if identity.InHealthSpace(m.cwd) {
-					s.Space = identity.SpaceHealth
+				if sp := identity.SpaceAt(m.cwd); sp != "" {
+					s.Space = sp
 				}
 				rolloutPath = p
 				textAt = m.lastTextAt
@@ -190,7 +197,7 @@ func (n *Node) sessionListIn(ctx context.Context, refreshAgents bool, pass *code
 				}
 				// Background shells keep running after the turn ends; background subagents are listed as subagents.
 				n.setBackground(&s, m)
-				s.BackgroundWaiting = n.backgroundWaits(&s) // bgwait.go (#6045)
+				n.setBackgroundWait(&s) // bgwait.go (#6045, #13744)
 				s.Loop, s.Goal, s.Plan = m.loop, m.goal, m.plan
 				s.Subagents = n.subagents(id)
 			}
@@ -219,16 +226,7 @@ func (n *Node) sessionListIn(ctx context.Context, refreshAgents bool, pass *code
 			s.AsksRead = true
 		}
 		if a.Agent == "codex" {
-			if _, thread, err := n.codexOwner(id); err == nil && thread.model != "" {
-				s.Model = thread.model
-			}
-			n.codexRewindRow(id, &s)
-			if c, thread, driven := n.codexEffortThread(id); driven {
-				s.Model = n.codexModelNow(id, c, thread, s.Model)
-				s.Capabilities.Model = proto.Bool(true)
-			}
-			n.codexEffortRow(id, &s.Efforts, &s.Effort, rollout) // joined on its app-server: its effort (codex_effort.go)
-			n.codexSpeedRow(&s)
+			n.codexPaneControls(&s, rollout)
 		}
 		if piFamily(a.Agent) {
 			n.mergePiRow(&s) // its conversation is the extension's (pi.go)
@@ -244,13 +242,32 @@ func (n *Node) sessionListIn(ctx context.Context, refreshAgents bool, pass *code
 			if s.Capabilities == nil && s.Status != proto.StatusOffline && s.Status != proto.StatusInterrupted {
 				s.Capabilities = &proto.SessionCapabilities{Read: true, Send: true, Interrupt: true, Approve: true, Terminal: true, Modes: proto.CanModes(false)}
 			}
+			hasRuntimeRow := false
 			if runtimeID := agyRuntimeIDs[id]; runtimeID != "" {
 				seen[runtimeID] = true
-				if s.Model == "" {
-					if runtimeRow, _, ok := n.runtimes.rowOf(runtimeID); ok {
+				if runtimeRow, _, ok := n.runtimes.rowOf(runtimeID); ok {
+					hasRuntimeRow = true
+					if s.Model == "" {
 						s.Model = runtimeRow.Model
 					}
+					if s.ContextTokens == 0 && runtimeRow.ContextTokens > 0 {
+						s.ContextTokens = runtimeRow.ContextTokens
+					}
+					if s.ContextWindow == 0 && runtimeRow.ContextWindow > 0 {
+						s.ContextWindow = runtimeRow.ContextWindow
+					}
+					if s.OutputTokens == 0 && runtimeRow.OutputTokens > 0 {
+						s.OutputTokens = runtimeRow.OutputTokens
+					}
 				}
+			}
+			if a.Agent == agyAgent {
+				if hasRuntimeRow {
+					n.resolveAgyContextWindow(&s)
+				} else {
+					n.mergeAgyTranscript(&s, agyConversations[id])
+				}
+				n.agyPaneTitle(&s, agyConversations[id]) // its conversation's title, not the terminal's (agytitle.go)
 			}
 		case otherAgent(a):
 			s.ReadOnlyReason = otherNoReader(a.Agent)
@@ -310,6 +327,8 @@ func (n *Node) sessionListIn(ctx context.Context, refreshAgents bool, pass *code
 				}
 				s.SetAliases(aliases)
 			}
+		} else if s.Agent == agyAgent {
+			n.resolveAgyContextWindow(s)
 		}
 		seen[s.SessionID] = true
 		if j != i {
@@ -367,7 +386,7 @@ func (n *Node) sessionListIn(ctx context.Context, refreshAgents bool, pass *code
 			n.observedRunning(s.SessionID)
 			n.noteGatewayRunning(s)
 		}
-		if earlier[s.SessionID] || !n.sessionScopeAllows(s.Cwd) {
+		if earlier[s.SessionID] || n.isRoundFork(s.SessionID) || !n.sessionScopeAllows(s.Cwd) {
 			continue
 		}
 		if n.listBlocked(s.SessionID, s.Cwd) {
@@ -471,6 +490,7 @@ func (n *Node) decorateState(s *proto.Session, managesModel bool) (sessionState,
 	if ok {
 		s.StartedByPersona = true
 		s.Launcher = st.Launcher
+		s.SetCreationID(st.CreationID)
 		s.OffLauncher = n.offLauncher(s.SessionID) // its claude not started by Persona's command (offlauncher.go)
 		if st.TaskExecution {
 			classifyTaskTurnFailure(s)
@@ -479,12 +499,13 @@ func (n *Node) decorateState(s *proto.Session, managesModel bool) (sessionState,
 			model := st.Model
 			s.RequestedModel = &model
 		}
-		// A row without a pane is listed where its record says it started, when that is an assistant or health
-		// directory: not where a `cd` in its transcript left it (#2368). A pane's directory is its host's.
-		if identity.InHealthSpace(st.Cwd) {
-			s.Space = identity.SpaceHealth
+		// A row without a pane is listed where its record says it started, when that is an assistant or space
+		// directory: not where a `cd` in its transcript left it (#2368). A pane's directory is its host's. A scoped node's
+		// unlisted built-in directory is no such record (unlistedAssistantDir): the row keeps where it started.
+		if sp := identity.SpaceAt(st.Cwd); sp != "" {
+			s.Space = sp
 		}
-		if s.Cwd == "" || s.PaneID == "" && identity.IsAssistantDir(st.Cwd) {
+		if (s.Cwd == "" || s.PaneID == "" && identity.IsAssistantDir(st.Cwd)) && !n.unlistedAssistantDir(st.Cwd) {
 			s.Cwd = st.Cwd
 		}
 	}
@@ -605,9 +626,15 @@ func (n *Node) pollAgents(ctx context.Context) {
 				backoff.record(h.Kind(), failed[h.Kind()], now)
 			}
 		}
+		gen := n.outsideListGen.Load()
 		list := n.sessionList(ctx, false)
 		listed = time.Now()
-		if revs := n.publish(list); len(revs) > 0 {
+		if n.outsideListGen.Load() != gen {
+			gen = n.outsideListGen.Load()
+			list = n.sessionList(ctx, false)
+			listed = time.Now()
+		}
+		if revs := n.publishGen(list, gen); len(revs) > 0 {
 			n.kickPorts() // a tool call ran: it may have started (or stopped) a server (ports.go)
 		}
 	}
@@ -619,7 +646,20 @@ func (n *Node) pollAgents(ctx context.Context) {
 // has yet to say whether botmux's sessions are listed (botmuxPending), nor a list the manager holds already, byte for
 // byte (sessions_sent.go).
 func (n *Node) publish(list []proto.Session) map[string]int64 {
+	return n.publishChecked(list, false, 0)
+}
+
+// publishGen is publish that drops a pollAgents snapshot if outsideListGen advanced while the list was being built or
+// before it reached the wire, preventing a stale Approve=false snapshot from overwriting a freshly flushed list.
+func (n *Node) publishGen(list []proto.Session, gen uint64) map[string]int64 {
+	return n.publishChecked(list, true, gen)
+}
+
+func (n *Node) publishChecked(list []proto.Session, checkGen bool, gen uint64) map[string]int64 {
 	if n.botmuxPending() {
+		return nil
+	}
+	if checkGen && n.outsideListGen.Load() != gen {
 		return nil
 	}
 	n.mu.Lock()
@@ -627,6 +667,10 @@ func (n *Node) publish(list []proto.Session) map[string]int64 {
 	n.mu.Unlock()
 	key := listKeySized(list, size)
 	n.mu.Lock()
+	if checkGen && n.outsideListGen.Load() != gen {
+		n.mu.Unlock()
+		return nil
+	}
 	changed := key != n.lastList
 	n.lastList = key
 	revs := n.revsChanged(list)
@@ -635,7 +679,7 @@ func (n *Node) publish(list []proto.Session) map[string]int64 {
 		return revs
 	}
 	if changed {
-		n.sendSessions(list)
+		n.sendSessionsChecked(list, checkGen, gen)
 	} else if len(revs) > 0 {
 		n.sendRevs(revs)
 	}
@@ -663,4 +707,19 @@ func (n *Node) revsChanged(list []proto.Session) map[string]int64 {
 // folder, except the assistant's own conversations and the sessions the hub keeps.
 func (n *Node) listBlocked(sid, cwd string) bool {
 	return cwd != "" && n.cwdBlocked(cwd) && !n.isAssistantSession(sid) && !n.keptSessions()[sid]
+}
+
+// Keep the start response and later inventory snapshots in step with the owning daemon.
+func (n *Node) codexPaneControls(s *proto.Session, rollout quickMeta) {
+	id := s.SessionID
+	if _, thread, err := n.codexOwner(id); err == nil && thread.model != "" {
+		s.Model = thread.model
+	}
+	n.codexRewindRow(id, s)
+	if c, thread, driven := n.codexEffortThread(id); driven {
+		s.Model = n.codexModelNow(id, c, thread, s.Model)
+		s.Capabilities.Model = proto.Bool(true)
+	}
+	n.codexEffortRow(id, &s.Efforts, &s.Effort, rollout) // joined on its app-server: its effort (codex_effort.go)
+	n.codexSpeedRow(s)
 }

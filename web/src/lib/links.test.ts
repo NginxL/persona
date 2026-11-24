@@ -161,7 +161,8 @@ describe("where a link opens", () => {
       openLink(`${hub}/s/m1/abc-1`);
       openLink(`${hub}/todos?id=todo_1`);
       expect(getPanel()).toBeNull();
-      // a link is no drill-down: its page names nowhere it came from (lib/handoff.ts leaveChat's `from`, #12055)
+      // away from a Persona conversation (this mock's routeAt knows no page) a link's page names nowhere it came from;
+      // from one it names the conversation (lib/handoff.ts openLinkPage, #13164: lib/handoff.test.ts)
       expect(vi.mocked(navigate).mock.calls.slice(-2)).toEqual([[{ name: "session", mid: "m1", sid: "abc-1" }, false, null], [{ name: "todos", id: "todo_1" }, false, null]]);
     } finally {
       closePanel();

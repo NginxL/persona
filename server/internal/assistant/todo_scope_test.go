@@ -83,6 +83,8 @@ func TestTodoRowsToAnExtension(t *testing.T) {
 	health := identity.HealthDir("/home/owner")
 	todoStores(t, func(t *testing.T, e *todoEnv, database *db.DB) {
 		ctx := context.Background()
+		// Universal-main supervision requires the fixture's supervisor to be the actual main conversation (#5732).
+		setSettings(t, e.s, func(v *Settings) { v.Main = "conv1" })
 		at := time.Now().UTC().Add(-time.Minute)
 		run := func(id, title, cwd, state, text string) proto.Session {
 			c := scopeSession(id, title, cwd)

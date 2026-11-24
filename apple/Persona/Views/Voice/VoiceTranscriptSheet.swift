@@ -19,13 +19,9 @@ struct VoiceTranscriptSheet: View {
             #if os(iOS) || os(visionOS)
             .navigationBarTitleDisplayMode(.inline)
             #endif
-            #if os(macOS)
-            .macSheetDone { dismiss() }
-            #else
             .toolbar {
                 SheetClose { dismiss() }
             }
-            #endif
         }
         .accessibilityIdentifier("voice-transcript")
     }

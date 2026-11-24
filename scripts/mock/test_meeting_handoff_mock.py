@@ -1,5 +1,5 @@
 """The mock hub's hand-off of a meeting to an Agent after it (#8852, docs/assistant/meeting-minutes.md "Handing a meeting
-to an Agent (#8852)"), as assistant/meeting_handoff.go has it: refused while the meeting goes on and with nothing to
+to an Agent (#8852)"), as modules/recording/meeting_handoff.go has it: refused while the meeting goes on and with nothing to
 hand, sent to an Agent as the owner's message, each try kept in detail.meta.handoffs with its problem when it failed,
 and MOCK_HANDOFF_FAIL keeping every try that passes the checks as failed."""
 import time

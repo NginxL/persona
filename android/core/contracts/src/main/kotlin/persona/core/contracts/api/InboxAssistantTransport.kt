@@ -111,13 +111,15 @@ interface InboxAssistantTransport {
      */
     suspend fun assistantOf(manager: String?): JsonObject = assistant()
     /**
-     * The directions of one manager (null: the default), `GET /api/v1/assistant/leaders`: `{leaders: [{id, name, ended?}]}`
-     * (#3519, #3695). A transport without it answers none, and the drawer shows the leaders' titles.
+     * The directions of one manager (null: the default), `GET /api/v1/assistant/leaders`: `{leaders: [{id, name, ended?,
+     * external?, machine_id?, session_id?}]}`. Explicit outside directions keep their optional Agent target through this
+     * fallback too. A transport without it answers none, and the drawer shows the leaders' titles.
      */
     suspend fun assistantLeadersOf(manager: String?): JsonObject = JsonObject(emptyMap())
     /**
      * The direction tree of the default manager (`GET /api/v1/assistant/directions/tree`, #4352): `{directions: [{id,
-     * name, secretary?, counts: {working, needs_you, stuck, review}}]}`, the current directions in the leaders' order.
+     * name, secretary?, counts: {working, needs_you, stuck, review}, external?, machine_id?, session_id?}]}`, the current
+     * directions in the leaders' order. Outside metadata is additive and absent from older hubs.
      * The hub answers it for the default manager alone. A transport without it says so (as an older hub's 404 does), and
      * the drawer keeps the flat direction rows.
      */

@@ -17,9 +17,7 @@ The image has no herdr and no Claude Code, so **the hub machine can't also be a 
 - The `hub.json` written on first start has `"machines": []` (not the native method's "one local machine, `kind: local`"); every computer has to be added.
 - The "Persona" assistant runs on one of your computers: set `assistant.machine` to its id in the built-in manager's `data/managers/assistant/manager.json` (`docs/operations/config.md` ("manager.json"); if unset, the first entry in `machines` is used).
 
-Extensions (`docs/extensions/extensions.md`) work as usual; installed ones live in `data/extensions/` and survive an image upgrade. The image lacks a few things the native method has:
-- No `bwrap`: an extension that would get a sandbox by default (one not installed from a trusted market, `docs/extensions/extensions.md` ("Sandbox")) still runs, just without a sandbox, and its details and the list say 没有沙箱 (no sandbox);
-  it can then read and write all of `data/` (including `hub.json`), so install only ones you trust.
+Extensions (`docs/extensions/extensions.md`) work as usual; installed ones live in `data/extensions/` and survive an image upgrade. The image includes bubblewrap; required isolation must work before an extension can start (see "Extension sandboxes" below). The image lacks a few things the native method has:
 - No `git`: git markets (`git:`, `git@…`, `ssh://…`) can't be added; `github:` and `https://` markets go over HTTPS and work as usual.
 - The image is Alpine (musl): TypeScript extensions packed by `personad extension pack` (bun's `bun-linux-*` targets, which need glibc) won't start; Go extensions (`CGO_ENABLED=0`) are unaffected.
 - No interpreters such as node or python: an extension whose command is an interpreter (e.g. one run with `node` in the manager's `manager.json`) won't start; write and pack extensions (`personad extension dev` / `pack`) on another computer.
@@ -93,7 +91,7 @@ The hub in the image is on the `docker` channel: it never replaces its own binar
 
 To be clear first: **the NAS is only the hub; the AI doesn't work on the NAS**. The image has no Claude Code, so the assistant and Agents all run on another computer of yours. After installing the hub you still need to add a computer (step 5 below); until then the App can pair and browse, but the main chat can't start.
 
-1. On the NAS, create a directory (e.g. `/volume1/docker/persona`) with a `data` subdirectory inside, both created with the NAS's file manager: if `data/` belongs to you, the hub's files belong to you (if Docker creates `data/` itself, it belongs to root, and then all files belong to 1000; see the table below). Put `deploy/docker/compose.yaml` and `deploy/docker/.env.example` in the directory, rename the latter to `.env`, and fill in two lines:
+1. On the NAS, create a directory (e.g. `/volume1/docker/persona`) with a `data` subdirectory inside, both created with the NAS's file manager: if `data/` belongs to you, the hub's files belong to you (if Docker creates `data/` itself, it belongs to root, and then all files belong to 1000; see the table below). Put `deploy/docker/compose.yaml`, `deploy/docker/extension-seccomp.json` and `deploy/docker/.env.example` in the directory, rename the latter to `.env`, and fill in two lines:
    - `PERSONA_IMAGE`: the image, `ghcr.io/<owner>/persona:latest` (see "Image" above; for a private image, `docker login ghcr.io` first). An older `.env` that has only the image's former variable keeps working. With neither, `docker compose` stops with `service "hub" has neither an image nor a build context specified`.
    - `PERSONA_PUBLIC_URL`: how the phone reaches this NAS, usually `http://<NAS LAN address>:18660`.
 2. Run `docker compose up -d` in that directory.
@@ -143,6 +141,48 @@ docker compose exec hub personad hub tailcat-key          # on the NAS: the publ
 
 Add the address to `machines` in `data/hub.json` (`{"id":"laptop","name":"Laptop","kind":"tailcat","tailcat_addr":"tc…"}`),
 then `docker compose restart hub`.
+
+## Extension sandboxes
+
+The image includes non-setuid bubblewrap. Process extensions that require isolation
+must pass its namespace and mount probe before starting. If that fails, the extension
+stays stopped and its details and `personad extension show` explain why.
+
+Keep `extension-seccomp.json` beside `compose.yaml` when installing or upgrading.
+The hub's Compose service adds **no capabilities** and does not use privileged mode.
+It sets `no-new-privileges`, permits bubblewrap's `clone`, `unshare`, `setns`, `mount`,
+`umount2`, `pivot_root` and `sethostname` calls in a profile derived from Docker's
+standard seccomp allowlist, and otherwise retains that allowlist. These calls still
+need kernel permission: the non-root hub can mount only after creating its own user
+namespace, where it receives namespace-local capabilities, never host `CAP_SYS_ADMIN`.
+`clone3` retains Docker's fallback behavior. This is a wider syscall surface than the
+standard Docker profile, so use the supplied profile only for the hub.
+
+Docker's default AppArmor policy denies mounts even inside a nested user namespace.
+The base service keeps the host's default AppArmor policy. On an AppArmor host,
+install the supplied narrower profile before enabling the optional Compose override
+(see below). SELinux and host kernel restrictions still apply. Hosts must allow unprivileged user namespaces
+(`user.max_user_namespaces` must be nonzero, and on hosts with
+`kernel.unprivileged_userns_clone`, it must be enabled). Do not work around a denied probe by adding host `SYS_ADMIN`,
+selecting `apparmor=unconfined` or enabling privileged mode. Without the needed host support, required extensions remain stopped.
+
+Check `docker info --format '{{json .SecurityOptions}}'` on a host you administer.
+When it lists AppArmor, copy `persona-hub.apparmor` and `compose.apparmor.yaml` from
+`deploy/docker/` beside the base Compose file. With AppArmor 4.x userspace installed,
+load the profile on the host with `sudo apparmor_parser -r persona-hub.apparmor`, then
+use `docker compose -f compose.yaml -f compose.apparmor.yaml up -d`. It retains Docker's
+proc/sys write denials, signal/ptrace peer restrictions and obsolete socket-family
+denials, adding user namespaces, tmpfs/proc/devpts mounts, bind mounts, propagation
+changes, remounts and pivot_root. It does not permit arbitrary filesystem mounts.
+These permissions remain gated by the non-root hub's kernel capabilities. Hosts
+without AppArmor use only the base file; an image update alone cannot alter the host's
+security configuration. An older compose file on an AppArmor host may therefore need
+the documented profile/override before required extensions can run.
+
+`server-other` CI runs the real extension filesystem/network isolation test as the
+non-root image user in a disposable container built from the same runtime stage,
+with all outer capabilities dropped and the supplied security options. It also requires the manager tests for refusal, `active=true` and the official
+exemption to pass inside that container. A skipped isolation test fails that check. On GitHub-hosted test VMs that advertise AppArmor, the workflow loads the checked-in host profile before starting the test container. This does not require a running hub or real state.
 
 ## Environment variables (override hub.json, not written back to the file)
 

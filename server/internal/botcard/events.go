@@ -1,0 +1,536 @@
+package botcard
+
+import (
+	"cmp"
+	"encoding/json"
+	"fmt"
+	"maps"
+	"slices"
+	"strconv"
+	"strings"
+	"time"
+)
+
+// Envelope is an event or callback as delivered (schema 2.0).
+type Envelope struct {
+	Schema string `json:"schema"`
+	Header struct {
+		EventID    string `json:"event_id"`
+		EventType  string `json:"event_type"`
+		CreateTime string `json:"create_time"`
+		AppID      string `json:"app_id"`
+	} `json:"header"`
+	Event json.RawMessage `json:"event"`
+}
+
+// Event types the hub handles.
+const (
+	EventMessage    = "im.message.receive_v1"
+	EventCardAction = "card.action.trigger"
+	EventP2PEntered = "im.chat.access_event.bot_p2p_chat_entered_v1"
+	EventRecalled   = "im.message.recalled_v1"
+)
+
+// Recalled is im.message.recalled_v1: a message in a chat the bot is in was recalled (message_owner: by its sender).
+type Recalled struct {
+	MessageID  string `json:"message_id"`
+	ChatID     string `json:"chat_id"`
+	RecallType string `json:"recall_type"`
+}
+
+func ParseEnvelope(payload []byte) (*Envelope, error) {
+	var e Envelope
+	if err := json.Unmarshal(payload, &e); err != nil {
+		return nil, err
+	}
+	if e.Header.EventType == "" {
+		return nil, fmt.Errorf("feishubot: not a 2.0 event")
+	}
+	return &e, nil
+}
+
+// UserID is how Feishu names a user; the hub keys on the open id (per app).
+type UserID struct {
+	OpenID  string `json:"open_id"`
+	UnionID string `json:"union_id"`
+	UserID  string `json:"user_id"`
+}
+
+// MessageEvent is im.message.receive_v1.
+type MessageEvent struct {
+	Sender struct {
+		SenderID   UserID `json:"sender_id"`
+		SenderType string `json:"sender_type"` // user | app
+	} `json:"sender"`
+	Message struct {
+		MessageID   string    `json:"message_id"`
+		RootID      string    `json:"root_id"`
+		ParentID    string    `json:"parent_id"`
+		ThreadID    string    `json:"thread_id"`
+		CreateTime  string    `json:"create_time"` // Unix milliseconds
+		ChatID      string    `json:"chat_id"`
+		ChatType    string    `json:"chat_type"` // p2p | group
+		MessageType string    `json:"message_type"`
+		Content     string    `json:"content"`
+		Mentions    []Mention `json:"mentions"`
+	} `json:"message"`
+}
+
+type Mention struct {
+	Key  string `json:"key"` // @_user_1, as it stands in the text
+	ID   UserID `json:"id"`
+	Name string `json:"name"`
+}
+
+func (m *MessageEvent) At() time.Time { return MsTime(m.Message.CreateTime) }
+
+// CardAction is card.action.trigger: a button pressed or a form submitted on a card the bot sent.
+type CardAction struct {
+	Operator struct {
+		OpenID string `json:"open_id"`
+	} `json:"operator"`
+	Token  string `json:"token"`
+	Action struct {
+		Value      map[string]any `json:"value"`
+		Tag        string         `json:"tag"`
+		Name       string         `json:"name"`
+		FormValue  map[string]any `json:"form_value"`
+		InputValue string         `json:"input_value"`
+		Option     string         `json:"option"`
+	} `json:"action"`
+	Context struct {
+		MessageID string `json:"open_message_id"`
+		ChatID    string `json:"open_chat_id"`
+	} `json:"context"`
+}
+
+// Str is a string value of the action (its value map, then its form).
+func (a *CardAction) Str(key string) string {
+	if v, ok := a.Action.Value[key]; ok {
+		return anyString(v)
+	}
+	if v, ok := a.Action.FormValue[key]; ok {
+		return anyString(v)
+	}
+	return ""
+}
+
+// Form returns a form field: a string, or the picks of a multi-select joined with ", ".
+func (a *CardAction) Form(key string) string { return anyString(a.Action.FormValue[key]) }
+
+func anyString(v any) string {
+	switch x := v.(type) {
+	case string:
+		return x
+	case []any:
+		parts := make([]string, 0, len(x))
+		for _, p := range x {
+			parts = append(parts, anyString(p))
+		}
+		return strings.Join(parts, ", ")
+	case nil:
+		return ""
+	case float64:
+		return strconv.FormatFloat(x, 'f', -1, 64)
+	case bool:
+		return strconv.FormatBool(x)
+	}
+	return fmt.Sprint(v)
+}
+
+// CardResponse answers a card callback: a toast, and the card to show instead (raw card JSON).
+type CardResponse struct {
+	Toast *Toast       `json:"toast,omitempty"`
+	Card  *CardPayload `json:"card,omitempty"`
+}
+
+type Toast struct {
+	Type    string `json:"type"` // info | success | error | warning
+	Content string `json:"content"`
+}
+
+type CardPayload struct {
+	Type string `json:"type"` // raw
+	Data any    `json:"data"`
+}
+
+// P2PEntered is the user opening the chat with the bot.
+type P2PEntered struct {
+	ChatID     string `json:"chat_id"`
+	OperatorID UserID `json:"operator_id"`
+}
+
+// MsTime is a millisecond Unix timestamp as the open platform writes it; the zero time when it is not one.
+func MsTime(s string) time.Time {
+	n, err := strconv.ParseInt(s, 10, 64)
+	if err != nil || n <= 0 {
+		return time.Time{}
+	}
+	return time.UnixMilli(n)
+}
+
+// --- message content ---
+
+// Content is a message read into what Persona passes on: its text (Markdown-ish) and the media in it to download.
+type Content struct {
+	Text      string
+	Media     []Media
+	postLinks []postLink
+	// post retains element boundaries and identities for command parsing.
+	post *richPost
+	// Forward: a merged forward; its messages are read with Client.Message.
+	Forward bool
+	// Sticker: a sticker carries no request; accept it silently instead of starting an Agent turn.
+	Sticker bool
+}
+
+// A received post supplies a link's display text separately from its destination.
+type postLink struct{ label, markdown string }
+
+// CutPostLink recognizes a leading link rendered from a real rich-text element, including
+// labels or destinations containing brackets and parentheses.
+func (c Content) CutPostLink(text string) (label, rest string, found bool) {
+	if !strings.HasPrefix(text, "[") {
+		return "", text, false
+	}
+	for _, link := range c.postLinks {
+		if rest, ok := strings.CutPrefix(text, link.markdown); ok {
+			return link.label, rest, true
+		}
+	}
+	return "", text, false
+}
+
+// Media is an image or file in a message.
+type Media struct {
+	Kind string // image | file
+	Key  string
+	Name string // files
+}
+
+// ParseContent reads a message's content by its type. mentions turn @_user_N back into names.
+func ParseContent(msgType, content string, mentions []Mention) Content {
+	var c Content
+	switch msgType {
+	case "text":
+		var v struct {
+			Text string `json:"text"`
+		}
+		_ = json.Unmarshal([]byte(content), &v)
+		c.Text = v.Text
+	case "post":
+		c = parsePost(content, mentions)
+	case "image":
+		var v struct {
+			ImageKey string `json:"image_key"`
+		}
+		_ = json.Unmarshal([]byte(content), &v)
+		if v.ImageKey != "" {
+			c.Media = append(c.Media, Media{Kind: "image", Key: v.ImageKey})
+		}
+	case "file", "audio", "media":
+		var v struct {
+			FileKey  string `json:"file_key"`
+			FileName string `json:"file_name"`
+		}
+		_ = json.Unmarshal([]byte(content), &v)
+		name := v.FileName
+		if name == "" {
+			name = map[string]string{"audio": "语音.opus", "media": "视频.mp4"}[msgType]
+			if name == "" {
+				name = "文件"
+			}
+		}
+		if v.FileKey != "" {
+			c.Media = append(c.Media, Media{Kind: "file", Key: v.FileKey, Name: name})
+		}
+		if msgType == "audio" {
+			c.Text = "[语音消息]"
+		}
+	case "merge_forward":
+		c.Forward = true
+	case "sticker":
+		c.Text = "[表情]"
+		c.Sticker = true
+	case "interactive":
+		c.Text = cardText(content, mentions)
+	case "share_chat":
+		c.Text = "[分享了一个群]"
+	case "share_user":
+		c.Text = "[分享了一张名片]"
+	case "location":
+		var v struct {
+			Name      string `json:"name"`
+			Longitude string `json:"longitude"`
+			Latitude  string `json:"latitude"`
+		}
+		_ = json.Unmarshal([]byte(content), &v)
+		c.Text = strings.TrimSpace(fmt.Sprintf("[位置] %s %s,%s", v.Name, v.Latitude, v.Longitude))
+	case "todo":
+		c.Text = todoText(content, mentions)
+	case "vote":
+		c.Text = voteText(content)
+	default:
+		c.Text = "[" + msgType + " 消息]"
+	}
+	c.Text = strings.TrimSpace(nameMentionKeys(c.Text, mentions))
+	return c
+}
+
+// nameMentionKeys puts "@<name>" in place of each mention's key in text, in one pass and a key only as a whole:
+// "@_user_1" is not the start of "@_user_10" (the key is not followed by another digit). A mention without a key is
+// no placeholder, and one without a name leaves its key as it stands.
+func nameMentionKeys(text string, mentions []Mention) string {
+	var b strings.Builder
+	done := 0 // text before this is in b
+	for i := 0; i < len(text); i++ {
+		for _, m := range mentions {
+			if m.Key == "" || m.Name == "" || !strings.HasPrefix(text[i:], m.Key) {
+				continue
+			}
+			if end := i + len(m.Key); end < len(text) && isDigit(text[end]) {
+				continue
+			}
+			b.WriteString(text[done:i])
+			b.WriteString("@" + m.Name)
+			done = i + len(m.Key)
+			i = done - 1
+			break
+		}
+	}
+	if done == 0 {
+		return text
+	}
+	b.WriteString(text[done:])
+	return b.String()
+}
+
+func isDigit(c byte) bool { return '0' <= c && c <= '9' }
+
+// richNode is one element of rich text: of a post's paragraph, of a received card's row, of a to-do's summary.
+type richNode struct {
+	Tag         string     `json:"tag"`
+	Text        string     `json:"text"`
+	Href        string     `json:"href"`
+	UserName    string     `json:"user_name"`
+	UserID      string     `json:"user_id"`
+	ImageKey    string     `json:"image_key"`
+	FileKey     string     `json:"file_key"`
+	Language    string     `json:"language"`
+	Emoji       string     `json:"emoji_type"`
+	Placeholder string     `json:"placeholder"` // a card's select menu
+	Elements    []richNode `json:"elements"`    // a card's note
+}
+
+// writeNodes renders nodes onto b: text as it stands, links as Markdown links, at nodes as @name, code blocks fenced.
+// Pictures and videos are a placeholder; a post also keeps their download references and its link labels. A card's note renders its
+// elements, a button or a select menu its label. mentions give names for at nodes with only a user_id.
+func writeNodes(b *strings.Builder, nodes []richNode, mentions []Mention, post *Content) {
+	for _, n := range nodes {
+		switch n.Tag {
+		case "text", "md":
+			b.WriteString(n.Text)
+		case "a":
+			markup := "[" + n.Text + "](" + n.Href + ")"
+			b.WriteString(markup)
+			if post != nil {
+				post.postLinks = append(post.postLinks, postLink{nameMentionKeys(n.Text, mentions), nameMentionKeys(markup, mentions)})
+			}
+		case "at":
+			switch {
+			case n.UserName != "":
+				b.WriteString("@" + n.UserName)
+			case n.UserID == "all":
+				b.WriteString("@所有人")
+			case n.UserID != "":
+				if name := mentionName(n.UserID, mentions); name != "" {
+					b.WriteString("@" + name)
+				} else {
+					b.WriteString("@" + strings.TrimPrefix(n.UserID, "@")) // a mention key ("@_user_1") as it stands
+				}
+			default:
+				b.WriteString("@某人")
+			}
+		case "img":
+			if n.ImageKey != "" {
+				if post != nil {
+					post.Media = append(post.Media, Media{Kind: "image", Key: n.ImageKey})
+				}
+				b.WriteString("[图片]")
+			}
+		case "media":
+			if n.FileKey != "" {
+				if post != nil {
+					post.Media = append(post.Media, Media{Kind: "file", Key: n.FileKey, Name: "视频.mp4"})
+				}
+				b.WriteString("[视频]")
+			}
+		case "code_block":
+			// A literal fence in a Markdown document must stay inside this code block.
+			fenceLen, run := 3, 0
+			for i := 0; i < len(n.Text); i++ {
+				if n.Text[i] == '`' {
+					run++
+					fenceLen = max(fenceLen, run+1)
+				} else {
+					run = 0
+				}
+			}
+			fence := strings.Repeat("`", fenceLen)
+			fmt.Fprintf(b, "\n%s%s\n%s\n%s\n", fence, strings.ToLower(n.Language), strings.TrimRight(n.Text, "\n"), fence)
+		case "emotion":
+			b.WriteString("[" + n.Emoji + "]")
+		case "hr":
+			b.WriteString("---")
+		case "note":
+			writeNodes(b, n.Elements, mentions, post)
+		case "button", "select_static":
+			label := cmp.Or(n.Text, n.Placeholder)
+			if label == "" {
+				continue
+			}
+			if s := b.String(); s != "" && !strings.HasSuffix(s, " ") {
+				b.WriteByte(' ') // buttons in a row stay apart
+			}
+			b.WriteString(label)
+		}
+	}
+}
+
+type richPost struct {
+	Title   string       `json:"title"`
+	Content [][]richNode `json:"content"`
+}
+
+// parsePost flattens rich text: paragraphs become lines, links Markdown links, code blocks fenced; images are media.
+// A received post is {"title","content":[[…]]}; one read back may be keyed by language ({"zh_cn":{…}}).
+// mentions give names for at nodes that carry a user_id without a user_name.
+func parsePost(content string, mentions []Mention) Content {
+	var p richPost
+	if err := json.Unmarshal([]byte(content), &p); err != nil || (p.Title == "" && p.Content == nil) {
+		var byLang map[string]richPost
+		if json.Unmarshal([]byte(content), &byLang) == nil {
+			for _, k := range []string{"zh_cn", "en_us", "ja_jp"} {
+				if v, ok := byLang[k]; ok {
+					p = v
+					break
+				}
+			}
+			if p.Content == nil {
+				for _, v := range byLang {
+					p = v
+					break
+				}
+			}
+		}
+	}
+	return renderPost(p, mentions)
+}
+
+func renderPost(p richPost, mentions []Mention) Content {
+	c := Content{post: &p}
+	var lines []string
+	if p.Title != "" {
+		lines = append(lines, "**"+p.Title+"**")
+	}
+	for _, para := range p.Content {
+		var b strings.Builder
+		writeNodes(&b, para, mentions, &c)
+		lines = append(lines, b.String())
+	}
+	c.Text = strings.Join(lines, "\n")
+	return c
+}
+
+// mentionName resolves an at node's user_id through the event's mentions; the id may be an open_id,
+// a user_id or a union_id depending on the tenant's id type, or the mention's own key ("@_user_1").
+func mentionName(id string, mentions []Mention) string {
+	for _, m := range mentions {
+		if m.ID.OpenID == id || m.ID.UserID == id || m.ID.UnionID == id || m.Key != "" && m.Key == id {
+			return m.Name
+		}
+	}
+	return ""
+}
+
+// cardLabel starts what a card reads as; a card with no text is the label alone.
+const cardLabel = "[卡片]"
+
+// cardText reads a card someone sent or forwarded. Received, a card is {"title","elements":[[node…]…]}: the title is
+// the first line and each row one line, its nodes rendered like a post's (its pictures are not downloaded). Any other
+// shape gives every "title" / "content" / "text" string, walked in key order so it reads the same every time.
+func cardText(content string, mentions []Mention) string {
+	var card struct {
+		Title    string       `json:"title"`
+		Elements [][]richNode `json:"elements"`
+	}
+	if json.Unmarshal([]byte(content), &card) == nil && (card.Title != "" || card.Elements != nil) {
+		var lines []string
+		if t := strings.TrimSpace(card.Title); t != "" {
+			lines = append(lines, t)
+		}
+		for _, row := range card.Elements {
+			var b strings.Builder
+			writeNodes(&b, row, mentions, nil)
+			if line := strings.TrimSpace(b.String()); line != "" {
+				lines = append(lines, line)
+			}
+		}
+		return strings.TrimSpace(cardLabel + " " + strings.Join(lines, "\n"))
+	}
+	var v any
+	if json.Unmarshal([]byte(content), &v) != nil {
+		return cardLabel
+	}
+	var parts []string
+	var walk func(any)
+	walk = func(x any) {
+		switch t := x.(type) {
+		case map[string]any:
+			for _, k := range []string{"title", "content", "text"} {
+				if s, ok := t[k].(string); ok && strings.TrimSpace(s) != "" {
+					parts = append(parts, strings.TrimSpace(s))
+				}
+			}
+			for _, k := range slices.Sorted(maps.Keys(t)) {
+				if _, isStr := t[k].(string); isStr && (k == "title" || k == "content" || k == "text") {
+					continue
+				}
+				walk(t[k])
+			}
+		case []any:
+			for _, sub := range t {
+				walk(sub)
+			}
+		}
+	}
+	walk(v)
+	return strings.TrimSpace(cardLabel + " " + strings.Join(parts, " "))
+}
+
+// todoText reads a to-do: its summary is a post and reads as one (its pictures are not downloaded).
+func todoText(content string, mentions []Mention) string {
+	var v struct {
+		Summary json.RawMessage `json:"summary"`
+	}
+	_ = json.Unmarshal([]byte(content), &v)
+	return "[任务] " + parsePost(string(v.Summary), mentions).Text
+}
+
+// voteText reads a vote: its topic, then its options.
+func voteText(content string) string {
+	var v struct {
+		Topic   string   `json:"topic"`
+		Options []string `json:"options"`
+	}
+	_ = json.Unmarshal([]byte(content), &v)
+	text := strings.Join(v.Options, " / ")
+	switch {
+	case v.Topic == "":
+	case text == "":
+		text = v.Topic
+	default:
+		text = v.Topic + ": " + text
+	}
+	return "[投票] " + text
+}

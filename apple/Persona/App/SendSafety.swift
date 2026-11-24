@@ -228,7 +228,7 @@ extension AppModel {
             return .sent
         } catch let e as APIError where e.code == "effort_change_pending" {
             // The node refused before typing. The operation receipt keeps the refusal under this ID.
-            markRefused(key, msg.id)
+            markRefused(key, msg.id, code: e.code)
             guard let effort = e.fields["effort"] else {
                 noteFailure(key, msg.id, e.shown ?? e.localizedDescription)
                 return .failed
@@ -237,7 +237,7 @@ extension AppModel {
             return .effortWaiting
         } catch let e as APIError where e.code == "input_draft" {
             Haptics.attention()
-            markRefused(key, msg.id)
+            markRefused(key, msg.id, code: e.code)
             noteFailure(key, msg.id, e.shown ?? e.localizedDescription)
             sendRefusal = SendRefusal(key: key, messageID: msg.id, draft: e.fields["draft"] ?? "", clearable: e.fields["clearable"])
             return .failed
@@ -255,7 +255,7 @@ extension AppModel {
             // A dialog holds the computer's terminal (#3752): nothing was typed. Say which one, and open the terminal
             // from here: answering at the computer is no way out for someone away from it.
             Haptics.attention()
-            markRefused(key, msg.id)
+            markRefused(key, msg.id, code: e.code)
             let head = e.fields["dialog"]?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
             let reason = head.isEmpty ? (e.shown ?? e.localizedDescription) : String(localized: "The terminal is waiting on “\(head)”.")
             noteFailure(key, msg.id, reason)
@@ -264,7 +264,7 @@ extension AppModel {
             })
             return .failed
         } catch {
-            if (error as? APIError)?.fields["delivered"] == "none" { markRefused(key, msg.id) } // a dialog open, say
+            if (error as? APIError)?.fields["delivered"] == "none" { markRefused(key, msg.id, code: (error as? APIError)?.code) } // a dialog open, say
             noteFailure(key, msg.id, error.shown ?? error.localizedDescription)
             show(error)
             return .failed
@@ -377,11 +377,15 @@ extension AppModel {
     func noteFailure(_ key: SessionKey, _ id: UUID, _ reason: String?) {
         guard let i = chat(key).pending.firstIndex(where: { $0.id == id }) else { return }
         chat(key).pending[i].failure = reason
+        if reason == nil { chat(key).pending[i].failureCode = nil }
     }
 
     /// The hub answered this message's id with a refusal it keeps: the next try goes with a new id (`retry`).
-    private func markRefused(_ key: SessionKey, _ id: UUID) {
-        if let i = chat(key).pending.firstIndex(where: { $0.id == id }) { chat(key).pending[i].refused = true }
+    private func markRefused(_ key: SessionKey, _ id: UUID, code: String? = nil) {
+        if let i = chat(key).pending.firstIndex(where: { $0.id == id }) {
+            chat(key).pending[i].refused = true
+            chat(key).pending[i].failureCode = code
+        }
     }
 
     /// The user chose Clear and Send: the node clears that draft (only if the box still shows it) and sends.

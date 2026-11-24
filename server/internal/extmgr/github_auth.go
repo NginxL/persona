@@ -10,10 +10,10 @@ import (
 	"time"
 
 	"github.com/nwverse/persona/server/internal/connector"
-	"github.com/nwverse/persona/server/internal/connector/github"
 	"github.com/nwverse/persona/server/internal/connector/proc"
 	"github.com/nwverse/persona/server/internal/connector/serve"
 	"github.com/nwverse/persona/server/internal/extension"
+	"github.com/nwverse/persona/server/internal/githubwire"
 	"github.com/nwverse/persona/server/internal/rpc"
 )
 
@@ -25,7 +25,7 @@ const githubAuthKey = "github_auth"
 
 // githubAuth is the user's choice.
 type githubAuth struct {
-	Source  string `json:"source"`            // github.SourceMachine | github.SourceDevice
+	Source  string `json:"source"`            // githubwire.SourceMachine | githubwire.SourceDevice
 	Machine string `json:"machine,omitempty"` // the machine's id, for SourceMachine
 }
 
@@ -33,34 +33,34 @@ type githubAuth struct {
 type githubMachine struct {
 	ID   string `json:"id"`
 	Name string `json:"name"`
-	github.MachineLogin
+	githubwire.MachineLogin
 }
 
 // githubAuthView is GET /api/v1/connectors/github/auth: the choice, the computers to choose from, and what the token
 // in use may do (scopes are known once GitHub said; missing lists what the connector needs and does not have).
 type githubAuthView struct {
-	Source      string                 `json:"source"`
-	Machine     string                 `json:"machine,omitempty"`
-	Machines    []githubMachine        `json:"machines"`
-	Scopes      []string               `json:"scopes,omitempty"`
-	ScopesKnown bool                   `json:"scopes_known"`
-	Missing     []github.RequiredScope `json:"missing,omitempty"`
+	Source      string                     `json:"source"`
+	Machine     string                     `json:"machine,omitempty"`
+	Machines    []githubMachine            `json:"machines"`
+	Scopes      []string                   `json:"scopes,omitempty"`
+	ScopesKnown bool                       `json:"scopes_known"`
+	Missing     []githubwire.RequiredScope `json:"missing,omitempty"`
 }
 
 // githubConnector is the hub's own GitHub connector while it runs (not while an extension took its place).
-func (h *Manager) githubConnector() *github.Connector {
-	c, _ := h.connectors.Get("github").(*github.Connector)
+func (h *Manager) githubConnector() githubwire.Connector {
+	c, _ := h.connectors.Get("github").(githubwire.Connector)
 	return c
 }
 
 // ownGitHub is the hub's own GitHub connector, running or set aside for an extension's (connectors_migrate.go): it
 // still checks each computer's gh login for the page.
-func (h *Manager) ownGitHub() *github.Connector {
+func (h *Manager) ownGitHub() githubwire.Connector {
 	if c := h.githubConnector(); c != nil {
 		return c
 	}
 	if v, ok := h.migrated.Load("github"); ok {
-		c, _ := v.(*github.Connector)
+		c, _ := v.(githubwire.Connector)
 		return c
 	}
 	return nil
@@ -81,9 +81,9 @@ func (h *Manager) githubChoice(ctx context.Context) (githubAuth, bool) {
 		}
 	}
 	if h.cfg.GitHub != nil && h.cfg.GitHub.Configured() {
-		return githubAuth{Source: github.SourceMachine, Machine: h.cfg.GitHub.Auth.FromMachine}, false
+		return githubAuth{Source: githubwire.SourceMachine, Machine: h.cfg.GitHub.Auth.FromMachine}, false
 	}
-	return githubAuth{Source: github.SourceDevice}, false
+	return githubAuth{Source: githubwire.SourceDevice}, false
 }
 
 // restoreGitHubSource applies the user's choice, kept from before, at start.
@@ -97,8 +97,8 @@ func (h *Manager) restoreGitHubSource(ctx context.Context) {
 	}
 }
 
-func (h *Manager) applyGitHubSource(ctx context.Context, c *github.Connector, a githubAuth) {
-	if a.Source == github.SourceMachine && a.Machine != "" {
+func (h *Manager) applyGitHubSource(ctx context.Context, c githubwire.Connector, a githubAuth) {
+	if a.Source == githubwire.SourceMachine && a.Machine != "" {
 		c.UseMachine(ctx, a.Machine, h.machineName(a.Machine), h.ghToken(a.Machine))
 		return
 	}
@@ -109,10 +109,10 @@ func (h *Manager) applyGitHubSource(ctx context.Context, c *github.Connector, a 
 // connector asks for a computer's token itself (credentials.gh_token).
 func (h *Manager) applyGitHubExtensionSource(ctx context.Context, c *proc.Conn, a githubAuth) (serve.AuthView, error) {
 	src := serve.AuthSource{Source: a.Source}
-	if a.Source == github.SourceMachine && a.Machine != "" {
+	if a.Source == githubwire.SourceMachine && a.Machine != "" {
 		src.Machine, src.MachineName = a.Machine, h.machineName(a.Machine)
 	} else {
-		src.Source = github.SourceDevice
+		src.Source = githubwire.SourceDevice
 	}
 	return c.SetAuth(ctx, src)
 }
@@ -136,7 +136,7 @@ func (h *Manager) githubExtensionTaken(ctx context.Context, c *proc.Conn, cs con
 
 // githubAuthNow is what the page shows: every machine's gh login, asked at once (a few seconds at most). c checks the
 // logins (the hub's own connector, also while an extension's runs); ext, when set, says the choice and the scopes.
-func (h *Manager) githubAuthNow(ctx context.Context, c *github.Connector, ext *proc.Conn) githubAuthView {
+func (h *Manager) githubAuthNow(ctx context.Context, c githubwire.Connector, ext *proc.Conn) githubAuthView {
 	v := githubAuthView{Source: c.Source(), Machine: c.MachineID(), Machines: []githubMachine{}}
 	v.Scopes, v.ScopesKnown = c.Scopes()
 	if ext != nil {
@@ -148,7 +148,7 @@ func (h *Manager) githubAuthNow(ctx context.Context, c *github.Connector, ext *p
 		v.Source, v.Machine, v.Scopes, v.ScopesKnown = av.Source, av.Machine, av.Scopes, av.ScopesKnown
 	}
 	if v.ScopesKnown {
-		v.Missing = github.MissingScopes(v.Scopes)
+		v.Missing = c.MissingScopes(v.Scopes)
 	}
 	ms := h.machinesNow()
 	out := make([]githubMachine, len(ms))
@@ -200,9 +200,9 @@ func (h *Manager) githubAuthRoutes(api *http.ServeMux) {
 			return
 		}
 		switch {
-		case a.Source == github.SourceDevice:
+		case a.Source == githubwire.SourceDevice:
 			a.Machine = ""
-		case a.Source == github.SourceMachine && h.localMachine(a.Machine) != nil:
+		case a.Source == githubwire.SourceMachine && h.localMachine(a.Machine) != nil:
 		default:
 			writeErr(w, http.StatusBadRequest, fmt.Errorf("source %q / machine %q", a.Source, a.Machine))
 			return
@@ -245,8 +245,8 @@ func (h *Manager) ghTokenFor(ctx context.Context, machine, host string) (string,
 	for _, c := range []struct {
 		err  error
 		code string
-	}{{github.ErrNoMachine, serve.CodeNoMachine}, {github.ErrOffline, serve.CodeOffline}, {github.ErrNodeTooOld, serve.CodeNodeTooOld},
-		{github.ErrNoGh, serve.CodeNoGh}, {github.ErrNotSignedIn, serve.CodeNotSignedIn}} {
+	}{{githubwire.ErrNoMachine, serve.CodeNoMachine}, {githubwire.ErrOffline, serve.CodeOffline}, {githubwire.ErrNodeTooOld, serve.CodeNodeTooOld},
+		{githubwire.ErrNoGh, serve.CodeNoGh}, {githubwire.ErrNotSignedIn, serve.CodeNotSignedIn}} {
 		if errors.Is(err, c.err) {
 			return "", &rpc.Error{Code: c.code, Message: err.Error()}
 		}

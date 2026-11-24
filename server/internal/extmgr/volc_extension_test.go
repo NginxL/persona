@@ -9,19 +9,48 @@ import (
 	"testing"
 
 	"github.com/nwverse/persona/server/internal/assistantwire"
+	"github.com/nwverse/persona/server/internal/builtinext"
 	"github.com/nwverse/persona/server/internal/extension"
 	"github.com/nwverse/persona/server/internal/extension/host"
 	"github.com/nwverse/persona/server/internal/i18n"
-	"github.com/nwverse/persona/server/internal/volc"
-	"github.com/nwverse/persona/server/internal/volc/volctest"
+	"github.com/nwverse/persona/server/internal/modules/volc/volctest"
 )
+
+// needsVolcModule is the extension its module provides, or skips the test in a build without the module
+// (persona_without_volc, persona_core_only); TestNoVolcWithoutItsModule covers that build.
+func needsVolcModule(t *testing.T) builtinext.Volc {
+	t.Helper()
+	volc, ok := builtinext.VolcSpeech()
+	if !ok {
+		t.Skip("the volc module is not in this build")
+	}
+	return volc
+}
+
+// Without its module the extension is not there: nothing registers it, nothing names it a transcription, and the
+// assistant's settings tool knows no meetings switch of it.
+func TestNoVolcWithoutItsModule(t *testing.T) {
+	if _, ok := builtinext.VolcSpeech(); ok {
+		t.Skip("the volc module is in this build")
+	}
+	h := newTestManager(t)
+	h.store = newExtensionStore()
+	startTestExtensions(t, h)
+	if p := h.extensions.reg.Get("volc"); p != nil {
+		t.Fatalf("%+v", p.Record)
+	}
+	if volcRef() != "" || isVolc(nil) || h.IsTranscriptionContribution("volc/volc") {
+		t.Fatal("the extension is named without its module")
+	}
+}
 
 // The manifest is one an installed extension could have: it validates, its form is in the subset, the key is a
 // secret shown by its last four characters, it says the one host it reaches, and its text is in every language.
 func TestVolcManifest(t *testing.T) {
+	volc := needsVolcModule(t)
 	h := newTestManager(t)
 	h.version = "1.2.3"
-	raw, _ := json.Marshal(volcManifest(h))
+	raw, _ := json.Marshal(volcManifest(h, volc))
 	m, err := extension.Parse(raw)
 	if err != nil {
 		t.Fatal(err)
@@ -53,7 +82,7 @@ func TestVolcManifest(t *testing.T) {
 			t.Errorf("%s: taken", bad)
 		}
 	}
-	ts := volcTranslations()
+	ts := volcTranslations(volc)
 	for _, l := range []i18n.Lang{i18n.ZhHans, i18n.Ja} {
 		f := ts[l].Configuration
 		if ts[l].Name == "" || f["meetings"].Confirm == "" || f["advanced"].Properties["asr_model"].Choices["volc.seedasr.sauc.duration"] == "" ||
@@ -70,8 +99,9 @@ func TestVolcManifest(t *testing.T) {
 // the real one does; its program reaches the stand-in service.
 func volcHub(t *testing.T) (*Manager, *volctest.Service, *assistantwire.MeetingTranscriptionChoice) {
 	t.Helper()
+	needsVolcModule(t)
 	svc := volctest.New(t)
-	t.Setenv(volc.EnvService, svc.URL)
+	t.Setenv(volctest.EnvService, svc.URL)
 	h := newTestManager(t)
 	h.store = newExtensionStore()
 	a := withAssistant(h)
@@ -96,6 +126,7 @@ func volcHub(t *testing.T) (*Manager, *volctest.Service, *assistantwire.MeetingT
 // the program; its transcription and speech answer through the hub.
 func TestVolcSetup(t *testing.T) {
 	h, svc, _ := volcHub(t)
+	volc := needsVolcModule(t)
 	mux := h.routes()
 	tok := h.cfg.Token
 	base := "/api/v1/extensions/volc/-/"
@@ -117,11 +148,11 @@ func TestVolcSetup(t *testing.T) {
 		hp := h.extensions.get(volc.ExtensionID)
 		return hp != nil && hp.proc != nil && hp.healthy(context.Background())
 	})
-	if !h.IsTranscriptionContribution(volcRef) {
+	if !h.IsTranscriptionContribution(volcRef()) {
 		t.Fatal("volc/volc is not a transcription contribution")
 	}
 	waitLong(t, "the transcription's info without a key", func() bool {
-		info, err := h.TranscriptionInfo(context.Background(), volcRef)
+		info, err := h.TranscriptionInfo(context.Background(), volcRef())
 		return err == nil && info.Setup == "key"
 	})
 
@@ -153,7 +184,7 @@ func TestVolcSetup(t *testing.T) {
 		t.Fatalf("%+v", v)
 	}
 	waitLong(t, "the restarted program's transcription", func() bool {
-		info, err := h.TranscriptionInfo(context.Background(), volcRef)
+		info, err := h.TranscriptionInfo(context.Background(), volcRef())
 		return err == nil && info.Setup == "" && slices.Contains(info.Features, "interim")
 	})
 
@@ -194,6 +225,7 @@ func TestVolcSetup(t *testing.T) {
 // set it.
 func TestVolcMeetingsSwitch(t *testing.T) {
 	h, _, choice := volcHub(t)
+	volc := needsVolcModule(t)
 	mux := h.routes()
 	tok := h.cfg.Token
 	base := "/api/v1/extensions/volc/-/"

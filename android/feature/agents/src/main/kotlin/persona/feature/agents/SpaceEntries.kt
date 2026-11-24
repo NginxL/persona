@@ -1,5 +1,9 @@
 package persona.feature.agents
 
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
@@ -8,6 +12,8 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.lifecycle.Lifecycle
@@ -35,7 +41,13 @@ import kotlinx.coroutines.delay
 import java.time.Instant
 import persona.core.designsystem.FeedbackNotice
 import persona.core.designsystem.FeedbackStyle
+import persona.core.designsystem.Tokens
 import persona.core.designsystem.rememberToastState
+import persona.feature.chat.CodexTakeoverBusyPill
+import persona.feature.chat.CodexTakeoverClient
+import persona.feature.chat.CodexTakeoverDialogs
+import persona.feature.chat.codexTakeoverMenuActions
+import persona.feature.chat.rememberCodexTakeoverCoordinator
 
 /**
  * The space page as a destination of its own ([SpaceRoute]): in a wide window it opens beside the Agents list (the
@@ -93,6 +105,7 @@ private fun SpaceDestination(route: SpaceRoute, navigator: Navigator, dependenci
 private fun SpacePage(route: SpaceRoute, model: AgentsViewModel, navigator: Navigator, creationModel: NewAgentViewModel?) {
     val page by model.page.collectAsStateWithLifecycle()
     val connection by model.connection.state.collectAsStateWithLifecycle()
+    val groups by model.hubGroups.groups.collectAsStateWithLifecycle()
     val pending by model.interactions.pending.collectAsStateWithLifecycle()
     val operations by model.operationState.collectAsStateWithLifecycle()
     val notice by model.notice.collectAsStateWithLifecycle()
@@ -137,7 +150,21 @@ private fun SpacePage(route: SpaceRoute, model: AgentsViewModel, navigator: Navi
         model.opened(row)
         navigator.navigate(ChatRoute(row.session.machineId, row.session.sessionId))
     }
+    val takeoverOps = model.operationsApi ?: LocalAgentsOperations.current?.operations
+    val takeoverClient = remember(takeoverOps) { takeoverOps?.let(CodexTakeoverClient::of) }
+    val takeoverCoordinator = rememberCodexTakeoverCoordinator(
+        client = takeoverClient,
+        sessions = model.sessions,
+        onOpenSession = null,
+        fallbackToast = toast,
+        onCompleted = { _, adopted -> navigator.navigate(ChatRoute(adopted.machineId, adopted.sessionId)) },
+    )
     val rowMenu: @Composable (AgentSession) -> List<JAction> = { row ->
+        val onlineForRow = groups.stateFor(row.session.machineId, connection) == ConnectionState.Online &&
+            page.machines.firstOrNull { it.id == row.session.machineId }?.online != false
+        val takeoverActions = if (takeoverClient != null && !row.session.archived) {
+            codexTakeoverMenuActions(row.session, takeoverCoordinator, enabled = !operations.busy && onlineForRow)
+        } else emptyList()
         AgentSessionMenuItems(row, row.id in page.preferences.pins.sessions, page.preferences.mutes.mutes(row), operations.busy,
             onOpen = { openRow(row) }, onPin = { model.pin(row) }, onMute = { model.mute(row) },
             onRead = { model.markRead(listOf(row)) }, onRename = { operationDialog = AgentOperationDialog.Rename(row.session) },
@@ -146,31 +173,44 @@ private fun SpacePage(route: SpaceRoute, model: AgentsViewModel, navigator: Navi
                     navigator.navigate(ChatRoute(it.machineId, it.sessionId, kind = ConversationKind.Assistant))
                 })
             },
+            onFork = if (row.session.canFork && !row.session.archived && model.hasOperations) ({
+                model.fork(row.session) { forked -> navigator.navigate(ChatRoute(forked.machineId, forked.sessionId)) }
+            }) else null,
+            forkOnline = onlineForRow,
+            takeoverActions = takeoverActions,
             onInterrupt = { model.interrupt(row.session) },
             onClose = { operationDialog = AgentOperationDialog.Close(row.session) },
             onDelete = { operationDialog = AgentOperationDialog.Delete(row.session) })
     }
-    SpaceScreen(space, page.machines, pending, page.preferences, operations.busy,
-        canStart = workspace != null && page.machines.any { it.id == space?.machineId && it.online }, toast = toast, now = now,
-        onDismiss = navigator::back, onOpen = ::openRow,
-        onNewTab = { creationModel?.startIn(AgentSpacePreset(it.machineId, requireNotNull(workspace), it.cwd, it.name)); newAgent = true },
-        spaceMenu = { shown ->
-            val session = shown.members.first().session
-            val unread = shown.members.filter { it.unseen }
-            AgentSpaceMenu(session, shown.preferenceKey in page.preferences.pins.spaces, shown.preferenceKey in page.preferences.mutes.spaces,
-                operations.busy, onPin = { model.spacePin(session) }, onMute = { model.spaceMute(session) },
-                onRename = { operationDialog = AgentOperationDialog.RenameSpace(session) },
-                onMarkRead = unread.takeIf { it.isNotEmpty() }?.let { rows -> { confirmRead = rows } })
-        },
-        sessionMenu = rowMenu, title = route.title,
-        onMachine = { navigator.navigate(MachineSpacesRoute(it)) },
-        // The page's list arrives a moment after it opens: no "No running agents" flash before that.
-        loaded = page.sessions.isNotEmpty() || page.machines.isNotEmpty(),
-        onClose = { row -> closeSwipe(row, operations.busy) { operationDialog = AgentOperationDialog.Close(row.session) } })
+    Box(Modifier.fillMaxSize()) {
+        SpaceScreen(space, page.machines, pending, page.preferences, operations.busy || takeoverCoordinator.inFlight,
+            canStart = workspace != null && page.machines.any { it.id == space?.machineId && it.online }, toast = toast, now = now,
+            onDismiss = navigator::back, onOpen = ::openRow,
+            onNewTab = { creationModel?.startIn(AgentSpacePreset(it.machineId, requireNotNull(workspace), it.cwd, it.name)); newAgent = true },
+            spaceMenu = { shown ->
+                val session = shown.members.first().session
+                val unread = shown.members.filter { it.unseen }
+                AgentSpaceMenu(session, shown.preferenceKey in page.preferences.pins.spaces, shown.preferenceKey in page.preferences.mutes.spaces,
+                    operations.busy, onPin = { model.spacePin(session) }, onMute = { model.spaceMute(session) },
+                    onRename = { operationDialog = AgentOperationDialog.RenameSpace(session) },
+                    onMarkRead = unread.takeIf { it.isNotEmpty() }?.let { rows -> { confirmRead = rows } })
+            },
+            sessionMenu = rowMenu, title = route.title,
+            onMachine = { navigator.navigate(MachineSpacesRoute(it)) },
+            // The page's list arrives a moment after it opens: no "No running agents" flash before that.
+            loaded = page.sessions.isNotEmpty() || page.machines.isNotEmpty(),
+            onClose = { row -> closeSwipe(row, operations.busy) { operationDialog = AgentOperationDialog.Close(row.session) } })
+        if (takeoverClient != null) CodexTakeoverBusyPill(
+            takeoverCoordinator,
+            page.sessions,
+            Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(horizontal = Tokens.Space.page, vertical = Tokens.Space.l),
+        )
+    }
     operationDialog?.let { dialog ->
         val machine = page.machines.firstOrNull { it.id == dialog.session.machineId }
         AgentOperationDialog(dialog, model, machine?.displayName, creationModel?.service, machine) { operationDialog = null }
     }
+    if (takeoverClient != null) CodexTakeoverDialogs(takeoverCoordinator)
     confirmRead?.let { rows -> MarkAllReadDialog(rows.size, onDismiss = { confirmRead = null }) { model.markRead(rows) } }
     if (newAgent) {
         if (creationModel != null) NewAgentDialog(creationModel, page.machines, connection == ConnectionState.Online,

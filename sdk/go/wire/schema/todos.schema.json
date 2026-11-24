@@ -20,8 +20,19 @@
       },
       "required": ["channel", "chat_id", "thread_id", "title"]
     },
+    "TodoEventResponsible": {
+      "description": "An external responsible party on a to-do that is not a Persona-started agent: a long-running session or a person, with optional machine_id and session_id hints.",
+      "type": "object",
+      "properties": {
+        "kind": {"type": "string", "enum": ["session", "person"]},
+        "name": {"type": "string"},
+        "machine_id": {"type": "string"},
+        "session_id": {"type": "string"}
+      },
+      "required": ["kind", "name"]
+    },
     "TodoChangedEvent": {
-      "description": "event.todo.changed: a to-do was created or deleted, or its title, whether it is done (or failed to start), its supervisor, or the thread it is bound to changed. Changes within about a second of each other are told once, as the to-do is at the end of them. title, thread and done are as after the change (the last ones for a deleted to-do); thread is left out when the to-do has none, done unless the to-do is done (closed, or its task failed to start). supervisor is the conversation that supervises it (the main conversation or a leader, see leaders.schema.json), left out when none does; a change of supervisor (the task moved to another leader) sends it too. kind is concern for something the owner raised in the main conversation and wants an answer to; such a to-do is done only once its outcome was reported to the owner (an event.todo.decision of source reported comes with it), never on its own; kind is left out for a to-do or a task and never changes. Notes, agents and decisions changing do not send it (decisions have event.todo.decision). Read the to-do again if it matters.",
+      "description": "event.todo.changed: a to-do was created or deleted, or its title, whether it is done (or failed to start), its supervisor, the thread it is bound to, or its external responsible party changed. Changes within about a second of each other are told once, as the to-do is at the end of them. title, thread, done and responsible are as after the change (the last ones for a deleted to-do); thread and responsible are left out when the to-do has none, done unless the to-do is done (closed, or its task failed to start). supervisor is the conversation that supervises it (the main conversation or a leader, see leaders.schema.json), left out when none does; a change of supervisor (the task moved to another leader) sends it too. kind is concern for something the owner raised in the main conversation and wants an answer to; such a to-do is done only once its outcome was reported to the owner (an event.todo.decision of source reported comes with it), never on its own; kind is left out for a to-do or a task and never changes. Notes, agents and decisions changing do not send it (decisions have event.todo.decision). Read the to-do again if it matters.",
       "type": "object",
       "properties": {
         "id": {"type": "string"},
@@ -30,6 +41,7 @@
         "done": {"type": "boolean"},
         "supervisor": {"type": "string"},
         "kind": {"type": "string", "enum": ["concern"]},
+        "responsible": {"$ref": "#/$defs/TodoEventResponsible"},
         "what": {"type": "string", "enum": ["created", "updated", "deleted"]}
       },
       "required": ["id", "title", "what"]

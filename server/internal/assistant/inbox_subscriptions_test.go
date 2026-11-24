@@ -63,7 +63,7 @@ func caughtUp(t *testing.T) subscriptionSource {
 	}
 	due := now.Add(24 * time.Hour)
 	items[3].DueDate = &due
-	if err := store.CommitRun(ctx, subscriptions.RunCommit{Sub: sub, Revision: 1, Items: items, Now: mark}); err != nil {
+	if _, err := store.CommitRun(ctx, subscriptions.RunCommit{Sub: sub, Revision: 1, Items: items, Now: mark}); err != nil {
 		t.Fatal(err)
 	}
 	svc := subscriptions.New(subscriptions.Options{Store: store, Lang: func() i18n.Lang { return i18n.En }})

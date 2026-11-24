@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/nwverse/persona/server/internal/modelhttp"
 	"github.com/nwverse/persona/server/internal/proto"
 )
 
@@ -29,39 +30,23 @@ func appAgent(f *fakeHub, byPersona bool, tools ...string) {
 	f.setItems(append(items, proto.Item{Seq: 90, Role: "assistant", Kind: proto.KindText, Text: "修好了"})...)
 }
 
-// An agent an app started becomes a quiet task the main conversation supervises once a turn of it did work: its todo
-// has no done_when, its card is in the main conversation, and the stop is judged like any supervised task's.
-func TestAppStartedAgentBecomesASupervisedTask(t *testing.T) {
+// An agent the user opened manually on the Agents page stays outside task tracking, even after a turn that did work.
+// Only assistant dispatch and explicit adoption create to-dos (#5732).
+func TestAppStartedAgentStaysWithoutATask(t *testing.T) {
 	s, f := newQuietService(t)
 	agentTasksOn(t, s)
 	f.judge = `{"verdict":"done","reason":"修好了"}`
 	appAgent(f, true, "Read", "Edit", "Bash")
 	s.taskTurnSettled(context.Background(), "box", "s1")
 
-	todo := onlyTodo(s)
-	if !todo.Quiet || todo.Origin != "conv1" || todo.Title != "登录页横屏崩溃，修一下" || len(todo.Agents) != 1 || todo.Agents[0].SessionID != "s1" {
-		t.Fatalf("todo = %+v", todo)
-	}
-	if v := todo.Supervision; v == nil || v.Supervisor != "conv1" || len(v.DoneWhen) != 0 {
-		t.Fatalf("supervision = %+v", todo.Supervision)
-	}
-	if kinds := feedKinds(s, "conv1"); !strings.HasPrefix(kinds, "task") {
-		t.Fatalf("feed = %q", kinds)
-	}
-	// The stop was judged: the task waits for the main conversation's review, which is told in a supervision message.
-	waitFor(t, "the review", func() bool { return todoNow(s, todo.ID).Supervision.state(todoNow(s, todo.ID)) == reviewPending })
-	waitFor(t, "the supervision message", func() bool { return len(f.notices()) == 1 })
-	if n := f.notices()[0]; !strings.Contains(n, "📋") || !strings.Contains(n, todo.ID) {
-		t.Fatalf("message:\n%s", n)
-	}
-	if todoNow(s, todo.ID).DoneAt != nil {
-		t.Fatal("a supervised task was closed without review")
+	if todoCount(s) != 0 || feedKinds(s, "conv1") != "" || len(f.notices()) != 0 {
+		t.Fatalf("manual start was adopted: todos=%d feed=%q notices=%d", todoCount(s), feedKinds(s, "conv1"), len(f.notices()))
 	}
 
-	// Its next turn end is that task's: no second todo.
+	// Another working turn is still the user's own session, not an assistant dispatch.
 	s.taskTurnSettled(context.Background(), "box", "s1")
-	if n := todoCount(s); n != 1 {
-		t.Fatalf("%d todos", n)
+	if todoCount(s) != 0 {
+		t.Fatalf("second turn created %d todos", todoCount(s))
 	}
 }
 
@@ -102,10 +87,10 @@ func TestAgentsLeftWithoutATask(t *testing.T) {
 		if todoCount(s) != 0 || feedKinds(s, "conv1") != "" {
 			t.Fatalf("%d todos, feed %q", todoCount(s), feedKinds(s, "conv1"))
 		}
-		// A later turn that does work makes it a task.
+		// A later turn that does work is still the user's own session, not an assistant dispatch.
 		appAgent(f, true, "Bash")
 		s.taskTurnSettled(ctx, "box", "s1")
-		if todoCount(s) != 1 {
+		if todoCount(s) != 0 {
 			t.Fatalf("after work: %d todos", todoCount(s))
 		}
 	})
@@ -151,15 +136,13 @@ func TestAgentsLeftWithoutATask(t *testing.T) {
 	})
 }
 
-// agent_start from a conversation that does not supervise makes a quiet task the main conversation supervises; from a
-// leader, the leader's; and with main_tasks_quiet off the main conversation's is still a quiet, supervised one. With
-// the setting off the answer and the todo are what they were (TestAgentStartFromTheMainConversation has the rest).
+// agent_start always leaves a tracked task: the calling direction lead owns its own starts, otherwise main does.
 func TestAgentStartIsATaskFromAnyConversation(t *testing.T) {
 	args := json.RawMessage(`{"machine":"box","cwd":"/code/app","prompt":"看看 CI 为什么挂了"}`)
 	ctx := context.Background()
 	for _, c := range []struct {
-		conv, supervisor, told string
-	}{{"conv2", "conv1", startToldMain}, {"lead1", "lead1", startToldHere}, {"conv1", "conv1", startToldHere}} {
+		conv, told, supervisor string
+	}{{"conv2", startToldMain, "conv1"}, {"lead1", startToldHere, "lead1"}, {"conv1", startToldHere, "conv1"}} {
 		s, _ := newQuietService(t)
 		setSettings(t, s, func(v *Settings) {
 			v.AgentTasks, v.MainTasksQuiet, v.Leaders = new(true), new(false), []string{"lead1"}
@@ -169,7 +152,7 @@ func TestAgentStartIsATaskFromAnyConversation(t *testing.T) {
 			t.Fatal(err)
 		}
 		todo := onlyTodo(s)
-		if !todo.Quiet || todo.Origin != c.conv || len(todo.Agents) != 1 || todo.Agents[0].SessionID != "s1" || todo.Title != "看看 CI 为什么挂了" {
+		if todo.Quiet || todo.Origin != c.conv || len(todo.Agents) != 1 || todo.Agents[0].SessionID != "s1" || todo.Title != "看看 CI 为什么挂了" {
 			t.Fatalf("%s: todo = %+v", c.conv, todo)
 		}
 		if v := todo.Supervision; v == nil || v.Supervisor != c.supervisor || len(v.DoneWhen) != 0 {
@@ -178,25 +161,66 @@ func TestAgentStartIsATaskFromAnyConversation(t *testing.T) {
 		if !strings.Contains(res, "a task of this conversation (its card is in the conversation; "+c.told+").") || feedKinds(s, c.conv) != "task" {
 			t.Fatalf("%s: result %q, feed %q", c.conv, res, feedKinds(s, c.conv))
 		}
+		if c.supervisor != c.conv && feedKinds(s, "conv1") != "task" {
+			t.Fatalf("%s: main feed %q", c.conv, feedKinds(s, "conv1"))
+		}
 	}
 
-	// Off: the main conversation's answer is word for word the old one, another conversation's agent is on no task.
+	// The old opt-in switches are irrelevant: both a main and a side start are tracked and main-supervised.
 	s, _ := newQuietService(t)
 	res, err := s.runTool(ctx, "server", "conv1", "agent_start", args)
 	if err != nil {
 		t.Fatal(err)
 	}
-	const was = ": session s1, a task of this conversation (its card is in the conversation; " +
+	const mainTold = ": session s1, a task of this conversation (its card is in the conversation; " +
 		"you are told here when it is done or waits for the user, nothing else notifies the user)."
-	if !strings.HasPrefix(res, "Started on ") || !strings.HasSuffix(res, was) {
-		t.Fatalf("off, main: %q", res)
+	if !strings.HasPrefix(res, "Started on ") || !strings.HasSuffix(res, mainTold) {
+		t.Fatalf("main: %q", res)
 	}
 	res, err = s.runTool(ctx, "server", "conv2", "agent_start", args)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.HasSuffix(res, ": session s2. It shows up in the app's Agents tab.") || todoCount(s) != 1 || feedKinds(s, "conv2") != "" {
-		t.Fatalf("off, another conversation: %q, %d todos", res, todoCount(s))
+	if !strings.Contains(res, startToldMain) || todoCount(s) != 2 || feedKinds(s, "conv2") != "task" {
+		t.Fatalf("side: %q, %d todos, feed %q", res, todoCount(s), feedKinds(s, "conv2"))
+	}
+	for _, todo := range s.todosOf(ctx, "*") {
+		if todo.Supervision == nil || todo.Supervision.Supervisor != "conv1" {
+			t.Fatalf("untracked start: %+v", todo)
+		}
+	}
+}
+
+// agent_start names the to-do it made before the start in the node's model_source: the Agent's gateway requests
+// carry it from their first one, whether main or a task leader started it (the link comes only after the start).
+func TestAgentStartCarriesTodoModelSource(t *testing.T) {
+	args := json.RawMessage(`{"machine":"box","cwd":"/code/app","prompt":"看看 CI 为什么挂了"}`)
+	for _, conv := range []string{"conv1", "lead1"} {
+		s, f := newQuietService(t)
+		setSettings(t, s, func(v *Settings) { v.Leaders = []string{"lead1"} })
+		if _, err := s.runTool(context.Background(), "server", conv, "agent_start", args); err != nil {
+			t.Fatal(err)
+		}
+		todo := onlyTodo(s)
+		var starts []modelhttp.Source
+		f.mu.Lock()
+		for _, c := range f.calls {
+			if c.Method != DeviceSessionStart {
+				continue
+			}
+			var p struct {
+				Source modelhttp.Source `json:"model_source"`
+			}
+			if err := json.Unmarshal(c.Params, &p); err != nil {
+				t.Fatal(err)
+			}
+			starts = append(starts, p.Source)
+		}
+		f.mu.Unlock()
+		want := modelhttp.Source{Role: "task_agent", Todo: todo.ID}
+		if len(starts) != 1 || starts[0] != want || todo.ID == "" {
+			t.Fatalf("%s: session.start model_source = %+v, want %+v", conv, starts, want)
+		}
 	}
 }
 
@@ -295,7 +319,7 @@ func TestLinkedTodoGetsASupervisor(t *testing.T) {
 
 // The depth cap holds for the tasks agent tasks make: an agent that became a task hands out none itself.
 func TestAgentTaskWorkerCannotHandOutTasks(t *testing.T) {
-	s, f := newQuietService(t)
+	s, _ := newQuietService(t)
 	ctx := context.Background()
 	agentTasksOn(t, s)
 	args, _ := json.Marshal(map[string]any{"machine": "box", "cwd": "/code/app", "prompt": "再开一个"})
@@ -303,16 +327,17 @@ func TestAgentTaskWorkerCannotHandOutTasks(t *testing.T) {
 		t.Fatal(err)
 	}
 	started := onlyTodo(s)
-	f.setSessions("box", proto.Session{SessionID: "s7", MachineID: "box", Cwd: "/code/app", Agent: "claude", Status: proto.StatusDone,
-		StartedByPersona: true, UpdatedAt: time.Now()})
-	f.setItems(proto.Item{Seq: 1, Role: "user", Kind: proto.KindText, Text: "跑一下测试"},
-		proto.Item{Seq: 2, Role: "assistant", Kind: proto.KindToolUse, ToolName: "Bash"},
-		proto.Item{Seq: 3, Role: "assistant", Kind: proto.KindText, Text: "跑完了"})
-	s.taskTurnSettled(ctx, "box", "s7") // an app's agent, a task now
+	if _, err := s.runTool(ctx, "server", "conv1", "agent_start", args); err != nil { // a second task, not a manual adoption
+		t.Fatal(err)
+	}
 	if todoCount(s) != 2 {
 		t.Fatalf("%d todos", todoCount(s))
 	}
-	for _, sid := range []string{"s1", "s7"} {
+	var sessions []string
+	for _, todo := range s.todosOf(ctx, "*") {
+		sessions = append(sessions, todo.Agents[0].SessionID)
+	}
+	for _, sid := range sessions {
 		err := s.workerRefusal(ctx, "box", sid)
 		if err == nil || !strings.Contains(err.Error(), "does not hand out Persona tasks") {
 			t.Fatalf("%s: %v", sid, err)
@@ -444,9 +469,12 @@ func TestAssistantConversationsListedAsAgentsAreNoTasks(t *testing.T) {
 			f.setItems(proto.Item{Seq: 1, Role: "user", Kind: proto.KindText, Text: "check the build"},
 				proto.Item{Seq: 2, Role: "assistant", Kind: proto.KindToolUse, ToolName: "Bash"},
 				proto.Item{Seq: 3, Role: "assistant", Kind: proto.KindText, Text: "done"})
+			if c, ok := s.session(ctx, "box", id); !ok || s.assistantsConversation(ctx, "box", c) {
+				t.Fatalf("%s on box was mistaken for the server's assistant conversation: %+v, ok %v", id, c, ok)
+			}
 			s.taskTurnSettled(ctx, "box", id)
-			if todo := onlyTodo(s); len(todo.Agents) != 1 || todo.Agents[0].MachineID != "box" || todo.Agents[0].SessionID != id {
-				t.Fatalf("%s on box: todo = %+v", id, todo)
+			if got := todoCount(s); got != 0 {
+				t.Fatalf("%s on box was automatically adopted after an ordinary turn: %d todos", id, got)
 			}
 		}
 	})
@@ -455,8 +483,14 @@ func TestAssistantConversationsListedAsAgentsAreNoTasks(t *testing.T) {
 		agentTasksOn(t, s)
 		listed(f, "a1000001", "/home/me/code/app")
 		s.taskTurnSettled(ctx, "server", "a1000001")
+		if got := todoCount(s); got != 0 {
+			t.Fatalf("an ordinary turn automatically adopted the app-opened Agent: %d todos", got)
+		}
+		if _, err := runJSON(t, s, "conv1", "agent_supervise", map[string]any{"machine": "server", "session_id": "a1000001"}); err != nil {
+			t.Fatalf("explicitly supervise a1000001: %v", err)
+		}
 		if todo := onlyTodo(s); len(todo.Agents) != 1 || todo.Agents[0].SessionID != "a1000001" {
-			t.Fatalf("turn end: todo = %+v", todo)
+			t.Fatalf("explicit adoption: todo = %+v", todo)
 		}
 		listed(f, "a2000001", "/home/me/code/app")
 		if _, err := runJSON(t, s, "conv1", "agent_supervise", map[string]any{"machine": "server", "session_id": "a2000001"}); err != nil ||

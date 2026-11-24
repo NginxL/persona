@@ -54,7 +54,7 @@ iOS      #3506 ─┐
 
 **Test plan**
 
-- **Server**: local `go test ./internal/voice ./internal/channel ./internal/assistant`; #3498 and #3500 run hub tests with Postgres.
+- **Server**: local `go test ./internal/modules/voice ./internal/channel ./internal/assistant`; #3498 and #3500 run hub tests with Postgres.
 - **iOS**: unit tests, DEBUG sample screenshots, mock flow, all on simulator.
 - **Hardware end to end**: after merge, maintainer uses TestFlight against real hub. Echo cancellation, speaker playback, Bluetooth, and lock screen can only be checked on hardware. Checklist:
   1. Main chat: immediate small-talk reply; "Check tomorrow's calendar" delegates and speaks result.

@@ -92,7 +92,7 @@ internal object ManagerText {
     }
 
     /** A name the hub takes: 1 to 40 characters once trimmed. */
-    fun validName(name: String): Boolean = name.trim().let { it.isNotEmpty() && it.codePointCount(0, it.length) <= MaxName }
+    fun validName(name: String): Boolean = persona.core.contracts.api.validManagerName(name)
 
     /** Why deleting is not offered, for the note under the button; null when it can be deleted. */
     @StringRes fun whyNoDelete(m: HubManager): Int? = when {
@@ -120,7 +120,7 @@ internal object ManagerText {
         }
     }
 
-    const val MaxName = 40
+    const val MaxName = persona.core.contracts.api.MANAGER_NAME_MAX
 }
 
 /** The hub took `{"hide": true}` and kept showing it: a hub from before the choice. */

@@ -279,6 +279,29 @@ func TestASnapshotRowOnlyWhenItChanges(t *testing.T) {
 	}
 }
 
+// A snapshot is new when it differs from the last one, even when it returns to an earlier value (#13122).
+func TestASnapshotBackToAnEarlierValueIsDelivered(t *testing.T) {
+	e := newEnv(t)
+	e.answer("Balance: 20")
+	r := Recipe{Mode: "snapshot", Tool: "balance", Args: json.RawMessage(`{}`), Kind: "sub_update", GroupBy: "source"}
+	sub := e.turnOn(e.create(r))
+	e.svc.RunDue(e.ctx)
+	e.answer("Balance: 12")
+	e.clock.advance(24 * time.Hour)
+	e.svc.RunDue(e.ctx)
+	e.answer("Balance: 20")
+	e.clock.advance(24 * time.Hour)
+	e.svc.RunDue(e.ctx)
+	got, err := e.store.GetSubscription(e.ctx, sub.ID)
+	if err != nil || got == nil || len(got.Runs) == 0 {
+		t.Fatalf("subscription: %+v, %v", got, err)
+	}
+	rows := e.rows(sub.ID)
+	if len(e.store.Items()) != 3 || len(rows) != 1 || rows[0].Context != "Balance: 20" || got.Runs[len(got.Runs)-1].New != 1 {
+		t.Fatalf("a snapshot back to an earlier value: %d kept, rows %+v, last run %+v", len(e.store.Items()), rows, got.Runs[len(got.Runs)-1])
+	}
+}
+
 func messageIDs(b connector.ChatBatch) []string {
 	var out []string
 	for _, m := range b.Messages {

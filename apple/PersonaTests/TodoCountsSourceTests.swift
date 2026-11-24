@@ -28,8 +28,9 @@ private final class TodoPendingWrites {
 }
 
 /// One number per place (#10465, docs/apple/ios.md "Filing and counts"): with one manager the hub's counts and places as
-/// sent; with several, counted from the current assistant's rows, with only its own project places; less the answers
-/// given on this device that the hub's view does not show yet.
+/// sent, each project's part counted from the rows as its place counts them; with several, counted from the current
+/// assistant's rows, with only its own project places; less the answers given on this device that the hub's view does
+/// not show yet.
 @MainActor
 struct TodoCountsSourceTests {
     @MainActor private final class Flag { var on = false }
@@ -58,7 +59,8 @@ struct TodoCountsSourceTests {
         return hub
     }
 
-    /// One manager: the numbers are the hub's as sent, its places too, All carrying N.
+    /// One manager: the numbers are the hub's as sent, its places too, All carrying N; a project's part is its rows',
+    /// as its place's Filter and Needs you header say it.
     @Test func oneManagerShowsTheHubsNumbers() async throws {
         let hub = Self.hub()
         // The hub's counts differ from what the rows would give: they are the ones shown.
@@ -70,7 +72,9 @@ struct TodoCountsSourceTests {
         #expect(store.countsSource.needsYou == 5 && store.countsSource.counts.open == 9)
         #expect(store.countsSource.places.map(\.id) == ["all", "today", "upcoming", "project:kyoto", "project:release"])
         #expect(store.countsSource.places.first?.needsYou == 5, "All carries N")
-        #expect(store.countsSource.places.last?.needsYou == 2)
+        #expect(store.countsSource.places.last?.needsYou == 0, "the hub says 2, but no row of it needs the owner")
+        await store.refresh(api: Self.hub().client)
+        #expect(store.countsSource.places.last?.needsYou == 2, "the release's two rows in Needs you")
     }
 
     /// Several managers: the hub adds both up, the pages list the current assistant's: N is counted from its rows, and
@@ -199,6 +203,31 @@ struct TodoCountsSourceTests {
             #expect(source.filed.map(\.id) == ["x", "a", "n"], "the new one first in To do, then Someday")
             pending.value = [:]
             try await waitForCount { source.needsYou == 1 && source.counts.open == 3 }
+        }
+    }
+
+    /// A write still on the device on a Needs-you row of a project (deleted, or put in Someday) comes off that project's
+    /// part and off All's N once each, with the hub's counts and places (one manager): the places count each part from
+    /// the rows with the writes applied, so nothing takes it off a second time. Both come back when the write goes.
+    @Test func aWriteInAProjectComesOffItsPartOnce() async throws {
+        let pending = TodoPendingWrites()
+        let source = TodoCountsSource(scope: { nil }, pending: { pending.value })
+        let rows = [TodoItem(id: "k1", title: "K1", project: "kyoto"), TodoItem(id: "k2", title: "K2", project: "kyoto"),
+                    TodoItem(id: "r1", title: "R1", project: "release")]
+        let needs = TodoSummary(phase: TodoPhase.needsYou, section: TodoListSection.needsYou, reason: "decision")
+        let hubCounts = TodoCounts(open: 3, needsYou: 3, sections: [TodoListSection.needsYou: 3])
+        let places = try JSON.decoder.decode(TodoPlaces.self, from: Data(Self.places.utf8))
+        source.update(.init(rows: rows, views: ["k1": needs, "k2": needs, "r1": needs], counts: hubCounts, places: places, now: Date()))
+        let part = { (slug: String) in source.places.first { $0.id == "project:" + slug }?.needsYou }
+        try await waitForCount { source.needsYou == 3 && part("kyoto") == 2 }
+        for write in [TodoCountsSource.Pending.gone, .someday] {
+            pending.value = ["k1": write]
+            try await waitForCount { source.needsYou == 2 }
+            #expect(part("kyoto") == 1 && part("release") == 1, "\(write): off its project's part once")
+            #expect(source.places.first?.needsYou == 2, "\(write): and off All's N once")
+            pending.value = [:]
+            try await waitForCount { source.needsYou == 3 }
+            #expect(part("kyoto") == 2 && source.places.first?.needsYou == 3)
         }
     }
 }

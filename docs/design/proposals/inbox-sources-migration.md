@@ -31,7 +31,7 @@ Read from the code on 2026-11-13. Functions are in `server/internal/` unless the
 | Built-in sources (mail, GitHub, iMessage, Lark through `larkcli`) are connectors the manager reads itself: a poll every 2 minutes, mail every 3, a kick debounced 3 s | `inboxPoll`, `inboxMailPoll`, `inboxDebounce`, `collectInbox` in `extmgr/inbox.go`; `readMail`, `readConnectors` in `extmgr/inbox_read.go` |
 | Subscriptions call an extension's or connector's read tool on their own schedule: checked every 30 s, at least 5 minutes between pulls, 20 s between calls and 120 calls an hour per connector | `tickEvery`, `callGap`, `defaultPerHour` in `subscriptions/runner.go`; `minInterval` in `subscriptions/service.go` |
 | A subscription hands the Inbox its items on poll and full rounds as a source with an id, a name, `Extension: true`, kinds and counts, never `Group`, `Meta`, `Settles` or `Migrated` | `readSubscriptions` in `extmgr/subscriptions.go` |
-| The built-ins already have read tools a subscription can call: mail's derived catalog (`search` by account, mailbox, query), GitHub's `search`/`read`/`diff`/`checks`, iMessage's JSON reads. `larkcli` has text tools only, which a recipe can use only as snapshots | `ReadCatalog` in `connector/catalog.go`; `readTools` in `connector/github/tools.go`; `CallJSON` in `connector/imessage/persona.go`, `extmgr/mail_connector.go`; `docs/extensions/subscriptions.md` "Recipe format" |
+| The built-ins already have read tools a subscription can call: mail's derived catalog (`search` by account, mailbox, query), GitHub's `search`/`read`/`diff`/`checks`, iMessage's JSON reads. `larkcli` has text tools only, which a recipe can use only as snapshots | `ReadCatalog` in `connector/catalog.go`; `readTools` in `modules/github/tools.go`; `CallJSON` in `modules/imessage/persona.go`, `extmgr/mail_connector.go`; `docs/extensions/subscriptions.md` "Recipe format" |
 
 ### 2b. What a subscription item lacks
 
@@ -156,13 +156,29 @@ Smallest gap first, so each step proves part of the design before the harder sou
 | P4 | P4a `changed` starts runs (#6247); P4b a generic `inbox_things` over `Collect`, a switched source 3 seconds after `changed`, its built-in's abilities in the round (#6381) | 3e |
 | P5 | P5a the default subscription's fixed id and `migrated` mark, delivery under the built-in's id, catch-up as rows, rollback (#6265); P5b the switch on the Inbox Sources pages, with M1 (#6345) | 3a, 3g |
 | M1 | **iMessage**: a `things` recipe over its `inbox_things` tool (#6296, #6317), the `changed` kick, the switch on the pages (P5b) | P4a, P5, things |
-| M2 | **GitHub**: a `things` recipe over the generic `inbox_things` (P4b), so comments as replies, inferred read and repo mutes stay its `Collect`'s; a comparison test; the switch held back from the pages until M1's week is over (#6404) | P4b, P5 |
-| M3 | **Lark**: JSON read tools for `larkcli` first, then its events through a push source, replies | P1–P5 |
-| M4 | **Mail**, one subscription per account: replies with threading, seen flags and off-page settling, read errors per account, translations | P1–P5 |
+| M2 | **GitHub**: a `things` recipe over the generic `inbox_things` (P4b), so comments as replies, inferred read and repo mutes stay its `Collect`'s; a comparison test; the switch held back from the pages until M1's week was over (#6404), offered since (#13599) | P4b, P5 |
+| M3 | **Lark**: a `things` recipe over the generic `inbox_things` (P4b), which answers the Lark extension's `Collect`, run 3 seconds after its `changed` events (decision 4: no JSON read tools or push source needed); a things recipe hands its latest answer, so a conversation's batch of new messages and its events' state stay apart (#13637); a comparison test; the switch held back until M2's week is over (#13672). `larkcli` stays a built-in: it is not on the owner's hub to have its week there | P4b, P5, #13637 |
+| M4 | **Mail**, not started (#13685; below): a `Collect` on the mail connector whose rows carry a mail block, one default subscription per account, the assistant routing a switched account's rows back into its mail path | P4b, P5, #13637 |
 | K1… | Each source's knowledge-base feed, once the subscription path has what it uses (3f) | per source |
 
 Each M step ships behind the switch and lands with the G1–G4 tests for that source. A source moves on new installs
 only after it has run switched on, on the owner's hub, for a week without a difference.
+
+**Mail (M4)** is not moved yet (#13685). When it is, it goes the way of decision 4:
+
+- **How**: the mail connector gets an Inbox whose `Collect` hands each account's latest page (its mailboxes' messages
+  with UIDs, Message-IDs, seen and answered flags, UIDVALIDITY) as rows carrying a mail block, a new `ThingExtra`
+  block as Lark's and GitHub's have theirs. Each account gets a default subscription. The assistant routes a switched
+  account's rows back into its existing mail path (`collectMail` in `server/internal/assistant/inbox_mail.go`), so
+  replies with threading headers, peeked bodies, seen and answered flags, off-page settling and per-account read
+  errors stay what they are. The rows are the built-in's by construction, and the regression risk is in the routing
+  only.
+- **Not one items-mode subscription per account** over mail's read tools, which this table first planned. Mail's Inbox
+  behavior lives in the assistant's mail path and is keyed on IMAP details: UIDs and UIDVALIDITY baselines, bodies read
+  without marking them read, seen and answered flags that file items, settling off the page. Rebuilding each of them
+  inside subscriptions would change the mail rows people see, on the largest source, for no gain the move needs.
+- **When**: after GitHub and Lark have each run switched on, on the owner's hub, for a week without a difference
+  (decision 6). Mail could not be switched sooner, and work written before then would sit unused while `main` moves on.
 
 ## 5. Decisions (owner, 2026-11-13)
 

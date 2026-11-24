@@ -2,12 +2,8 @@ package extmgr
 
 import (
 	"context"
-	"encoding/json"
-	"net/http"
 
-	"github.com/nwverse/persona/server/internal/db"
-	"github.com/nwverse/persona/server/internal/mail"
-	"github.com/nwverse/persona/server/internal/proto"
+	"github.com/nwverse/persona/server/internal/mailwire"
 )
 
 // Store is the hub's Postgres as this code keeps its state in it (internal/db; the same keys and tables as when
@@ -32,36 +28,7 @@ type sendStore interface {
 }
 
 // mailStore keeps the mail accounts (mail_accounts; mail seals their secrets itself).
-type mailStore interface {
-	Store
-	MailAccounts(ctx context.Context) ([]db.MailAccountRow, error)
-	ReplaceMailAccounts(ctx context.Context, rows []db.MailAccountRow) error
-}
+type mailStore = mailwire.Store
 
-// Mail is implemented by internal/mail; an interface so the manager can run without it.
-type Mail interface {
-	Handler() http.Handler
-	Tools() []proto.Tool
-	Call(ctx context.Context, name string, args json.RawMessage, approve func(ctx context.Context, summary string, input json.RawMessage) bool) proto.ToolResult
-	// CallRef is Call that also says the Message-ID of the mail mail_send handed to the transport ("" for anything else).
-	CallRef(ctx context.Context, name string, args json.RawMessage, approve func(ctx context.Context, summary string, input json.RawMessage) bool) (proto.ToolResult, string)
-	// CallJSON is a read tool's answer as JSON for subscriptions (connector.ReadJSON); ok is false for a tool without one.
-	CallJSON(ctx context.Context, name string, args json.RawMessage) (out json.RawMessage, ok bool, err error)
-	ListAccounts() ([]mail.MailAccount, error)
-	IntakeMailboxes(ctx context.Context, accountID string) ([]string, error)
-	ListMessages(ctx context.Context, opts mail.ListOptions) (*mail.ListResult, error)
-	GetMessage(ctx context.Context, accountID string, uid uint32, mailbox string) (*mail.MailMessage, error)
-	// SeenFlags is, for each of uids still in mailbox, whether it is seen; one it no longer has is not in the map.
-	SeenFlags(ctx context.Context, accountID, mailbox string, uids []uint32) (map[uint32]bool, error)
-	Send(ctx context.Context, req mail.SendRequest) error
-	// FetchAttachment is one attachment's bytes for mail_save_attachment (the node's mail.attachment), at most max.
-	FetchAttachment(ctx context.Context, accountID string, uid uint32, mailbox, id string, max int64) (mail.Attachment, []byte, error)
-	AddAccount(req mail.AddAccountRequest) (*mail.MailAccount, error)
-	DeleteAccount(id string) error
-	// ExportAccount and ImportAccount move an account to another manager (sources.go); the JSON holds its secrets.
-	ExportAccount(id string) ([]byte, error)
-	ImportAccount(data []byte) (*mail.MailAccount, error)
-}
-
-// NewMail is set by the mail integration (mail_glue.go); secretKey is the key file the passwords are sealed with.
-var NewMail func(dataDir, secretKey string, store mailStore, google GoogleConfig, microsoft MicrosoftConfig) (Mail, error)
+// Mail is the mail module (internal/modules/mail) as this code uses it; nil when the build has none (mailport).
+type Mail = mailwire.Service

@@ -1,4 +1,3 @@
-#if os(iOS) || os(visionOS)
 import Foundation
 import HealthKit
 
@@ -340,5 +339,4 @@ enum WorkoutTool {
         return fields
     }
 }
-#endif
 import PersonaWire

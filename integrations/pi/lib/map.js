@@ -46,9 +46,13 @@ export function toolInput(name, args) {
     case 'write':
       return clipInput(dropUndefined({ file_path: a.path, content: a.content }))
     case 'edit': {
-      const edits = Array.isArray(a.edits) ? a.edits : []
-      if (edits.length === 1) return clipInput(dropUndefined({ file_path: a.path, old_string: edits[0].oldText, new_string: edits[0].newText }))
-      return clipInput(dropUndefined({ file_path: a.path, edits: edits.map((e) => ({ old_string: e.oldText, new_string: e.newText })) }))
+      if (!Array.isArray(a.edits)) {
+        return clipInput(dropUndefined({ file_path: a.path, old_string: a.oldText, new_string: a.newText }))
+      }
+      if (a.edits.length === 1) {
+        return clipInput(dropUndefined({ file_path: a.path, old_string: a.edits[0]?.oldText, new_string: a.edits[0]?.newText }))
+      }
+      return clipInput(dropUndefined({ file_path: a.path, edits: a.edits.map((e) => dropUndefined({ old_string: e?.oldText, new_string: e?.newText })) }))
     }
     default:
       return clipInput(a)
@@ -56,8 +60,8 @@ export function toolInput(name, args) {
 }
 
 /** The apps' tool name for a call, telling a multi-edit (Claude's MultiEdit) from a single one. */
-function callName(name, args) {
-  if (name === 'edit' && Array.isArray(args?.edits) && args.edits.length !== 1) return 'MultiEdit'
+export function callName(name, args) {
+  if (name === 'edit' && Array.isArray(args?.edits) && args.edits.length > 1) return 'MultiEdit'
   return toolName(name)
 }
 

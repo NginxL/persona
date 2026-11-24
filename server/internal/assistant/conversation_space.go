@@ -18,7 +18,7 @@ import (
 // 100 newest, and nothing before it is back after a restart. So the space is noted when the manager starts a
 // conversation (startConversationOn) and whenever a computer lists one (SessionsChanged), kept in the store
 // (db.NoteConversationSpaces), and read when no computer lists it (conversationSpaces). A conversation noted in the
-// health space stays there. One a to-do names that was quiet since before spaces were noted is listed again for it to
+// space other than the assistant's own stays there. One a to-do names that was quiet since before spaces were noted is listed again for it to
 // be noted (conversation_space_backfill.go); one never noted is still not told (its transcript gone): the rule fails
 // closed for it.
 
@@ -43,8 +43,8 @@ var (
 const conversationSpaceTimeout = 5 * time.Second
 
 // convSpaceBook is what the manager knows of its conversations' spaces. noted: what it wrote, by computer and session,
-// so a list noted once is not written again; known: by session, what it read of the store and every health space it
-// noted (the health space's when either says so), so a read asks the store only of a conversation it has not read.
+// so a list noted once is not written again; known: by session, what it read of the store and every space other than
+// the assistant's own it noted (that space when either says so), so a read asks the store only of a conversation it has not read.
 // A conversation noted outside the space is read back from the store, which tells it by session on whichever computer
 // noted it, rather than taken from the note. For a manager without such a store (in memory) the book is all there is,
 // and what it notes is what it knows.
@@ -57,28 +57,31 @@ type convSpaceBook struct {
 	writing bool
 }
 
-// learnLocked takes space for session id into known: the health space's stays. b.mu is held.
+// learnLocked takes space for session id into known: a space other than the assistant's own stays. b.mu is held.
 func (b *convSpaceBook) learnLocked(id, space string) {
 	if b.known == nil {
 		b.known = map[string]string{}
 	}
-	if was, ok := b.known[id]; !ok || was != SpaceHealth {
+	if was, ok := b.known[id]; !ok || was == "" {
 		b.known[id] = space
 	}
 }
 
 // noteConversationSpaces notes rows (each a conversation's computer, session and space): in the store, and once
-// written in the book. One noted already as it is now, or in the health space, is not written again. A failed write is
-// tried again with the next list; a health space it noted is known all the same, since that only hides.
+// written in the book. One noted already as it is now, or in a space other than the assistant's own, is not written
+// again. A failed write is tried again with the next list; a space it noted is known all the same, since that only
+// hides. A conversation named in two spaces is noted in the stricter (the store takes the first of them).
 func (s *Service) noteConversationSpaces(ctx context.Context, rows []db.ConversationSpace) {
+	rows = slices.DeleteFunc(slices.Clone(rows), func(r db.ConversationSpace) bool {
+		return r.SessionID == "" || r.MachineID == "" || !s.trackKnown(ctx, r.Space)
+	})
+	rank := func(space string) int { return s.trackPolicy(ctx, space).strictness() }
+	slices.SortStableFunc(rows, func(a, b db.ConversationSpace) int { return rank(b.Space) - rank(a.Space) })
 	b := &s.convSpaces
 	b.mu.Lock()
 	var fresh []db.ConversationSpace
 	for _, r := range rows {
-		if r.SessionID == "" || r.MachineID == "" || !validSpace(r.Space) {
-			continue
-		}
-		if was, ok := b.noted[[2]string{r.MachineID, r.SessionID}]; ok && (was == r.Space || was == SpaceHealth) {
+		if was, ok := b.noted[[2]string{r.MachineID, r.SessionID}]; ok && (was == r.Space || was != "") {
 			continue
 		}
 		fresh = append(fresh, r)
@@ -104,12 +107,12 @@ func (s *Service) noteConversationSpaces(ctx context.Context, rows []db.Conversa
 	var ids []string
 	for _, r := range fresh {
 		if written {
-			if k := [2]string{r.MachineID, r.SessionID}; b.noted[k] != SpaceHealth {
+			if k := [2]string{r.MachineID, r.SessionID}; b.noted[k] == "" {
 				b.noted[k] = r.Space
 			}
 			ids = append(ids, r.SessionID)
 		}
-		if r.Space == SpaceHealth || !durable {
+		if r.Space != "" || !durable {
 			b.learnLocked(r.SessionID, r.Space)
 		}
 	}
@@ -118,20 +121,17 @@ func (s *Service) noteConversationSpaces(ctx context.Context, rows []db.Conversa
 }
 
 // listedSpace is the space of assistant conversation c as a computer lists it (its own space or its directory's, a
-// directory inside the health space counting as the space), and false for a row that is no conversation of this
+// directory inside a space counting as the space: runSpace), and false for a row that is no conversation of this
 // manager's assistant, or a deleted one's.
 func (s *Service) listedSpace(c proto.Session) (string, bool) {
 	if c.SessionID == "" || c.IsDeleted() || !s.isAssistantRow(c) {
 		return "", false
 	}
-	if healthRun(c) {
-		return SpaceHealth, true
-	}
-	return spaceOf(c), true
+	return runSpace(c), true
 }
 
-// conversationSpacesListed notes the space of each assistant conversation in machine's list (SessionsChanged). A health
-// space is known at once; the store is written off the list's way (writeListedSpaces), so a store that does not answer
+// conversationSpacesListed notes the space of each assistant conversation in machine's list (SessionsChanged). A space
+// other than the assistant's own is known at once; the store is written off the list's way (writeListedSpaces), so a store that does not answer
 // holds up no list: while it is written, a conversation listed is told by the list.
 func (s *Service) conversationSpacesListed(machine string, list []proto.Session) {
 	if machine == "" {
@@ -150,7 +150,7 @@ func (s *Service) conversationSpacesListed(machine string, list []proto.Session)
 		if !ok {
 			continue
 		}
-		if was, seen := b.noted[[2]string{machine, c.SessionID}]; seen && (was == space || was == SpaceHealth) {
+		if was, seen := b.noted[[2]string{machine, c.SessionID}]; seen && (was == space || was != "") {
 			if backfill {
 				already = append(already, c.SessionID)
 			}
@@ -170,7 +170,7 @@ func (s *Service) conversationSpacesListed(machine string, list []proto.Session)
 		return
 	}
 	for _, r := range rows {
-		if r.Space == SpaceHealth {
+		if r.Space != "" {
 			b.learnLocked(r.SessionID, r.Space)
 		}
 	}
@@ -265,7 +265,7 @@ type spaceTold struct {
 // call a computer: the Lark agent's, the Inbox AI twin's); the main conversation as the computer it is routed to lists
 // it (Settings.mainRouteMachine: one kept on the assistant's former computer); else as the record of its deletion
 // keeps it (one read for all). A row listed under the id tells it only as the assistant's conversation (isAssistantRow,
-// as a note is taken: listedSpace) or as one in the health space (which only hides): a session started under the id
+// as a note is taken: listedSpace) or as one in a space (which only hides): a session started under the id
 // in a terminal is not the chat the id names. One none of them tells (quiet since before its space was noted, the
 // store unreadable) is not told.
 func (s *Service) conversationSpaces(ctx context.Context, ids []string) map[string]spaceTold {
@@ -308,9 +308,9 @@ func (s *Service) conversationSpaces(ctx context.Context, ids []string) map[stri
 	set := s.settings(ctx)
 	told := func(id string, l proto.Session) bool {
 		switch {
-		case out[id].known && out[id].space == SpaceHealth: // a row of the space under the id: whatever else is listed
-		case healthRun(l):
-			out[id] = spaceTold{SpaceHealth, true}
+		case out[id].known && out[id].space != "": // a row of a space under the id: whatever else is listed
+		case runSpace(l) != "":
+			out[id] = spaceTold{runSpace(l), true}
 		case s.isAssistantRow(l):
 			out[id] = spaceTold{spaceOf(l), true}
 		default:

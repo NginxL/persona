@@ -1,5 +1,6 @@
 import { forwardRef, useEffect, useId, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
 import { t } from "../../i18n";
+import { useShowFilter } from "../../lib/agents-display";
 import { fromDefaultManager } from "../../lib/manager-choice";
 import { onHubEvent } from "../../lib/store";
 import { SavedAgentSearchesModel, savedSearchProblem, SAVED_SEARCH_LIMIT, SAVED_SEARCH_NAME_MAX, type SavedAgentSearch, type SavedAgentSearchesSnapshot } from "../../lib/saved-agent-searches";
@@ -180,6 +181,8 @@ export function EmptySearch({ query, onNewAgent }: { query: string; onNewAgent: 
 
 /** The list-filter action is only relevant after a search; keep its presentation with the query tools. */
 export function FilterAgentsList({ query, onFilter }: { query: string; onFilter: () => void }) {
+  // the list's Filter is a Settings switch (Agents): off, there is nothing for the words to narrow
+  if (!useShowFilter()) return null;
   return <button type="button" onClick={onFilter} data-testid="palette-filter-list" className="flex w-full items-center gap-2.5 border-t border-line px-4 py-2.5 text-left hover:bg-hover">
     <span className="flex size-5 shrink-0 items-center justify-center"><Icon name="filter" size={13} className="text-ink-3" /></span>
     <span className="min-w-0 flex-1 truncate text-meta text-ink">{t("palette.filter_agents_list", { query })}</span>

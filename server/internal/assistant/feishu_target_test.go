@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/nwverse/persona/server/internal/feishubot"
+	"github.com/nwverse/persona/server/internal/botcard"
 )
 
 // The wrappers' target adds chat_id / in_thread to feishu.post and feishu.text only when set: the usual calls carry
@@ -22,7 +22,7 @@ func TestFeishuTargetParams(t *testing.T) {
 	})
 	s := newTestService(t, f)
 	ctx := context.Background()
-	card := feishubot.NewCard("t", "green", "a").Markdown("target card")
+	card := botcard.NewCard("t", "green", "a").Markdown("target card")
 
 	if _, err := s.botPost(ctx, "om_1", card, "fb"); err != nil {
 		t.Fatal(err)

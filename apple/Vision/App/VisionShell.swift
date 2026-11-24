@@ -1,6 +1,5 @@
 import SwiftUI
 
-#if os(visionOS)
 extension View {
     /// The main window's shell on Apple Vision Pro, around the app's TabView (RootView's `RootTabs`, which visionOS
     /// draws as the system's tab ornament at the window's leading edge): the Needs You ornament below the window.
@@ -64,4 +63,3 @@ private struct NeedsYouOrnament: View {
         model.open(next)
     }
 }
-#endif

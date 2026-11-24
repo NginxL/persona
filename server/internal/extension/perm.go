@@ -86,7 +86,8 @@ func (p Permissions) normalized() Permissions {
 func (p Permissions) FullHub() bool { return p.HubAPI && len(p.Hub) == 0 }
 
 // Covers says whether p grants everything q asks (an upgrade asking for no more needs no new consent). The full token
-// covers only the scopes InEveryScope includes; named-only scopes need a grant naming them. Scopes never cover the full token.
+// covers only inherited scope consent; named-only scopes and remote personal ledger reads need a grant naming them.
+// Scopes never cover the full token.
 func (p Permissions) Covers(q Permissions) bool {
 	if q.FullHub() && !p.FullHub() || q.LauncherKeys && !p.LauncherKeys || q.GhLogin && !p.GhLogin ||
 		q.UsageGateways && !p.UsageGateways || q.AgentRuntimes && !p.AgentRuntimes || q.ErrorReports && !p.ErrorReports ||
@@ -94,7 +95,7 @@ func (p Permissions) Covers(q Permissions) bool {
 		return false
 	}
 	for _, s := range q.Hub {
-		if !(p.FullHub() && InEveryScope(s)) && !slices.Contains(p.Hub, s) {
+		if !p.coversScopeConsent(s) {
 			return false
 		}
 	}
@@ -104,6 +105,12 @@ func (p Permissions) Covers(q Permissions) bool {
 		}
 	}
 	return true
+}
+
+// A legacy full-hub reader retains its existing co-location path, but upgrading
+// to a manifest that names assistant.entries.read must ask before enabling remote personal reads.
+func (p Permissions) coversScopeConsent(scope string) bool {
+	return slices.Contains(p.Hub, scope) || scope != ScopeAssistantEntriesRead && p.FullHub() && InEveryScope(scope)
 }
 
 // nodeConsent is what the user agrees to of a program on computers: the systems it runs on, what it asks for there,
@@ -441,6 +448,11 @@ func ExplainWith(l i18n.Lang, m *Manifest, config json.RawMessage) []PermissionL
 	if m.HasDataContent() {
 		out = append(out, permissionLine(l, "assistant_data"))
 	}
+	// Giving the hub its memory to filter by scene is shown, like recalls not agreed to: it hands the program nothing,
+	// and what it already wrote for the assistant stops going in around the filter (memory_sources.go).
+	if len(m.MemorySources()) > 0 {
+		out = append(out, permissionLine(l, "memory_source"))
+	}
 	if topics := m.Topics(); len(topics) > 0 {
 		var what []string
 		for _, t := range topics {
@@ -527,7 +539,7 @@ func AddedWith(l i18n.Lang, old, m *Manifest, config json.RawMessage) []Permissi
 	} else if !m.Permissions.FullHub() {
 		var more []string
 		for _, s := range m.Permissions.normalized().Hub {
-			if !(old.Permissions.FullHub() && InEveryScope(s)) && !slices.Contains(old.Permissions.Hub, s) {
+			if !old.Permissions.coversScopeConsent(s) {
 				more = append(more, s)
 			}
 		}

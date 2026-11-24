@@ -151,6 +151,55 @@ func TestIrreversibleDecisionIsOnlyRemindedAtTheDeadline(t *testing.T) {
 	}
 }
 
+// An explicit reversible=false keeps the default 24-hour reminder deadline, but never authorizes the recommendation.
+// The reason-based safeguards cover irreversible and outward-facing decisions at an explicit deadline too.
+func TestNeedsUserDoesNotDefaultWhenRecommendationCannotBeUndone(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		whyOwner string
+		deadline string
+	}{
+		{name: "explicit false with default deadline", whyOwner: whyPriority},
+		{name: "irreversible with explicit deadline", whyOwner: whyIrreversible, deadline: "1h"},
+		{name: "visible to others with explicit deadline", whyOwner: whyVisible, deadline: "1h"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s, f, todo, _, _ := conclusionService(t, false)
+			waitsForReview(t, s, f, todo.ID, "The rollout is ready for a decision.")
+			args := map[string]any{
+				"verdict": "needs_user", "reason": "Choose the rollout", "recommend": "Proceed",
+				"why_owner": tc.whyOwner, "reversible": false,
+				"options": []map[string]string{{"label": "Proceed", "leads_to": "The recommendation runs"},
+					{"label": "Wait", "leads_to": "Nothing changes"}},
+				"cost_of_waiting": "The task waits",
+			}
+			if tc.deadline != "" {
+				args["deadline"] = tc.deadline
+			}
+			res := reviewTask(t, s, todo.ID, args)
+			sent, pushes := len(sentToAgent(f)), deadlinePushes(f, todo.ID)
+			pastDeadline(t, s, todo.ID)
+			s.sweepDecisionDeadlines(time.Now())
+			if got := sentToAgent(f)[sent:]; len(got) != 0 {
+				t.Fatalf("a decision that cannot be undone was taken by default: %q; task_review result %q", got, res)
+			}
+			a := askOf(s, todo.ID)
+			if !a.AcceptedAt.IsZero() || a.ByDefault || a.DueAt.IsZero() {
+				t.Fatalf("ask after the deadline: %+v", a)
+			}
+			if todoNow(s, todo.ID).Supervision.State != reviewNeedsUser {
+				t.Fatal("no longer waits for the user")
+			}
+			if n := deadlinePushes(f, todo.ID); n != pushes+1 {
+				t.Fatalf("%d reminder pushes, want 1", n-pushes)
+			}
+			if !strings.Contains(res, "cannot be undone") {
+				t.Fatalf("task_review does not say it is only reminded: %q", res)
+			}
+		})
+	}
+}
+
 // Without a deadline a decision waits as before, however long.
 func TestDecisionWithoutDeadlineWaits(t *testing.T) {
 	s, f, todo, _, _ := conclusionService(t, false)
@@ -430,6 +479,7 @@ func TestGoldenDecisionDeadline(t *testing.T) {
 // The owner answering the decision's card with a choice of their own ends its deadline, even when that answer did not
 // reach the agent: the recommendation they turned down is never taken by default afterwards.
 func TestOwnersOwnAnswerEndsTheDeadline(t *testing.T) {
+	needsLarkLayer(t)
 	for _, fail := range []bool{false, true} {
 		t.Run(fmt.Sprintf("send fails %v", fail), func(t *testing.T) {
 			s, f, todo, _, _ := conclusionService(t, false)

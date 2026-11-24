@@ -177,3 +177,20 @@ func TestWithdrawOnlyWhereTheCardWent(t *testing.T) {
 		q.timer.Stop()
 	}
 }
+
+// A manager's push that stands for a card (a plan's, assistantwire.Notification.CardID) names the card like an
+// interaction's push, and the card's end takes it back the same way.
+func TestWithdrawTakesBackAPushStandingForACard(t *testing.T) {
+	h, f, open := withdrawHub(t, "withdraw")
+	h.notifyDoneUnder("", "assistant", "m1", "笔记本", "s1", "A plan waits for Start", "修登录崩溃", pushWants{}, managerPushCollapseID("", "plan:plan_x"), "",
+		pushPolicy{level: "P0", cardID: "plan_x"})
+	got := f.wait(t, 1)
+	if p := open(got[0]); p["interaction_id"] != "plan_x" {
+		t.Fatalf("the push does not name its card: %v", p)
+	}
+	h.push.withdraw("plan_x")
+	got = f.wait(t, 2)
+	if p := open(got[1]); got[1].PushType != "background" || fmt.Sprint(p["resolved_interaction_ids"]) != "[plan_x]" {
+		t.Fatalf("withdrawal %+v %v", got[1], p)
+	}
+}

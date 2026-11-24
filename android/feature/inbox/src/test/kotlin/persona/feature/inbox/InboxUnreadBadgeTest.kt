@@ -4,6 +4,7 @@ import org.junit.Assert.*
 import org.junit.Test
 import persona.core.domain.inbox.InboxItem
 import persona.core.domain.inbox.buildInboxList
+import persona.core.inbox.*
 
 class InboxUnreadBadgeTest {
     private fun record(id: String, read: Boolean = false, done: Boolean = false, tier: String = "action", status: String? = null) =

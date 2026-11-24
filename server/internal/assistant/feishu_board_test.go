@@ -624,6 +624,7 @@ func TestBoardLeavesWhatEndedAtOnce(t *testing.T) {
 // A task whose "Please verify" card goes out (askAcceptance) is on the board within the settle time, and off it once
 // the owner passes it: the whole path, not only the board's own state.
 func TestBoardTakesADeployedTaskAndDropsItWhenPassed(t *testing.T) {
+	needsLarkLayer(t)
 	ctx := context.Background()
 	s, f, _ := acceptService(t)
 	clk := newFakeClock()

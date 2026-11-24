@@ -2,10 +2,12 @@ package node
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 	"time"
 
+	"github.com/nwverse/persona/server/internal/db"
 	"github.com/nwverse/persona/server/internal/proto"
 )
 
@@ -92,6 +94,45 @@ func TestMarkInterruptedRecordsARestartStop(t *testing.T) {
 	}
 	if ranUntilRestart(n.bootAt.Add(time.Minute).Unix(), n.bootAt) || ranUntilRestart(0, n.bootAt) || !ranUntilRestart(n.bootAt.Add(-restartWindow).Unix(), n.bootAt) {
 		t.Fatal("ranUntilRestart")
+	}
+}
+
+// A restart of the whole machine (WSL restarted under its Agents, #11528) leaves the new node only what the hub kept:
+// RanAt has to come back from it (db.NodeSession), or the Agent the restart cut off reads as stopped for no known
+// reason. The record goes the way state.put and state.load take it: the node's JSON into the hub's record and back.
+func TestRestartIsRecordedFromTheHubsCopy(t *testing.T) {
+	old, _ := testNode(t)
+	started := time.Now().Add(-2 * time.Hour)
+	old.state.Sessions["cut-off"] = sessionState{Launcher: "claude", Cwd: "/work", Pane: "w1:p1", StartedAt: started}
+	old.recordRunning("cut-off")
+	sent, _ := old.state.get("cut-off")
+	if sent.RanAt == 0 {
+		t.Fatal("recordRunning wrote no RanAt")
+	}
+	raw, err := json.Marshal(sent) // state.put
+	if err != nil {
+		t.Fatal(err)
+	}
+	var kept db.NodeSession
+	if err := json.Unmarshal(raw, &kept); err != nil {
+		t.Fatal(err)
+	}
+	raw, err = json.Marshal(map[string]db.NodeSession{"cut-off": kept}) // state.load
+	if err != nil {
+		t.Fatal(err)
+	}
+	var loaded map[string]sessionState
+	if err := json.Unmarshal(raw, &loaded); err != nil {
+		t.Fatal(err)
+	}
+
+	n, _ := testNode(t)
+	n.bootAt = time.Unix(sent.RanAt, 0).Add(2 * time.Minute) // the machine came back two minutes later
+	n.state.merge(loaded)
+	rows := []proto.Session{{SessionID: "cut-off", Status: proto.StatusOffline}}
+	n.markInterrupted(rows, nil)
+	if rows[0].Status != proto.StatusInterrupted || n.stopCause("cut-off") != proto.StopRestart {
+		t.Fatalf("after the hub's copy: status %s, cause %q (ran_at %d)", rows[0].Status, n.stopCause("cut-off"), loaded["cut-off"].RanAt)
 	}
 }
 

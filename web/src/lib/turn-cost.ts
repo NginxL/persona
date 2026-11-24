@@ -10,6 +10,7 @@ import { api } from "./api";
 import { bareModel, replyModelName } from "./model-change";
 import type { PanelPrice } from "./model-panel";
 import { compactTokens } from "./tokens";
+import { formatLatencyMs } from "./session-insights";
 import type { TurnUsage } from "./turn-usage";
 import type { TokenUsage } from "./types";
 import { workDuration } from "./work-groups";
@@ -247,7 +248,7 @@ function modelNames(models: readonly ModelTokens[]): string[] {
 /** The card's lines, in cindy's order (buildTurnUsageTooltipLines): with a cost, its title, the value and, for two or
  *  more models, each one's; then the tokens, the cache, the time when known (`ms`, the work summary's "Worked for"),
  *  the model when there was no breakdown, the low-cache suggestion, and without a cost why there is none. */
-export function usageLines(usage: UsageSummary, cost: TurnCost | null, ms?: number): string[] {
+export function usageLines(usage: UsageSummary, cost: TurnCost | null, ms?: number, ttftMs?: number): string[] {
   const lines: string[] = [];
   const s = usageTotals(usage.models);
   const priced = cost && cost.total > 0 ? cost : null;
@@ -263,6 +264,7 @@ export function usageLines(usage: UsageSummary, cost: TurnCost | null, ms?: numb
   const rate = formatPercent(s.hit);
   lines.push(rate ? t("chat-replybar.cache_line", { read: compactTokens(s.cache_read), write: compactTokens(s.cache_write), rate }) : t("chat-replybar.cache_line_no_rate", { read: compactTokens(s.cache_read), write: compactTokens(s.cache_write) }));
   if (ms !== undefined && ms > 0) lines.push(t("chat-replybar.time_line", { duration: workDuration(ms) }));
+  if (ttftMs !== undefined && Number.isFinite(ttftMs) && ttftMs >= 0) lines.push(t("chat-replybar.ttft_line", { ttft: formatLatencyMs(ttftMs) }));
   if (!breakdown) {
     const names = modelNames(usage.models);
     if (names.length) lines.push(t("chat-replybar.model_line", { model: names.length === 1 ? names[0] : t("chat-replybar.models", { count: names.length }) }));

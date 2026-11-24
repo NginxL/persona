@@ -36,9 +36,9 @@ final class ModelsSettingsHierarchyTests: XCTestCase {
 
     @MainActor func testAgentGroupsToolsAndKeepsTheTriageDestination() {
         let app = launch(models: false)
-        let agents = app.descendants(matching: .any)["settings-agents"].firstMatch
+        XCTAssertTrue(app.openSettingsAdvancedPage(), "no Settings › Advanced:\n\(app.debugDescription)")
+        let agents = app.settingsAdvancedRow("settings-agents")
         XCTAssertTrue(agents.waitForExistence(timeout: 10))
-        for _ in 0..<4 where !agents.isHittable { app.swipeUp() }
         agents.tap()
         XCTAssertTrue(app.descendants(matching: .any)["settings-agent-claude"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.descendants(matching: .any)["settings-agent-codex"].exists)

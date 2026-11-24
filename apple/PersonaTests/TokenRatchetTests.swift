@@ -27,7 +27,7 @@ struct TokenRatchetTests {
         let ios = here.deletingLastPathComponent()
         var out: [String: [String: Int]] = [:]
         let res = try metrics.map { ($0.name, try NSRegularExpression(pattern: $0.pattern)) }
-        for dir in ["Persona", "PersonaWatch", "Shared"] {
+        for dir in ["Persona", "Modules", "PersonaWatch", "Shared"] {
             let files = FileManager.default.enumerator(at: ios.appending(path: dir), includingPropertiesForKeys: nil)?
                 .compactMap { $0 as? URL }
                 .filter { $0.pathExtension == "swift" && !exempt.contains($0.lastPathComponent) && !$0.path.contains("/Shared/Design/") } ?? []

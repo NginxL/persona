@@ -2,7 +2,7 @@ import { mcpToolNames } from '../../runtime-sdk/lib/compat.js'
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { startFakeNode, until } from '../../runtime-sdk/testing/fake-node.js'
-import { createDshRuntime } from '../lib/dsh.js'
+import { answerOf, createDshRuntime } from '../lib/dsh.js'
 
 /** A Cordis-like event bus: emit for emit events, waterfall for the answerer chains (registration order, prepend first). */
 function bus() {
@@ -1698,4 +1698,47 @@ test('updated_at advances with session events and timeContext even when controll
   const list = n.last('runtime.sessions').sessions
   assert.equal(list[0].session_id, 'session-long', 'newly finished long turn ranks first')
   assert.equal(list[0].status, 'done')
+})
+
+test('answerOf preserves multiSelect options containing commas and keeps mixed custom text intact', () => {
+  const questions = [
+    {
+      id: 'q-perms',
+      question: 'Which permissions?',
+      multiSelect: true,
+      options: [{ label: 'Read, write' }, { label: 'Delete' }, { label: 'Admin, billing' }],
+    },
+    {
+      id: 'q-db',
+      question: 'Which databases?',
+      multiSelect: true,
+      options: [{ label: 'pg' }, { label: 'sqlite' }],
+    },
+  ]
+
+  assert.deepEqual(
+    answerOf(questions, undefined, {
+      answers: {
+        'Which permissions?': 'Read, write',
+        'Which databases?': 'pg, sqlite',
+      },
+    }),
+    [
+      { id: 'q-perms', selected: ['Read, write'] },
+      { id: 'q-db', selected: ['pg', 'sqlite'] },
+    ],
+  )
+
+  assert.deepEqual(
+    answerOf(questions, undefined, {
+      answers: {
+        'Which permissions?': 'Read, write, Admin, billing',
+        'Which databases?': 'pg, cockroach',
+      },
+    }),
+    [
+      { id: 'q-perms', selected: ['Read, write', 'Admin, billing'] },
+      { id: 'q-db', selected: [], custom: 'pg, cockroach' },
+    ],
+  )
 })

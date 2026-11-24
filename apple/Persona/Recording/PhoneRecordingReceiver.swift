@@ -1,4 +1,3 @@
-#if os(iOS) || os(visionOS)
 import Foundation
 
 /// Installs the receiver before WCSession activates; the system may launch the app in the background just to deliver a file.
@@ -36,4 +35,3 @@ final class PhoneRecordingReceiver {
         #endif
     }
 }
-#endif

@@ -50,6 +50,71 @@ func (f routeFlags) any() bool {
 	return f.server != "" || f.target != "" || f.alwaysSet
 }
 
+// check refuses, before anything is saved, a --proxy-always the command line alone shows cannot be turned on: with
+// a --proxy that is no URL (as persona-link proxy refuses --off and --env with --always), or with --ssh-always (only
+// one route can be the only one). saveProxy checks the rest against link.json.
+func (f routeFlags) check() error {
+	if !f.proxy.always || !f.proxy.alwaysSet {
+		return nil
+	}
+	if f.proxy.set && noProxyURL(f.proxy.value) {
+		return errUsage
+	}
+	if f.always && f.alwaysSet {
+		return link.ErrSSHAlwaysProxyAlways
+	}
+	return nil
+}
+
+// saveProxy saves the proxy flags once ssh, the tunnel this command line saves (nil: none), is known with its
+// default Always. As persona-link proxy, a refusal changes nothing: proxy-only mode and Always use SSH are checked
+// against link.json before anything is saved. --proxy-always is refused without a proxy URL given or saved, or while
+// Always use SSH stays on (saved and left alone by this line, or this line's default for loopback addresses); a
+// tunnel that is always used is refused while a saved proxy-only mode stays on. This line's tunnel replaces the saved
+// one, so when it has no Always a saved Always use SSH goes off first, before proxy-only mode goes on.
+func (f routeFlags) saveProxy(e *env, ssh *link.SSH) error {
+	if !f.proxy.any() {
+		return nil
+	}
+	saved, err := link.Read(e.configPath())
+	if errors.Is(err, os.ErrNotExist) {
+		saved, err = &link.Config{}, nil
+	}
+	if err != nil {
+		return err
+	}
+	on := f.proxy.always && f.proxy.alwaysSet
+	cleared := f.proxy.set && noProxyURL(f.proxy.value) // SetProxy turns proxy-only mode off with it
+	sshAlways := saved.SSH != nil && saved.SSH.Always
+	switch {
+	case !f.proxy.alwaysSet && saved.ProxyAlways && !cleared && ssh != nil && ssh.Always:
+		return link.ErrSSHAlwaysProxyAlways // what the pairing or SetSSH says once the proxy is saved
+	case !on:
+	case !f.proxy.set && (saved.Proxy == "" || saved.Proxy == link.ProxyOff):
+		return link.ErrProxyAlwaysNeedsURL
+	case ssh == nil && sshAlways:
+		return link.ErrProxyAlwaysSSHAlways
+	case ssh != nil && ssh.Always: // a default: check refuses --ssh-always
+		return link.NewTextError("link-cli.proxy_always_ssh_default", nil)
+	}
+	if on && f.proxy.set {
+		if _, err := link.ParseProxy(f.proxy.value); err != nil {
+			return err
+		}
+	}
+	if on && ssh != nil && sshAlways {
+		if err := link.Update(e.configPath(), func(c *link.Config) error {
+			if c.SSH != nil {
+				c.SSH.Always = false
+			}
+			return nil
+		}); err != nil {
+			return err
+		}
+	}
+	return f.proxy.save(e)
+}
+
 func (f routeFlags) build(rawLink string) (*link.SSH, error) {
 	if !f.any() {
 		return nil, nil

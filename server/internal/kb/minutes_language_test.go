@@ -470,10 +470,10 @@ func TestMinutesRenderedAgainKeepTheirLanguage(t *testing.T) {
 }
 
 // The minutes' and the recap's Markdown name their sections as the web's recording page does in every language, so
-// minutes copied from it read like the screen (web/src/i18n/locales/<lang>/knowledge-kbdetail.json).
+// minutes copied from it read like the screen (web/src/i18n/locales/<lang>/recording.json, the web recording module's strings).
 func TestMinutesHeadingsAreTheWebsSections(t *testing.T) {
 	for _, l := range i18n.Langs {
-		raw, err := os.ReadFile(filepath.Join("..", "..", "..", "web", "src", "i18n", "locales", string(l), "knowledge-kbdetail.json"))
+		raw, err := os.ReadFile(filepath.Join("..", "..", "..", "web", "src", "i18n", "locales", string(l), "recording.json"))
 		if err != nil {
 			t.Fatal(err)
 		}

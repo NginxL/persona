@@ -1,4 +1,3 @@
-#if os(iOS) || os(visionOS)
 import AudioToolbox
 import AVFoundation
 import Foundation
@@ -8,8 +7,9 @@ import PersonaKit
 // The call's audio on an iPhone and in CarPlay (docs/assistant/voice.md 6.4). Adapted from the audio half of the earlier
 // CarPlay `DuplexVoiceSession` in PR #1931 (coordination in #1951); #1931 now calls through `VoiceConversation`
 // with this engine. Play-and-record / voice-chat with voice processing, AVAudioConverter down to the extension's
-// PCM16, an AVAudioPlayerNode at its output rate behind a short jitter buffer (`VoicePlayout`, #4430), dropping what
-// `clear` cancels by generation, and ending on a call or a media services reset. The microphone goes into a
+// PCM16, an AVAudioPlayerNode at its output rate behind a short jitter buffer (`VoicePlayout`, #4430) that reads how much
+// the player has left off its render position (`VoicePlayerClock`, #13963), dropping what `clear` cancels by generation,
+// and ending on a call or a media services reset. The microphone goes into a
 // `VoiceUplink` (held until `ready`, muted as silence, measured for the orb). The route follows `VoiceRoute` (#3015): a connected headset plays and records, else the loudspeaker,
 // and a device coming or going during the call is followed; a route change rebuilds the tap and converter (or the whole
 // engine) instead of ending the call; voice processing that will not run falls back to plain capture. Nothing reads
@@ -181,11 +181,18 @@ nonisolated final class VoiceInputProbe: @unchecked Sendable {
     private var events: (@MainActor (VoiceAudioEvent) -> Void)?
     /// Bumped by `clear` and every rebuild: completions of buffers scheduled before are ignored.
     private var generation = 0
-    /// The loudness of the voice's buffers still queued, in order: the first is the one playing.
+    /// The loudness of the voice's buffers still queued, in order: the first is the one playing. Emptied by completions,
+    /// which come an output latency after the player rendered the buffer: for the orb and `.playing`, which follow what is
+    /// heard, never for whether the player has run dry (`clock`).
     private var queued: [Float] = []
-    /// The voice held back until enough of it has gathered (#4430), and the wait that plays it anyway.
+    /// Where what was scheduled on the player ends on its timeline: how much it still has to play, for `playout`.
+    private var clock = VoicePlayerClock()
+    /// The voice held back until enough of it has gathered (#4430), and the wait that plays it anyway (set for `holdDue`).
     private var playout = VoicePlayout<Piece>(rate: VoiceFrame.defaultOutputRate)
     private var holdTimer: Task<Void, Never>?
+    private var holdDue: TimeInterval?
+    /// How often the voice ran dry mid-reply this call (#12922), for the log's last line.
+    private var stalls = 0
     private var activated = false
     private var observers: [NSObjectProtocol] = []
     /// The engine's configuration-change observer: a rebuilt engine gets its own.
@@ -327,13 +334,14 @@ nonisolated final class VoiceInputProbe: @unchecked Sendable {
         }
         watchEngine()
         // Port kinds only, never device names (they can carry a person's name).
-        Self.log.notice("voice: call audio on (echo cancellation \(self.cancelsEcho, privacy: .public), \(Self.describe(session.currentRoute), privacy: .public))")
+        Self.log.notice("voice: call audio on (echo cancellation \(self.cancelsEcho, privacy: .public), \(Self.describe(session), privacy: .public))")
         onRunning?()
     }
 
     /// The system's session: the engine goes, and what was queued to play with it; the uplink, the events and the
     /// observers stay for the next `activate`.
     private func tearDown() {
+        dropQueued("dropped as the system took the call's audio away")
         if let engineObserver { NotificationCenter.default.removeObserver(engineObserver) }
         engineObserver = nil
         input?.removeTap(onBus: 0)
@@ -344,7 +352,7 @@ nonisolated final class VoiceInputProbe: @unchecked Sendable {
         player = nil
         playFormat = nil
         pump = nil
-        dropQueued()
+        clock.restart()
     }
 
     func reconfigure(_ format: VoiceAudioFormat) throws {
@@ -366,12 +374,14 @@ nonisolated final class VoiceInputProbe: @unchecked Sendable {
     func cue(_ pcm: Data) { schedule(pcm, voice: false) }
 
     func clear() {
+        logCut("cut off")
         generation += 1
         dropHeld()
         let was = !queued.isEmpty
         queued = []
         if let player {
             player.stop()
+            clock.restart()
             if engine?.isRunning == true { player.play() }
         }
         if was {
@@ -405,7 +415,7 @@ nonisolated final class VoiceInputProbe: @unchecked Sendable {
         } catch {
             try rebuild()
         }
-        Self.log.notice("voice: audio back after the interruption (\(Self.describe(session.currentRoute), privacy: .public))")
+        Self.log.notice("voice: audio back after the interruption (\(Self.describe(session), privacy: .public))")
     }
 
     func stop() {
@@ -427,6 +437,13 @@ nonisolated final class VoiceInputProbe: @unchecked Sendable {
         generation += 1
         dropHeld()
         queued = []
+        clock.restart()
+        if stalls > 0 {
+            let times = stalls, lead = Int(playout.leadNow * 1000)
+            Self.log.notice("voice: ran dry mid-reply \(times, privacy: .public) times this call; the lead reached \(lead, privacy: .public) ms")
+        }
+        stalls = 0
+        playout = VoicePlayout(rate: format.outputRate)
         if activated {
             activated = false
             let session = AVAudioSession.sharedInstance()
@@ -499,18 +516,20 @@ nonisolated final class VoiceInputProbe: @unchecked Sendable {
         self.player = player
         self.playFormat = playFormat
         self.pump = pump
-        playout = VoicePlayout(rate: format.outputRate)
+        // A new player for the same call: the link is the one the voice stalled on, so the raised lead stays (#12922).
+        playout = VoicePlayout(rate: format.outputRate, level: playout.level)
+        clock.restart()
     }
 
     /// Takes the engine apart and puts it together again for the input as it is now (a new route or new rates). What
     /// was queued to play is gone with the old player.
     private func rewire(_ engine: AVAudioEngine) throws {
+        dropQueued("dropped as the player was set up again")
         input?.removeTap(onBus: 0)
         input = nil
         if let player { engine.detach(player) }
         player = nil
         pump = nil
-        dropQueued()
         // The new route may have no input (#5029): reading the input node then would set up an I/O unit that cannot start.
         guard AVAudioSession.sharedInstance().isInputAvailable else { throw VoiceAudioError.noInput }
         try wire(engine)
@@ -522,6 +541,7 @@ nonisolated final class VoiceInputProbe: @unchecked Sendable {
     /// will not run): the old one would not start again there (voice processing on a route it does not run on, a
     /// headset still coming up).
     private func rebuild() throws {
+        dropQueued("dropped with the old engine")
         if let engineObserver { NotificationCenter.default.removeObserver(engineObserver) }
         engineObserver = nil
         input?.removeTap(onBus: 0)
@@ -531,7 +551,6 @@ nonisolated final class VoiceInputProbe: @unchecked Sendable {
         player = nil
         playFormat = nil
         pump = nil
-        dropQueued()
         guard AVAudioSession.sharedInstance().isInputAvailable else { throw VoiceAudioError.noInput }
         // A system call's manager hears of the new engine both ways: voice processing turning on again can surface as a
         // system mute, which is the engine's and not the owner's until a moment after it runs.
@@ -541,8 +560,9 @@ nonisolated final class VoiceInputProbe: @unchecked Sendable {
         if owner == .system { onRunning?() }
     }
 
-    /// What was queued to play is gone with the old player.
-    private func dropQueued() {
+    /// What was queued to play is gone with the old player (`what` happened to it, for the log).
+    private func dropQueued(_ what: String) {
+        logCut(what)
         let was = !queued.isEmpty
         generation += 1
         dropHeld()
@@ -578,24 +598,34 @@ nonisolated final class VoiceInputProbe: @unchecked Sendable {
         buffer.frameLength = AVAudioFrameCount(samples.count)
         samples.withUnsafeBufferPointer { channel.update(from: $0.baseAddress!, count: samples.count) }
         guard voice else { return enqueue(buffer, level: nil, on: player) }
-        let ready = playout.add(Piece(buffer: buffer, level: VoicePCM.rms(samples)), frames: samples.count, playing: !queued.isEmpty)
-        if playout.isHolding {
-            waitForLead()
-        } else {
-            holdTimer?.cancel()
-            holdTimer = nil
+        let stalled = playout.stalls
+        let left = playerLeft(player)
+        let ready = playout.add(Piece(buffer: buffer, level: VoicePCM.rms(samples)), frames: samples.count, left: left,
+                                at: ProcessInfo.processInfo.systemUptime)
+        logEndedReply()
+        if playout.stalls > stalled {
+            stalls += 1
+            let had = Int(((left ?? 0) * 1000).rounded()), lead = Int(playout.leadNow * 1000)
+            Self.log.notice("voice: ran dry mid-reply, \(had, privacy: .public) ms left in the player as the next piece came (below 0: silent that long); gathering \(lead, privacy: .public) ms before playing")
         }
+        holdUntilDue()
         for piece in ready { enqueue(piece.buffer, level: piece.level, on: player) }
     }
 
-    /// Plays what is held once the first of it has waited `VoicePlayout.wait`, lead or not.
-    private func waitForLead() {
-        guard holdTimer == nil else { return }
+    /// Plays what is held when `VoicePlayout.due` comes, lead or not; nothing held, no wait.
+    private func holdUntilDue() {
+        let due = playout.due
+        guard due != holdDue else { return }
+        holdTimer?.cancel()
+        holdTimer = nil
+        holdDue = due
+        guard let due else { return }
         let generation = generation
         holdTimer = Task { [weak self] in
-            try? await Task.sleep(for: .seconds(VoicePlayout<Piece>.wait))
+            try? await Task.sleep(for: .seconds(max(0, due - ProcessInfo.processInfo.systemUptime)))
             guard !Task.isCancelled, let self else { return }
             holdTimer = nil
+            holdDue = nil
             guard generation == self.generation, let player, engine?.isRunning == true else { return playout.clear() }
             for piece in playout.release() { enqueue(piece.buffer, level: piece.level, on: player) }
         }
@@ -604,7 +634,39 @@ nonisolated final class VoiceInputProbe: @unchecked Sendable {
     private func dropHeld() {
         holdTimer?.cancel()
         holdTimer = nil
+        holdDue = nil
         playout.clear()
+        logEndedReply()
+    }
+
+    /// What the player still has to play, off its render position (`VoicePlayerClock.left`). A player that is not playing
+    /// starts its timeline again when it does.
+    private func playerLeft(_ player: AVAudioPlayerNode) -> TimeInterval? {
+        guard player.isPlaying else {
+            clock.restart()
+            return nil
+        }
+        return clock.left(rendered: player.renderedSeconds)
+    }
+
+    /// The reply that just ended, as it arrived (`VoiceReply`), into the call's log.
+    private func logEndedReply() {
+        guard let reply = playout.takeEnded() else { return }
+        Self.log.notice("voice: \(reply.logLine(lead: self.playout.leadNow), privacy: .public)")
+    }
+
+    /// The voice still to play is about to go (`what`: cut off by `clear` (the extension's word, Interrupt, a connection
+    /// that went), or dropped with a player): how much of it, and where it played. A cut-off while the loudspeaker plays
+    /// may be the voice's own echo taken for the user cutting in (#13963).
+    private func logCut(_ what: String) {
+        // A stopped engine has no render position: how much was left is unknown then, but something was if it had not
+        // all been heard.
+        let measured = engine?.isRunning == true ? player.flatMap { playerLeft($0) } : nil
+        let left = max(0, measured ?? 0)
+        guard left > 0 || playout.isHolding || (measured == nil && !queued.isEmpty) else { return }
+        let amount = measured == nil ? "an unknown amount" : "\(Int((left * 1000).rounded())) ms"
+        let route = Self.describe(AVAudioSession.sharedInstance().currentRoute)
+        Self.log.notice("voice: \(what, privacy: .public) with \(amount, privacy: .public) still in the player\(self.playout.isHolding ? " and more held" : "", privacy: .public) (\(route, privacy: .public), echo cancellation \(self.cancelsEcho, privacy: .public))")
     }
 
     /// Onto the player: the voice with its loudness, a cue without.
@@ -618,10 +680,13 @@ nonisolated final class VoiceInputProbe: @unchecked Sendable {
             }
             queued.append(level)
         }
+        let playing = player.isPlaying
+        if !playing { clock.restart() }
+        clock.scheduled(Double(buffer.frameLength) / buffer.format.sampleRate, rendered: playing ? player.renderedSeconds : nil)
         player.scheduleBuffer(buffer, completionCallbackType: .dataPlayedBack) { @Sendable [weak self] _ in
             Task { @MainActor in self?.played(generation, voice: voice) }
         }
-        if !player.isPlaying { player.play() }
+        if !playing { player.play() }
     }
 
     /// One buffer finished: the next one's loudness, or quiet when none is left.
@@ -687,7 +752,7 @@ nonisolated final class VoiceInputProbe: @unchecked Sendable {
             tearDown()
         } else {
             interruptedNow = true
-            dropQueued()
+            dropQueued("dropped by an interruption")
         }
         events?(.interrupted)
     }
@@ -704,7 +769,7 @@ nonisolated final class VoiceInputProbe: @unchecked Sendable {
             follow(route.changed(Self.snapshot(session), change, at: .now), why: Self.describe(reason))
         } else {
             // The system routes a call: the route is only followed, never moved.
-            Self.log.notice("voice: call route after \(Self.describe(reason), privacy: .public): \(Self.describe(session.currentRoute), privacy: .public)")
+            Self.log.notice("voice: call route after \(Self.describe(reason), privacy: .public): \(Self.describe(session), privacy: .public)")
         }
         // An engine the change stopped without telling (the configuration change normally does).
         routeChanged()
@@ -718,7 +783,7 @@ nonisolated final class VoiceInputProbe: @unchecked Sendable {
         guard let engine, !engine.isRunning else { return }
         do {
             try rewire(engine)
-            Self.log.notice("voice: audio route changed, microphone set up again (\(Self.describe(AVAudioSession.sharedInstance().currentRoute), privacy: .public))")
+            Self.log.notice("voice: audio route changed, microphone set up again (\(Self.describe(AVAudioSession.sharedInstance()), privacy: .public))")
         } catch {
             Self.log.notice("voice: the engine would not start again on the new route, building a new one")
             do {
@@ -755,7 +820,7 @@ nonisolated final class VoiceInputProbe: @unchecked Sendable {
             }
         }
         // Port kinds only, never device names (they can carry a person's name).
-        Self.log.notice("voice: route after \(why, privacy: .public): \(Self.describe(session.currentRoute), privacy: .public)\(plan == .keep ? "" : " (moved)", privacy: .public)")
+        Self.log.notice("voice: route after \(why, privacy: .public): \(Self.describe(session), privacy: .public)\(plan == .keep ? "" : " (moved)", privacy: .public)")
     }
 
     /// The session as `VoiceRoute` sees it (also the meeting's spoken answers, `MeetingSpeaker`).
@@ -785,7 +850,14 @@ nonisolated final class VoiceInputProbe: @unchecked Sendable {
         }
     }
 
-    private static func describe(_ route: AVAudioSessionRouteDescription) -> String {
+    /// The route as `describe(_:)` gives it, with how long after the player renders it is heard (#13963): the output
+    /// latency, which delays every completion, and the I/O buffer, which is how old a render position can be.
+    static func describe(_ session: AVAudioSession) -> String {
+        let latency = Int((session.outputLatency * 1000).rounded()), buffer = Int((session.ioBufferDuration * 1000).rounded())
+        return describe(session.currentRoute) + ", output latency \(latency) ms, I/O buffer \(buffer) ms"
+    }
+
+    static func describe(_ route: AVAudioSessionRouteDescription) -> String {
         "out " + route.outputs.map(\.portType.rawValue).joined(separator: "+")
             + ", in " + route.inputs.map(\.portType.rawValue).joined(separator: "+")
     }
@@ -803,4 +875,15 @@ nonisolated final class VoiceInputProbe: @unchecked Sendable {
         }
     }
 }
-#endif
+
+nonisolated extension AVAudioPlayerNode {
+    /// How far the player has rendered, in seconds on its own timeline since it started playing (it goes on through
+    /// silence): read off its last render cycle, so up to one I/O buffer old (#13963). Nil when it is not playing or has not
+    /// rendered yet.
+    var renderedSeconds: TimeInterval? {
+        guard isPlaying, let node = lastRenderTime, node.isSampleTimeValid,
+              let time = playerTime(forNodeTime: node), time.isSampleTimeValid, time.sampleRate > 0
+        else { return nil }
+        return max(0, Double(time.sampleTime) / time.sampleRate)
+    }
+}

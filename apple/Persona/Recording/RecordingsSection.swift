@@ -1,4 +1,3 @@
-#if os(iOS) || os(visionOS)
 import SwiftUI
 #if os(iOS)
 import AVFoundation
@@ -47,9 +46,7 @@ struct RecordingsSection: View {
         // in Knowledge's Meetings list, which All Meetings below opens.
         let recents = library.entries.filter { e in
             guard !(capturing && e.id == capture.recordingID), e.id != today else { return false }
-            #if os(iOS) || os(visionOS)
             if e.isDay { return RecordingStatusText.dayStillHere(days.cell(e.id).summary) }
-            #endif
             return RecordingStatusText.stillHere(e, sync: sync)
         }
         #if os(iOS)
@@ -285,7 +282,6 @@ struct RecordingStatusText: View {
         return true
     }
 
-    #if os(iOS) || os(visionOS)
     /// The same for a past all-day recording, whose state is its day's (`RecordingDayStatus.word`): it leaves the page
     /// once the hub has its text (synced, its recap ready, being written or failed). Listed until its summary is read.
     static func dayStillHere(_ summary: RecordingDaySummary?) -> Bool {
@@ -295,7 +291,6 @@ struct RecordingStatusText: View {
         default: return true
         }
     }
-    #endif
 
     static func status(_ entry: RecordingEntry, transcription: RecordingTranscription, sync: RecordingSync) -> (String, Color) {
         if entry.active {
@@ -1417,4 +1412,3 @@ private struct RecordingKeptRun: Identifiable {
     var to: Date
     var keep: RecordingKeep
 }
-#endif

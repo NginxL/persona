@@ -29,7 +29,7 @@ internal fun leftCaptures(before: List<ComposerAttachment>, now: List<ComposerAt
 /** Deletes a capture's file through the provider; anything that is not one of ours is left alone. Call off the main thread. */
 fun deleteCapture(context: Context, uri: String) {
     if (!isCaptureUri(uri, context.packageName)) return
-    runCatching { context.contentResolver.delete(Uri.parse(uri), null, null) }
+    val _ = runCatching { context.contentResolver.delete(Uri.parse(uri), null, null) }
 }
 
 /**
@@ -54,6 +54,6 @@ fun appLabel(context: Context): String =
 /** This app's page in the system settings, where its permissions are. */
 fun openAppSettings(context: Context) {
     val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", context.packageName, null))
-    runCatching { context.startActivity(intent) }
+    val _ = runCatching { context.startActivity(intent) }
         .recoverCatching { context.startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
 }

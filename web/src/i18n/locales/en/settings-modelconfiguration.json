@@ -80,6 +80,7 @@
   "permission_mode": "Permission mode",
   "permission_mode_inherit": "Use default · {mode}",
   "permission_mode_hint": "Leave on default to inherit from the category above or use the launcher's own default. Applies to new starts only.",
+  "permission_mode_hint_inbox": "Without a choice here, Inbox chats use Default permissions and never inherit Agents' Full access. Plan is unavailable because it blocks required Persona tools. Applies to new chats and stopped chats when they resume; running chats keep their mode.",
   "api_models": "Available models",
   "api_model_id": "Model ID",
   "api_model_hint": "Choose a discovered model or enter any model ID. Your edits are not saved until you choose Save.",
@@ -116,5 +117,7 @@
   "agents": "Agents",
   "usage_one": "Last 7 days: {calls} call · {tokens} tokens",
   "usage_other": "Last 7 days: {calls} calls · {tokens} tokens",
+  "usage_failures_one": "{failures} failed",
+  "usage_failures_other": "{failures} failed",
   "usage_detail": "Last 7 days (UTC): {input} input, {output} output, {cache_write} cache write and {cache_read} cache read tokens; failed calls: {failures}. The tokens shown are input + output + cache writes; cache reads are left out."
 }

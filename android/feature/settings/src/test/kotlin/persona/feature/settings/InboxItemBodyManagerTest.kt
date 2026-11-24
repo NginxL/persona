@@ -31,7 +31,7 @@ import persona.core.contracts.api.ExtensionViewSection
 import persona.core.contracts.api.ManagerPins
 import persona.core.designsystem.PersonaTheme
 import persona.core.navigation.InboxItemUiRoute
-import persona.feature.inbox.InboxItemKey
+import persona.core.inbox.InboxItemKey
 
 /** An extension-drawn inbox item's body is drawn and worked by the item's manager, under the item's id on the hub. */
 @RunWith(AndroidJUnit4::class)

@@ -61,7 +61,7 @@ Manifest fields:
 | `catalog.call` | `{source, tool, args?}` → `{text}` | Current catalog only; non-read-only or missing tools answer `not_read_only`; args is an object, default `{}` |
 | `tools.list` | `{}` → `{tools: [{name, description, input_schema}]}` | Read-only tools, names prefixed `<id>_` |
 | `tools.call` | `{name, args}` → `{text, images?}` | `images` (optional, #8484): pictures for the model after the text, `[{mime, data, caption?}]`; only on a hub whose `initialize` lists `tool_images`. See "Pictures in a tool's answer" below |
-| `thread.page` | `{thread, before?, limit}` → `{chat, messages, before?}` | One Inbox thread page, oldest first; empty before means latest, earlier pages use returned cursor; limit max 50. Fields `connector/threads.go`: `ThreadChat` / `ThreadMessage` / `ThreadMedia`… `chat.reply` is reply action with `{chat, text, reply_to}` |
+| `thread.page` | `{thread, before?, limit}` → `{chat, messages, before?}` | One Inbox thread page, oldest first; empty before means latest, earlier pages use returned cursor; limit max 50. Fields `connectorwire/threads.go`: `ThreadChat` / `ThreadMessage` / `ThreadMedia`… `chat.reply` is reply action with `{chat, text, reply_to}` |
 | `thread.media` | `{ref}` → `{mime, data}` | Base64 avatar / media bytes, max 4 MB. Ref immutable; hub persists, app caches forever. Changing avatars include version in ref |
 | `actions.list` | `{}` → `{tools: [{name, description, input_schema}]}` | Writes, `<id>_` prefix |
 | `actions.describe` | `{name, args}` → `{action: {name, visible}, summary}` | Phone card action / full content; visible = audience. No network. Error means invalid args, returned to caller without card |
@@ -126,6 +126,16 @@ Group-capable connectors submit each thread's new messages as a **batch awaiting
 - **Event with meta**: `group.append` returns ordinary thing, including migrated extra Lark block / `rule_tier`, plus required Inbox ID (program generates new IDs per rules) and program-owned meta (messages, etc.). Hub stores / returns verbatim to model / program, **never parses**. Context contains event text for AI twin; at / last from latest message. Hub writes by ID; model title / summary / tier, `triaged_by: "model"`. Fallback tier from `group.fallback` `rule_tier` (existing event uses returned thing `rule_tier`), program title, reason By Rules, `triaged_by: "rules"`; this version not resubmitted to model. Unchanged last means retransmission, no store / push.
 - **Old hubs**: before #1680, unknown group rejects **entire connector registration**, unknown capability, and `meta_description` prevents manifest load. Extension `engines.persona` must require hub build containing #1680 (`">=YYYYMMDDHHMM"`, build UTC time at merge), so old hubs reject install / upgrade rather than lose connector afterward. Development build 0 skips check.
 - **Future capabilities**: since #1680, unknown **extension-provided** connector capabilities log once per extension / capability, remove that capability, keep running. Built-in connectors remain strict. Future capability additions no longer drop entire connector on old hubs with #1680, but already deployed pre-#1680 hubs still do.
+
+### Call context (#13246)
+
+`tools.call`, `actions.describe` and `actions.do` also say where the call comes from, so a connector can apply limits of its own:
+
+- `track`: the calling conversation's track, its slug (`main` for the main track); absent when the hub cannot tell.
+- `track_kind`: the track's kind; absent when not known (the main track).
+- `categories`: the conversation's information categories (`health`, `finance`, `relationships`, `emotion`, `legal_id`; `docs/assistant/health.md` "Information categories"), `[]` for general. **Absent means not known** (an older hub, a turn not tagged yet): take it for sensitive.
+
+All three are optional and additive (no version change): a program that ignores them works as before. Whether the phone confirms a write stays the hub's decision, never the connector's. A connector built on `server/internal/connector/serve` reads them with `connector.CallContextOf(ctx)` inside `Call`, `Describe` and `Write`; an SDK program reads them from the params (`ConnectorCallParams`, `ConnectorDoParams`).
 
 ### Pictures in a tool's answer (#8484)
 

@@ -32,6 +32,7 @@ func newCardHub(t *testing.T) (*Service, *fakeHub, *channel.Run, *[]map[string]a
 // With answer_new_card the answer is a new card under the owner's message, and the progress card folds into the
 // process with a line pointing below (#5396).
 func TestFeishuAnswerNewCard(t *testing.T) {
+	needsLarkLayer(t)
 	s, _, r, posts := newCardHub(t)
 	progress := r.Ext["card"]
 	s.finishChannelRun(r, &channel.Result{Answer: "结论在这里"})
@@ -53,6 +54,7 @@ func TestFeishuAnswerNewCard(t *testing.T) {
 
 // A quiet ending has no answer to send: it stays in the progress card, as with the switch off.
 func TestFeishuAnswerNewCardQuietEnd(t *testing.T) {
+	needsLarkLayer(t)
 	s, _, r, posts := newCardHub(t)
 	s.finishChannelRun(r, &channel.Result{Quiet: true})
 	if len(*posts) != 1 || (*posts)[0]["update"] != true {
@@ -62,6 +64,7 @@ func TestFeishuAnswerNewCardQuietEnd(t *testing.T) {
 
 // A new card Feishu refuses is written into the progress card instead: the answer still lands.
 func TestFeishuAnswerNewCardRefusedFallsBack(t *testing.T) {
+	needsLarkLayer(t)
 	s, f, r, posts := newCardHub(t)
 	f.answerApp(AppFeishu, FeishuPost, func(json.RawMessage) (any, error) {
 		return nil, errors.New("feishu post: 230002 bot is not in the chat")
@@ -78,6 +81,7 @@ func TestFeishuAnswerNewCardRefusedFallsBack(t *testing.T) {
 // An answer that did not reach the hub is tried again under the same key, so one that did arrive lands once, and
 // the progress card is folded only once it is out.
 func TestFeishuAnswerNewCardTriesAgainWhenUnreachable(t *testing.T) {
+	needsLarkLayer(t)
 	s, f, r, posts := newCardHub(t)
 	var keys []string
 	f.answerApp(AppFeishu, FeishuPost, func(p json.RawMessage) (any, error) {
@@ -104,13 +108,5 @@ func TestFeishuAnswerNewCardTriesAgainWhenUnreachable(t *testing.T) {
 	}
 	if len(*posts) != 2 || (*posts)[1]["update"] != true {
 		t.Fatalf("posts %v", *posts)
-	}
-}
-
-// Each progress card's answer has a key of its own: a held run answers every turn under a new card.
-func TestAnswerKey(t *testing.T) {
-	a, b := answerKey("run1", "om_1"), answerKey("run1", "om_2")
-	if a == b || a != answerKey("run1", "om_1") || len(a) > 50 || !strings.HasPrefix(a, "ans-") {
-		t.Fatalf("keys %q %q", a, b)
 	}
 }

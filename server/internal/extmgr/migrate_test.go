@@ -31,7 +31,7 @@ func TestAMigratedBuiltinIsReadThroughItsSubscription(t *testing.T) {
 		t.Fatal(err)
 	}
 	items := []subscriptions.Item{{UID: "m1", Thread: "chat-1", Title: "From the subscription", Kind: "sub_message"}}
-	if err := store.CommitRun(ctx, subscriptions.RunCommit{Sub: sub, Revision: 1, Items: items, Now: now.Add(-30 * time.Second)}); err != nil {
+	if _, err := store.CommitRun(ctx, subscriptions.RunCommit{Sub: sub, Revision: 1, Items: items, Now: now.Add(-30 * time.Second)}); err != nil {
 		t.Fatal(err)
 	}
 	h.subs = subscriptions.New(h.subscriptionOptions(store))
@@ -102,19 +102,40 @@ func TestABuiltinSwitchesToItsDefaultSubscription(t *testing.T) {
 	if err := b.SetMigrated(ctx, c.ID(), false, subscriptions.Actor{ID: "device:phone"}); err != nil || viaOf().On {
 		t.Fatalf("switched back: %v %+v", err, viaOf())
 	}
-	if err := b.SetMigrated(ctx, "lark", true, subscriptions.Actor{}); err == nil {
+	if err := b.SetMigrated(ctx, "larkcli", true, subscriptions.Actor{}); err == nil {
 		t.Fatal("a source without a default switched")
 	}
-	// GitHub's default is known but withheld until the owner says (#6404): no switch, and switching on is refused.
-	if m := migrations["github"]; m.Recipe.Tool != subscriptions.InboxThingsTool || m.Recipe.Mode != wire.ConnectorSubscriptionModeThings || !withheld["github"] {
+	// GitHub's default is offered since iMessage's week on the owner's hub (#6404, #13599).
+	if m := migrations["github"]; m.Recipe.Tool != subscriptions.InboxThingsTool || m.Recipe.Mode != wire.ConnectorSubscriptionModeThings || withheld["github"] {
 		t.Fatalf("GitHub's default: %+v (withheld %v)", m.Recipe, withheld["github"])
 	}
-	withheld[c.ID()] = true // as GitHub's is: a default known, not offered
+	// Lark's default is known, withheld until GitHub has had its week (#13672): its extension's rows, ready-made through
+	// the generic inbox_things, as connector/proc's TestASwitchedChatSourceHandsCollectsRows reads them.
+	if m := migrations["lark"]; m.Connector != "lark" || m.Source != "lark" || !subscriptions.SameRecipe(m.Recipe, subscriptions.Recipe{
+		Mode: wire.ConnectorSubscriptionModeThings, Tool: subscriptions.InboxThingsTool, ItemsPath: "$.things",
+		Kind: wire.ConnectorSubscriptionKindSubMessage, GroupBy: wire.ConnectorSubscriptionGroupThread}) || !withheld["lark"] {
+		t.Fatalf("Lark's default: %+v (withheld %v)", m, withheld["lark"])
+	}
+	// A default known but withheld until the owner says (decision 6): no switch, and switching on is refused.
+	withheld[c.ID()] = true
+	defer delete(withheld, c.ID())
 	if v := viaOf(); v != nil {
 		t.Fatalf("a withheld default's switch is offered: %+v", v)
 	}
 	if err := b.SetMigrated(ctx, c.ID(), true, subscriptions.Actor{}); err == nil {
 		t.Fatal("a withheld default switched on")
+	}
+	// One switched on before it was withheld keeps its switch, to switch back.
+	delete(withheld, c.ID())
+	if err := b.SetMigrated(ctx, c.ID(), true, subscriptions.Actor{}); err != nil {
+		t.Fatal(err)
+	}
+	withheld[c.ID()] = true
+	if v := viaOf(); v == nil || !v.On {
+		t.Fatalf("a withheld default switched on lost its switch: %+v", v)
+	}
+	if err := b.SetMigrated(ctx, c.ID(), false, subscriptions.Actor{}); err != nil || viaOf() != nil {
+		t.Fatalf("a withheld default switched back: %v %+v", err, viaOf())
 	}
 	delete(withheld, c.ID())
 	if withheld["imessage"] {
@@ -164,7 +185,7 @@ func TestASwitchedSourceShowsItsSubscriptionsReads(t *testing.T) {
 		} else {
 			next.RunState, next.Error, next.FailCount = subscriptions.StateFailing, p, next.FailCount+1
 		}
-		if err := store.CommitRun(ctx, subscriptions.RunCommit{Sub: next, Revision: cur.Revision, Now: at}); err != nil {
+		if _, err := store.CommitRun(ctx, subscriptions.RunCommit{Sub: next, Revision: cur.Revision, Now: at}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -226,7 +247,7 @@ func TestASwitchedSourceKeepsItsBuiltinsAbilities(t *testing.T) {
 	row := connector.InboxThing{Thread: "chat:C1", Kind: "mention", Title: "Made-up: the plan", Last: "m7", At: now.Add(-2 * time.Minute)}
 	raw, _ := json.Marshal(row)
 	items := []subscriptions.Item{{UID: "t:1", Thread: row.Thread, Title: row.Title, Kind: row.Kind, Thing: raw}}
-	if err := store.CommitRun(ctx, subscriptions.RunCommit{Sub: sub, Revision: 1, Items: items, Now: now.Add(-30 * time.Second)}); err != nil {
+	if _, err := store.CommitRun(ctx, subscriptions.RunCommit{Sub: sub, Revision: 1, Items: items, Now: now.Add(-30 * time.Second)}); err != nil {
 		t.Fatal(err)
 	}
 	h.subs = subscriptions.New(h.subscriptionOptions(store))

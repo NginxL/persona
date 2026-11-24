@@ -95,7 +95,6 @@ struct TabActivityTests {
     }
 }
 
-#if os(iOS)
 /// The helpers on a real view: a page that stays in the window (the shell's hidden page) still has its work cancelled.
 @MainActor
 struct TabActiveTaskTests {
@@ -263,4 +262,3 @@ struct TabActiveTaskTests {
         #expect(calls.log == ["start"])
     }
 }
-#endif

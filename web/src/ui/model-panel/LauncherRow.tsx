@@ -1,7 +1,7 @@
 // A launcher summary stays visible when its model rows are folded (#10249).
 import { t } from "../../i18n";
 import { agentName } from "../../lib/agent-kind";
-import type { PanelProvider, PanelState } from "../../lib/model-panel";
+import { modelCount, type PanelProvider, type PanelState } from "../../lib/model-panel";
 import { weeklyQuota, quotaReset, type LauncherQuotaAnswer } from "../../lib/quota";
 import { cx } from "../atoms";
 import { Icon } from "../icons";
@@ -29,17 +29,19 @@ export function LauncherRow({
   const quota = weeklyQuota(answer);
   const current = state.current?.provider === p.id;
   const why = p.unavailable || p.locked;
+  const label = p.name;
+  const named = p.idNote ? `${label} (${p.idNote})` : label;
   const status = p.status && p.status !== why ? p.status : undefined;
-  const detail = [
-    agentName(p.engine, p.engineLabel),
-    p.defaultModel || t("chat-modelpill.default_model"),
-    p.models !== null &&
-      t("ui-modelpanel.model_count", {
-        count: p.models.filter((m) => !m.providerDefault).length,
-      }),
-  ]
-    .filter(Boolean)
-    .join(" · ");
+  // the launcher the chat runs on says so and no more: its model is on the pill, in the header and lit in its list
+  const detail = current
+    ? ""
+    : [
+        agentName(p.engine, p.engineLabel),
+        p.defaultModel || t("chat-modelpill.default_model"),
+        p.models !== null && t("ui-modelpanel.model_count", { count: modelCount(p.models) }),
+      ]
+        .filter(Boolean)
+        .join(" · ");
   const quotaText = quota
     ? [
         t("ui-modelpanel.weekly_left", {
@@ -56,8 +58,9 @@ export function LauncherRow({
       <button
         type="button"
         data-panel-launcher={p.id}
-        aria-label={p.name}
-        title={p.idNote ? `${p.name} (${p.idNote})` : p.name}
+        aria-label={label}
+        aria-description={why || undefined}
+        title={why ? `${named}: ${why}` : named}
         aria-expanded={expanded}
         disabled={frozen}
         onClick={onToggle}
@@ -70,12 +73,16 @@ export function LauncherRow({
         <ProviderMark engine={p.engine} label={p.engineLabel} size={16} />
         <span className="min-w-0 flex-1">
           <span className="flex min-w-0 items-center gap-1.5 text-meta font-medium">
-            <span className="min-w-0 truncate">{p.name}</span>
+            <span className="min-w-0 truncate">{label}</span>
+            {/* folded, why it can't take a pick is a mark and a tooltip, not a line under every such launcher (#12315) */}
+            {why && !expanded && <Icon name="info" size={12} className="shrink-0 text-ink-3" />}
             {(current || p.isDefault) && <span className="shrink-0 text-submeta text-ink-3">{current ? t("ui-modelpanel.current_launcher") : t("ui-modelpanel.default_launcher")}</span>}
           </span>
-          <span className="block truncate text-submeta text-ink-3" title={detail}>
-            {detail}
-          </span>
+          {detail && (
+            <span className="block truncate text-submeta text-ink-3" title={detail}>
+              {detail}
+            </span>
+          )}
           {p.idNote && <span className="block truncate font-mono text-submeta text-ink-3">{p.idNote}</span>}
           {p.alsoNote && <span className="block truncate text-submeta text-ink-3">{p.alsoNote}</span>}
         </span>
@@ -89,9 +96,9 @@ export function LauncherRow({
         )}
         <Icon name="chevron" size={12} className={cx("shrink-0 text-ink-3", expanded && "rotate-180")} />
       </button>
-      {(why || status || p.error) && (
+      {((why && expanded) || status || p.error) && (
         <div className="relative z-[1] px-3 pb-1 text-submeta text-ink-3">
-          {why && (
+          {why && expanded && (
             <div className="break-words">
               {why}{" "}
               {p.unavailable && onHelp && (

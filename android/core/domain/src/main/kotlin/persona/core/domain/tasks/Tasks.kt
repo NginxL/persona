@@ -17,6 +17,7 @@ import persona.core.contracts.PlanTask
 import persona.core.contracts.TaskPlan
 import persona.core.contracts.Todo
 import persona.core.contracts.draftPlaceholder
+import persona.core.contracts.parseTime
 import persona.core.domain.lines.ApiErrorInfo
 import persona.core.domain.lines.ChatLine
 import persona.core.domain.lines.ToolCall
@@ -50,12 +51,13 @@ enum class TaskState(val label: CoreText, val rank: Int) {
     Failed(CoreText.of(Key.TaskFailed), 4);
 
     companion object {
-        /** [interrupted]: one of its agents stopped on a model API error (`Session.interrupted`). */
-        fun of(todo: Todo, agents: List<AgentState>, interrupted: Boolean = false): TaskState = when {
+        /** [interrupted]: one of its agents stopped on a model API error (`Session.interrupted`). A current working or
+         *  [waiting] replacement supersedes that old interruption. */
+        fun of(todo: Todo, agents: List<AgentState>, interrupted: Boolean = false, waiting: Boolean = false): TaskState = when {
             todo.doneAt != null && !todo.startError.isNullOrBlank() -> Failed
             todo.doneAt != null -> Done
             AgentState.NeedsYou in agents -> NeedsYou
-            interrupted && AgentState.Working !in agents && todo.supervision?.state != "parked" -> Interrupted
+            interrupted && AgentState.Working !in agents && !waiting && todo.supervision?.state != "parked" -> Interrupted
             AgentState.Unread in agents -> Unread
             AgentState.Working in agents -> Working
             agents.isNotEmpty() -> Followup
@@ -188,10 +190,17 @@ object AssistantLines {
     /**
      * The chat's lines (in reading order) with the feed among them — each item at the end of the exchange it happened
      * in, before the first message sent after it — each turn's quick results after its work line, and a day line over
-     * the first line of each day.
+     * the first line of each day. While older transcript pages remain unloaded, [earliest] (the oldest loaded item's
+     * time, matching web `displayLines` `from`) holds back older feed items and their day lines until those pages load.
      */
-    fun lines(lines: List<ChatLine>, feed: List<FeedItem>, zone: ZoneId = ZoneId.systemDefault()): List<ChatLine> {
-        val out = ArrayList<ChatLine>(lines.size + feed.size)
+    fun lines(
+        lines: List<ChatLine>,
+        feed: List<FeedItem>,
+        zone: ZoneId = ZoneId.systemDefault(),
+        earliest: Instant? = null,
+    ): List<ChatLine> {
+        val visible = if (earliest == null) feed else feed.filter { time(it.at)?.isBefore(earliest) != true }
+        val out = ArrayList<ChatLine>(lines.size + visible.size)
         var next = 0
         var pending = emptyList<ChatLine>()
         fun flush() { out += pending; pending = emptyList() }
@@ -200,7 +209,7 @@ object AssistantLines {
             flush()
             val at = inputTime(line)
             if (at != null) {
-                while (next < feed.size && (time(feed[next].at) ?: Instant.EPOCH) < at) out += feedLine(feed[next++])
+                while (next < visible.size && (time(visible[next].at) ?: Instant.EPOCH) < at) out += feedLine(visible[next++])
             }
             out += line
             if (line is ChatLine.Work) {
@@ -209,7 +218,7 @@ object AssistantLines {
             }
         }
         flush()
-        while (next < feed.size) out += feedLine(feed[next++])
+        while (next < visible.size) out += feedLine(visible[next++])
         return days(out, zone)
     }
 
@@ -249,7 +258,7 @@ object AssistantLines {
         else -> null
     }
 
-    fun time(iso: String?): Instant? = iso?.let { runCatching { Instant.parse(it) }.getOrNull() }
+    fun time(iso: String?): Instant? = parseTime(iso)
 
     /** "Today · Tue, Nov 3", "Yesterday · …", or the date: which one, and whether the year shows (the app words it). */
     fun dayLabel(date: LocalDate, today: LocalDate = LocalDate.now()): DayLabel = DayLabel(date, when (date) {

@@ -44,6 +44,7 @@ import persona.core.navigation.AppTab
 import persona.core.navigation.ChatRoute
 import persona.core.navigation.ConversationKind
 import persona.core.navigation.Navigator
+import persona.core.inbox.*
 
 /**
  * An inbox item's detail: source-specific meta and "View original", the current state, the suggestion, ✦ Summary, Recap,

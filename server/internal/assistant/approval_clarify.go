@@ -141,8 +141,10 @@ func (s *Service) waitPreparedCard(ctx context.Context, ix proto.Interaction, op
 // awaitPrepared releases only the original tool call on clarification. Final
 // resolution, expiry and replacement still finish the interaction normally.
 // Every waiter listens to the broadcast, never the one-shot p.done: a snapshot
-// waiter cannot steal the original caller's terminal result.
-func (s *Service) awaitPrepared(ctx context.Context, p *pending) (proto.Resolution, error) {
+// waiter cannot steal the original caller's terminal result. An auxiliary
+// snapshot waiter's cancellation detaches only that waiter; the original
+// caller owns the prepared operation's cancellation lifecycle.
+func (s *Service) awaitPrepared(ctx context.Context, p *pending, auxiliary bool) (proto.Resolution, error) {
 	s.fleet.mu.Lock()
 	if p.resolved == nil {
 		p.resolved = make(chan struct{})
@@ -177,7 +179,7 @@ func (s *Service) awaitPrepared(ctx context.Context, p *pending) (proto.Resoluti
 		s.fleet.mu.Lock()
 		settled := p.claimed || p.prepared.terminal
 		orphaned := false
-		if !settled && p.ix.Resumable && s.fleet.interactions[p.ix.ID] == p {
+		if !settled && !auxiliary && p.ix.Resumable && s.fleet.interactions[p.ix.ID] == p {
 			orphaned = s.orphanLocked(p)
 		}
 		s.fleet.mu.Unlock()
@@ -187,6 +189,11 @@ func (s *Service) awaitPrepared(ctx context.Context, p *pending) (proto.Resoluti
 			// card that has already finished.
 			<-resolved
 			return terminal()
+		}
+		if auxiliary {
+			// The snapshot stopped asking for this card. Its auxiliary waiter
+			// leaves, but the original operation and owner card remain pending.
+			return proto.Resolution{Dismiss: true}, nil
 		}
 		if orphaned {
 			// Match the ordinary hook waiter: a transient disconnect does not

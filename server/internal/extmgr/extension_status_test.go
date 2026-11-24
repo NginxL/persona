@@ -129,7 +129,7 @@ func TestExtensionMarketAndSandboxStatusLanguage(t *testing.T) {
 			t.Fatalf("market %s: HTTP %d %v", l, code, out)
 		}
 		state := h.extensions.sandboxOf(i18n.With(context.Background(), l), p)
-		want := i18n.T(l, "hub-extension_sandbox.unavailable", i18n.Args{"why": i18n.T(l, "extension-status.sandbox_no_bwrap")})
+		want := i18n.T(l, "hub-extension_sandbox.start_blocked", i18n.Args{"why": i18n.T(l, "extension-status.sandbox_no_bwrap")})
 		if state.Why != want {
 			t.Fatalf("sandbox %s: %q; want %q", l, state.Why, want)
 		}

@@ -11,12 +11,12 @@ jobs:
   server:
     name: Server ${{ matrix.shard }}
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       max-parallel: 2
       matrix:
-        shard: [node, managers, other, build]
+        shard: [node, managers, other, build, core-node, core-managers, core-other]
     env:
       CI_SERVER_SHARD: ${{ matrix.shard }}
     steps:
@@ -41,9 +41,26 @@ jobs:
             server-go-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-${{ matrix.shard }}-${{ hashFiles('server/go.sum', 'sdk/go/go.sum') }}-
             server-go-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-${{ matrix.shard }}-
       - uses: oven-sh/setup-bun@v2
-        if: matrix.shard == 'other'
+        if: matrix.shard == 'other' || matrix.shard == 'core-other'
         with:
           bun-version: '1.4.2'
+      - name: Load the hub AppArmor profile on the hosted test VM
+        if: matrix.shard == 'other'
+        shell: bash
+        run: |
+          security=$(docker info --format '{{json .SecurityOptions}}')
+          if [[ "$security" == *apparmor* ]]; then
+            if ! command -v apparmor_parser >/dev/null; then
+              sudo apt-get update -qq
+              sudo apt-get install -y --no-install-recommends apparmor
+            fi
+            profiles=(deploy/docker/*.apparmor)
+            if [ "${#profiles[@]}" -ne 1 ] || [ ! -f "${profiles[0]}" ]; then
+              printf 'Expected one regular AppArmor profile file, found %s candidates\n' "${#profiles[@]}" >&2
+              exit 1
+            fi
+            sudo apparmor_parser -r "${profiles[0]}"
+          fi
       - name: Server checks
         run: scripts/ci/server.sh "$CI_SERVER_SHARD"
       - name: Save shard Go caches

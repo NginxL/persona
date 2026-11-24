@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import argparse
+import concurrent.futures
 import json
 import os
 from pathlib import Path
@@ -7,10 +8,12 @@ import socket
 import subprocess
 import sys
 import tempfile
+import threading
+import time
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from run import run
+from run import resolve, terminate
 sys.path.insert(0, str(ROOT / "scripts" / "test"))
 from server_test_env import clean_environment
 
@@ -28,11 +31,45 @@ def select_suites(suites, index=0, count=1):
     return sorted(suites)[index::count]
 
 
+# Each suite is its own python process and most wait on subprocesses, sockets or files, not the CPU: run in turn they
+# took over 900 s on a loaded CI machine, CI's limit for this step, while their CPU time is a fraction of that. Run several
+# at once, each with its own HOME, and print each suite's output in one block when it ends so logs stay readable.
+DEFAULT_JOBS = 6
+SUITE_SECONDS = 120
+
+
+def run_suite(suite, home_root, lock):
+    """Run one suite with captured output; print its block whole; return (label, exit code)."""
+    label = str(suite.relative_to(ROOT))
+    home = tempfile.mkdtemp(prefix="h-", dir=home_root)
+    env = dict(os.environ, HOME=home)
+    started = time.monotonic()
+    with tempfile.TemporaryFile(dir=home_root) as output:
+        process = subprocess.Popen(resolve([sys.executable, "-B", "-m", "unittest", "-q", suite.stem]), cwd=suite.parent,
+                                   env=env, stdout=output, stderr=subprocess.STDOUT, start_new_session=True)
+        try:
+            code = process.wait(timeout=SUITE_SECONDS)
+            verdict = "PASS" if code == 0 else "FAIL"
+        except subprocess.TimeoutExpired:
+            terminate(process)
+            code, verdict = 124, "TIMEOUT"
+        output.seek(0)
+        text = output.read().decode("utf-8", errors="replace")
+    elapsed = time.monotonic() - started
+    with lock:
+        print(f"::group::{label}\n{text}", end="" if text.endswith("\n") or not text else "\n", flush=True)
+        print(f"::endgroup::\n{verdict} {label} ({elapsed:.1f}s, exit {code})", flush=True)
+    return label, (code if code >= 0 else 128 - code)
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--shard-index", type=int, default=int(os.environ.get("CI_PYTHON_SHARD_INDEX", "0")))
     parser.add_argument("--shard-count", type=int, default=int(os.environ.get("CI_PYTHON_SHARD_COUNT", "1")))
+    parser.add_argument("--jobs", type=int, default=int(os.environ.get("CI_PYTHON_JOBS", str(DEFAULT_JOBS))))
     args = parser.parse_args()
+    if args.jobs < 1:
+        parser.error("--jobs must be positive")
     found = [path for path in ROOT.joinpath("scripts").rglob("test_*.py") if "node_modules" not in path.parts]
     suites = [path for path in found if is_suite(path)]
     if args.shard_index == 0:
@@ -61,11 +98,11 @@ def main():
         finally:
             for reservation in reservations:
                 reservation.close()
-        for suite in suites:
-            os.chdir(suite.parent)
-            label = str(suite.relative_to(ROOT))
-            if run(label, 120, [sys.executable, "-B", "-m", "unittest", "-q", suite.stem]):
-                failed.append(label)
+        lock = threading.Lock()
+        with concurrent.futures.ThreadPoolExecutor(max_workers=args.jobs) as pool:
+            for label, code in pool.map(lambda suite: run_suite(suite, home, lock), suites):
+                if code:
+                    failed.append(label)
     print(f"Python suites: {len(suites)}; failed: {len(failed)}")
     for suite in failed:
         print(f"FAIL {suite}")

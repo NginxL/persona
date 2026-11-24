@@ -13,39 +13,6 @@ import (
 	"github.com/nwverse/persona/server/internal/rpc"
 )
 
-// Catalog is an optional collection of subscribable read-only sources. Find it
-// through ReadCatalog and dispatch through CallCatalog, which also serve older
-// connectors' declared ReadTools without exposing any Actions.
-type Catalog interface {
-	Catalog(context.Context) ([]CatalogSource, error)
-	CatalogCall(context.Context, CatalogQuery) (string, error)
-}
-
-// Catalog payloads share the schema-generated SDK types with extension authors.
-type (
-	CatalogSource      = wire.ConnectorCatalogSource
-	CatalogTool        = wire.ConnectorCatalogTool
-	CatalogAnnotations = wire.ConnectorCatalogAnnotations
-	SubscriptionRecipe = wire.ConnectorSubscriptionRecipe
-	SubscriptionFields = wire.ConnectorSubscriptionFields
-	CatalogResult      = wire.ConnectorCatalog
-)
-
-// ReadJSON is optional for a connector whose catalog comes from its ReadTools (docs/extensions/subscriptions.md
-// "Existing connectors"). CallCatalog calls CallJSON first: a read tool answers subscriptions with JSON, a list of
-// items with stable ids that they can follow item by item, while the models keep the text Call gives them. ok is
-// false for a tool without a JSON answer, and CallCatalog calls Call instead. It is not a capability: nothing else
-// asks for it.
-type ReadJSON interface {
-	CallJSON(ctx context.Context, name string, args json.RawMessage) (out json.RawMessage, ok bool, err error)
-}
-
-type CatalogQuery struct {
-	Source string          `json:"source"`
-	Tool   string          `json:"tool"`
-	Args   json.RawMessage `json:"args,omitempty"`
-}
-
 // ReadCatalog validates the catalog a connector declares. Without that optional
 // capability, its existing read tools form one source whose stable id is the
 // connector id, with their <id>_ prefix removed from the short names.

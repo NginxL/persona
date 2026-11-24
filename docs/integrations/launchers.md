@@ -292,6 +292,10 @@ pi, the Cursor CLI (`cursor-agent`) and the Antigravity CLI (`agy`) are agents t
 
 **agy's permission mode is its start's.** An agy start runs in Allow all (`--dangerously-skip-permissions`) unless it names another mode: `acceptEdits` passes `--mode accept-edits`, `auto` passes `--mode auto`, and `default` passes no flag (agy's own approval). Like Claude Code, an agy worker from `agent_start` or `task_plan` gets Allow all when nothing names a mode (`startAgent.allowAll`), since nobody at the pane answers agy's approval prompt; a mode the call or plan names stays. The row reports the mode it started in as `permission_mode`, and a herdr restart resumes it with the same flag. The mode, effort and model cannot be changed afterwards: `session.modes` on an agy or Cursor pane is refused with `modes_unsupported` (409) and no key reaches the pane, and their rows say `capabilities.modes: false`, so no client offers the chips. agy cycles its own modes with shift+tab, but its footer is not Claude Code's and Allow all is a start flag outside that cycle, so the node does not drive it. Antigravity's runtime (`agy acp`, the companion conversation) keeps its own mode switch.
 
+A managed Antigravity launcher with a key (`GOOGLE_GEMINI_BASE_URL` / `GEMINI_API_KEY`) also decides how the Antigravity companion (Agents without a terminal, agy as the assistant, the model list) signs in: the node gives the companion that launcher's variables and `PERSONA_AGY_MODEL_PROVIDER=gemini`, and the companion then uses the Gemini API key provider instead of a Google account (`docs/integrations/runtimes.md`, "Gemini API key provider", #13762). With several such launchers the first by name is used (fetched ahead whatever its delivery, #13871), and removing the key (or the launcher) restarts the companion on the sign-in again.
+
+**Creating one** (`POST /api/v1/launchers`, a full-device token): `{"kind": "launcher", "agent": "agy", "name": "agy-gw", "base_url": "https://<gateway address>", "api_key": "<key>", "model": "<an agy model id the gateway serves>"}`. `model` is required (it is the launcher's default; pick one from `agy models`, such as `gemini-4-neon-high`), `auth` is not used (agy sends the key in `x-goog-api-key` itself), and `name` may be left out. The key is stored sealed and never sent back. A herdr pane start or resume of that launcher types `personad launch agy-gw …`, which fetches the launcher's `GOOGLE_GEMINI_BASE_URL` / `GEMINI_API_KEY` from the node (launch key, as for a managed Claude launcher) and execs `agy --settings '{"modelProvider":"gemini"}' …`; the key is in no typed line, no argument and no resume command. An `--settings` the pane's own arguments carry is kept as it is.
+
 For herdr starts, the Antigravity model picker reads the local launcher's `models` output and uses the standard catalog cache and refresh. Picking an effort passes `--effort` with one of `low`, `medium`, `high`, `xhigh` or `max`. Leaving an override unset uses the launcher's default. pi and Cursor keep their own effort.
 
 The first message is never typed into the pane:
@@ -302,7 +306,7 @@ The first message is never typed into the pane:
 
 Neither keeps token counts the node can read, so their usage is not on the token calendar (`docs/server/machines.md`, "Token usage"). A herdr restart starts Cursor again without a session. Pi's resume names its session (`pi --session`). Pi runs with `--approve` on start and resume, so a directory with project-local files does not stop it at a Trust prompt nobody answers (`docs/integrations/pi.md`, "Project trust"). An agy start answers agy's folder-trust dialog ("Do you trust the contents of this project?") by trusting the folder the start chose, as Claude's and Codex's starts do, before its first message goes in; the watch is bounded, and a start with no dialog types nothing extra (`server/internal/node/agytrust.go`, #11424). Resuming one of these sessions from the phone with `session.start` is refused (`work_agent_resume`): a stopped pi resumes in its own herdr tab when the phone sends it a message (`docs/integrations/pi.md`), and the others are resumed on the computer.
 
-**Antigravity CLI conversation history and restore.** Run `herdr integration install antigravity-cli` on the computer that runs agy. Once Persona verifies the conversation ID herdr reports for the pane, it reads that conversation's local history. On a herdr restart, a Persona-started pane uses `agy --conversation <id>` to reopen the verified conversation and preserves the selected model. Until Persona has a verified ID, the pane restores with `agy` and the original `--model` option if set, starting a fresh conversation. The phone can still send messages, interrupt, and use the terminal while it waits for the conversation.
+**Antigravity CLI conversation history and restore.** Persona's own agy hooks (installed by the node; see `personad node doctor`, line `agy-hooks`) or `herdr integration install antigravity-cli` report the pane's conversation. Once Persona verifies that conversation ID, it reads that conversation's local history. On a herdr restart, a Persona-started pane uses `agy --conversation <id>` to reopen the verified conversation and preserves the selected model. Until Persona has a verified ID, the pane restores with `agy` and the original `--model` option if set, starting a fresh conversation. The phone can still send messages, interrupt, and use the terminal while it waits for the conversation.
 
 **The Cursor CLI on a Mac over SSH.** `cursor-agent` keeps its sign-in in the macOS keychain. A pane opened inside an SSH session (or by a launchd job that is not the GUI user's) finds the keychain locked and asks for it, so the agent never becomes ready and the start fails. Run it in the GUI session: herdr itself started there (the node service of a logged-in user), not `ssh mac cursor-agent`. The same applies to anything else the CLI reads from the keychain.
 
@@ -757,3 +761,75 @@ A launcher whose provider reports a prepaid balance rather than an allowance win
   what the label covers, so a client can add entries up: the iPhone's Usage widget shows today's money as the sum of the
   `day` entries' `cost_usd` over the launchers that have a gateway, and no money when none says (`docs/apple/home-widgets.md`).
   Fake hub's `cc_main` and `cc_team` carry quota from two example gateways (`示例网关`, “Example gateway,” and `示例中转`, “Example relay”) for screenshots.
+
+
+## Model request attribution
+
+Gateway accounting can opt in to source headers with `PERSONA_MODEL_SOURCE_HOSTS`. Its default is empty: Persona
+adds no source headers to any destination. Set it in the service environment of the hub/assistant manager and every
+node that makes model requests, for example:
+
+```sh
+PERSONA_MODEL_SOURCE_HOSTS='gateway.example.com,*.relay.example.com'
+```
+
+Entries are comma-separated hostnames, without a scheme, port or path. Exact names match only that host;
+`*.relay.example.com` matches subdomains at any depth, but not `relay.example.com` itself. Matching ignores hostname
+case and the destination port. A bare `*` is unsupported. Use only your gateway hosts; official vendor addresses
+must stay outside the allowlist. Restart the affected services and their model sessions after changing it so existing
+processes and restored terminal commands do not retain an earlier environment or generated settings.
+
+Persona checks the effective Base URL/provider address, never the launcher name. On an allowed destination it adds:
+
+| Header | Value |
+| --- | --- |
+| `X-Persona-Role` | `main` for interactive main/side chats; `leader` for direction conversations; `routine` for scheduled runs and their conversations; `task_agent` for work Agents; `background` for sorting, knowledge helpers, supervision and model health probes |
+| `X-Persona-Todo` | Linked to-do ID, when known at process start (an `agent_start` makes its to-do before the start, so its Agent names it) |
+| `X-Persona-Routine` | Scheduled-task ID, when known |
+| `X-Persona-Session` | Persona session ID, when known at process start/resume |
+
+Persona's own gateway reads for extensions (quota and usage through the hub or a node) and provider tests and model
+lists are `background`. Only role enums and validated IDs enter these fields. A routine delivered into an interactive conversation has the
+routine's accounting role for that run; the next interactive message restores the conversation's role. Manager-owned
+records supply the metadata on starts, sends and autonomous resumes. Source changes participate in process reuse,
+and node state preserves attribution through the manager's database boundary.
+
+Claude Code uses newline-separated `Name: Value` pairs in `ANTHROPIC_CUSTOM_HEADERS`. Persona merges its reserved
+source fields into the effective existing headers in a generated, private per-start settings file, preserving other
+headers and settings. The generated settings pin the verified gateway URL with the headers, including for terminal
+restores; user launcher/configuration files are never edited. An unknown endpoint or a launcher whose dynamic
+settings cannot be read is skipped. Administrator-enforced settings can supersede these generated settings.
+
+Codex uses a final CLI helper after normal shell launcher expansion, or after a managed provider is resolved. It adds
+per-invocation `-c` overrides for the selected custom provider's `env_http_headers`. Existing literal headers are carried
+in environment bindings too, so credentials never enter the new arguments. Authentication, provider URL and unrelated
+headers stay intact. These local configuration overrides keep attribution on that process rather than a shared daemon.
+A terminal's shell has its engine's environment, not the node's, so the node hands its allowlist to that helper in the
+start file (`codex-start`) or in its answer to `personad launch`; the shell need not export `PERSONA_MODEL_SOURCE_HOSTS`.
+Some Codex traffic cannot carry the fields: the built-in `openai` provider ignores ordinary provider header overrides;
+explicit remote/desktop app-servers and external runtimes own their own HTTP transport; project-level provider choices
+are skipped because only Codex knows whether it trusts that project configuration. Unknown/unreadable provider
+configuration, compact `-c...` / `-p...` options and legacy administrator provider overlays are also skipped.
+Use a Persona-managed or ordinary custom Responses provider on a local CLI when attribution is required. A new Codex session's ID is allocated after startup, so its initial process may omit
+`X-Persona-Session`; a resume with a known ID can include it.
+
+Persona does not add source headers to Antigravity (`agy`) Agent requests. Managed launchers with a Gemini API key
+select `modelProvider: gemini` by default. In agy 1.5.10, both the CLI and ACP ignored `AGY_LLM_GATEWAY_HEADERS`
+when sending generation requests to `GOOGLE_GEMINI_BASE_URL`. To check attribution, inspect a
+`streamGenerateContent` POST in the gateway log. A model catalog GET can carry headers that generation omits.
+
+Antigravity's Enterprise Gateway can send operator-configured headers on generation requests. Its headers apply
+to the whole process. Persona's ACP companion shares one process across ordinary work Agents, so setting a task ID
+there would label other Agents' requests with the same ID. For a terminal Agent, an allowlist check would need
+the effective gateway destination because administrator settings can override the URL independently of the headers.
+See Google's [Enterprise Gateway configuration and precedence](https://docs.cloud.google.com/gemini/enterprise/docs/ai-developer-tools/deploy-enterprise-gateway#settings-precedence).
+
+Direct Messages, Responses and Chat Completions helpers use `background`, including helpers sent through a node.
+Cross-origin redirects strip all source fields, even when the next origin is also allowlisted. A gateway should also
+strip these fields before forwarding a request to its vendor.
+
+After deployment, inspect gateway ingress logs for one interactive main chat, one direction conversation, one scheduled
+run, one work Agent from each supported launcher and one background helper. Check the role and available IDs, without
+logging prompts or credentials. Confirm that direct official-vendor requests and an empty allowlist have no source
+headers, and that vendor-bound gateway egress has none. This repository change neither deploys the configuration nor
+changes gateway accounting/enforcement.

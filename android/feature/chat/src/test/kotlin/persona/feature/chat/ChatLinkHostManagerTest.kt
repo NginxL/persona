@@ -62,15 +62,15 @@ import persona.core.designsystem.LocalChromeInsets
 import persona.core.designsystem.PersonaTheme
 import persona.core.designsystem.Tokens
 import persona.feature.inbox.InboxRepository
-import persona.feature.inbox.InboxSnapshot
-import persona.feature.inbox.LarkContentSource
-import persona.feature.inbox.LarkConversation
-import persona.feature.inbox.LarkPart
+import persona.core.inbox.InboxSnapshot
+import persona.core.inbox.LarkContentSource
+import persona.core.inbox.LarkConversation
+import persona.core.inbox.LarkPart
 import persona.feature.inbox.LocalInboxRepository
 import persona.feature.inbox.ManagerLinks
-import persona.feature.inbox.ReplyDraft
-import persona.feature.inbox.ReplyRequest
-import persona.feature.inbox.ReplyTarget
+import persona.core.inbox.ReplyDraft
+import persona.core.inbox.ReplyRequest
+import persona.core.inbox.ReplyTarget
 
 /** A document another manager's item page opened natively is read as that manager, and so is a document linked inside it. */
 @RunWith(AndroidJUnit4::class)

@@ -165,10 +165,7 @@ it.each([false, true])("hands text to a compatible alias inline (follow default:
   launchers = [{ name: "work", agent_type: "traex" }];
   extra = followDefault ? { default: { provider: "work" } } : {};
   await open();
-  const launch = [...document.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent?.trim() === t("todos.launch_and_hand"))!;
-  await act(async () => launch.click());
-  await act(async () => vi.advanceTimersByTimeAsync(0));
-  const starts = requests.filter((r) => r.path === "/sessions" && r.init.method === "POST");
+  const starts = await launchHandoff();
   expect(starts).toHaveLength(1);
   expect(starts[0].init.json).toMatchObject({ launcher: "work", agent_type: "traex", prompt: expect.stringContaining("Release checklist") });
   expect(starts[0].init.json).not.toHaveProperty("async");
@@ -178,7 +175,8 @@ it.each([false, true])("hands text to a compatible alias inline (follow default:
 const launchHandoff = async () => {
   const launch = [...document.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent?.trim() === t("todos.launch_and_hand"))!;
   await act(async () => launch.click());
-  await act(async () => vi.advanceTimersByTimeAsync(0));
+  // launchAgent loads its delivery module on intent; wait for the real request, not a fixed number of microtasks.
+  await act(async () => vi.waitFor(() => expect(requests.filter((r) => r.path === "/sessions" && r.init.method === "POST")).toHaveLength(1)));
   return requests.filter((r) => r.path === "/sessions" && r.init.method === "POST");
 };
 
@@ -261,8 +259,7 @@ describe("the hand-over dialog's buttons and agent rows", () => {
     await act(async () => button(t("todos.tab_new")).click());
     const prompt = document.querySelector<HTMLTextAreaElement>("textarea")!;
     await act(async () => prompt.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", ctrlKey: true, bubbles: true })));
-    await act(async () => vi.advanceTimersByTimeAsync(0));
-    expect(requests.filter((r) => r.path === "/sessions" && r.init.method === "POST")).toHaveLength(1);
+    await act(async () => vi.waitFor(() => expect(requests.filter((r) => r.path === "/sessions" && r.init.method === "POST")).toHaveLength(1)));
   });
 
   it("ends the form with them on a wide screen, as before", async () => {

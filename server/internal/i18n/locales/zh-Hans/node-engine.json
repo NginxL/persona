@@ -1,5 +1,5 @@
 {
-  "agy_pane_integration": "你仍可发送消息和使用终端。herdr 确认此窗格对应的对话后，Persona 就会显示该对话。如果尚未安装集成，请运行 herdr integration install antigravity-cli。",
+  "agy_pane_integration": "你仍可发送消息和使用终端。agy 通过 Persona 自己的 agy hook（或 herdr 的 Antigravity 集成）报告此窗格对应的对话后，Persona 就会显示该对话。如果一直不显示，请运行 personad node doctor，看 agy-hooks 那一行。",
   "paseo_unreachable": "Paseo 在运行，但 Persona 连不上它：{reason}",
   "paseo_not_connected": "Paseo 在运行，但 Persona 一直没连上它",
   "paseo_not_connected_why": "Paseo 在运行，但 Persona 一直没连上它：{reason}",

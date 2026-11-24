@@ -263,7 +263,7 @@ func (m *Machine) dialPortStream(ctx context.Context, mux *streams.Mux, dial dev
 }
 
 // screenLinkSubprotocol is the WebSocket subprotocol a phone offers to carry the live screen as a screen session
-// (#6398; the node's internal/screenlink, whose Subprotocol it equals). The hub only passes it on: it never reads the
+// (#6398; the node's internal/modules/screen-share/screenlink, whose Subprotocol it equals). The hub only passes it on: it never reads the
 // session's framing.
 const screenLinkSubprotocol = "persona-screen-link.1"
 

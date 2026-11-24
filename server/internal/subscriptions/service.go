@@ -729,6 +729,7 @@ func withRecipe(sub Subscription, t target, dr DryRun, origin string, now time.T
 	next.RunState, next.Error, next.FailCount, next.FailingSince, next.ShapeMisses = StateOK, nil, 0, nil, 0
 	if !SameRecipe(t.recipe, sub.Recipe) {
 		next.Continuation = nil
+		next.Answer, next.AnswerAt = nil, nil // another recipe's answer: each thread's newest stored until its next run
 	}
 	if t.recipe.Mode != sub.Recipe.Mode {
 		next.SnapshotHash = ""

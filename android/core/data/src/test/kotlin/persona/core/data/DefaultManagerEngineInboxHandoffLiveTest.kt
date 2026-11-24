@@ -24,7 +24,7 @@ import persona.core.contracts.api.DeliveryState
 import persona.core.contracts.api.ItemsQuery
 import persona.core.hub.HttpChatComposerService
 import persona.core.hub.HubConnectionConfig
-import persona.feature.inbox.InboxHandOffRequest
+import persona.core.inbox.InboxHandOffRequest
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [35])
@@ -48,6 +48,7 @@ class DefaultManagerEngineInboxHandoffLiveTest {
                     val item = repository.snapshot.value.records.single { it.hubItemId == field("item_id") }
                     val composer = sender.connectComposer { transport ->
                         HttpChatComposerService(pairing, transport, connection, config.token,
+                            onRetryStart = sender::beginComposerRetry,
                             onRetryDelivery = sender::recordComposerDelivery, onPairingExpired = {})
                     }
                     assertEquals(target, repository.handOff(InboxHandOffRequest(item.item.id, field("instruction"),

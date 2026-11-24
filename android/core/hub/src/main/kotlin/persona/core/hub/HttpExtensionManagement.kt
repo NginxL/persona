@@ -218,7 +218,7 @@ class HttpExtensionManagement internal constructor(
                 val bytes = body.source().use { source ->
                     // read at most one byte past the limit, so a body without a length cannot run away
                     source.request(MaxImageBytes + 1L)
-                    source.buffer.size.takeIf { it <= MaxImageBytes } ?: throw HubFailure(HubError.Protocol)
+                    if (source.buffer.size > MaxImageBytes) throw HubFailure(HubError.Protocol)
                     source.buffer.readByteArray()
                 }
                 bytes.takeIf { it.isNotEmpty() } ?: throw HubFailure(HubError.Protocol)

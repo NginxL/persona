@@ -6,7 +6,7 @@ import { useSyncExternalStore } from "react";
 import { t } from "../i18n";
 import { api, ApiError, enc, errorText } from "./api";
 import { ago } from "./format";
-import { BUILTIN_MANAGER, chooseManager, chosenManager, notePickedName, noteShownIdentity, onManagerChoice, setRosterDefault, settleRosterDefault, shownManager } from "./manager-choice";
+import { BUILTIN_MANAGER, chooseManager, chosenManager, clearConfirmedDefault, notePickedName, noteShownIdentity, onManagerChoice, setRosterDefault, settleRosterDefault, shownManager } from "./manager-choice";
 import { onHubEvent } from "./store";
 
 export interface Manager {
@@ -245,6 +245,7 @@ export function resetRoster() {
   rosterAgain = null;
   rosterReset++;
   roster = null;
+  clearConfirmedDefault();
 }
 
 /** Puts a roster in place (tests set one directly); the current assistant follows a default that moved, and goes back
@@ -256,6 +257,8 @@ export function setRoster(next: ManagerList | null) {
     const chosen = chosenManager();
     if (chosen && !switcherManagers(next).some((m) => m.id === chosen)) chooseManager(null);
     noteCurrentAssistant();
+  } else {
+    clearConfirmedDefault();
   }
   rosterListeners.forEach((l) => l());
 }

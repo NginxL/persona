@@ -50,7 +50,10 @@ func TestRetryOnAnotherLauncherOfATaskWhoseLauncherWasChosenForIt(t *testing.T) 
 		t.Run(c.name, func(t *testing.T) {
 			s, f := launcherRetryDBHub(t)
 			ctx := context.Background()
-			setSettings(t, s, func(v *Settings) { v.Main = "conv1"; v.MachineID = "server" })
+			// task_plans and assistant_feed are not truncated between tests, and the history reads a conversation's
+			// first page (feedPage items): a shared name such as conv1 can fill it with earlier tests' items.
+			conv := "retry_" + randomHex(6)
+			setSettings(t, s, func(v *Settings) { v.Main = conv; v.MachineID = "server" })
 			saveTier(t, s, "fast", ModelTier{Launcher: "work"})
 			task := map[string]any{"title": "Fix the build", "prompt": "Fix the build", "machine": "box", "cwd": "/code/app",
 				"permission": "bypassPermissions", "why": "the code is on box"}
@@ -65,7 +68,7 @@ func TestRetryOnAnotherLauncherOfATaskWhoseLauncherWasChosenForIt(t *testing.T) 
 			f.failStart = c.failure
 			f.mu.Unlock()
 			args, _ := json.Marshal(map[string]any{"tasks": []map[string]any{task}})
-			res, err := s.toolTaskPlan(ctx, "conv1", args)
+			res, err := s.toolTaskPlan(ctx, conv, args)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -87,7 +90,7 @@ func TestRetryOnAnotherLauncherOfATaskWhoseLauncherWasChosenForIt(t *testing.T) 
 			}
 			if c.tool {
 				args, _ := json.Marshal(map[string]any{"todo_id": todo.ID, "reason": "work's key is refused", "launcher": "claude"})
-				res, err := s.toolTaskRetry(ctx, "conv1", args)
+				res, err := s.toolTaskRetry(ctx, conv, args)
 				if err != nil || !strings.Contains(res, "with launcher claude") {
 					t.Fatalf("task_retry: %q %v", res, err)
 				}
@@ -102,8 +105,8 @@ func TestRetryOnAnotherLauncherOfATaskWhoseLauncherWasChosenForIt(t *testing.T) 
 			if pt := p.Tasks[i]; pt.Launcher != "claude" || pt.Tier != "" || !strings.Contains(pt.Why, "改用 claude 重新开始：work 在 box 上没开起来") {
 				t.Fatalf("plan task %+v", pt)
 			}
-			if !retryMoves(s, "conv1", todo.ID, "work", "claude") {
-				t.Fatalf("the move from work is not in the task's history: %s", feedKinds(s, "conv1"))
+			if !retryMoves(s, conv, todo.ID, "work", "claude") {
+				t.Fatalf("the move from work is not in the task's history: %s", feedKinds(s, conv))
 			}
 		})
 	}

@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -32,6 +33,7 @@ import (
 	"github.com/nwverse/persona/server/internal/proto"
 	"github.com/nwverse/persona/server/internal/rpc"
 	"github.com/nwverse/persona/server/internal/sessionlist"
+	"github.com/nwverse/persona/server/internal/textfmt"
 )
 
 // nodeOutdated recognizes the prefix also returned by an old manager that lacks
@@ -69,15 +71,17 @@ func (h *Hub) routes() http.Handler {
 	h.paneRoutes(api)
 	h.nodeDoctorRoutes(api)
 	h.machineProcRoutes(api)
+	h.machineToolchainRoutes(api)
 	h.machineServicesRoutes(api)
 	h.machineNetworkRoutes(api)
+	h.machineStorageRoutes(api)
 	h.nodeUpdateRelayRoutes(api)
 	api.HandleFunc("GET /api/v1/interactions", func(w http.ResponseWriter, r *http.Request) {
 		ixs := visibleInteractions(h.pendingInteractions(), h.requestHasElicitation(r))
 		if restrictedAgentData(r) {
 			em := extensionManager(r)
 			ixs = slices.DeleteFunc(ixs, func(ix proto.Interaction) bool {
-				return em != "" && cmp.Or(ix.Manager, assistantwire.AssistantID) != em || h.hiddenFromExtensions(ix)
+				return em != "" && cmp.Or(ix.Manager, assistantwire.AssistantID) != em || ix.Private || h.spacesHidden(r) && h.hiddenFromExtensions(ix)
 			})
 		}
 		writeJSON(w, map[string]any{"interactions": h.withMuted(ixs)})
@@ -126,7 +130,7 @@ func (h *Hub) routes() http.Handler {
 	h.managerInstallRoutes(mux) // GET /i/<code>: the install script (managers_install.go)
 	mux.Handle("/api/", appAPI)
 	mux.Handle("/", h.adminRoutes(mux, appAPI, webApp(filepath.Join(h.cfg.dir, "web"))))
-	return h.outerLayers(h.sharingDispatcher(h.plaintextLoopbackOnly(jsonRouteErrors(mux))))
+	return h.outerLayers(h.privateNetworkOnly(h.sharingDispatcher(h.plaintextLoopbackOnly(jsonRouteErrors(mux)))))
 }
 
 // outerLayers are what every request goes through around the routes, outermost first: the auth layer's marks
@@ -345,9 +349,18 @@ type statusWriter struct {
 	status          int
 	securityFailure bool
 	lang            i18n.Lang
+	errBody         []byte // the start of a server error's body, for its request line (loggedError)
 }
 
 func (s *statusWriter) WriteHeader(code int) { s.status = code; s.ResponseWriter.WriteHeader(code) }
+
+// Write keeps the start of a server error's body for the request log (loggedError) and writes b.
+func (s *statusWriter) Write(b []byte) (int, error) {
+	if s.status >= 500 && len(s.errBody) < loggedErrorBody {
+		s.errBody = append(s.errBody, b[:min(len(b), loggedErrorBody-len(s.errBody))]...)
+	}
+	return s.ResponseWriter.Write(b)
+}
 
 // authRefusal is a request's mark that the hub's own auth layer refused it (authMarks puts it in the context).
 type authRefusal struct{ refused atomic.Bool }
@@ -371,7 +384,8 @@ func (s *statusWriter) Unwrap() http.ResponseWriter { return s.ResponseWriter }
 
 // logRequests logs failed and slow requests (method, path, status, time; never the query, body or token) under
 // a request id: the app's X-Client-Request-Id when it sent one, which it shows next to a server error, else a new
-// one. Every response carries it as X-Request-Id.
+// one. Every response carries it as X-Request-Id. A server error's line also says the code and the error the hub
+// answered with (loggedError): without them a 502 left nothing to go on (#13468).
 func logRequests(h *Hub, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
@@ -390,13 +404,62 @@ func logRequests(h *Hub, next http.Handler) http.Handler {
 		// Auth and ingress refusals are logged by securityError (masked, rate limited), WebSocket ones included.
 		if !sw.securityFailure && (sw.status >= 400 || (!longLived(r) && time.Since(start) > 2*time.Second)) {
 			path := loggedPath(r.URL.Path)
+			why := ""
+			if sw.status >= 500 {
+				why = loggedError(sw.errBody)
+			}
 			if client.Platform != "" {
-				h.logf("[%s] %s %s -> %d (%s) client=%q", id, r.Method, path, sw.status, time.Since(start).Round(time.Millisecond), client.Platform+"/"+client.Version)
+				h.logf("[%s] %s %s -> %d (%s) client=%q%s", id, r.Method, path, sw.status, time.Since(start).Round(time.Millisecond), client.Platform+"/"+client.Version, why)
 			} else {
-				h.logf("[%s] %s %s -> %d (%s)", id, r.Method, path, sw.status, time.Since(start).Round(time.Millisecond))
+				h.logf("[%s] %s %s -> %d (%s)%s", id, r.Method, path, sw.status, time.Since(start).Round(time.Millisecond), why)
 			}
 		}
 	})
+}
+
+// loggedErrorBody bounds what a server error's body keeps for the log; loggedErrorText, the text it shows.
+const loggedErrorBody, loggedErrorText = 4096, 300
+
+// loggedError is what a server error's request line adds, from the hub's JSON error body (apierr): ` code=<code>`,
+// then ` detail="<detail>"`, the technical words a localized failure keeps apart from its generic error
+// (rpc-errors.failed), else ` error="<error>"`; one line, quoted, clipped. "" for any other body: nothing else of a
+// response is logged.
+func loggedError(body []byte) string {
+	var e struct {
+		Code   string `json:"code"`
+		Error  string `json:"error"`
+		Detail any    `json:"detail"`
+	}
+	if json.Unmarshal(body, &e) != nil || e.Code == "" && e.Error == "" {
+		return ""
+	}
+	var b strings.Builder
+	if e.Code != "" {
+		b.WriteString(" code=")
+		if strings.Trim(e.Code, "abcdefghijklmnopqrstuvwxyz0123456789_.-") == "" {
+			b.WriteString(e.Code)
+		} else {
+			b.WriteString(strconv.Quote(textfmt.Clip(e.Code, 40)))
+		}
+	}
+	quoted := func(s string) string { return strconv.Quote(textfmt.Clip(textfmt.OneLine(s), loggedErrorText)) }
+	switch d := e.Detail.(type) {
+	case string:
+		if d != "" {
+			b.WriteString(" detail=" + quoted(d))
+			return b.String()
+		}
+	case nil:
+	default: // a structured detail (a refusal's fields): as compact JSON
+		if raw, err := json.Marshal(d); err == nil {
+			b.WriteString(" detail=" + quoted(string(raw)))
+			return b.String()
+		}
+	}
+	if e.Error != "" {
+		b.WriteString(" error=" + quoted(e.Error))
+	}
+	return b.String()
 }
 
 // loggedPath is a request's path as the log may show it: an install code in /i/<code> (a credential) is masked.
@@ -616,6 +679,9 @@ func (h *Hub) sessionItems(w http.ResponseWriter, r *http.Request, m *Machine) {
 		return
 	}
 	res.Items = cardCompatItems(h.requestLang(r), h.requestWants(r, featureCardRing), h.requestWants(r, featureMarkdownCloseout), localizedItems(h.requestLang(r), h.withInjected(res.Items)))
+	// Allow binding a pending live Hub TTFT on latest-page / incremental reads while keeping historical pages read-only.
+	allowBind := atoi(q.Get("before_seq")) == 0 && atoi(q.Get("through_seq")) == 0
+	h.ttft.annotate(m.cfg.ID, r.PathValue("sid"), res.Items, allowBind)
 	if q.Get("lazy_images") == "1" {
 		res.Items = proto.WithoutImageData(res.Items)
 	}
@@ -769,7 +835,7 @@ func (h *Hub) listSessions(w http.ResponseWriter, r *http.Request) {
 		if mid != "" && m.cfg.ID != mid || em != "" && owner != em || named != "" && owner != named {
 			continue
 		}
-		lists = append(lists, stampedList{withoutHealthSessions(r, h.shown(m.cfg.ID, m.keptSessions())), owner})
+		lists = append(lists, stampedList{h.withoutSpaceSessions(r, h.shown(m.cfg.ID, m.keptSessions())), owner})
 	}
 	writeSessionLists(w, lists)
 }
@@ -827,42 +893,45 @@ func writeSessionLists(w http.ResponseWriter, lists []stampedList) {
 	_, _ = w.Write(buf.Bytes())
 }
 
+type sessionStartRequest struct {
+	MachineID        string        `json:"machine_id"`
+	Cwd              string        `json:"cwd"`
+	Launcher         string        `json:"launcher"`
+	AgentType        string        `json:"agent_type,omitempty"`
+	WorkSession      bool          `json:"work_session,omitempty"`
+	Model            string        `json:"model,omitempty"` // picked in "New agent" for this start; empty: applyModel's
+	Prompt           string        `json:"prompt"`
+	ClientMsgID      string        `json:"client_msg_id,omitempty"`
+	Images           []proto.Image `json:"images,omitempty"`
+	ResumeSessionID  string        `json:"resume_session_id"`
+	WorkspaceID      string        `json:"workspace_id"`
+	DesktopProjectID string        `json:"desktop_project_id"`
+	// Host: the machine's enabled engine host to open in (herdr, orca, paseo…; #2576); empty: its default host.
+	// Checked by the node (an older node ignores it and starts in its engine).
+	Host           string `json:"host,omitempty"`
+	PermissionMode string `json:"permission_mode,omitempty"`
+	Effort         string `json:"effort,omitempty"`
+	// LauncherDefaultEffort keeps an explicit launcher's effort at its native default.
+	LauncherDefaultEffort bool   `json:"launcher_default_effort,omitempty"`
+	Speed                 string `json:"speed,omitempty"`
+	Ultracode             *bool  `json:"ultracode,omitempty"`
+	// Goal: a one-line condition the node sets with /goal after the first message is in (node/startgoal.go); a
+	// start it cannot take there answers 409 start_goal_unsupported before anything starts.
+	Goal string `json:"goal,omitempty"`
+	// TabName names the herdr tab; empty: one made from the first message (tabName, assistant/agents_start.go),
+	// else agent-<n>.
+	TabName string `json:"tab_name,omitempty"`
+	// Async: answer at once with the session it is going to be and start it in the background (node/starting.go);
+	// messages sent to it meanwhile go in once it is ready. NameHint: what the tab name is made from when the
+	// app sends the first message itself (so it shows as a message right away) instead of as prompt.
+	Async    bool   `json:"async,omitempty"`
+	NameHint string `json:"name_hint,omitempty"`
+	TodoID   string `json:"todo_id,omitempty"`
+}
+
 func (h *Hub) startSession(w http.ResponseWriter, r *http.Request) {
-	var p struct {
-		MachineID       string        `json:"machine_id"`
-		Cwd             string        `json:"cwd"`
-		Launcher        string        `json:"launcher"`
-		AgentType       string        `json:"agent_type,omitempty"`
-		WorkSession     bool          `json:"work_session,omitempty"`
-		Model           string        `json:"model,omitempty"` // picked in "New agent" for this start; empty: applyModel's
-		Prompt          string        `json:"prompt"`
-		Images          []proto.Image `json:"images,omitempty"`
-		ClientMsgID     string        `json:"client_msg_id,omitempty"`
-		ResumeSessionID string        `json:"resume_session_id"`
-		WorkspaceID     string        `json:"workspace_id"`
-		// Host: the machine's enabled engine host to open in (herdr, orca, paseo…; #2576); empty: its default host.
-		// Checked by the node (an older node ignores it and starts in its engine).
-		Host           string `json:"host,omitempty"`
-		PermissionMode string `json:"permission_mode,omitempty"`
-		Effort         string `json:"effort,omitempty"`
-		// LauncherDefaultEffort keeps an explicit launcher's effort at its native default.
-		LauncherDefaultEffort bool   `json:"launcher_default_effort,omitempty"`
-		Speed                 string `json:"speed,omitempty"`
-		Ultracode             *bool  `json:"ultracode,omitempty"`
-		// Goal: a one-line condition the node sets with /goal after the first message is in (node/startgoal.go); a
-		// start it cannot take there answers 409 start_goal_unsupported before anything starts.
-		Goal string `json:"goal,omitempty"`
-		// TabName names the herdr tab; empty: one made from the first message (tabName, assistant/agents_start.go),
-		// else agent-<n>.
-		TabName string `json:"tab_name,omitempty"`
-		// Async: answer at once with the session it is going to be and start it in the background (node/starting.go);
-		// messages sent to it meanwhile go in once it is ready. NameHint: what the tab name is made from when the
-		// app sends the first message itself (so it shows as a message right away) instead of as prompt.
-		Async    bool   `json:"async,omitempty"`
-		NameHint string `json:"name_hint,omitempty"`
-		TodoID   string `json:"todo_id,omitempty"`
-	}
-	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 4<<20))
+	var p sessionStartRequest
+	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, proto.MessageBodyLimit)) // a first message with its pictures
 	if err == nil {
 		err = json.Unmarshal(body, &p)
 	}
@@ -870,6 +939,10 @@ func (h *Hub) startSession(w http.ResponseWriter, r *http.Request) {
 		writeBodyErr(w, err, err)
 		return
 	}
+	h.startSessionWith(w, r, p, false)
+}
+
+func (h *Hub) startSessionWith(w http.ResponseWriter, r *http.Request, p sessionStartRequest, handoff bool) {
 	if strings.HasPrefix(p.ClientMsgID, proto.A2ADeliveryPrefix) {
 		writeErrCode(w, http.StatusBadRequest, "client_msg_id_reserved", i18n.Err("hub-send.reserved_id"))
 		return
@@ -879,7 +952,12 @@ func (h *Hub) startSession(w http.ResponseWriter, r *http.Request) {
 		writeErrCode(w, http.StatusBadRequest, "work_target_required", errors.New("Choose a computer, project folder, harness and launcher for the new session."))
 		return
 	}
-	r = h.captureHumanSubmission(r, p.Prompt)
+	if apierr.ImagesOverLimit(w, proto.HubImageLimits.For(p.AgentType), len(p.Images)) {
+		return
+	}
+	if !handoff {
+		r = h.captureHumanSubmission(r, p.Prompt)
+	}
 	if p.TodoID != "" && principalOf(r.Context()).Role != roleFull {
 		writeErr(w, http.StatusForbidden, errors.New("read-only role cannot modify todos"))
 		return
@@ -908,13 +986,13 @@ func (h *Hub) startSession(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if restrictedAgentData(r) {
-		// A scoped token resumes only a chat its computer lists, shown and outside the health space. An extension's
+		// A scoped token resumes only a chat its computer lists, shown and outside any space. An extension's
 		// resume is decided last (extensionResume): one its computer no longer lists goes to the computer's check (#10941).
 		if pr.Role == roleScoped && p.ResumeSessionID != "" && !h.publicSessionForControl(m, p.ResumeSessionID) {
 			writeErr(w, http.StatusNotFound, errDeleteUnknown)
 			return
 		}
-		if identity.InHealthSpace(startCwd(m, p.Cwd)) {
+		if identity.InSpace(startCwd(m, p.Cwd)) {
 			writeErrCode(w, http.StatusForbidden, "permission_denied", i18n.Err("apierr-apierr.health_start_forbidden"))
 			return
 		}
@@ -938,6 +1016,7 @@ func (h *Hub) startSession(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	inferredAgentType := p.AgentType == ""
 	if p.AgentType == "" {
 		for _, launcher := range m.cfg.Launchers {
 			if launcher.Name == p.Launcher {
@@ -961,7 +1040,7 @@ func (h *Hub) startSession(w http.ResponseWriter, r *http.Request) {
 	if strings.TrimSpace(p.Prompt) != "" {
 		p.Images = append(p.Images, handoffImages...)
 	}
-	async := startsAsync(p.Async, p.ResumeSessionID, p.Launcher, p.AgentType)
+	async := startsAsync(p.Async, p.ResumeSessionID, p.Launcher, p.AgentType) && !desktopStartLauncher(p.Launcher)
 	nameAfterStart := async
 	parent := r.Context()
 	if r.Header.Get("X-Persona-Op-Id") != "" {
@@ -969,8 +1048,7 @@ func (h *Hub) startSession(w http.ResponseWriter, r *http.Request) {
 		parent = context.WithoutCancel(parent)
 	}
 	startedAt := time.Now()
-	budget := startBudget(async && !p.WorkSession)
-	ctx, cancel := context.WithDeadline(parent, startedAt.Add(budget))
+	ctx, cancel := context.WithDeadline(parent, startedAt.Add(startBudgetForLauncher(async && !p.WorkSession, p.Launcher)))
 	defer cancel()
 	var res struct {
 		Session      proto.Session `json:"session"`
@@ -989,6 +1067,7 @@ func (h *Hub) startSession(w http.ResponseWriter, r *http.Request) {
 	// The manager says what it runs on (Models › Agents, a model picked for this start) and names its tab
 	// (agents_link.go).
 	note, err := h.agentStartParams(ctx, m, params, name)
+	cancel()
 	if err != nil {
 		var refused *startRefused
 		if errors.As(err, &refused) {
@@ -998,15 +1077,49 @@ func (h *Hub) startSession(w http.ResponseWriter, r *http.Request) {
 		callErr(w, err) // 503 assistant_offline without the manager (the machine is its to reach), else 502
 		return
 	}
+	// Defaults and fallback launchers are resolved by the manager. Use what will actually run for both the node's
+	// acknowledgement mode and the total start budget, without retaining the shorter resolution deadline.
 	resolvedLauncher, _ := params["launcher"].(string)
 	resolvedAgent, _ := params["agent_type"].(string)
-	async = startsAsync(p.Async, p.ResumeSessionID, resolvedLauncher, resolvedAgent)
-	if resolvedBudget := startBudget(async && !p.WorkSession); resolvedBudget != budget {
-		// The manager may have found a synchronous launcher after the request was admitted.
-		cancel()
-		resolvedCtx, cancelResolved := context.WithDeadline(parent, startedAt.Add(resolvedBudget))
-		defer cancelResolved()
-		ctx = resolvedCtx
+	if inferredAgentType && resolvedLauncher != p.Launcher && resolvedAgent == p.AgentType {
+		resolvedAgent = "" // a fallback must not inherit the originally requested launcher's inferred type
+		delete(params, "agent_type")
+	}
+	if resolvedAgent == "" {
+		for _, configured := range m.cfg.Launchers {
+			if configured.Name == resolvedLauncher && configured.AgentType != "" {
+				resolvedAgent = configured.AgentType
+				params["agent_type"] = resolvedAgent
+				break
+			}
+		}
+	}
+	if handoff {
+		if resolvedLauncher != p.Launcher {
+			writeErr(w, http.StatusConflict, i18n.Err("hub-context_handoff.launcher_missing"))
+			return
+		}
+		params["require_launcher"] = true
+	}
+	askedAsync, _ := params["async"].(bool)
+	async = startsAsync(askedAsync, p.ResumeSessionID, resolvedLauncher, resolvedAgent) && !desktopStartLauncher(resolvedLauncher)
+	nameAfterStart = async
+	params["async"] = async
+	ctx, cancel = context.WithDeadline(parent, startedAt.Add(startBudgetForLauncher(async && !p.WorkSession, resolvedLauncher)))
+	defer cancel()
+	if tabName, _ := params["tab_name"].(string); !async && name == "" && nameFrom != "" && strings.TrimSpace(tabName) == "" && p.ResumeSessionID == "" {
+		// An initially async start did not ask the manager for a name. It now waits for creation, so name it first.
+		var named struct {
+			Name string `json:"name"`
+		}
+		nameCtx, nameCancel := context.WithTimeout(ctx, 15*time.Second)
+		err := h.asstOf(h.machineOwner(m.cfg.ID)).call(nameCtx, assistantwire.MethodAgentTabName, map[string]any{"prompt": nameFrom}, &named)
+		nameCancel()
+		if err != nil {
+			h.logf("tab name: %v", err)
+		} else if named.Name != "" {
+			params["tab_name"] = named.Name
+		}
 	}
 	method := "session.start"
 	if p.WorkSession {
@@ -1161,6 +1274,17 @@ func startBudget(async bool) time.Duration {
 		return 15 * time.Second
 	}
 	return 100 * time.Second
+}
+
+func desktopStartLauncher(launcher string) bool {
+	return launcher == "claude-desktop" || launcher == "codex-app"
+}
+
+func startBudgetForLauncher(async bool, launcher string) time.Duration {
+	if desktopStartLauncher(launcher) {
+		return 3 * time.Minute // seed (30s), import (15s), and first message (up to 2m)
+	}
+	return startBudget(async)
 }
 
 // ---- WebSocket ----

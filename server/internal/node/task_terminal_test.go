@@ -1,16 +1,58 @@
 package node
 
 import (
+	"bufio"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/nwverse/persona/server/internal/devicewire"
+	"github.com/nwverse/persona/server/internal/osproc"
 	"github.com/nwverse/persona/server/internal/proto"
 )
 
 const taskTerminalTestToken = "838e2748-4eee-46e2-9bcb-69bc5f760512"
+
+// Use an idle process with no controlling terminal or children. The test
+// runner's own process can have subprocesses or share the runner's terminal,
+// either of which the close guard treats as live work in the task pane.
+func idleTaskTerminalPID(t *testing.T) int {
+	t.Helper()
+	bin, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.CommandContext(t.Context(), bin)
+	cmd.Env = append(os.Environ(), "NODE_TEST_TASK_TERMINAL_IDLE=1")
+	cmd.SysProcAttr = osproc.SessionGroupAttr()
+	if _, err := cmd.StdinPipe(); err != nil {
+		t.Fatal(err)
+	}
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = cmd.Process.Kill(); _ = cmd.Wait() })
+	started := make(chan error, 1)
+	go func() {
+		_, err := bufio.NewReader(stdout).ReadString('\n')
+		started <- err
+	}()
+	select {
+	case err := <-started:
+		if err != nil {
+			t.Fatalf("idle task process did not start: %v", err)
+		}
+	case <-time.After(30 * time.Second):
+		t.Fatal("idle task process did not start")
+	}
+	return cmd.Process.Pid
+}
 
 func taskTerminalFixture(t *testing.T) (*Node, *fakeHerdr, devicewire.TaskTerminal, string, string) {
 	t.Helper()
@@ -20,8 +62,9 @@ func taskTerminalFixture(t *testing.T) (*Node, *fakeHerdr, devicewire.TaskTermin
 		`{"type":"user","message":{"role":"user","content":"Finish fixture"},"uuid":"u1"}`,
 		`{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Fixture finished."}]},"uuid":"a1"}`,
 		`{"type":"system","subtype":"turn_duration","durationMs":1000}`)
+	pid := idleTaskTerminalPID(t)
 	target := devicewire.TaskTerminal{SessionID: sidA, PaneID: "w1:p1", TabID: "w1:t1", WorkspaceID: "w1",
-		Token: taskTerminalTestToken, PID: os.Getpid(), Process: procStartMark(os.Getpid())}
+		Token: taskTerminalTestToken, PID: pid, Process: procStartMark(pid)}
 	if target.Process == "" {
 		t.Skip("the platform does not expose a process start identity")
 	}

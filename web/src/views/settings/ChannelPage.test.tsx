@@ -7,19 +7,26 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { t } from "../../i18n";
-import type { ChannelDetail } from "../../lib/channels";
+import { ApiError } from "../../lib/api";
+import type { ChannelDetail, ChannelTestResult } from "../../lib/channels";
 
-type Asked = { kind: "get" | "put" | "unbind" | "test"; body?: unknown; answer: (d: ChannelDetail) => void };
+type Asked = {
+  kind: "get" | "put" | "unbind" | "test";
+  body?: unknown;
+  answer: (d: ChannelDetail | ChannelTestResult) => void;
+  reject: (err: unknown) => void;
+};
 const hub = vi.hoisted(() => ({ asked: [] as Asked[] }));
 
 vi.mock("../../lib/channels", async (original) => ({
   ...(await original<typeof import("../../lib/channels")>()),
-  channelDetail: () => new Promise((resolve) => hub.asked.push({ kind: "get", answer: resolve })),
-  updateChannel: (_id: string, body: unknown) => new Promise((resolve) => hub.asked.push({ kind: "put", body, answer: resolve })),
-  unbindChannel: () => new Promise((resolve) => hub.asked.push({ kind: "unbind", answer: resolve })),
-  testChannel: () => new Promise((resolve) => hub.asked.push({ kind: "test", answer: resolve })),
+  channelDetail: () => new Promise((resolve, reject) => hub.asked.push({ kind: "get", answer: resolve, reject })),
+  updateChannel: (_id: string, body: unknown) => new Promise((resolve, reject) => hub.asked.push({ kind: "put", body, answer: resolve, reject })),
+  unbindChannel: () => new Promise((resolve, reject) => hub.asked.push({ kind: "unbind", answer: resolve, reject })),
+  testChannel: () => new Promise((resolve, reject) => hub.asked.push({ kind: "test", answer: resolve, reject })),
 }));
 vi.mock("../../ui/atoms", async (original) => ({ ...(await original<typeof import("../../ui/atoms")>()), toast: vi.fn() }));
+import { toast } from "../../ui/atoms";
 import { ChannelPage } from "./Channels";
 
 vi.hoisted(() => {
@@ -41,9 +48,14 @@ let root: Root;
 const settle = async () => {
   for (let i = 0; i < 8; i++) await act(async () => { await Promise.resolve(); });
 };
-const answer = async (a: Asked | undefined, d: ChannelDetail) => {
+const answer = async (a: Asked | undefined, d: ChannelDetail | ChannelTestResult) => {
   expect(a).toBeTruthy();
   await act(async () => a!.answer(d));
+  await settle();
+};
+const fail = async (a: Asked | undefined, err: unknown) => {
+  expect(a).toBeTruthy();
+  await act(async () => a!.reject(err));
   await settle();
 };
 const sw = (label: string) => host.querySelector<HTMLButtonElement>(`button[role="switch"][aria-label="${label}"]`)!;
@@ -57,6 +69,7 @@ const puts = () => hub.asked.filter((a) => a.kind === "put");
 
 beforeEach(async () => {
   hub.asked = [];
+  vi.mocked(toast).mockReset();
   host = document.createElement("div");
   document.body.appendChild(host);
   root = createRoot(host);
@@ -77,6 +90,47 @@ it("offers a test message only when the connected channel can send without a rep
   await answer(hub.asked.shift(), { ...detail(false, false), source: "plugin", capabilities: { format: "plain" } });
 
   expect(byText(t("settings-channels.send_test"))).toBeUndefined();
+  expect(byText(t("settings-channels.check_connection"))).toBeUndefined();
+});
+
+it("offers Check connection for reply-only channels and displays the returned note", async () => {
+  const refresh = host.querySelector<HTMLButtonElement>(`button[aria-label="${t("settings-channels.refresh")}"]`)!;
+  await act(async () => refresh.click());
+  await answer(hub.asked.shift(), {
+    ...detail(false, false),
+    source: "plugin",
+    kind: "mention",
+    capabilities: { format: "plain", reply_only: true },
+  });
+
+  expect(byText(t("settings-channels.send_test"))).toBeUndefined();
+  const check = byText(t("settings-channels.check_connection"));
+  expect(check).toBeDefined();
+  expect(host.textContent).toContain(t("settings-channels.check_connection_footer"));
+
+  await act(async () => check.click());
+  await settle();
+  const req = hub.asked.shift();
+  expect(req?.kind).toBe("test");
+  const note = "Demo is connected and ready. It only replies to incoming messages, so no test message was sent.";
+  await answer(req, { ok: true, reply_only: true, note });
+
+  expect(toast).toHaveBeenCalledWith(note, "ok");
+  expect(host.querySelector('[role="status"]')?.textContent).toBe(note);
+});
+
+it("displays non-502 cannot_send error messages cleanly without gateway wording", async () => {
+  const sendTest = byText(t("settings-channels.send_test"));
+  await act(async () => sendTest.click());
+  await settle();
+  const req = hub.asked.shift();
+  expect(req?.kind).toBe("test");
+  const explanation = "This channel only replies to incoming messages.";
+  await fail(req, new ApiError(409, explanation, { code: "cannot_send", error: explanation }, true, undefined, "/channels/demo/test"));
+
+  expect(toast).toHaveBeenCalledWith(explanation, "error");
+  expect(host.querySelector('[role="alert"]')?.textContent).toBe(explanation);
+  expect(host.textContent).not.toContain("502");
 });
 
 describe("ChannelPage saves", () => {

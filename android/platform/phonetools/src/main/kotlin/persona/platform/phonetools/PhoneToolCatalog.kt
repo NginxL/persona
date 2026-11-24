@@ -196,6 +196,53 @@ internal object PhoneToolCatalog {
             PhoneSource.Health, mapOf(
                 "id" to string("The workout's id."),
             ), listOf("id")),
+        // Every Health Connect type record by record (#13740, iOS HealthRecords); no phone_health_watch: see HealthRecords.
+        tool("phone_health_types",
+            "List the health data types this phone can read, from Apple Health on an iPhone or Health Connect on " +
+                "Android: quantities, categories, workouts, correlations, ECGs, audiograms and the rest. Each row has the " +
+                "type name to pass to phone_health_samples, the store's own identifier, the kind, the unit values come in, " +
+                "and access: not_requested (ask with phone_health_request_access), requested (the user was asked; Apple " +
+                "Health never tells apps whether reading was allowed, so no data can also mean it was refused), granted or " +
+                "not_granted (Health Connect tells), or unavailable with a reason. Health data goes only to the hub that " +
+                "asked and is not written to logs.",
+            PhoneSource.Health, mapOf(
+                "kind" to string("Only types of this kind, for example quantity, category or workout; every kind when absent."),
+            )),
+        tool("phone_health_samples",
+            "Read individual health samples of one type in a time window, in the order the health store returns them: " +
+                "id, start, end, value and unit (or the kind's own fields: a category's value and value_label, a workout's " +
+                "activity and totals, the readings inside a correlation, an ECG's classification and average heart rate, " +
+                "an audiogram's hearing levels), source (app name and bundle id or package), device (name, manufacturer, " +
+                "model, versions) and metadata. Pass type from phone_health_types. Returns at most limit samples with " +
+                "more: true when there are more, and an anchor: pass it back with the same type and window for the next " +
+                "page, and later for only what was added since, with the ids of deleted samples in deleted. A type Persona " +
+                "may not read yet answers its access (not_requested, or not_granted on Android) instead of failing. Health " +
+                "data goes only to the hub that asked and is not written to logs.",
+            PhoneSource.Health, mapOf(
+                "anchor" to string("The anchor from the previous answer for this type and window: the next page, or what changed since."),
+                "end" to string("Window end, ISO 8601 with a timezone. Default: none, so an anchor keeps finding new samples."),
+                "limit" to integer("At most this many samples, default 100, max 500.", 1, 500),
+                "start" to string("Window start, ISO 8601 with a timezone. Default: 7 days ago."),
+                "type" to string("The type name from phone_health_types, for example heart_rate."),
+            ), listOf("type")),
+        tool("phone_health_sources",
+            "List the apps and devices that saved health data on this phone: each source's name, bundle id (or Android " +
+                "package) and the types it saved. With type, only that type's sources in the last days, plus the devices " +
+                "its samples name (name, manufacturer, model, hardware and software versions). Without type, every type " +
+                "the user was asked about is looked at. Health data goes only to the hub that asked and is not written to " +
+                "logs.",
+            PhoneSource.Health, mapOf(
+                "days" to integer("How many days back to look, default 30, max 3650.", 1, 3650),
+                "type" to string("Only this type (a name from phone_health_types); every type the user was asked about when absent."),
+            )),
+        tool("phone_health_request_access",
+            "Ask the user on the phone to allow reading the given health types (names from phone_health_types; [\"all\"] " +
+                "for every type the phone can read). Only types not asked about yet bring up the system's permission " +
+                "screen, so the user decides once and later calls ask nothing. Needs Persona open on the phone's screen; " +
+                "otherwise it answers status: needs_foreground. Returns each type's access afterwards.",
+            PhoneSource.Health, mapOf(
+                "types" to array("Type names from phone_health_types, or [\"all\"].", string("One type name.")),
+            ), listOf("types")),
         tool("phone_photos_recent",
             "List recent photos and videos, newest first. Each row has the Photos local identifier, creation date (ISO " +
                 "8601), media type (image/video), pixel width and height, whether it is a screenshot, whether it is a " +

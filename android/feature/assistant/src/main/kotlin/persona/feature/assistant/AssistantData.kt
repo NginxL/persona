@@ -6,6 +6,7 @@ import androidx.compose.ui.res.stringResource
 import persona.core.contracts.Session
 import persona.core.contracts.AgentState
 import persona.core.contracts.SessionKey
+import persona.core.contracts.ExternalDirection
 import persona.core.contracts.api.AssistantRepository
 import persona.core.contracts.api.AssistantSnapshot
 import persona.core.contracts.api.LeaderCounts
@@ -27,7 +28,7 @@ import java.util.UUID
 
 /**
  * The drawer's Persona chats (#4331): [main] the main conversation (its own row, above the search), [directions] the
- * leader conversations under their [names] ("常驻", in the hub's order), and [others] every other conversation, which
+ * leader conversations and explicitly outside directions under their [names] ("常驻", in the hub's order), and [others] every other conversation, which
  * "All chats" lists and a search narrows. [counts] each leader's open tasks, by session id. [recent] the newest eligible
  * chats between 常驻 and All chats (#4922, #5196), none while searching. [background] the built-in background supervisor's
  * conversation id (#4927): it is one of [others], under its own name, and its row has no pin, archive or end.
@@ -42,6 +43,8 @@ internal data class ConversationGroups(
     val tree: persona.core.contracts.DirectionTree? = null,
     val recent: List<Session> = emptyList(),
     val background: String? = null,
+    /** Presentation-only outside rows by opaque direction id; none is a real Persona conversation. */
+    val externalDirections: Map<String, ExternalDirection> = emptyMap(),
 )
 
 /** How many chats the drawer's Recent lists (#4922, the web's `RECENT_LIMIT`, iOS). */
@@ -128,9 +131,26 @@ internal fun conversationGroups(
     // conversation waits under one "All chats" row (there is no all-conversations page on this app): main and the
     // leaders are not listed twice.
     val names = filtered.directionNames
+    val externalDirections = mutableMapOf<String, ExternalDirection>()
     val directions = filtered.leaders.filter { it != background }.mapNotNull { id ->
-        filtered.conversations.firstOrNull { it.sessionId == id && it.key != filtered.mainSession && !it.archived }
-    }.filter { query.isBlank() || it in matches || names[it.sessionId].orEmpty().contains(query.trim(), ignoreCase = true) }
+        val conversation = filtered.conversations.firstOrNull {
+            it.sessionId == id && it.key != filtered.mainSession && !it.archived
+        }
+        when {
+            conversation != null -> conversation
+            // A real conversation always wins, even if a malformed response also marks its direction external.
+            filtered.conversations.any { it.sessionId == id } -> null
+            activeTag.isNullOrEmpty() -> filtered.externalDirection(id)?.let { external ->
+                externalDirections[id] = external
+                Session(sessionId = id, title = names[id].orEmpty(), status = "idle", assistant = true)
+            }
+            else -> null
+        }
+    }.filter {
+        query.isBlank() || it in matches || names[it.sessionId].orEmpty().contains(query.trim(), ignoreCase = true) ||
+            (it.sessionId in externalDirections && it.conversationTitle(words).contains(query.trim(), ignoreCase = true))
+    }
+    val shownExternal = externalDirections.filterKeys { id -> directions.any { it.sessionId == id } }
     val listed = directions.mapTo(HashSet()) { it.key }
     val others = orderConversations(
         matches.filter { it.key != filtered.mainSession && it.key !in listed }, filtered.conversationOrder,
@@ -141,6 +161,7 @@ internal fun conversationGroups(
         tree = filtered.directionTree,
         recent = if (query.isBlank()) recentConversations(filtered) else emptyList(),
         background = background,
+        externalDirections = shownExternal,
     )
 }
 

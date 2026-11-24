@@ -31,7 +31,11 @@ func (h *Manager) marketAdd(ctx context.Context, specText, token string) (Market
 	if n >= extension.MarketsMost {
 		return MarketView{}, i18n.Err("hub-extension_market.too_many")
 	}
-	mk := &extension.Market{Spec: spec, Token: token, Client: h.marketClient(), GitHubAPI: ms.githubAPI, Dir: h.marketsDir(), Cache: h.packageCache()}
+	client, err := h.marketClient()
+	if err != nil {
+		return MarketView{}, err
+	}
+	mk := &extension.Market{Spec: spec, Token: token, Client: client, GitHubAPI: ms.githubAPI, Dir: h.marketsDir(), Cache: h.packageCache()}
 	if err := h.configureMarket(mk); err != nil {
 		return MarketView{}, err
 	}
@@ -131,7 +135,11 @@ func (h *Manager) marketSetSpec(ctx context.Context, id, specText string) (Marke
 	if old.Token != "" && !old.SharesTokenWith(spec) {
 		return MarketView{}, i18n.Err("extension-market_security.credential_move")
 	}
-	mk := &extension.Market{Spec: spec, Token: old.Token, Client: h.marketClient(), GitHubAPI: ms.githubAPI, Dir: h.marketsDir(), Cache: h.packageCache()}
+	client, err := h.marketClient()
+	if err != nil {
+		return MarketView{}, err
+	}
+	mk := &extension.Market{Spec: spec, Token: old.Token, Client: client, GitHubAPI: ms.githubAPI, Dir: h.marketsDir(), Cache: h.packageCache()}
 	if err := h.configureMarket(mk); err != nil {
 		return MarketView{}, err
 	}

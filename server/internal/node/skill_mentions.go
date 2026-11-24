@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/nwverse/persona/server/internal/assistantskills"
+	"github.com/nwverse/persona/server/internal/assistantwire"
 )
 
 type skillCatalogRequest struct {
@@ -34,54 +35,76 @@ func (n *Node) skillCatalog(ctx context.Context, in skillCatalogRequest) (assist
 	if in.Owner == "" || in.Cwd == "" || !filepath.IsAbs(in.Cwd) {
 		return out, errors.New("skill catalog requires an assistant execution environment")
 	}
-	if n.runtimeAssistant(in.SessionID) || n.assistantRuntime(in.Launcher) != nil || n.guestOf(in.SessionID) != nil {
+	if n.guestOf(in.SessionID) != nil {
 		return out, errors.New("skill selection is unavailable for this runtime")
 	}
-	if in.Launcher == "" {
-		in.Launcher = "claude"
-	}
-	agent, err := n.assistantAgent(ctx, in.Launcher)
-	if err != nil {
-		return out, err
-	}
-	var entries []assistantskills.Entry
-	switch agent {
-	case "codex":
-		entries, out.Complete, err = n.codexSkillCatalog(ctx, in)
-	case "claude":
-		in.ConfigDir, err = n.assistantProfileSelection(ctx, in.SessionID, in.Launcher, in.ConfigDir, in.SessionID != "")
-		if err != nil {
-			return out, err
+	var (
+		entries []assistantskills.Entry
+		err     error
+	)
+	if agyLauncher, isRuntime, rerr := n.agySkillRuntime(in); isRuntime {
+		if rerr != nil {
+			return out, rerr
 		}
-		profile := n.assistantConfigDir(in.Launcher, in.ConfigDir)
-		if profile == "" {
-			profile = filepath.Join(n.home, ".claude")
+		if in.ConfigDir != "" {
+			return out, errors.New(assistantwire.ConfigDirClaudeOnly)
 		}
-		roots := []assistantskills.Root{{Path: filepath.Join(profile, "skills"), Source: "user"}}
-		for dir, depth := filepath.Clean(in.Cwd), 0; depth < 64; depth++ {
-			rel, _ := filepath.Rel(in.Cwd, dir)
-			roots = append(roots, assistantskills.Root{Path: filepath.Join(dir, ".claude", "skills"), Source: "project · " + rel})
-			parent := filepath.Dir(dir)
-			if parent == dir {
-				break
-			}
-			dir = parent
-		}
-		// Bounded local roots, not a claim to enumerate bundled, remote or plugin-only commands.
-		entries, err = assistantskills.LocalCatalog(roots)
-		if err == nil {
-			var own map[string]any
-			if settings := n.launcherOwnSettings(ctx, in.Launcher); settings != "" {
-				own, err = readLauncherSettings(settings, in.Cwd, n.home)
-				if err != nil {
-					return out, errors.New("cannot establish the launcher's skill settings")
+		in.Launcher = agyLauncher
+		entries, err = n.agySkillCatalog(in)
+	} else {
+		if in.Launcher == "" && in.SessionID != "" && n.state != nil {
+			if st, ok := n.state.get(in.SessionID); ok && st.Launcher != "" &&
+				n.assistantRuntime(st.Launcher) == nil && n.runtimeOf(st.Launcher) == nil {
+				if m, ok := n.managedLauncher(st.Launcher); !ok || m.AgentType() != agyAgent {
+					in.Launcher = st.Launcher
 				}
 			}
-			// The user's skill switches a private profile carries (assistant_user_setup.go) come before the launcher's.
-			entries, err = visibleClaudeSkills(entries, profile, in.Cwd, map[string]any{"skillOverrides": n.userSkillsOff(profile, in.Cwd)}, own)
 		}
-	default:
-		err = errors.New("skill selection is unavailable for this runtime")
+		if in.Launcher == "" {
+			in.Launcher = "claude"
+		}
+		agent, agentErr := n.assistantAgent(ctx, in.Launcher)
+		if agentErr != nil {
+			return out, agentErr
+		}
+		switch agent {
+		case "codex":
+			entries, out.Complete, err = n.codexSkillCatalog(ctx, in)
+		case "claude":
+			in.ConfigDir, err = n.assistantProfileSelection(ctx, in.SessionID, in.Launcher, in.ConfigDir, in.SessionID != "")
+			if err != nil {
+				return out, err
+			}
+			profile := n.assistantConfigDir(in.Launcher, in.ConfigDir)
+			if profile == "" {
+				profile = filepath.Join(n.home, ".claude")
+			}
+			roots := []assistantskills.Root{{Path: filepath.Join(profile, "skills"), Source: "user"}}
+			for dir, depth := filepath.Clean(in.Cwd), 0; depth < 64; depth++ {
+				rel, _ := filepath.Rel(in.Cwd, dir)
+				roots = append(roots, assistantskills.Root{Path: filepath.Join(dir, ".claude", "skills"), Source: "project · " + rel})
+				parent := filepath.Dir(dir)
+				if parent == dir {
+					break
+				}
+				dir = parent
+			}
+			// Bounded local roots, not a claim to enumerate bundled, remote or plugin-only commands.
+			entries, err = assistantskills.LocalCatalog(roots)
+			if err == nil {
+				var own map[string]any
+				if settings := n.launcherOwnSettings(ctx, in.Launcher); settings != "" {
+					own, err = readLauncherSettings(settings, in.Cwd, n.home)
+					if err != nil {
+						return out, errors.New("cannot establish the launcher's skill settings")
+					}
+				}
+				// The user's skill switches a private profile carries (assistant_user_setup.go) come before the launcher's.
+				entries, err = visibleClaudeSkills(entries, profile, in.Cwd, map[string]any{"skillOverrides": n.userSkillsOff(profile, in.Cwd)}, own)
+			}
+		default:
+			err = errors.New("skill selection is unavailable for this runtime")
+		}
 	}
 	if err != nil {
 		return out, err

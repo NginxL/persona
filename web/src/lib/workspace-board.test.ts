@@ -49,6 +49,15 @@ describe("workspace board projection", () => {
     expect(cardSessions(c, [session("computer", "C:\\repo\\one\\..\\two\\")])).toHaveLength(1);
     expect(boundCard({ ...initial(), cards: [c] }, { machine_id: "computer", cwd: "C:\\repo\\two\\" } as Workspace)?.id).toBe(c.id);
   });
+  it("compares Windows directory components without case changes to displayed paths", () => {
+    expect(directory("C:\\Projects\\Demo")).toBe("c:/Projects/Demo");
+    expect(sameDirectory("C:\\Projects\\Demo", "c:/projects/demo/")).toBe(true);
+    expect(sameDirectory("\\\\Server\\Share\\Projects\\Demo", "//server/share/projects/demo")).toBe(true);
+    expect(sameDirectory("/Projects/Demo", "/projects/demo")).toBe(false);
+    const c = card("windows", { cwd: "C:\\Projects\\Demo" });
+    expect(cardSessions(c, [session("computer", "c:/projects/demo")])).toHaveLength(1);
+    expect(boundCard({ ...initial(), cards: [c] }, { machine_id: "computer", cwd: "c:/projects/demo" } as Workspace)).toBe(c);
+  });
   it("recognizes archived bindings for restoration, scoped to a machine", () => {
     const board = initial(), w = { machine_id: "computer", cwd: "/projects/old/" } as Workspace;
     expect(boundCard(board, w)?.archived).toBe(true);

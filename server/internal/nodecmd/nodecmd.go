@@ -1,25 +1,29 @@
 // Package nodecmd is the device's command line: what a computer runs for its node and its Agents (`node --stdio`,
-// `node --attach`, `hook`, `mcp`, `ask`, `notify`, `launch`, …). The device's own program `persona-node` is this alone;
+// `node --attach`, `hook`, `mcp`, `ask`, `notify`, `create-direction`, `write-progress`, `launch`, …). The device's own
+// program `persona-node` is this alone;
 // `personad` dispatches the same commands here and adds the hub's and the manager's. It must
 // not link the hub, the manager or the database (cmd/persona-node/main_test.go guards that).
 package nodecmd
 
 import (
+	_ "github.com/nwverse/persona/server/internal/modules/all/node" // the modules that run on the node (Provider seams)
+
 	"context"
 	"encoding/json"
 	"errors"
 	"io"
 	"os"
 	"runtime"
+	"strings"
 	"time"
 
 	"github.com/nwverse/persona/server/internal/extension/sandbox"
-	"github.com/nwverse/persona/server/internal/iphone"
+	"github.com/nwverse/persona/server/internal/machineops"
 	"github.com/nwverse/persona/server/internal/mcpserver"
 	"github.com/nwverse/persona/server/internal/node"
 	"github.com/nwverse/persona/server/internal/nodeclient"
+	"github.com/nwverse/persona/server/internal/nodecmd/commandport"
 	"github.com/nwverse/persona/server/internal/nodeupdate"
-	"github.com/nwverse/persona/server/internal/office"
 	"github.com/nwverse/persona/server/internal/osproc"
 	"github.com/nwverse/persona/server/internal/procs"
 	"github.com/nwverse/persona/server/internal/scriptcli"
@@ -32,8 +36,13 @@ type Build struct {
 	Program string // nodeproto.ProgramPersonad or ProgramPersonaNode: what node.info says the node runs as
 }
 
-// Usage is the device commands' part of the usage text (the node part is NodeUsage).
-const Usage = `  personad hook             Claude Code hook entry (reads hook JSON on stdin)
+// Usage is the device commands' part of the usage text (the node part is NodeUsage), with the lines of the commands
+// the node-side modules of this build add (internal/nodecmd/commandport).
+func Usage() string { return strings.TrimSuffix(deviceUsage+"\n"+commandport.CommandUsage(), "\n") }
+
+const deviceUsage = `  personad resource status [resource]  shared runner status as JSON
+  personad gate <project> <ref> [groups...]  join or reuse identical gate work
+  personad hook             Claude Code hook entry (reads hook JSON on stdin)
   personad mcp              Claude Code MCP server (stdio)
   personad ask "question" [--options a,b,c] [--timeout 10m] [--require-remote]
                            block until the question is answered on the phone; exit 0 allowed / option chosen (printed),
@@ -45,16 +54,14 @@ const Usage = `  personad hook             Claude Code hook entry (reads hook JS
   personad tool <tool> [<json args> | -] | --cli <connector> [--format json|text] <words…>
                            a connector's tools from the assistant's shell, or an Agent's own tools from its pane
                            (docs/protocol/connector-protocol.md "Command line"; personad tool --help)
-  personad office docx|pptx|xlsx|check …
-                           write a Word document or a deck from Markdown, a workbook from JSON / CSV, or say what is in
-                           one (the office skill): personad office --help
+  personad ops storage|hotspots|toolchain|network|ports|processes|services|service-logs|mcp|skill …
+                           on-demand read-only machine diagnostics CLI, stdio MCP server, and opt-in skill manager: personad ops --help
   personad claude-plugin status|install|uninstall|on|off
                            the Persona plugin for Claude Code on this computer, as JSON (persona-link plugin says it in
                            words; docs/operations/link.md "Claude Code plugin")
   personad codex-start <file>
                            run the Codex launcher in file (written by the node, removed once read) with the first
-                           message as its last argument, no shell in between (docs/integrations/codex.md "Starting from the phone")
-` + iphone.Usage
+                           message as its last argument, no shell in between (docs/integrations/codex.md "Starting from the phone")`
 
 // SysmonUsage is `sysmon`'s line in the usage text.
 const SysmonUsage = `  personad sysmon [n]       print this machine's system info and 1 + n metric samples (n default 3, at most 8640,
@@ -72,6 +79,10 @@ func Run(ctx context.Context, stop func(), args []string, b Build) (handled bool
 	}
 	rest := args[1:]
 	switch args[0] {
+	case "resource":
+		return true, resourceCommand(ctx, rest)
+	case "gate":
+		os.Exit(gateCommand(ctx, rest, os.Stdin, os.Stdout, os.Stderr))
 	case sandbox.AgentExecCommand:
 		stop()
 		return true, sandbox.RunAgentExec(rest)
@@ -88,10 +99,12 @@ func Run(ctx context.Context, stop func(), args []string, b Build) (handled bool
 		return true, runLaunch(stop, ticket, rest[0], rest[1:]) // launch.go: bounded wait for the node, Ctrl-C ends it
 	case "assistant-tui": // an assistant conversation's interactive Claude Code, as claude -p to the node (node/assistant_tui.go)
 		os.Exit(node.AssistantTUI(rest, os.Stdin, os.Stdout, os.Stderr))
+	case "model-source": // final Codex provider attribution, after launcher expansion
+		return true, node.ModelSourceLaunch(rest)
 	case "codex-start": // a Codex launcher with the phone's first message, read from a file (node/codex_start.go)
 		return true, node.CodexStart(rest)
 	case "tab-start": // a command a runtime gave to resume its session in a new tab (`pi --session …`, node/pi.go)
-		return true, node.CodexStart(rest)
+		return true, node.TabStart(rest)
 	case "mcp":
 		return true, mcpserver.Serve(ctx, b.Version, os.Stdin, os.Stdout)
 	case "tool": // a connector's tools and command line from the assistant's shell (internal/toolcli)
@@ -100,14 +113,16 @@ func Run(ctx context.Context, stop func(), args []string, b Build) (handled bool
 		os.Exit(scriptcli.Ask(ctx, rest, os.Stdin, os.Stdout, os.Stderr))
 	case "notify":
 		os.Exit(scriptcli.Notify(ctx, rest, os.Stdout, os.Stderr))
+	case "create-direction":
+		os.Exit(scriptcli.CreateDirection(ctx, rest, os.Stdout, os.Stderr))
+	case "write-progress":
+		os.Exit(scriptcli.WriteProgress(ctx, rest, os.Stdout, os.Stderr))
 	case "decision":
 		os.Exit(scriptcli.Decision(ctx, rest, os.Stdin, os.Stdout, os.Stderr))
-	case "office":
-		os.Exit(office.Main(rest, os.Stdout, os.Stderr))
+	case "ops":
+		os.Exit(machineops.Main(ctx, b.Version, rest, os.Stdin, os.Stdout, os.Stderr))
 	case "claude-plugin": // the Persona plugin for Claude Code here, as JSON (node/claudeplugin.go; persona-link plugin)
 		os.Exit(node.ClaudePluginCommand(ctx, rest, os.Stdout, os.Stderr))
-	case "iphone": // this computer's paired iPhones for phone control (internal/iphone)
-		os.Exit(iphone.Command(ctx, rest, os.Stdout, os.Stderr))
 	case "sysmon":
 		n, err := sysmonCount(rest)
 		if err != nil {
@@ -115,11 +130,18 @@ func Run(ctx context.Context, stop func(), args []string, b Build) (handled bool
 		}
 		runSysmon(ctx, n)
 	case "node-update-check":
-		return true, json.NewEncoder(os.Stdout).Encode(nodeupdate.Check{Version: b.Version, OS: runtime.GOOS, Arch: runtime.GOARCH, Program: b.Program, ResidentHandover: node.ResidentHandoverSupported})
+		return true, json.NewEncoder(os.Stdout).Encode(nodeupdate.Check{
+			Version: b.Version, OS: runtime.GOOS, Arch: runtime.GOARCH, Program: b.Program,
+			ResidentHandover: node.ResidentHandoverSupported, AdoptionMarker: true,
+		})
 	case "node-update-watch":
 		return true, runNodeUpdateWatch(ctx, rest)
 	default:
-		return false, nil
+		run, ok := commandport.LookupCommand(args[0]) // a module's command (internal/modules/all/node)
+		if !ok {
+			return false, nil
+		}
+		os.Exit(run(ctx, rest, os.Stdin, os.Stdout, os.Stderr))
 	}
 	return true, nil
 }
@@ -152,6 +174,8 @@ func runNode(ctx context.Context, args []string, b Build) error {
 				os.Exit(1)
 			}
 			return err
+		case "agy-hooks": // Persona's entries in the Antigravity CLI's hooks file (node/agyhooks.go)
+			return node.AgyHooksCommand(args[1:], os.Stdout)
 		case "reset-uid":
 			if err := noExtraArgs("reset-uid", args[1:]); err != nil {
 				exitNodeUsage(err)

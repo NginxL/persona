@@ -140,9 +140,11 @@ func restartedOn(t *testing.T, st Store) (*Service, *fakeHub) {
 	t.Helper()
 	s, f := newTaskServiceOn(t, st)
 	shortSupervise(t, s)
+	f.mu.Lock()
 	f.hello.Assistant.MachineID = "server"
-	setSettings(t, s, func(v *Settings) { v.Main = "conv1" })
 	f.known["conv1"] = true
+	f.mu.Unlock()
+	setSettings(t, s, func(v *Settings) { v.Main = "conv1" })
 	f.setSessions("server", proto.Session{SessionID: "conv1", MachineID: "server", Assistant: true, Status: proto.StatusIdle})
 	return s, f
 }
@@ -295,7 +297,10 @@ func TestCompletionAcrossRestart(t *testing.T) {
 			s, f, todo := newSupervisedServiceOn(t, database)
 			ctx := context.Background()
 			nodeListed(s, f, turnRow(proto.StatusIdle, 1, ""))
-			s.superviseWatch(ctx, time.Now()) // the first manager's sweep has run: the turns' ledger is kept from here on
+			// The first manager's sweep has run, its looks too: the turns' ledger is kept from here on. A look of it still
+			// going when the turn below ends could take that end up as a start nobody heard, ahead of the list's start
+			// and end (#13701).
+			sweeps(t, s, todo.ID, 1)
 			done := turnRow(proto.StatusDone, 3, "修好了")
 			page := turnPage("turn-1", "修好了", true)
 			switch at {
@@ -687,7 +692,10 @@ func TestTaskReceiptReservationIsReleased(t *testing.T) {
 				s.taskTurnEnded(ctx, "box", "s1") // the node answers again, and the same turn end is told again
 			}
 			waitFor(t, "the receipt", func() bool { return len(recoveryReceipts(t, s, todo.ID)) == 1 })
-			waitFor(t, "the task to close", func() bool { return todoNow(s, todo.ID).DoneAt != nil })
+			waitFor(t, "judge-done delivery to stay open", func() bool {
+				current := todoNow(s, todo.ID)
+				return current.DoneAt == nil && current.Check != nil && current.Check.Verdict == verdictDone
+			})
 			quiet := time.NewTicker(100 * time.Millisecond)
 			defer quiet.Stop()
 			<-quiet.C // a second receipt or judgment would show by now
@@ -833,6 +841,7 @@ func TestCompletionUnheardWhileAUsageLimitIsWaitedOut(t *testing.T) {
 		t.Fatalf("the task was changed while its turn waits for the reset: start %v → %v, stage %q → %q, %+v", mark, workMark(s, todo.ID), before.Stage, now.Stage, now.Supervision)
 	}
 	// The reset passed long ago and nothing went on: the same row is now a turn that ended, cut off by the limit.
+	boxReadsBefore := itemReadsOn(f, "box")
 	f.setSessions("box", limited(time.Now().Add(-limitResumeGrace-time.Minute)))
 	sweeps(t, s, todo.ID, 4)
 	waitFor(t, "the interrupted receipt", func() bool { return len(recoveryReceipts(t, s, todo.ID)) == 1 })
@@ -844,9 +853,22 @@ func TestCompletionUnheardWhileAUsageLimitIsWaitedOut(t *testing.T) {
 	if len(receipts) != 1 || receipts[0].State != "interrupted" || f.judged != 0 {
 		t.Fatalf("after the wait: %d receipts %+v, %d judgments, want one interrupted receipt and no judgment", len(receipts), receipts, f.judged)
 	}
-	if got := reads.Load(); got < 1 || got > 2 {
+	// Count the worker agent's own transcript reads on box; direct supervision confirmation reads conv1 on server (#12567).
+	if got := itemReadsOn(f, "box") - boxReadsBefore; got < 1 || got > 2 {
 		t.Fatalf("%d transcript reads to take the turn up, want the sweep's and the end's own", got)
 	}
+}
+
+func itemReadsOn(f *fakeHub, device string) int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	n := 0
+	for _, c := range f.calls {
+		if c.Device == device && c.Method == DeviceSessionItems {
+			n++
+		}
+	}
+	return n
 }
 
 // A node that lists the session but does not answer the transcript read is not asked on every tick: the next tick,
@@ -1001,6 +1023,7 @@ func TestCompletionAfterAnUnnamedTurnWithTheNodeClockBehind(t *testing.T) {
 // A meeting's turn in the task's agent is never the task's completion: found by the sweep with no start heard, it is
 // left alone (no receipt, no start taken), kept as seen and not read again.
 func TestCompletionUnheardMeetingTurn(t *testing.T) {
+	needsRecordingModule(t) // a path of the recording module's
 	s, f, todo := newSupervisedService(t)
 	nodeListed(s, f, turnRow(proto.StatusIdle, 1, ""))
 	sweeps(t, s, todo.ID, 1)

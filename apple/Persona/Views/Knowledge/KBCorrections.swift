@@ -496,9 +496,6 @@ struct KBFactsEditor: View {
             .onAppear { if initial.isEmpty { focused = true } }
         }
         .presentationDetents([.medium, .large])
-        #if os(macOS)
-        .macSheet()
-        #endif
     }
 
     private func submit() async {

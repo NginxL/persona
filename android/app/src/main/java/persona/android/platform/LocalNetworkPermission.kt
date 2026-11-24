@@ -22,6 +22,8 @@ import androidx.lifecycle.compose.LifecycleEventEffect
 import persona.android.di.ConnectionRuntime
 import persona.android.di.WiredPairingService
 import persona.core.contracts.api.*
+import persona.core.designsystem.RetainedTextDensity
+import persona.core.designsystem.currentTextDensities
 import persona.core.hub.HubPairingClient
 import persona.core.hub.LocalAddressPolicy
 import kotlinx.coroutines.*
@@ -160,22 +162,34 @@ internal fun LocalNetworkPermissionDialog(permission: LocalNetworkPermission, co
             if (!granted) dismissed = true
         }
     }
+    val densities = currentTextDensities()
     if (pending != null || state == ConnectionState.NeedsLocalNetworkPermission && !permission.granted() && !dismissed) AlertDialog(
         onDismissRequest = { pending?.complete(false); dismissed = true },
-        title = { Text(stringResource(R.string.app_local_network_title)) },
-        text = { Text(stringResource(if (permission.requestedBefore) R.string.app_local_network_denied
-            else R.string.app_local_network_ask)) },
-        confirmButton = { TextButton(onClick = {
-            if (permission.requestedBefore) {
-                try {
-                    openedSettings = true
-                    context.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${context.packageName}")))
-                } catch (_: Exception) { openedSettings = false; pending?.complete(false) }
-            } else {
-                permission.recordRequest()
-                launcher.launch(LOCAL_NETWORK)
+        title = { RetainedTextDensity(densities) { Text(stringResource(R.string.app_local_network_title)) } },
+        text = {
+            RetainedTextDensity(densities) {
+                Text(stringResource(if (permission.requestedBefore) R.string.app_local_network_denied else R.string.app_local_network_ask))
             }
-        }) { Text(stringResource(if (permission.requestedBefore) R.string.app_local_network_open_settings else R.string.app_local_network_allow), maxLines = 1) } },
-        dismissButton = { TextButton(onClick = { pending?.complete(false); dismissed = true }) { Text(stringResource(R.string.app_local_network_not_now), maxLines = 1) } },
+        },
+        confirmButton = {
+            RetainedTextDensity(densities) {
+                TextButton(onClick = {
+                    if (permission.requestedBefore) {
+                        try {
+                            openedSettings = true
+                            context.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${context.packageName}")))
+                        } catch (_: Exception) { openedSettings = false; pending?.complete(false) }
+                    } else {
+                        permission.recordRequest()
+                        launcher.launch(LOCAL_NETWORK)
+                    }
+                }) { Text(stringResource(if (permission.requestedBefore) R.string.app_local_network_open_settings else R.string.app_local_network_allow), maxLines = 1) }
+            }
+        },
+        dismissButton = {
+            RetainedTextDensity(densities) {
+                TextButton(onClick = { pending?.complete(false); dismissed = true }) { Text(stringResource(R.string.app_local_network_not_now), maxLines = 1) }
+            }
+        },
     )
 }

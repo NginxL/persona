@@ -134,9 +134,10 @@ final class SidebarLayoutPhoneTests: XCTestCase {
         let settings = element("sidebar-settings")
         XCTAssertTrue(settings.waitForExistence(timeout: 10) && settings.isHittable, "no Settings in the drawer:\n\(app.debugDescription)")
         settings.tap()
-        // Closed from its first page (above), Settings opens there again, as over the shell: Appearance › Navigation.
-        let appearance = element("settings-appearance"), navigation = element("settings-navigation")
-        XCTAssertTrue(appearance.waitForExistence(timeout: 10), "Settings did not open from the drawer:\n\(app.debugDescription)")
+        // Closed from its first page (above), Settings opens there again, as over the shell: Advanced › Appearance › Navigation.
+        XCTAssertTrue(app.openSettingsAdvancedPage(), "Settings did not open from the drawer on its first page:\n\(app.debugDescription)")
+        let appearance = app.settingsAdvancedRow("settings-appearance"), navigation = element("settings-navigation")
+        XCTAssertTrue(appearance.waitForExistence(timeout: 10), "no Appearance row:\n\(app.debugDescription)")
         appearance.tap()
         XCTAssertTrue(navigation.waitForExistence(timeout: 10), "no Navigation row:\n\(app.debugDescription)")
         for _ in 0..<6 where !navigation.isHittable { app.swipeUp(velocity: .slow) }
@@ -147,10 +148,10 @@ final class SidebarLayoutPhoneTests: XCTestCase {
         XCTAssertTrue(app.buttons["Agents"].firstMatch.waitForExistence(timeout: 10), "the switch did not come back:\n\(app.debugDescription)")
     }
 
-    /// Settings' × is on its first page, as over the shell: back from Navigation (and Appearance) first.
+    /// Settings' × is on its first page, as over the shell: back from Navigation (Appearance, Advanced) first.
     @MainActor private func closeSettings() {
         let close = app.buttons["settings-close"].firstMatch, back = app.navigationBars.buttons["BackButton"].firstMatch
-        for _ in 0..<3 where !close.exists && back.exists {
+        for _ in 0..<4 where !close.exists && back.exists {
             back.tap()
             _ = close.waitForExistence(timeout: 2)
         }

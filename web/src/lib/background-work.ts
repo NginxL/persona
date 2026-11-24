@@ -1,4 +1,5 @@
 import { t } from "../i18n";
+import { stateOf } from "./format";
 import type { Session, Subagent, Workflow } from "./types";
 import type { SessionLookup, Todo } from "./todos";
 import { backgroundCommandLine, backgroundWaitLine, waitingOnWorkflow, workflowCounts, type WaitLine } from "./workflows";
@@ -30,6 +31,31 @@ export function backgroundWork(session: Session | undefined): BackgroundWork | u
     : background.filter((b) => b.kind !== "workflow" && b.kind !== "agent").length);
   return tasks || subagents || workflows || session.background_working || (summary && session.background_tasks_count === undefined && (session.background_count ?? 0) > 0)
     ? { tasks, subagents, workflows, workflow } : undefined;
+}
+
+/** Background commands that look stuck (#13744, Session.background_stalled_since): the Agent is still Working (a running
+ *  tool is work), and this says how long they have used no CPU and written no output. Null when the hub says nothing. */
+export interface BackgroundStall {
+  /** The short line: "Background commands idle for 3 hr". */
+  text: string;
+  /** What it means, for a tooltip. */
+  title: string;
+}
+
+export function backgroundStall(s: Session | undefined, now = Date.now()): BackgroundStall | null {
+  if (!s || stateOf(s) !== "working" || !s.background_working || s.background_waiting) return null;
+  const text = stalledText(s.background_stalled_since, now);
+  return text ? { text, title: t("lib-state-labels.bg_stalled_hint") } : null;
+}
+
+/** "Background commands quiet for 3 hr" from the time they went quiet; "" when there is none (or it is Go's zero time). */
+export function stalledText(since: string | undefined, now = Date.now()): string {
+  const at = since ? Date.parse(since) : NaN;
+  if (!Number.isFinite(at) || at < 86400_000) return "";
+  const minutes = Math.max(1, Math.floor((now - at) / 60_000));
+  if (minutes < 60) return t("lib-state-labels.bg_stalled_minutes", { count: minutes });
+  return minutes < 2880 ? t("lib-state-labels.bg_stalled_hours", { count: Math.floor(minutes / 60) })
+    : t("lib-state-labels.bg_stalled_days", { count: Math.floor(minutes / 1440) });
 }
 
 /** The hub says the agent's turn is over and a subagent it launched in the background still runs (#5030, cindy's

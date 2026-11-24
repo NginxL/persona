@@ -45,12 +45,19 @@ func probeRecovery(ctx context.Context, reach func(context.Context) bool) <-chan
 
 // hubProbe returns a check that races direct and outbound proxy routes within one probe interval. SSH logins
 // are reserved for full connection attempts. The check is nil when there are no candidates or SSH is required.
+// Proxy-only mode (Config.ProxyAlways) probes only through the proxy, and not at all without one.
 func hubProbe(c *Config) func(context.Context) bool {
 	if len(c.Endpoints) == 0 || (c.SSH != nil && c.SSH.Always) {
 		return nil
 	}
 	direct := ranked(c.Endpoints)
 	proxy, proxiedEndpoints, _ := proxied(c)
+	if c.ProxyAlways {
+		if len(proxiedEndpoints) == 0 {
+			return nil
+		}
+		direct = nil
+	}
 	return func(ctx context.Context) bool {
 		ctx, cancel := context.WithTimeout(ctx, probeEvery)
 		defer cancel()

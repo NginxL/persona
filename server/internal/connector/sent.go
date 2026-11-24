@@ -30,7 +30,8 @@ type LetThrough struct {
 }
 
 // Sent is a write that went out as the user: the gate let it through and the action ran without an error. A write the
-// gate refused or the user declined, one that failed, and one the user sent by their own hand (Run) are not.
+// gate refused, the user declined or nobody answered the card of (proto.ToolErrorUnanswered), one that failed, and one
+// the user sent by their own hand (Run) are not.
 type Sent struct {
 	At        time.Time
 	Connector string          // the connector's id

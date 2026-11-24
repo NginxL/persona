@@ -2,6 +2,7 @@ package assistant
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"sync"
 	"testing"
@@ -17,9 +18,10 @@ import (
 type ctxAwareLinkStore struct {
 	*profileTaskStore
 	todoStore
-	mu     sync.Mutex
-	rows   []db.TodoRow
-	linked int
+	mu          sync.Mutex
+	rows        []db.TodoRow
+	linked      int
+	failSession string
 }
 
 func newCtxAwareLinkStore() *ctxAwareLinkStore {
@@ -54,7 +56,13 @@ func (st *ctxAwareLinkStore) CreateTodo(_ context.Context, t db.TodoRow) error {
 	st.rows = append(st.rows, t)
 	return nil
 }
-func (st *ctxAwareLinkStore) link(ctx context.Context) ([]string, error) {
+func (st *ctxAwareLinkStore) link(ctx context.Context, sessionID string) ([]string, error) {
+	if sessionID == st.failSession {
+		st.mu.Lock()
+		st.linked++
+		st.mu.Unlock()
+		return nil, errors.New("injected exact-session link failure")
+	}
 	if err := ctx.Err(); err != nil {
 		return nil, err // what pgx answers when the start's own context is already spent
 	}
@@ -63,11 +71,11 @@ func (st *ctxAwareLinkStore) link(ctx context.Context) ([]string, error) {
 	st.mu.Unlock()
 	return nil, nil
 }
-func (st *ctxAwareLinkStore) LinkTodoAgentWithSource(ctx context.Context, _, _, _, _, _, _, _, _, _ string, _ time.Time) ([]string, error) {
-	return st.link(ctx)
+func (st *ctxAwareLinkStore) LinkTodoAgentWithSource(ctx context.Context, _, _, sessionID, _, _, _, _, _, _ string, _ time.Time) ([]string, error) {
+	return st.link(ctx, sessionID)
 }
-func (st *ctxAwareLinkStore) LinkTodoAgentOfDoneTask(ctx context.Context, _, _, _, _, _, _, _, _, _ string, _ time.Time) ([]string, error) {
-	return st.link(ctx)
+func (st *ctxAwareLinkStore) LinkTodoAgentOfDoneTask(ctx context.Context, _, _, sessionID, _, _, _, _, _, _ string, _ time.Time) ([]string, error) {
+	return st.link(ctx, sessionID)
 }
 func (st *ctxAwareLinkStore) linkCount() int {
 	st.mu.Lock()
@@ -86,6 +94,16 @@ func shortTaskStartReconcile(t *testing.T) {
 	t.Cleanup(func() {
 		taskStartTimeout, taskStartAdoptWait, taskStartAdoptPoll, agentStartListTimeout = oldStart, oldWait, oldPoll, oldListTimeout
 	})
+}
+
+// shortTaskStartAdopt shortens only the search for the session of a start that did not answer (one second, quick polls),
+// for a test whose fake fails the start at once. The start keeps its budget: what it reads before it asks the node (the
+// plan, the model configuration in Postgres) is not squeezed into milliseconds (#14158).
+func shortTaskStartAdopt(t *testing.T) {
+	t.Helper()
+	oldWait, oldPoll := taskStartAdoptWait, taskStartAdoptPoll
+	taskStartAdoptWait, taskStartAdoptPoll = time.Second, 15*time.Millisecond
+	t.Cleanup(func() { taskStartAdoptWait, taskStartAdoptPoll = oldWait, oldPoll })
 }
 
 // reconcileHub is a fake hub with the given machines (no sessions yet) whose session.start always spends the

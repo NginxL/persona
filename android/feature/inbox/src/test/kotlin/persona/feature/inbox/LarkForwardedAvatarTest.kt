@@ -8,6 +8,7 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.annotation.Config
 import persona.core.designsystem.PersonaTheme
+import persona.core.inbox.*
 
 /** #5696: a forwarded bundle's senders show their pictures once the hub is connected, not only their initials. */
 @RunWith(AndroidJUnit4::class)

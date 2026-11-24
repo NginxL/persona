@@ -166,12 +166,14 @@ func (d *DB) EditStartedPlanTask(ctx context.Context, id string, index int, edit
 	return &row, nil
 }
 
-const compareTaskQueueSQL = `UPDATE task_plans SET tasks = jsonb_set(tasks, ARRAY[$2::integer::text, 'queue'], $5::jsonb), updated_at = $6
+const compareTaskQueueSQL = `UPDATE task_plans SET tasks = jsonb_set(tasks, ARRAY[$2::integer::text],
+	(tasks->$2::integer) || jsonb_build_object('queue', $5::jsonb) ||
+	CASE WHEN $7::jsonb IS NULL THEN '{}'::jsonb ELSE jsonb_build_object('placement',$7::jsonb) END), updated_at = $6
 	WHERE id = $1 AND state = 'started' AND tasks->$2::integer->>'todo_id' = $3 AND tasks->$2::integer->'queue' = $4::jsonb`
 
 // CompareTaskQueue changes one authorized start's queue only if it is still the entry the dispatcher read.
-func (d *DB) CompareTaskQueue(ctx context.Context, id string, index int, todoID string, before, after json.RawMessage, at time.Time) (bool, error) {
-	tag, err := d.pool.Exec(ctx, compareTaskQueueSQL, id, index, todoID, []byte(before), []byte(after), at)
+func (d *DB) CompareTaskQueue(ctx context.Context, id string, index int, todoID string, before, after, placement json.RawMessage, at time.Time) (bool, error) {
+	tag, err := d.pool.Exec(ctx, compareTaskQueueSQL, id, index, todoID, []byte(before), []byte(after), at, []byte(placement))
 	return tag.RowsAffected() == 1, err
 }
 
@@ -191,7 +193,7 @@ func (d *DB) UnstartedQueuedTodo(ctx context.Context, todoID, planID string, sin
 // ClaimUnstartedTaskQueue combines to-do eligibility and the exact queue CAS.
 // Agent link writers lock the same to-do row. Check membership in a separate
 // statement after acquiring it so links committed while the lock was busy are visible.
-func (d *DB) ClaimUnstartedTaskQueue(ctx context.Context, planID string, index int, todoID string, since time.Time, before, after json.RawMessage, at time.Time) (bool, error) {
+func (d *DB) ClaimUnstartedTaskQueue(ctx context.Context, planID string, index int, todoID string, since time.Time, before, after, placement json.RawMessage, at time.Time) (bool, error) {
 	var claimed bool
 	err := pgx.BeginFunc(ctx, d.pool, func(tx pgx.Tx) error {
 		var one int
@@ -206,7 +208,7 @@ func (d *DB) ClaimUnstartedTaskQueue(ctx context.Context, planID string, index i
 		if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM todo_agents WHERE todo_id = $1)`, todoID).Scan(&linked); err != nil || linked {
 			return err
 		}
-		tag, err := tx.Exec(ctx, compareTaskQueueSQL, planID, index, todoID, []byte(before), []byte(after), at)
+		tag, err := tx.Exec(ctx, compareTaskQueueSQL, planID, index, todoID, []byte(before), []byte(after), at, []byte(placement))
 		claimed = tag.RowsAffected() == 1
 		return err
 	})

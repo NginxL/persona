@@ -6,6 +6,7 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.core.app.ApplicationProvider
+import persona.core.inbox.*
 
 @RunWith(AndroidJUnit4::class)
 @org.robolectric.annotation.Config(sdk = [35])

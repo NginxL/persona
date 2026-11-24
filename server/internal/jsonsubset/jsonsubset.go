@@ -7,7 +7,9 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"math"
+	"math/big"
 	"strings"
 	"unicode/utf8"
 )
@@ -19,10 +21,8 @@ import (
 
 // Compile reads a schema: a JSON object, whose local $refs resolve.
 func Compile(raw json.RawMessage) (map[string]any, error) {
-	var v any
-	dec := json.NewDecoder(bytes.NewReader(raw))
-	dec.UseNumber()
-	if err := dec.Decode(&v); err != nil {
+	v, err := Decode(raw)
+	if err != nil {
 		return nil, fmt.Errorf("json_schema is not JSON: %w", err)
 	}
 	root, ok := v.(map[string]any)
@@ -95,7 +95,10 @@ func Decode(raw []byte) (any, error) {
 	if err := dec.Decode(&v); err != nil {
 		return nil, err
 	}
-	if dec.More() {
+	if _, err := dec.Token(); err != io.EOF {
+		if err != nil {
+			return nil, err
+		}
 		return nil, fmt.Errorf("more than one JSON value")
 	}
 	return v, nil
@@ -231,7 +234,10 @@ func ValidateAt(root, schema map[string]any, v any, at string, depth int) string
 			return fmt.Sprintf("%s: should be at most %v characters", at, m)
 		}
 	case json.Number:
-		f, _ := x.Float64()
+		f, ok := number(x)
+		if !ok {
+			return at + ": number is out of range"
+		}
 		if m, ok := number(schema["minimum"]); ok && f < m {
 			return fmt.Sprintf("%s: should be at least %v", at, m)
 		}
@@ -272,14 +278,12 @@ func anyType(v any, types []string) bool {
 				return true
 			}
 		case "number":
-			if _, ok := v.(json.Number); ok {
+			if _, ok := number(v); ok {
 				return true
 			}
 		case "integer":
-			if n, ok := v.(json.Number); ok {
-				if f, err := n.Float64(); err == nil && f == math.Trunc(f) {
-					return true
-				}
+			if f, ok := number(v); ok && f == math.Trunc(f) {
+				return true
 			}
 		}
 	}
@@ -297,6 +301,9 @@ func jsonType(v any) string {
 	case bool:
 		return "a boolean"
 	case json.Number:
+		if _, ok := number(v); !ok {
+			return "an out-of-range number"
+		}
 		return "a number"
 	case nil:
 		return "null"
@@ -310,17 +317,64 @@ func number(v any) (float64, bool) {
 		return 0, false
 	}
 	f, err := n.Float64()
-	return f, err == nil
+	return f, err == nil && !math.IsNaN(f) && !math.IsInf(f, 0)
+}
+
+func numberEqual(x, y json.Number) bool {
+	fx, ok1 := number(x)
+	fy, ok2 := number(y)
+	if !ok1 || !ok2 || fx != fy {
+		return false
+	}
+	if fx == 0 {
+		return true
+	}
+	if len(x) <= 512 && len(y) <= 512 {
+		rx, ok1 := new(big.Rat).SetString(string(x))
+		ry, ok2 := new(big.Rat).SetString(string(y))
+		if ok1 && ok2 {
+			return rx.Cmp(ry) == 0
+		}
+	}
+	return string(x) == string(y)
 }
 
 func schemaEqual(a, b any) bool {
-	if x, ok := a.(json.Number); ok {
-		if y, ok := b.(json.Number); ok {
-			fx, e1 := x.Float64()
-			fy, e2 := y.Float64()
-			return e1 == nil && e2 == nil && fx == fy
+	switch x := a.(type) {
+	case nil:
+		return b == nil
+	case bool:
+		y, ok := b.(bool)
+		return ok && x == y
+	case string:
+		y, ok := b.(string)
+		return ok && x == y
+	case json.Number:
+		y, ok := b.(json.Number)
+		return ok && numberEqual(x, y)
+	case []any:
+		y, ok := b.([]any)
+		if !ok || len(x) != len(y) {
+			return false
 		}
-		return false
+		for i := range x {
+			if !schemaEqual(x[i], y[i]) {
+				return false
+			}
+		}
+		return true
+	case map[string]any:
+		y, ok := b.(map[string]any)
+		if !ok || len(x) != len(y) {
+			return false
+		}
+		for k, vx := range x {
+			vy, has := y[k]
+			if !has || !schemaEqual(vx, vy) {
+				return false
+			}
+		}
+		return true
 	}
 	return compact(a) == compact(b)
 }

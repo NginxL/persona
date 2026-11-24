@@ -17,6 +17,7 @@ import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
 import persona.core.designsystem.*
 import persona.core.designsystem.Tokens
+import persona.core.inbox.*
 
 @Composable
 internal fun LarkLinkedText(text: String, source: LarkContentSource? = null, modifier: Modifier = Modifier) {
@@ -90,7 +91,7 @@ private fun CardBlocks(
                             pending = true
                             scope.launch {
                                 try {
-                                    repository.cardAction(messageId, block.actionId)
+                                    repository.cardAction(messageId, block.actionId!!)
                                 } catch (e: Exception) {
                                     onError(e.message ?: res.getString(R.string.inbox_lark_action_failed))
                                 } finally {

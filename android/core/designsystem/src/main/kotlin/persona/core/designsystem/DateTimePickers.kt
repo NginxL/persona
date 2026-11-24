@@ -42,16 +42,21 @@ fun JDatePickerDialog(initial: LocalDate?, onPick: (LocalDate) -> Unit, onDismis
     val colors = DatePickerDefaults.colors(containerColor = palette.surfaceOpaque, titleContentColor = palette.ink2, headlineContentColor = palette.ink,
         weekdayContentColor = palette.ink3, dayContentColor = palette.ink, selectedDayContainerColor = palette.accent,
         todayDateBorderColor = palette.accent, todayContentColor = palette.accent, selectedYearContainerColor = palette.accent)
+    val densities = currentTextDensities()
     DatePickerDialog(
         onDismissRequest = onDismiss, colors = colors, shape = PersonaTheme.shapes.panelShape, tonalElevation = androidx.compose.ui.unit.Dp.Hairline,
         confirmButton = {
-            JButton(stringResource(R.string.designsystem_done), {
-                state.selectedDateMillis?.let { onPick(java.time.Instant.ofEpochMilli(it).atZone(ZoneOffset.UTC).toLocalDate()) }
-                onDismiss()
-            }, kind = JButtonKind.Primary, size = JButtonSize.Medium, enabled = state.selectedDateMillis != null)
+            RetainedTextDensity(densities) {
+                JButton(stringResource(R.string.designsystem_done), {
+                    state.selectedDateMillis?.let { onPick(java.time.Instant.ofEpochMilli(it).atZone(ZoneOffset.UTC).toLocalDate()) }
+                    onDismiss()
+                }, kind = JButtonKind.Primary, size = JButtonSize.Medium, enabled = state.selectedDateMillis != null)
+            }
         },
-        dismissButton = { JButton(stringResource(R.string.designsystem_cancel), onDismiss, kind = JButtonKind.Quiet, size = JButtonSize.Medium) },
-    ) { DatePicker(state, colors = colors, showModeToggle = false) }
+        dismissButton = {
+            RetainedTextDensity(densities) { JButton(stringResource(R.string.designsystem_cancel), onDismiss, kind = JButtonKind.Quiet, size = JButtonSize.Medium) }
+        },
+    ) { RetainedTextDensity(densities) { DatePicker(state, colors = colors, showModeToggle = false) } }
 }
 
 /** Picks a time of day on a 24-hour dial, starting at [initial] (now when none); [title] says what it is for. */

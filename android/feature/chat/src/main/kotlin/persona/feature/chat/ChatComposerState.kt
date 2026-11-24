@@ -83,16 +83,25 @@ class ChatComposerState(initial: ChatComposerDraft = ChatComposerDraft()) {
             fieldValue = value
         }
     var draftLoaded by mutableStateOf(false)
-    private var attachmentList by mutableStateOf(initial.attachments)
+    private var attachmentOrder by mutableStateOf(initial.attachments.map { it.id })
+    private val attachmentStates = mutableStateMapOf<String, ComposerAttachment>().apply { putAll(initial.attachments.associateBy { it.id }) }
     /** Edited photos' sources, edits and history by attachment id (#4992): kept in memory beside the draft, never sent. */
     internal var photoEdits by mutableStateOf<Map<String, PhotoEdits>>(emptyMap())
     /** The draft's attachments; a photo that leaves it takes its kept edits along. */
     var attachments: List<ComposerAttachment>
-        get() = attachmentList
+        get() = attachmentOrder.mapNotNull(attachmentStates::get)
         set(value) {
-            attachmentList = value
-            if (photoEdits.keys.any { id -> value.none { it.id == id } }) photoEdits = photoEdits.filterKeys { id -> value.any { it.id == id } }
+            val ids = value.mapTo(mutableSetOf()) { it.id }
+            attachmentStates.keys.filter { it !in ids }.forEach(attachmentStates::remove)
+            value.forEach { attachmentStates[it.id] = it }
+            attachmentOrder = value.map { it.id }
+            if (photoEdits.keys.any { id -> id !in ids }) photoEdits = photoEdits.filterKeys { it in ids }
         }
+
+    /** A background upload updates its own row, never a stale copy of another attachment's state. */
+    internal fun updateAttachment(id: String, update: (ComposerAttachment) -> ComposerAttachment) {
+        attachmentStates[id]?.let { attachmentStates[id] = update(it) }
+    }
     var sessionVersion by mutableStateOf(initial.sessionVersion)
     var currentSessionVersion by mutableStateOf<DraftSessionVersion?>(null)
     val oldVersion get() = hasContent && (currentSessionVersion?.replaced == true || sessionVersion?.let { origin ->

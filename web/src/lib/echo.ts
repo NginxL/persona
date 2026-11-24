@@ -31,6 +31,14 @@ export function sameWords(a: string, b: string): boolean {
   return x === y || (Math.min([...x].length, [...y].length) >= 8 && (x.includes(y) || y.includes(x)));
 }
 
+/** Compare the raw texts published by the hub, preserving word boundaries. Short replies must match in full. */
+export function sameMessage(a: string, b: string): boolean {
+  const x = a.replace(/\s+/g, " ").trim();
+  const y = b.replace(/\s+/g, " ").trim();
+  if (!x || !y) return false;
+  return x === y || (Math.min([...x].length, [...y].length) >= 8 && (x.includes(y) || y.includes(x)));
+}
+
 export interface Sent {
   /** The client_msg_id it was sent with; none when it went in another way (the prompt that started a conversation),
    *  then only words can find it. */

@@ -286,7 +286,6 @@ struct TerminalKeyBar: View {
     }
 }
 
-#if os(iOS) || os(visionOS)
 /// Reports every touch down and up on it (each finger on its own key), nothing else.
 private struct TouchArea: UIViewRepresentable {
     var down: () -> Void
@@ -306,27 +305,6 @@ private struct TouchArea: UIViewRepresentable {
         override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent?) { cancel?() }
     }
 }
-#else
-/// Reports every mouse press and release on it (the Mac's version of the touch area above), nothing else.
-private struct TouchArea: NSViewRepresentable {
-    var down: () -> Void
-    var up: () -> Void
-    /// Never sent by a mouse (a press always ends in a release); kept so the key bar is the same on both.
-    var cancel: () -> Void
-
-    func makeNSView(context: Context) -> TouchView { TouchView() }
-    func updateNSView(_ v: TouchView, context: Context) { v.down = down; v.up = up; v.cancel = cancel }
-
-    final class TouchView: NSView {
-        var down: (() -> Void)?
-        var up: (() -> Void)?
-        var cancel: (() -> Void)?
-        override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
-        override func mouseDown(with event: NSEvent) { down?() }
-        override func mouseUp(with event: NSEvent) { up?() }
-    }
-}
-#endif
 
 /// A key of the bar: armed / held keys are tinted and outlined, a locked one is filled with a bar under its label.
 struct KeyCap: View {

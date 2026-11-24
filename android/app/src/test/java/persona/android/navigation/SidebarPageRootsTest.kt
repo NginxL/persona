@@ -22,8 +22,8 @@ import persona.core.navigation.TodoDetailRoute
 import persona.core.navigation.TodosRoute
 import persona.feature.assistant.AssistantSidebarShade
 import persona.core.contracts.api.KnowledgeKind
-import persona.feature.knowledge.KnowledgeKindRoute
-import persona.feature.knowledge.KnowledgeRoute
+import persona.core.navigation.KnowledgeKindRoute
+import persona.core.navigation.KnowledgeRoute
 
 /** Mirrors apple/PersonaTests/SidebarPageRootsTests.swift (#9667, iOS #8359). */
 class SidebarPageRootsTest {

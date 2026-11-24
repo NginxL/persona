@@ -12,7 +12,7 @@ import (
 	"github.com/nwverse/persona/server/internal/approval"
 	"github.com/nwverse/persona/server/internal/extwire"
 	"github.com/nwverse/persona/server/internal/i18n"
-	"github.com/nwverse/persona/server/internal/mail"
+	"github.com/nwverse/persona/server/internal/mailwire"
 	"github.com/nwverse/persona/server/internal/prompts"
 	"github.com/nwverse/persona/server/internal/proto"
 )
@@ -211,7 +211,11 @@ func (h *Manager) getMailAccounts(context.Context) (string, error) {
 
 func (h *Manager) addMailAccount(_ context.Context, v json.RawMessage) (*selfChange, error) {
 	l := h.userLang()
-	req, summary, err := mailAccountRequest(l, v)
+	var guide func(lang, email string) string
+	if h.mail != nil {
+		guide = h.mail.PasswordGuide
+	}
+	req, summary, err := mailAccountRequest(l, v, guide)
 	if err != nil {
 		return nil, err
 	}
@@ -230,8 +234,9 @@ func (h *Manager) addMailAccount(_ context.Context, v json.RawMessage) (*selfCha
 }
 
 // mailAccountRequest reads add's value into the request and what the card says. Gmail is an error: Google sign-in
-// only happens in the app.
-func mailAccountRequest(l i18n.Lang, v json.RawMessage) (mail.AddAccountRequest, string, error) {
+// only happens in the app. guide (the mail module's PasswordGuide, nil without mail) says where a provider makes the
+// authorization code its mail clients sign in with.
+func mailAccountRequest(l i18n.Lang, v json.RawMessage, guide func(lang, email string) string) (mailwire.AddAccountRequest, string, error) {
 	var a struct {
 		Email        string `json:"email"`
 		Provider     string `json:"provider"`
@@ -244,25 +249,25 @@ func mailAccountRequest(l i18n.Lang, v json.RawMessage) (mail.AddAccountRequest,
 		SMTPSecurity string `json:"smtp_security"`
 	}
 	if err := json.Unmarshal(v, &a); err != nil {
-		return mail.AddAccountRequest{}, "", fmt.Errorf("value: %w", err)
+		return mailwire.AddAccountRequest{}, "", fmt.Errorf("value: %w", err)
 	}
 	email := strings.ToLower(strings.TrimSpace(a.Email))
 	if !strings.Contains(email, "@") {
-		return mail.AddAccountRequest{}, "", errors.New("email is required")
+		return mailwire.AddAccountRequest{}, "", errors.New("email is required")
 	}
 	if a.Provider == "gmail" || strings.HasSuffix(email, "@gmail.com") || strings.HasSuffix(email, "@googlemail.com") {
-		return mail.AddAccountRequest{}, "", errors.New("Gmail is added with Google sign-in, which only works in the app: " +
+		return mailwire.AddAccountRequest{}, "", errors.New("Gmail is added with Google sign-in, which only works in the app: " +
 			"ask the user to open 设置 › 邮箱 › 添加邮箱, pick Gmail and tap 使用 Google 账号登录")
 	}
 	provider := a.Provider
 	if provider == "" {
-		provider = mail.ProviderIMAP
+		provider = mailwire.ProviderIMAP
 	}
-	req := mail.AddAccountRequest{Name: strings.TrimSpace(a.Name), Email: email, Provider: provider, Auth: mail.AuthPassword,
+	req := mailwire.AddAccountRequest{Name: strings.TrimSpace(a.Name), Email: email, Provider: provider, Auth: mailwire.AuthPassword,
 		Username: a.Username, IMAPHost: a.IMAPHost, IMAPPort: a.IMAPPort, SMTPHost: a.SMTPHost, SMTPPort: a.SMTPPort,
 		SMTPSecurity: a.SMTPSecurity}
 	servers := ss(l, "servers_auto")
-	if provider == mail.ProviderFeishu {
+	if provider == mailwire.ProviderFeishu {
 		servers = ss(l, "servers_feishu")
 	} else if a.IMAPHost != "" || a.SMTPHost != "" {
 		servers = fmt.Sprintf("IMAP %s · SMTP %s", hostPort(l, a.IMAPHost, a.IMAPPort), hostPort(l, a.SMTPHost, a.SMTPPort))
@@ -270,7 +275,7 @@ func mailAccountRequest(l i18n.Lang, v json.RawMessage) (mail.AddAccountRequest,
 	summary := ss(l, "add_mail", i18n.Args{"email": email, "servers": servers})
 	// QQ / NetEase sign in with an authorization code, not the account's password: the card says where to make one
 	// (#5123), unless the servers were given (then they may not be the provider's).
-	if g := mail.PasswordGuide(l, email); g != "" && provider == mail.ProviderIMAP && a.IMAPHost == "" && a.SMTPHost == "" {
+	if g := passwordGuide(guide, l, email); g != "" && provider == mailwire.ProviderIMAP && a.IMAPHost == "" && a.SMTPHost == "" {
 		summary += "\n" + g
 	}
 	return req, summary, nil
@@ -417,4 +422,12 @@ func (h *Manager) personaSettings(ctx context.Context, machineID, sessionID stri
 		},
 	})
 	return outcome.Text, err
+}
+
+// passwordGuide is guide's text for email (mailwire.Service.PasswordGuide), "" without one.
+func passwordGuide(guide func(lang, email string) string, l i18n.Lang, email string) string {
+	if guide == nil {
+		return ""
+	}
+	return guide(string(l), email)
 }

@@ -123,6 +123,13 @@ tint. State colors are the same in every style.
   `AppIcon-Vision`, and the watch's `AppIcon`. `AppGlyph` shows the home-screen variant in the app
   (`docs/apple/ios.md`, "Light & Dark").
 
+## Space icons
+
+A domain space stores an icon token, never a symbol or a color (`SpaceIcon` in
+`apple/Persona/Views/Spaces/SpaceWords.swift`, the same 16 as the web). Each maps to one `Theme.Icon` name; the space
+ones added for it are `domainSpace` (layers, also the mark for a token this app does not know), `spaceBook`, `spaceFlag`,
+`spaceSun` and `spaceSmile`. Each is read by its localized name.
+
 ## Extensions and other targets
 
 The widgets, the Live Activity, the Share and Notification extensions do not compile `Theme`, so their few symbols are

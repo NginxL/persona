@@ -161,6 +161,27 @@ describe("the sanitizer", () => {
     ]);
   });
 
+  it("normalizes mixed-case HTML attributes so autocomplete stays off and inline CSS is counted", () => {
+    const s = new Sanitizer();
+    expect(s.clean([
+      insert(el(10, "input", [["AUTOCOMPLETE", "on"], ["STYLE", "color: red"]])),
+      insert(el(11, "div", [["style", "color: red"], ["STYLE", "color: blue"]])),
+      insert(el(12, "svg", [["viewBox", "0 0 10 10"]], [], "svg")),
+    ])).toEqual([
+      ["t", BODY_ID, 0, [10, "input", "", [["autocomplete", "off"], ["style", "color: red"]], [], {}]],
+      ["t", BODY_ID, 0, [11, "div", "", [["style", "color: blue"]], [], {}]],
+      ["t", BODY_ID, 0, [12, "svg", "svg", [["viewBox", "0 0 10 10"]], [], {}]],
+    ]);
+    expect(s.counts.css).toBe("color: red".length + "color: blue".length);
+    expect(s.clean([["a", 10, "AUTOCOMPLETE", null], ["a", 10, "Autocomplete", "on"], ["a", 10, "STYLE", null]])).toEqual([
+      ["a", 10, "style", null],
+    ]);
+    expect(s.counts.css).toBe("color: blue".length);
+    const near = new Sanitizer();
+    near.clean([insert(el(20, "style", [], [text(21, `a{color:red}${" ".repeat(CSS_BYTES_MOST - 16)}`)]), HEAD_ID)]);
+    expect(() => near.clean([insert(el(22, "div", [["STYLE", "color: red"]]))])).toThrow(LimitError);
+  });
+
   it("drops svg elements that load or embed, and svg outside an svg", () => {
     const out = new Sanitizer().clean([
       insert(el(10, "svg", [["viewBox", "0 0 10 10"]], [el(11, "image", [["href", "https://example.com/x.png"]], [], "svg"), el(12, "use", [["href", "https://example.com/s.svg#a"]], [], "svg"), el(13, "foreignObject", [], [el(14, "div")], "svg"), el(15, "rect", [["width", "5"]], [], "svg")], "svg")),

@@ -122,8 +122,7 @@ func TestInboxSignalsCollapse(t *testing.T) {
 	}
 }
 
-// Nothing is raised for a task nobody supervises, Persona's own reply, a bot chat, a task waiting for the owner's
-// decision, or with the switch off (the default).
+// Nothing is raised for a task nobody supervises, Persona's own reply, a bot chat, or with the switch off (the default).
 func TestInboxSignalsLeftOut(t *testing.T) {
 	ctx := context.Background()
 	for _, c := range []struct {
@@ -143,11 +142,6 @@ func TestInboxSignalsLeftOut(t *testing.T) {
 		{"Persona's own send", func(_ *testing.T, _ *Service, _ *Todo, it *InboxItem) { it.Agent.SentOf = it.Last }},
 		{"bot chat", func(_ *testing.T, _ *Service, _ *Todo, it *InboxItem) { it.Kind = KindBot }},
 		{"linked to no task", func(_ *testing.T, _ *Service, _ *Todo, it *InboxItem) { it.Agent.TodoID = "" }},
-		{"waits for the owner", func(t *testing.T, s *Service, todo *Todo, _ *InboxItem) {
-			if _, _, err := s.updateSupervision(ctx, todo.ID, func(v *Supervision) bool { v.State = reviewNeedsUser; return true }); err != nil {
-				t.Fatal(err)
-			}
-		}},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			s, f := newQuietService(t)
@@ -166,8 +160,8 @@ func TestInboxSignalsLeftOut(t *testing.T) {
 	}
 }
 
-// A signal still waiting is left out of the message when the switch goes off, or the task starts waiting for the owner,
-// before the message goes out.
+// A signal still waiting is left out of the message when the switch goes off; if the task enters reviewNeedsUser
+// meanwhile, it is delivered as non-destructive needs_user_external_info instead of being silently dropped (#13112).
 func TestInboxSignalDroppedMeanwhile(t *testing.T) {
 	ctx := context.Background()
 	s, _ := newQuietService(t)
@@ -191,8 +185,9 @@ func TestInboxSignalDroppedMeanwhile(t *testing.T) {
 	if _, _, err := s.updateSupervision(ctx, todo.ID, func(v *Supervision) bool { v.State = reviewNeedsUser; return true }); err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := s.digestEntry(ctx, g, ""); ok {
-		t.Fatal("told while the task waits for the owner")
+	e, ok := s.digestEntry(ctx, g, "")
+	if !ok || e.Kind != sigNeedsUserExternalInfo || e.ExternalInfo == nil {
+		t.Fatalf("expected non-destructive needs_user_external_info entry while waiting for owner, got %+v ok=%v", e, ok)
 	}
 }
 

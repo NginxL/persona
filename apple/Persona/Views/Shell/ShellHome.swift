@@ -458,7 +458,7 @@ struct ShellDestinations: ViewModifier {
                     routed(place(route).modifier(FirstPage(on: !agentRoutes)).modifier(ShellPlaceRoot()))
                 }
                 .modifier(InboxDestinations(accounts: accounts.accounts, inboxChat: routeChat, openFeishu: { path.append($0) }))
-                .modifier(AgentRoutes(on: agentRoutes, chat: routeChat, openFeishu: { path.append($0) }))
+                .modifier(AgentRoutes(path: $path, on: agentRoutes, chat: routeChat, openFeishu: { path.append($0) }))
                 .navigationDestination(for: InboxChatRoute.self) { r in routed(ChatView(key: r.key, itemManager: r.manager).id(r.key)) }
                 .environment(\.feishuOpen) { path.append($0) }
                 .environment(\.pushInboxChat, routeChat)
@@ -478,6 +478,7 @@ struct ShellDestinations: ViewModifier {
 
     /// What the Agents list registers as well: here only where it does not (the shell, the iPad's Persona tab).
     private struct AgentRoutes: ViewModifier {
+        @Binding var path: NavigationPath
         var on: Bool
         var chat: ((InboxChatRoute) -> Void)?
         var openFeishu: ((FeishuRoute) -> Void)?
@@ -486,7 +487,7 @@ struct ShellDestinations: ViewModifier {
             if on {
                 content
                     .navigationDestination(for: TodoDetailRoute.self) { r in
-                        TodoDetailView(todoID: r.id)
+                        TodoDetailView(todoID: r.id, openDetail: { (route: TodoDetailRoute) in path.append(route) })
                             .modifier(InboxDestinationEnvironment(chat: chat, openFeishu: openFeishu))
                     }
                     .navigationDestination(for: MachineDetailRoute.self) { r in
@@ -523,9 +524,9 @@ struct ShellDestinations: ViewModifier {
         case .inbox: InboxPage(path: path, accountState: accounts, embedded: true)
         case .todos:
             #if os(iOS)
-            TodosPlacePage() // the V1 list where the hub sends the view (#10465), else TodosView
+            TodosPlacePage(openDetail: { (route: TodoDetailRoute) in path.wrappedValue.append(route) }) // V1 (#10465), else TodosView
             #else
-            TodosView()
+            TodosView(openDetail: { (route: TodoDetailRoute) in path.wrappedValue.append(route) })
             #endif
         case .machines: MachinesView()
         case .extensionPage(let r): ExtensionNavPage(route: r)

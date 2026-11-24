@@ -54,6 +54,18 @@ describe("questions of an AskUserQuestion / ask_user", () => {
     expect(typedAnswer(qs[0], answers["继续吗？ "])).toBeUndefined();
   });
 
+  it("parses Claude Code AskUserQuestion results alongside hub ask_user results", () => {
+    const qs = toolQuestions(input);
+    const claudeResult =
+      'User has answered your questions: "用哪个方案？"="都不要，换个思路", "要哪些？"="x, z". You can now continue with the user\'s answers in mind.';
+    const answers = askUserAnswers(claudeResult, qs);
+    expect(answers).toEqual({ "用哪个方案？": "都不要，换个思路", "要哪些？": "x, z" });
+    expect(pickedOption("x", answers["要哪些？"], true)).toBe(true);
+    expect(pickedOption("y", answers["要哪些？"], true)).toBe(false);
+    expect(typedAnswer(qs[0], answers["用哪个方案？"])).toBe("都不要，换个思路");
+    expect(askUserAnswers("User has answered your questions: ", qs)).toEqual({});
+  });
+
   it("names an MCP tool by its own name", () => {
     expect(baseToolName("mcp__persona__ask_user")).toBe("ask_user");
     expect(baseToolName("ExitPlanMode")).toBe("ExitPlanMode");

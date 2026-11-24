@@ -2,6 +2,7 @@ package persona.feature.inbox
 
 import org.junit.Assert.assertEquals
 import org.junit.Test
+import persona.core.inbox.*
 
 /** A topic card's reply preview (#576 G134, iOS `LarkTopicReplies`): the newest two replies, and how many are earlier. */
 class LarkTopicCardTest {

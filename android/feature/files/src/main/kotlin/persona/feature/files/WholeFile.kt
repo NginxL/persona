@@ -102,7 +102,7 @@ internal fun rememberWholeFile(file: SessionFileContent, folder: String, fetch: 
             if (!always && WholeFiles.carried(file)) return@withContext runCatching { fromPreview() }
                 .getOrElse { WholeLoad.Failed(resources.getString(R.string.files_audio_cache_failed)) }
             try {
-                fetch(into)
+                val _ = fetch(into)
                 WholeLoad.Ready(into)
             } catch (e: kotlinx.coroutines.CancellationException) {
                 throw e
@@ -145,11 +145,11 @@ private fun VideoPlayer(file: File) {
     var view by remember(file) { mutableStateOf<VideoView?>(null) }
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     DisposableEffect(lifecycle, view) {
-        val observer = LifecycleEventObserver { _, event -> if (event == Lifecycle.Event.ON_STOP) runCatching { view?.pause() } }
+        val observer = LifecycleEventObserver { _, event -> if (event == Lifecycle.Event.ON_STOP) { val _ = runCatching { view?.pause() } } }
         lifecycle.addObserver(observer)
         onDispose { lifecycle.removeObserver(observer) }
     }
-    DisposableEffect(file) { onDispose { runCatching { view?.stopPlayback() } } }
+    DisposableEffect(file) { onDispose { val _ = runCatching { view?.stopPlayback() } } }
     AndroidView(
         factory = { context ->
             VideoView(context).apply {

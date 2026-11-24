@@ -71,6 +71,9 @@ func TestAssistantToolsOnlyForAssistant(t *testing.T) {
 	})
 	connectAssistant(t, h)
 	for _, tool := range h.mcpTools(false) {
+		if tool.Name == "resource_status" {
+			continue // Shared read-only status is available to both conversation types.
+		}
 		if h.isAssistantTool(context.Background(), tool.Name) || strings.HasPrefix(tool.Name, "lark_") {
 			t.Fatalf("%s leaked to ordinary sessions", tool.Name)
 		}
@@ -83,9 +86,14 @@ func TestAssistantToolsOnlyForAssistant(t *testing.T) {
 			t.Fatalf("%s schema: %v", tool.Name, err)
 		}
 	}
-	for _, want := range []string{"ask_user", "notify_user", "schedule_followup", "agents_list", "agent_read", "lark_search", "examplenotes_search"} {
+	for _, want := range []string{"resource_status", "ask_user", "notify_user", "schedule_followup", "agents_list", "agent_read", "lark_search", "examplenotes_search"} {
 		if !names[want] {
 			t.Fatalf("assistant is missing %s", want)
+		}
+	}
+	for _, name := range []string{"resource_acquire", "resource_get", "resource_renew", "resource_release", "resource_cancel"} {
+		if names[name] {
+			t.Fatalf("assistant model was offered resource lease control %s", name)
 		}
 	}
 }

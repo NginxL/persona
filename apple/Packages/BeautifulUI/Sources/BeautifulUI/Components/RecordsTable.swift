@@ -340,7 +340,10 @@ public struct RecordsTable: View {
     }
 
     private func footerRow(_ rows: [RecordItem]) -> some View {
-        let average = Int((Double(rows.map(\.strength.rawValue).reduce(0, +)) / Double(max(rows.count, 1)) / 3 * 100).rounded())
+        // In steps: as one expression the visionOS build gives up type-checking it.
+        let total: Int = rows.map(\.strength.rawValue).reduce(0, +)
+        let mean: Double = Double(total) / Double(max(rows.count, 1))
+        let average = Int((mean / 3 * 100).rounded())
         return HStack(spacing: 0) {
             sticky(
                 HStack(spacing: 4) {

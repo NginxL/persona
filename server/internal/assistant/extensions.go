@@ -21,6 +21,7 @@ import (
 
 // Extensions is the manager's extensions, connectors and bots (internal/extmgr.Manager).
 type Extensions interface {
+	waterExtensions
 	Hello(res json.RawMessage)
 	BusUp() // returns once its report went: the outbox goes after it (outbox.go)
 	Request(ctx context.Context, method string, params json.RawMessage) (any, bool, error)
@@ -30,6 +31,27 @@ type Extensions interface {
 	// AssistantSaid takes the assistant's events that are its (handled false: they go to the hub).
 	AssistantSaid(event string, params json.RawMessage) bool
 	http.Handler
+}
+
+// waterExtensions exposes only the legacy water migration, never arbitrary extension files.
+type waterExtensions interface {
+	WaterExtension(ctx context.Context, readState bool) (*assistantwire.WaterExtension, error)
+	DisableWaterExtension(w http.ResponseWriter, r *http.Request, storageKey string) bool
+}
+
+func (b *BusHub) WaterExtension(ctx context.Context, readState bool) (*assistantwire.WaterExtension, error) {
+	if e := b.opts.Extensions; e != nil {
+		return e.WaterExtension(ctx, readState)
+	}
+	return nil, nil
+}
+
+func (b *BusHub) DisableWaterExtension(w http.ResponseWriter, r *http.Request, storageKey string) bool {
+	if e := b.opts.Extensions; e != nil {
+		return e.DisableWaterExtension(w, r, storageKey)
+	}
+	intakeUnavailable(w)
+	return false
 }
 
 // localAppCall is an app.call the manager's extensions answer.
@@ -123,6 +145,7 @@ func (s *Service) SetExtensions(e ExtensionTools) {
 		s.repoStarted = started.Started()
 	}
 	s.transcriptionReadinessReset()
+	s.setMemorySources(e) // the memory extensions' entries (memory_extension_source.go)
 }
 
 // AskCard is askHub for the extensions in this process: a card of theirs (a mail send, Cua's apps, persona_settings),

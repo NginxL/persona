@@ -235,6 +235,21 @@ class AgentModelPanelTest {
         assertTrue(reading.loading)
     }
 
+    @Test fun aSavedAliasSelectsTheFoldedRowAndSendsNoSecondSwitch() {
+        val folded = AgentModel("claude-opus-5-5", "Opus 5.5", aliases = listOf("opus", "fable"), efforts = listOf("low", "high"))
+        val own = LauncherModels("claude", listOf(folded, AgentModel("sonnet", "Sonnet 4.5")))
+        val saved = agent.copy(model = "opus")
+        val panel = AgentModelPanel.panel(saved, launchers, { name -> if (name == "example") ModelList(read = true, list = own) else read(name) }, emptySet())
+        assertEquals(PanelConfig("example", "claude-opus-5-5", "high"), panel.state.current)
+        assertEquals(listOf("claude-opus-5-5", "sonnet"), panel.providers.first().models?.map { it.id })
+        assertEquals(emptyList<ModeStep>(), AgentModelPanel.pickPlan(saved,
+            PanelConfig("example", "claude-opus-5-5", "high"), { if (it == "example") own else lists[it] }, emptySet()))
+        assertEquals("Opus 5.5", AgentModelPanel.pill(saved, ModelList(read = true, list = own), launchers).setup.model)
+
+        val waiting = saved.copy(pendingSwitch = PendingSwitch("work", "fable"))
+        assertEquals("Opus 5.5", AgentModelPanel.pendingPill(waiting, { ModelList(read = true, list = own) }, launchers, "Default")?.model)
+    }
+
     @Test fun switchRefusalsAreTheSwitches() {
         assertTrue(AgentModelPanel.switchRefused(409, "switch_failed"))
         assertFalse(AgentModelPanel.switchRefused(409, "input_draft"))

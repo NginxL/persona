@@ -14,6 +14,8 @@ func TestBackgroundPlaceholderFoldsOnPageAndIncrementalWatch(t *testing.T) {
 		{"supervision placeholder", proto.SourceSupervision, "No response requested.", proto.KindThinking},
 		{"scheduled placeholder", proto.SourcePatrol, " [no content]。 ", proto.KindThinking},
 		{"relay placeholder", proto.SourceConversation, "no content", proto.KindThinking},
+		{"notice placeholder", proto.SourceNotice, "No response requested.", proto.KindThinking},
+		{"substantive notice reply", proto.SourceNotice, "The release needs your approval.", proto.KindText},
 		{"substantive supervision reply", proto.SourceSupervision, "The backup passed verification.", proto.KindText},
 		{"phrase in a substantive reply", proto.SourceSupervision, "No response requested. That is what the log said.", proto.KindText},
 		{"direct input", "", "No response requested.", proto.KindText},

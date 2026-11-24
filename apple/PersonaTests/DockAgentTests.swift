@@ -21,7 +21,7 @@ struct DockAgentTests {
 
     /// A runtime's session (a Paseo agent, #4494), with the agent that created it.
     private func runtime(_ id: String, state: String, parent: String? = nil, since: String? = nil) throws -> Session {
-        try session(id, state: state, since: since, extra: parent.map { ["source_kind": "runtime", "is_subagent": true, "parent_session_id": $0] }
+        try session(id, state: state, since: since, extra: parent.map { ["source_kind": "runtime", "parent_session_id": $0] }
                     ?? ["source_kind": "runtime"])
     }
 

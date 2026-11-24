@@ -3,14 +3,12 @@ package extmgr
 import (
 	"net/http/httptest"
 	"testing"
-
-	"github.com/nwverse/persona/server/internal/mail"
 )
 
 // Mail's routes are the manager's (relayed by the hub): their errors reach the apps as mail wrote them.
 func TestMailRoutingErrorsUnchanged(t *testing.T) {
 	h := newTestManager(t)
-	h.mail = &mail.Service{}
+	h.mail = testMail(t)
 	mux := h.routes()
 	for _, tt := range []struct{ method, path string }{{"GET", "/api/v1/mail/missing"}, {"DELETE", "/api/v1/mail/accounts"}} {
 		r := httptest.NewRequest(tt.method, tt.path, nil)

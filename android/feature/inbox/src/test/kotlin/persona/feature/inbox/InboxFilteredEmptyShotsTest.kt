@@ -36,6 +36,7 @@ import persona.core.domain.inbox.InboxItem
 import persona.core.navigation.AppTab
 import persona.core.navigation.Navigator
 import java.io.File
+import persona.core.inbox.*
 
 /**
  * A source or kind filter that leaves nothing open says so, with the filter mark and Clear filters, instead of the

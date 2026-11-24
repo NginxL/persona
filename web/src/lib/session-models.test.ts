@@ -163,9 +163,12 @@ describe("what a pick sends", () => {
       { id: "future-medium", name: "Future Medium", efforts: ["low", "medium", "high"], default_effort: "medium" },
       { id: "future-high", name: "Future High", efforts: ["low", "medium", "high"], default_effort: "high" },
     ] };
-    expect(pickPlan(agy, { provider: "agy", model: "future-high" }, () => list)).toEqual([{ model: "future-high" }, { effort: "high" }]);
+    expect(pickPlan(agy, { provider: "agy", model: "future-high" }, () => list)).toEqual([{ model: "future-high" }]);
+    expect(pickPlan(agy, { provider: "agy", model: "future-high", effort: "low" }, () => list)).toEqual([{ model: "future-high" }, { effort: "low" }]);
+    expect(pickPlan(agy, { provider: "agy", model: "future-high", effort: "high" }, () => list)).toEqual([{ model: "future-high" }]);
     // its rows have no slider: the variants are the levels
     expect(sessionPanel(agy, [], lists({ agy: { list } })).providers[0].models!.every((m) => m.efforts.length === 0)).toBe(true);
+    expect(sessionPanel({ ...agy, effort: undefined }, [], lists({ agy: { list } })).providers[0].models?.[0].defaultEffort).toBe("medium");
   });
 });
 
@@ -182,6 +185,14 @@ describe("what the pill says", () => {
     expect(pillView(grok, {})).toMatchObject({ engine: "grok", engineLabel: "Grok", provider: "grok" });
     expect(pillView(session({ agent: "paseo", agent_label: "Cursor", launcher: "cursor", source_kind: "runtime" }), {}).engine).toBe("cursor");
     expect(pillView(session(), {}).engineLabel).toBeUndefined();
+  });
+
+  it("uses the effort encoded by a catalog variant when the session reports only the model", () => {
+    const model = "gemini-4-neon-xhigh";
+    const agy = session({ agent: "agy", launcher: "agy", model, effort: undefined });
+    const list: LauncherModels = { agent: "agy", models: [{ id: model, name: "Gemini 4 Neon (XHigh)", default_effort: "xhigh" }] };
+    expect(pillView(agy, { list })).toMatchObject({ model: "Gemini 4 Neon", effort: "xhigh" });
+    expect(pillView({ ...agy, effort: "medium" }, { list })).toMatchObject({ model: "Gemini 4 Neon", effort: "medium" });
   });
 
   it("loading or failed only while there is no list; no model before one is known, the default entry's name once read", () => {

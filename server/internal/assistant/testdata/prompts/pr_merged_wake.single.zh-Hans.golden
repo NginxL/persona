@@ -1,0 +1,1 @@
+交付 PR https://github.com/example/app/pull/42 已合并，且已无其他未关闭的交付 PR。请独立核对 done_when：若只差 PR 合并，请调用 task_review(accepted) 验收关单；若仍有合入后步骤（如部署、线上验证等），请继续推进。

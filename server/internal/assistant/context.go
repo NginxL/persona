@@ -17,7 +17,8 @@ import (
 )
 
 // Context is the <persona-context> block a message to conversation p.SessionID starts with (the node asks on every
-// message, node/assistant_context.go): who the user is, whether this is the main conversation, and the snapshot.
+// message, node/assistant_context.go): who the user is, whether this is the main conversation, and the snapshot; for a
+// conversation in a track other than the main space, its track's own short context instead (space_context.go).
 // With p.Ack it only confirms what a delivered message carried: its view errors (context_view_errors.go) and the
 // background supervisor's announcement.
 func (s *Service) Context(ctx context.Context, p ContextParams) ContextResult {
@@ -28,11 +29,20 @@ func (s *Service) Context(ctx context.Context, p ContextParams) ContextResult {
 		}
 		return ContextResult{}
 	}
-	background := s.isBackground(ctx, p.SessionID)
+	if p.RecoveryOnly {
+		return s.compactRecoveryContext(ctx, p)
+	}
+	background := s.isBackgroundSession(ctx, p.SessionID)
 	snapshot := ""
 	cleanRound := s.cleanRoundSession(p.SessionID)
 	if !cleanRound { // a granted schedule's round reads nothing from outside (schedule_grant.go)
+		if track := s.contextTrack(ctx, p, background); track != "" {
+			// a conversation in a track other than the main space: its own short context, not the snapshot (space_context.go)
+			return s.contextResult(ctx, p, s.spaceContext(ctx, track), "", false)
+		}
 		snapshot = s.contextSnapshot(ctx, s.snapshotScope(ctx, p.SessionID), background)
+		// The memory extension's standing entries this conversation may use, a section of its own (memory_extension_source.go).
+		snapshot = s.withStandingMemory(ctx, p.MachineID, p.SessionID, snapshot)
 	}
 	c := prompts.AssistantContext{ScheduledWorkPlan: cleanRound && s.settings(ctx).workGuideOn(), Snapshot: snapshot, Owner: s.owner(ctx),
 		Main: s.isMain(ctx, p.SessionID), Leader: s.isLeader(ctx, p.SessionID), Background: background}
@@ -50,12 +60,26 @@ func (s *Service) Context(ctx context.Context, p ContextParams) ContextResult {
 		c.LeaderName = s.leaderNames(ctx, []string{p.SessionID})[p.SessionID]
 		c.LeaderStatus = s.directionStatus(ctx, p.SessionID)
 	}
-	text := prompts.RenderAssistantContext(c)
+	return s.contextResult(ctx, p, prompts.RenderAssistantContext(c), c.BackgroundStarted, cleanRound)
+}
+
+// contextResult is Context's answer with text as its <persona-context> text: with the view errors to report, the
+// background supervisor's announcement (backgroundStarted, "" for none) to confirm, the compaction instructions and,
+// unless this is a clean round, the compaction recovery.
+func (s *Service) contextResult(ctx context.Context, p ContextParams, text, backgroundStarted string, cleanRound bool) ContextResult {
 	errs, receipts := s.viewErrors(ctx, p)
-	if c.BackgroundStarted != "" {
-		receipts = append(receipts, assistantwire.ViewErrorReceipt{ItemID: backgroundAnnounceReceipt, Digest: c.BackgroundStarted})
+	if backgroundStarted != "" {
+		receipts = append(receipts, assistantwire.ViewErrorReceipt{ItemID: backgroundAnnounceReceipt, Digest: backgroundStarted})
 	}
-	return ContextResult{Text: text, ViewErrors: errs, Receipts: receipts}
+	out := ContextResult{Text: text, ViewErrors: errs, Receipts: receipts, CompactInstructions: prompts.RenderCompactInstructions(answerLanguage(s.hello(ctx).Locale))}
+	if !cleanRound {
+		if p.PrepareRecovery && p.RecoveryID == "" {
+			s.prepareCompactRecovery(ctx, p)
+		}
+		recovery := s.compactRecoveryContext(ctx, p)
+		out.RecoveryID, out.Recovery = recovery.RecoveryID, recovery.Recovery
+	}
+	return out
 }
 
 // contextState is the last snapshot taken for the live context.
@@ -136,7 +160,7 @@ func backgroundSnapshot(snap prompts.Snapshot) prompts.Snapshot {
 // whole list to the main conversation (docs/assistant/todos.md); another conversation that got it took the user's
 // question for one of the others' tasks, which crowded its own out of the first rows.
 func (s *Service) snapshotScope(ctx context.Context, id string) string {
-	if id == "" || s.settings(ctx).Main == "" || s.isMain(ctx, id) || s.isBackground(ctx, id) || s.runsScheduledTask(ctx, id) {
+	if id == "" || s.settings(ctx).Main == "" || s.isMain(ctx, id) || s.isBackgroundSession(ctx, id) || s.runsScheduledTask(ctx, id) {
 		return ""
 	}
 	return id
@@ -369,8 +393,8 @@ func snapshotAgentGroup(c proto.Session, now time.Time) snapshotAgentGroupKind {
 	recent := now.Sub(c.UpdatedAt) < 24*time.Hour
 	w := c.Work
 	switch {
-	case c.State == proto.StateNeedsYou, silentRow(c):
-		return snapshotAgentNeedsYou // a turn with no output is the owner's to continue, not finished (#10187)
+	case c.State == proto.StateNeedsYou, silentRow(c), upstreamRow(c):
+		return snapshotAgentNeedsYou // a turn with no output or a persistent upstream stall needs visibility (#10187, #13372)
 	case c.State == proto.StateWorking:
 		return snapshotAgentWorking
 	case c.AwaitsReply && c.State == proto.StateIdle && recent:
@@ -395,10 +419,11 @@ func snapshotAgentGroup(c proto.Session, now time.Time) snapshotAgentGroupKind {
 func (s *Service) snapshotAgents(ctx context.Context, devices []Device, web string) (needs, unread, awaiting, waiting, done, muted []prompts.SnapshotAgent,
 	working []prompts.SnapshotAgent) {
 	now := time.Now()
+	lang := s.lang(ctx)
 	for _, m := range devices {
 		list, off, _ := s.sessionsMuted(ctx, m.ID)
 		for _, c := range list {
-			if c.Assistant || c.HiddenByDirectory() || c.FoldedUnder() != "" {
+			if c.Assistant || c.HiddenByDirectory() || c.FoldedUnder() != "" || c.IsSubagent || c.IsCodexSubagent() {
 				continue
 			}
 			c.State = c.FoldedState()
@@ -413,6 +438,8 @@ func (s *Service) snapshotAgents(ctx context.Context, devices []Device, web stri
 			}
 			if silentRow(c) {
 				a.Line = c.TurnError // why it is the owner's: no output, or Persona's Stop (#10187)
+			} else if upstreamRow(c) {
+				a.Line = s.upstreamSnapshotLine(lang, m.ID, c) // persistent upstream 5xx / pool outage (#13372)
 			}
 			a.Line = clip(oneLine(a.Line), 160)
 			group := snapshotAgentGroup(c, now)

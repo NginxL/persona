@@ -74,7 +74,7 @@ internal fun LazyListScope.keyStep(
     preset.signupLink?.let { link ->
         item("key-where") {
             val uri = LocalUriHandler.current
-            JTextButton(stringResource(R.string.settings_onb_where_key), { runCatching { uri.openUri(link) } }, icon = PhIcons.ArrowSquareOut)
+            JTextButton(stringResource(R.string.settings_onb_where_key), { val _ = runCatching { uri.openUri(link) } }, icon = PhIcons.ArrowSquareOut)
         }
     }
     item("key-test") { KeyTestStatus(state, preset, onRetest) }

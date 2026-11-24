@@ -23,6 +23,7 @@ import persona.core.contracts.api.ConnectionState
 import persona.core.contracts.api.InboxAssistantTransport
 import persona.core.contracts.api.InboxEntry
 import persona.core.designsystem.PersonaTheme
+import persona.core.inbox.*
 
 /**
  * #5306: a recalled message Keep recalled messages kept is shown in full, yet it takes no reactions, replies or card writes

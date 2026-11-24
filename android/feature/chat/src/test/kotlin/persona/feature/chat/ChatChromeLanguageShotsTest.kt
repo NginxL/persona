@@ -97,16 +97,44 @@ class ChatChromeLanguageShotsTest {
         }
         for (s in AppStyle.entries) for (d in listOf(false, true)) {
             rule.runOnIdle { style = s; dark = d; roster = null }
+            rule.mainClock.autoAdvance = false
+            repeat(4) { rule.mainClock.advanceTimeByFrame() }
+            rule.mainClock.autoAdvance = true
+            // Finish the style/theme recomposition before establishing this appearance's baseline. Waiting for
+            // idleness alone does not guarantee that this appearance's pixels were submitted.
+            rule.waitForIdle()
             val before = rule.onNodeWithTag("identity-chat").captureToImage().asAndroidBitmap()
             for ((case, installed) in listOf("single" to listOf(only),
                 "multiple" to listOf(only, persona.core.contracts.api.HubManager("work", "Other assistant", online = false)))) {
                 rule.runOnIdle { roster = persona.core.contracts.api.ManagerRoster(installed, "assistant") }
+                rule.mainClock.autoAdvance = false
+                repeat(4) { rule.mainClock.advanceTimeByFrame() }
+                rule.mainClock.autoAdvance = true
                 rule.onNodeWithText("Plan a sample trip").assertExists()
                 rule.onNodeWithText("The sample itinerary is ready.").assertExists()
                 rule.onNodeWithText("Personal assistant name").assertDoesNotExist()
                 rule.onNodeWithText("Other assistant").assertDoesNotExist()
                 val rendered = rule.onNodeWithTag("identity-chat").captureToImage().asAndroidBitmap()
-                assertTrue("Roster identity changed the conversation's chrome or attribution", before.sameAs(rendered))
+                if (!before.sameAs(rendered)) {
+                    var first = -1
+                    var last = -1
+                    var differences = 0
+                    for (y in 0 until before.height) for (x in 0 until before.width) {
+                        if (before.getPixel(x, y) != rendered.getPixel(x, y)) {
+                            differences++
+                            val point = y * before.width + x
+                            if (first < 0) first = point
+                            last = point
+                        }
+                    }
+                    val message = "roster-pixel-diff style=${s.key} dark=$d case=$case differences=$differences " +
+                        "first=${first % before.width},${first / before.width} last=${last % before.width},${last / before.width}"
+                    println(message)
+                    val diagnostic = File("/tmp/persona-roster-diff").apply { mkdirs() }
+                    before.compress(Bitmap.CompressFormat.PNG, 100, File(diagnostic, "before-$case-${s.key}-$d.png").outputStream())
+                    rendered.compress(Bitmap.CompressFormat.PNG, 100, File(diagnostic, "after-$case-${s.key}-$d.png").outputStream())
+                    assertTrue(message, before.sameAs(rendered))
+                }
                 File(out(), "identity-$case-${s.key}-${if (d) "dark" else "light"}.png").outputStream().use {
                     assertTrue(rendered.compress(Bitmap.CompressFormat.PNG, 100, it))
                 }

@@ -14,12 +14,12 @@ import (
 	"time"
 
 	"github.com/nwverse/persona/server/internal/connector"
-	"github.com/nwverse/persona/server/internal/connector/github"
-	"github.com/nwverse/persona/server/internal/connector/imessage"
 	"github.com/nwverse/persona/server/internal/connector/proc"
 	"github.com/nwverse/persona/server/internal/extension"
 	"github.com/nwverse/persona/server/internal/extension/host"
-	"github.com/nwverse/persona/server/internal/mail"
+	"github.com/nwverse/persona/server/internal/extmgr/githubport"
+	"github.com/nwverse/persona/server/internal/githubwire"
+	"github.com/nwverse/persona/server/internal/imessagewire"
 	"github.com/nwverse/persona/server/internal/proto"
 )
 
@@ -201,10 +201,10 @@ func TestConnectorsEndpoint(t *testing.T) {
 // What GET /api/v1/connectors?all=1 says each built-in connector can do (the app goes by these names).
 func TestConnectorsListTheSameCapabilities(t *testing.T) {
 	h := newTestManager(t)
-	h.mail = (*mail.Service)(nil)
+	h.mail = testMail(t)
 	h.connectors = connector.NewRegistry(nil)
 	h.registerConnectors()
-	if err := h.addConnector(imessage.NewRemote(imessage.Config{Machine: "mac"}, "Mac", nil)); err != nil {
+	if err := h.addConnector(newTestIMessage(t, imessagewire.Config{Machine: "mac"}, "Mac", nil)); err != nil {
 		t.Fatal(err)
 	}
 	connectFakeManager(t, h) // GitHub's options come with the inbox's muted repositories, the manager's
@@ -216,6 +216,9 @@ func TestConnectorsListTheSameCapabilities(t *testing.T) {
 		"mail tools,actions,archive hosts=[] options=false",
 		"github status,tools,actions,events,hosts,inbox,archive,login,options,threads hosts=[github.com] options=true",
 		"imessage status,tools,catalog,events,inbox,archive hosts=[] options=false", // catalog: inbox_things (#6317)
+	}
+	if githubport.Factory() == nil { // a build without the GitHub module has no built-in GitHub connector
+		want = slices.DeleteFunc(want, func(s string) bool { return strings.HasPrefix(s, "github ") })
 	}
 	if !slices.Equal(got, want) {
 		t.Fatalf("got\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
@@ -290,10 +293,10 @@ func TestGhTokenFromAMachine(t *testing.T) {
 	h := newTestManager(t)
 	m := newMachine(h, MachineConfig{ID: "mac", Name: "Mac", Kind: "local"})
 	h.byID["mac"] = m
-	if _, err := h.ghToken("mac")(context.Background(), "github.com"); !errors.Is(err, github.ErrOffline) {
+	if _, err := h.ghToken("mac")(context.Background(), "github.com"); !errors.Is(err, githubwire.ErrOffline) {
 		t.Fatalf("offline: %v", err)
 	}
-	if _, err := h.ghToken("nope")(context.Background(), "github.com"); !errors.Is(err, github.ErrNoMachine) {
+	if _, err := h.ghToken("nope")(context.Background(), "github.com"); !errors.Is(err, githubwire.ErrNoMachine) {
 		t.Fatalf("unknown machine: %v", err)
 	}
 }

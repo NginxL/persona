@@ -65,6 +65,8 @@ internal fun InteractionPanel(
     labels: Map<String, StackLabel> = emptyMap(),
     first: String? = null,
     counted: Boolean = true,
+    /** When non-null, a lone unfolded card shows a top-edge grabber allowing the user to resize its cap (#12306). */
+    resize: CardResize? = null,
     /** Drawn under a card that is not folded: the rule a question a supervisor passed up suggests (#4929); null: nothing. */
     suggestion: (@Composable (Interaction) -> Unit)? = null,
 ) {
@@ -131,6 +133,7 @@ internal fun InteractionPanel(
                     headerActions = { closeCard(request) },
                     // an approval says it waits for the user, in the chat as on the web and iOS (#4883)
                     kicker = if (request.kind == "permission" && !request.isSecretRun) stringResource(DecisionKind.Tool.labelRes) else null,
+                    grabber = if (!folded && resize != null && resize.id == request.id) ({ CardGrabber(resize) }) else null,
                 ) {
                     if (full != request.id) body(request, false)
                 }
@@ -412,10 +415,10 @@ internal fun InteractionForm(
                 if (draft.message.isNotEmpty() && !interaction.hasFieldsForm) Text(stringResource(R.string.chat_permission_clear_reason), style = PersonaTheme.type.caption, color = PersonaTheme.palette.ink2)
             }
             "plan" -> {
-                if (full) ChatMarkdown(interaction.plan.orEmpty())
+                if (full) ReadingContent { ChatMarkdown(interaction.plan.orEmpty()) }
                 else {
                     Column(Modifier.heightIn(max = 140.dp).verticalScroll(rememberScrollState(), enabled = false)) {
-                        ChatMarkdown(interaction.plan.orEmpty())
+                        ReadingContent { ChatMarkdown(interaction.plan.orEmpty()) }
                     }
                     JTextButton(stringResource(R.string.chat_plan_show_full), onExpand)
                 }

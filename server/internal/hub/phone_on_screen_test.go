@@ -19,11 +19,13 @@ func TestPhoneOnScreenToolsAnswerWithoutWaking(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		h, pushes, _ := phoneWakeTestHub(t, true)
 		h.setPhoneTools(db.PhoneToolRegistration{DeviceID: "phone", Platform: "ios", Tools: []proto.Tool{
-			{Name: "phone_clipboard_get"}, {Name: "phone_clipboard_set"}, {Name: "phone_device_info"},
+			{Name: "phone_clipboard_get"}, {Name: "phone_clipboard_set"}, {Name: "phone_health_request_access"},
+			{Name: "phone_device_info"},
 		}})
 		for _, call := range []struct{ name, args string }{
 			{"phone_clipboard_get", `{}`},
 			{"phone_clipboard_set", `{"text":"hello"}`},
+			{"phone_health_request_access", `{"types":["heart_rate"]}`},
 		} {
 			start := time.Now()
 			got := h.callPhone(context.Background(), call.name, json.RawMessage(call.args))

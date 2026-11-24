@@ -22,6 +22,7 @@ import persona.core.contracts.Todo
 import persona.core.designsystem.ChatHint
 import persona.core.designsystem.JSheet
 import persona.core.designsystem.PersonaTheme
+import persona.core.designsystem.ReadingContent
 import persona.core.designsystem.icons.PhIcon
 import persona.core.designsystem.icons.PhIcons
 import persona.core.domain.taskOfInjected
@@ -126,7 +127,7 @@ internal fun InjectedLine(id: String, n: Injected, showDetail: Boolean = true) {
     ChatHint(n.line, icon, tint, onClick, Modifier.testTag("injected-${n.kind}"),
         onClickLabel = stringResource(if (todo != null) R.string.chat_injected_open_task else R.string.chat_injected_view_request))
     if (open) JSheet({ open = false }, title = n.title ?: n.line, scrollable = true) {
-        ChatMarkdown(n.detail.orEmpty(), "injected/$id")
+        ReadingContent { ChatMarkdown(n.detail.orEmpty(), "injected/$id") }
     }
 }
 

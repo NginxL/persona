@@ -32,7 +32,7 @@ vi.mock("../../ui/model-panel/ModelPanel", () => ({
 const toast = vi.hoisted(() => vi.fn());
 vi.mock("../../ui/atoms", async (orig) => ({ ...(await orig<typeof import("../../ui/atoms")>()), toast }));
 
-const { AgentModelPill, ModelPill, pillEffort, pillShortName } = await import("./ModelPill");
+const { AgentModelPill, ModelPill, pillShortName } = await import("./ModelPill");
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -44,11 +44,11 @@ describe("the pill's states", () => {
   it("normal: the engine's mark first, then model, effort, chevron; the tooltip and name say it all", () => {
     const html = markup(<ModelPill current={opus} onOpen={() => {}} />);
     expect(html).toMatch(/^<button type="button" data-model-pill="ready" aria-haspopup="listbox" aria-expanded="false"/);
-    expect(html).toContain(`aria-label="${t("chat-modelpill.aria_effort", { model: "Opus 5.5", effort: "高" })}"`);
-    expect(html).toContain('title="Claude Code · Opus 5.5 · gateway · 高"');
+    expect(html).toContain(`aria-label="${t("chat-modelpill.aria_effort", { model: "Opus 5.5", effort: "High" })}"`);
+    expect(html).toContain('title="Claude Code · Opus 5.5 · gateway · High"');
     // in this order: the engine's mark (#5497: no letter tile, drawn once), the name, the effort, then the chevron
     const text = html.replace(/<[^>]+>/g, "|").split("|").filter(Boolean);
-    expect(text).toEqual(["Opus 5.5", "高"]);
+    expect(text).toEqual(["Opus 5.5", "High"]);
     expect(html.match(/data-agent-mark=/g)).toHaveLength(1);
     expect(html.indexOf('data-agent-mark="claude"')).toBeLessThan(html.indexOf('<span title="Opus 5.5"'));
     expect(html.indexOf("data-pill-effort")).toBeGreaterThan(html.indexOf('<span title="Opus 5.5"'));
@@ -57,6 +57,23 @@ describe("the pill's states", () => {
     expect(html).toContain("border-transparent");
     expect(html).toContain("hover:border-line-strong");
     expect(html).toContain("aria-expanded:bg-hover");
+  });
+
+  it.each([
+    ["agy", "Gemini 4 Neon (Medium)", "medium", "Gemini 4 Neon", "Medium"],
+    ["codex", "GPT-5.5 (Minimal) [1m]", "xhigh", "GPT-5.5 [1m]", "XHigh"],
+    ["claude", "Opus 5.5 (1M context) (Max)", "max", "Opus 5.5 (1M context)", "Max"],
+    ["opencode", "Example (Ultra)", "ultra", "Example", "Ultra"],
+  ])("renders a single tier for %s and preserves its context size", (engine, model, effort, name, label) => {
+    const host = document.createElement("div");
+    host.innerHTML = markup(<ModelPill current={{ engine, provider: engine, model, effort }} onOpen={() => {}} />);
+    const button = host.querySelector("button")!;
+    expect(button.getAttribute("aria-label")).toBe(t("chat-modelpill.aria_effort", { model: name, effort: label }));
+    expect(button.title).toContain(` · ${name} · ${engine} · ${label}`);
+    expect(button.querySelector("[data-pill-effort]")?.textContent).toBe(label);
+    expect(button.textContent).toContain(name);
+    if (pillShortName(name) !== name) expect(button.querySelector("[data-pill-short]")?.textContent).toBe(pillShortName(name));
+    expect(button.textContent).not.toMatch(/\((Medium|Minimal|Max|Ultra)\)/);
   });
 
   it("takes the composer card's widths: its words' width under 600, a step smaller under 520, the mark and chevron alone under 420", () => {
@@ -90,12 +107,13 @@ describe("the pill's states", () => {
     expect(pillShortName("Sonnet 4.5（200k 上下文）")).toBe("Sonnet 4.5 200K");
     expect(pillShortName("Sonnet 4.5 [1m]")).not.toBe(pillShortName("Sonnet 4.5"));
     const html = markup(<ModelPill current={{ ...opus, model: "Opus 5.5 (1M context)" }} onOpen={() => {}} />);
-    const full = /<span title="Opus 5.5 \(1M context\)" class="([^"]*)">Opus 5.5 \(1M context\)<\/span>/.exec(html)![1];
+    const name = /<span title="Opus 5.5 \(1M context\)" class="([^"]*)"/.exec(html)![1];
+    expect(name).toContain("@max-[420px]/composer:hidden");
+    const full = /<span class="([^"]*)">Opus 5.5 \(1M context\)<\/span>/.exec(html)![1];
     expect(full).toContain("@max-[600px]/composer:hidden");
-    const short = /<span title="Opus 5.5 \(1M context\)" data-pill-short="true" class="([^"]*)">Opus 5.5 1M<\/span>/.exec(html)![1];
+    const short = classOf(html, "data-pill-short");
     expect(short).toMatch(/(^| )hidden( |$)/);
-    expect(short).toContain("@max-[600px]/composer:block");
-    expect(short).toContain("@max-[420px]/composer:hidden");
+    expect(short).toContain("@max-[600px]/composer:inline");
     // a name with nothing to drop is drawn once
     expect(markup(<ModelPill current={opus} onOpen={() => {}} />)).not.toContain("data-pill-short");
   });
@@ -113,7 +131,7 @@ describe("the pill's states", () => {
   it("Fast: a filled bolt in the neutral colour, and Fast in the tooltip", () => {
     const html = markup(<ModelPill current={{ ...opus, engine: "codex", model: "5.5", fast: true }} onOpen={() => {}} />);
     expect(html).toContain("fill-current");
-    expect(html).toContain(`title="Codex · 5.5 · gateway · 高 · ${t("chat-sessiondialogs.speed_fast")}"`);
+    expect(html).toContain(`title="Codex · 5.5 · gateway · High · ${t("chat-sessiondialogs.speed_fast")}"`);
   });
 
   it("loading or failed, the pill keeps its 64 px under 420 px: only a waiting switch makes it grow there", () => {
@@ -142,21 +160,21 @@ describe("the pill's states", () => {
     expect(none).toContain(t("chat-modelpill.failed"));
     expect(none).toContain("text-red");
     const known = markup(<ModelPill current={opus} failed onOpen={() => {}} />);
-    expect(known).toContain(`title="Claude Code · Opus 5.5 · gateway · 高 · ${t("chat-modelpill.failed")}"`);
+    expect(known).toContain(`title="Claude Code · Opus 5.5 · gateway · High · ${t("chat-modelpill.failed")}"`);
     expect(known.match(/text-red/g)!.length).toBe(2); // the mark and the warning after the effort
   });
 
   it("pending (#5035): a clock first, the next engine named, both setups in the tooltip", () => {
-    const next = { engine: "codex", provider: "cx", model: "5.5", effort: "low" };
-    const html = markup(<ModelPill current={opus} pending={next} onOpen={() => {}} />);
+    const next = { engine: "codex", provider: "cx", model: "5.5 (Low)", effort: "low" };
+    const html = markup(<ModelPill current={{ ...opus, model: "Opus 5.5 (High)" }} pending={next} onOpen={() => {}} />);
     expect(html).toContain('data-model-pill="pending"');
     expect(html.indexOf("<svg")).toBeLessThan(html.indexOf('data-agent-mark="codex"')); // the clock before the target's mark
     // the target's engine before the name, gone when the pill is narrow
     expect(html).toMatch(/data-pill-target[^>]*>Codex<\/span>/);
     expect(classOf(html, "data-pill-target")).toContain("@max-[600px]/composer:hidden");
     expect(html).toContain('data-pill-engine="codex"');
-    expect(html).toContain(`title="${t("chat-modelpill.current_and_next", { current: "Claude Code · Opus 5.5 · gateway · 高", next: "Codex · 5.5 · cx · 低" })}"`);
-    expect(html).toContain(`aria-label="${t("chat-modelpill.aria_pending_effort", { agent: "Codex", model: "5.5", effort: "低" })}"`);
+    expect(html).toContain(`title="${t("chat-modelpill.current_and_next", { current: "Claude Code · Opus 5.5 · gateway · High", next: "Codex · 5.5 · cx · Low" })}"`);
+    expect(html).toContain(`aria-label="${t("chat-modelpill.aria_pending_effort", { agent: "Codex", model: "5.5", effort: "Low" })}"`);
   });
 
   it("pending on another launcher of the same engine: that launcher named before the model", () => {
@@ -167,8 +185,8 @@ describe("the pill's states", () => {
     // under 420 px the clock, the mark and the chevron: wider than the plain pill's 64 px
     expect(html).toContain("@max-[420px]/composer:w-auto");
     expect(html).not.toContain("@max-[420px]/composer:w-[64px]");
-    expect(html).toContain(`title="${t("chat-modelpill.current_and_next", { current: "Claude Code · Opus 5.5 · gateway · 高", next: "Claude Code · GLM 5.3 · work · 高" })}"`);
-    expect(html).toContain(`aria-label="${t("chat-modelpill.aria_pending_effort", { agent: "work", model: "GLM 5.3", effort: "高" })}"`);
+    expect(html).toContain(`title="${t("chat-modelpill.current_and_next", { current: "Claude Code · Opus 5.5 · gateway · High", next: "Claude Code · GLM 5.3 · work · High" })}"`);
+    expect(html).toContain(`aria-label="${t("chat-modelpill.aria_pending_effort", { agent: "work", model: "GLM 5.3", effort: "High" })}"`);
   });
 
   it("disabled while a switch is on its way", () => {
@@ -180,16 +198,12 @@ describe("the pill's states", () => {
 
   it("a label, not a button, where nothing can be switched", () => {
     const html = markup(<ModelPill current={opus} />);
-    expect(html).toMatch(/^<span data-model-pill="label" title="Claude Code · Opus 5.5 · gateway · 高"/);
+    expect(html).toMatch(/^<span data-model-pill="label" title="Claude Code · Opus 5.5 · gateway · High"/);
     expect(html).not.toContain("<button");
-    expect(html).toContain(`<span class="sr-only">${t("chat-modelpill.aria_effort", { model: "Opus 5.5", effort: "高" })}</span>`);
+    expect(html).toContain(`<span class="sr-only">${t("chat-modelpill.aria_effort", { model: "Opus 5.5", effort: "High" })}</span>`);
     expect(html.match(/<svg/g)).toBeNull(); // no chevron (Claude's mark is an image)
   });
 
-  it("says every effort in full outside English (ModelPill.en.test.tsx has English's short Extra)", () => {
-    expect(pillEffort("xhigh")).toBe("很高");
-    expect(pillEffort("max")).toBe("最高");
-  });
 });
 
 // ── an Agent's pill and its panel ──
@@ -281,7 +295,7 @@ describe("an Agent's pill", () => {
     await show(agent({ launcher: "claude" }));
     expect(pill()!.querySelector("[data-pill-target]")?.textContent).toBe("claude");
     expect(pill()!.textContent).toContain("Opus 5.5");
-    expect(pill()!.querySelector("[data-pill-effort]")?.textContent).toBe("高");
+    expect(pill()!.querySelector("[data-pill-effort]")?.textContent).toBe("High");
     expect(modes()).toEqual([]);
   });
 
@@ -499,7 +513,7 @@ describe("an Agent's pill", () => {
     act(() => root.render(<AgentModelPill session={getSession(s.machine_id, "s1")!} />));
     await flush();
     expect(pill()!.getAttribute("data-model-pill")).toBe("pending");
-    expect(pill()!.getAttribute("title")).toBe(t("chat-modelpill.current_and_next", { current: "Claude Code · Opus 5.5 · gateway · 高", next: "Claude Code · Haiku 5.5 · claude · 低" }));
+    expect(pill()!.getAttribute("title")).toBe(t("chat-modelpill.current_and_next", { current: "Claude Code · Opus 5.5 · gateway · High", next: "Claude Code · Haiku 5.5 · claude · Low" }));
     // a refusal puts it back as it was, with the hub's words
     calls.length = 0;
     modesAnswer = () => json({ error: "这个启动器用的是另一个配置目录", code: "switch_config_dir" }, 409);

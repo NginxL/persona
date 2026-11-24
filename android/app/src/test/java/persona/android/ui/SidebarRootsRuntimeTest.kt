@@ -75,18 +75,18 @@ import persona.core.navigation.TodosRoute
 import persona.feature.inbox.InboxEventRoute
 import persona.feature.inbox.InboxItemPages
 import persona.feature.inbox.InboxLanding
-import persona.feature.inbox.InboxPreferences
-import persona.feature.inbox.InboxRecord
+import persona.core.inbox.InboxPreferences
+import persona.core.inbox.InboxRecord
 import persona.feature.inbox.InboxRepository
 import persona.feature.inbox.InboxScreen
-import persona.feature.inbox.InboxSnapshot
-import persona.feature.inbox.LarkConversation
-import persona.feature.inbox.LarkPart
+import persona.core.inbox.InboxSnapshot
+import persona.core.inbox.LarkConversation
+import persona.core.inbox.LarkPart
 import persona.feature.inbox.LocalInboxLanding
 import persona.feature.inbox.LocalInboxListActive
-import persona.feature.inbox.ReplyDraft
-import persona.feature.inbox.ReplyRequest
-import persona.feature.inbox.ReplyTarget
+import persona.core.inbox.ReplyDraft
+import persona.core.inbox.ReplyRequest
+import persona.core.inbox.ReplyTarget
 
 /**
  * [SidebarRootsRuntime] is the composable [Root] calls for width changes, one display per host, and

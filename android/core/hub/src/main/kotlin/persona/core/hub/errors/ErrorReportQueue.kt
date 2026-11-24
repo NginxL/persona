@@ -34,7 +34,7 @@ class ErrorReportQueue(
             false
         }
         // The optional local recorder never changes the established hub queue's outcome.
-        if (written) runCatching { localCopy(report) }
+        if (written) { val _ = runCatching { localCopy(report) } }
         return written
     }
 

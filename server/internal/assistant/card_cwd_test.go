@@ -41,7 +41,7 @@ func TestNodeCardsArePlacedInTheConversationsDirectory(t *testing.T) {
 	}
 
 	// Through a node's interaction.create: the card that waits is in the health space, and neither the Lark bot's
-	// "all cards" nor a channel's "all questions" (ixInHealth) takes it.
+	// "all cards" nor a channel's "all questions" (ixSpace) takes it.
 	ft.f.answerApp(AppFeishu, FeishuStatusGet, func(json.RawMessage) (any, error) {
 		return FeishuStatus{Ready: true, Enabled: true, Owner: "ou_a", PairedAt: time.Unix(100, 0),
 			Features: FeishuFeatures{Main: true, Cards: true, AllCards: true}}, nil
@@ -61,19 +61,19 @@ func TestNodeCardsArePlacedInTheConversationsDirectory(t *testing.T) {
 		byID[ix.ID] = ix
 	}
 	h, m := byID["ix_health"], byID["ix_main"]
-	if h.Cwd != health || !ft.s.ixInHealth(ctx, h) {
-		t.Fatalf("the health card waits in %q (health %v)", h.Cwd, ft.s.ixInHealth(ctx, h))
+	if h.Cwd != health || ft.s.ixSpace(ctx, h) != SpaceHealth {
+		t.Fatalf("the health card waits in %q (health %v)", h.Cwd, ft.s.ixSpace(ctx, h) == SpaceHealth)
 	}
 	if ft.s.feishuCardWanted(ctx, h) {
 		t.Error("the Lark bot's all cards takes a health conversation's card")
 	}
-	if m.Cwd != assistant || ft.s.ixInHealth(ctx, m) || !ft.s.feishuCardWanted(ctx, m) {
-		t.Errorf("the main conversation's card: %q, health %v, posted %v", m.Cwd, ft.s.ixInHealth(ctx, m), ft.s.feishuCardWanted(ctx, m))
+	if m.Cwd != assistant || ft.s.ixSpace(ctx, m) == SpaceHealth || !ft.s.feishuCardWanted(ctx, m) {
+		t.Errorf("the main conversation's card: %q, health %v, posted %v", m.Cwd, ft.s.ixSpace(ctx, m) == SpaceHealth, ft.s.feishuCardWanted(ctx, m))
 	}
 }
 
-// ixInHealth hides a card whose directory is the health space's or inside it; a directory that only starts the same
-// is not. spaceOf, which says which space a conversation is in, stays exact: a row in health/reports is not one.
+// ixSpace puts a card in the health space when its directory is the space's or inside it; a directory that only
+// starts the same is not. spaceOf, which says which space a conversation is in, stays exact: a row in health/reports is not one.
 func TestHealthCardsCountTheSpacesFolders(t *testing.T) {
 	ft := newFleetTest(t)
 	ctx := context.Background()
@@ -83,8 +83,8 @@ func TestHealthCardsCountTheSpacesFolders(t *testing.T) {
 		"/home/u/.persona/health-bin":     false,
 		"/tmp/health":                     false,
 	} {
-		if got := ft.s.ixInHealth(ctx, proto.Interaction{MachineID: "mac", Cwd: cwd}); got != want {
-			t.Errorf("ixInHealth(%s) = %v, want %v", cwd, got, want)
+		if got := ft.s.ixSpace(ctx, proto.Interaction{MachineID: "mac", Cwd: cwd}) == SpaceHealth; got != want {
+			t.Errorf("ixSpace(%s) == health = %v, want %v", cwd, got, want)
 		}
 	}
 	if spaceOf(proto.Session{Cwd: "/home/u/.persona/health/reports"}) != "" {

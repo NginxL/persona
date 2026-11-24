@@ -31,7 +31,9 @@ type RepositoryBinding struct {
 	Purpose  string   `json:"purpose,omitempty"`
 	CloneURL string   `json:"clone_url,omitempty"`
 	// ProviderName is an extension provider's name when the reference was saved (absent for GitHub and GitLab).
-	ProviderName string    `json:"provider_name,omitempty"`
+	ProviderName string `json:"provider_name,omitempty"`
+	// TaskWorkflow is an optional per-repository default task-collaboration cadence ("isolated" or "shared_branch").
+	TaskWorkflow string    `json:"task_workflow,omitempty"`
 	VerifiedAt   time.Time `json:"verified_at"`
 }
 
@@ -51,18 +53,19 @@ func (doc repositoryDocument) taskCatalog() repository.Catalog {
 	out := repository.Catalog{Revision: doc.Revision, Repositories: make([]repository.CatalogEntry, 0, len(doc.Repositories))}
 	for _, entry := range doc.Repositories {
 		out.Repositories = append(out.Repositories, repository.CatalogEntry{Identity: entry.Identity, ID: entry.ID, CloneURL: entry.CloneURL,
-			ProviderName: entry.ProviderName})
+			ProviderName: entry.ProviderName, TaskWorkflow: entry.TaskWorkflow})
 	}
 	return out
 }
 
 type repositoryInput struct {
-	URL      string   `json:"url"`
-	Provider string   `json:"provider"`
-	Name     string   `json:"name"`
-	Aliases  []string `json:"aliases"`
-	Purpose  string   `json:"purpose"`
-	CloneURL *string  `json:"clone_url,omitempty"`
+	URL          string   `json:"url"`
+	Provider     string   `json:"provider"`
+	Name         string   `json:"name"`
+	Aliases      []string `json:"aliases"`
+	Purpose      string   `json:"purpose"`
+	CloneURL     *string  `json:"clone_url,omitempty"`
+	TaskWorkflow string   `json:"task_workflow,omitempty"`
 }
 
 type repositoryProblem string
@@ -107,6 +110,11 @@ func (in repositoryInput) details(out RepositoryBinding) (RepositoryBinding, err
 			out.Aliases = append(out.Aliases, alias)
 		}
 	}
+	wf, wfErr := repository.NormalizeTaskWorkflow(in.TaskWorkflow)
+	if wfErr != "" {
+		return out, repositoryProblem("metadata")
+	}
+	out.TaskWorkflow = wf
 	return out, nil
 }
 

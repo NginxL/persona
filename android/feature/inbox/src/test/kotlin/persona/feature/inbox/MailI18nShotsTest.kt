@@ -39,6 +39,7 @@ import persona.core.domain.inbox.InboxItem
 import persona.core.navigation.AppTab
 import persona.core.navigation.Navigator
 import java.io.File
+import persona.core.inbox.*
 
 /**
  * The mail page (with an AI twin's draft, a thread of two and attachments) and writing a reply, in each of the app's

@@ -75,17 +75,23 @@ func fillSpaceDirectories(spaces []host.Space, panes []host.Agent) {
 	}
 }
 
-// listWorkspaces is the machine's workspace catalog: each terminal host's workspaces, and those of each engine runtime
-// that keeps workspaces of its own (Paseo's, runtimeworkspaces.go), with or without sessions in them.
+// listWorkspaces is the machine's workspace catalog: native desktop projects, each terminal host's workspaces, and
+// those of each engine runtime that keeps workspaces of its own (Paseo's, runtimeworkspaces.go), with or without sessions.
 func (n *Node) listWorkspaces(ctx context.Context) (proto.WorkspacesResponse, error) {
 	out := proto.WorkspacesResponse{Workspaces: []proto.Workspace{}}
+	desktop, desktopSources, desktopErrors := n.desktopWorkspaces()
+	out.Workspaces = append(out.Workspaces, desktop...)
+	out.Errors = append(out.Errors, desktopErrors...)
 	hs := n.hosts.All()
 	runtimes, runtimeEngine := n.catalogRuntimes()
-	if len(hs) == 0 && !runtimeEngine {
+	if len(hs) == 0 && !runtimeEngine && desktopSources == 0 && len(desktopErrors) == 0 {
 		return out, fmt.Errorf("unsupported: this node has no workspace host")
 	}
 	var failures []error
-	succeeded := 0
+	for _, failure := range desktopErrors {
+		failures = append(failures, fmt.Errorf("%s workspaces: %s", failure.Source, failure.Error))
+	}
+	succeeded := desktopSources
 	for _, h := range hs {
 		var spaces []host.Space
 		var err error

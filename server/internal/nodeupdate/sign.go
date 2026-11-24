@@ -27,7 +27,10 @@ func (m *Manager) signedStage(ctx context.Context, u *upload) (string, string) {
 	if m.signer == nil {
 		return u.Path, u.Spec.SHA256
 	}
-	check := func(path string) error { return selfCheck(ctx, path, u.Spec, m.requireResidentHandover) }
+	check := func(path string) error {
+		_, err := selfCheck(ctx, path, u.Spec, m.requireResidentHandover)
+		return err
+	}
 	for _, adhoc := range []bool{false, true} {
 		path, err := m.signedCopy(ctx, u.Path, adhoc, check)
 		var sum string

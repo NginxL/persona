@@ -245,9 +245,6 @@ struct ReanswerSheet: View {
                 }
             }
         }
-        #if os(macOS)
-        .macSheet()
-        #endif
     }
 
     private func option(_ i: Int, _ q: Question, _ opt: QuestionOption) -> some View {

@@ -23,7 +23,7 @@ func (h *Hub) scopedPublicSession(machine, session string) bool {
 		return false
 	}
 	s, ok := m.session(session)
-	return ok && !healthSession(&s)
+	return ok && !spaceSession(&s)
 }
 
 // scopedDeviceRoute uses the same registered route pattern as extension
@@ -154,7 +154,7 @@ func (c *client) scopedSocketFrame(data []byte) []byte {
 		}
 		summaries := make([]scopedSessionSummary, 0, len(rows))
 		for _, row := range rows {
-			if !healthSession(&row) && !row.Archived {
+			if !spaceSession(&row) && !row.Archived {
 				summaries = append(summaries, scopedSessionSummary{row.SessionID, row.MachineID, row.Title, row.Agent, row.Status})
 			}
 		}

@@ -37,6 +37,7 @@ type workspaceBoardStore interface {
 // boardBook serializes workspace discovery so a slow earlier request cannot overwrite a later snapshot.
 type boardBook struct {
 	discoverMu sync.Mutex
+	mutateMu   sync.Mutex
 }
 
 func (s *Service) workspaceBoardRoutes() {
@@ -178,6 +179,10 @@ func (s *Service) mutateWorkspaceBoard(w http.ResponseWriter, r *http.Request) {
 		apierr.Write(w, 400, workspaceboard.ErrInvalid)
 		return
 	}
+	// Serialize the revision check with node-side project and directory creation.
+	// Two requests at one revision must not both create before one board save loses.
+	s.board.mutateMu.Lock()
+	defer s.board.mutateMu.Unlock()
 	state, err := store.WorkspaceBoard(r.Context())
 	if err != nil {
 		apierr.Write(w, 503, err)
@@ -187,14 +192,29 @@ func (s *Service) mutateWorkspaceBoard(w http.ResponseWriter, r *http.Request) {
 		apierr.WriteCode(w, 409, "conflict", db.ErrWorkspaceBoardConflict)
 		return
 	}
+	creating := op.CreateDirectory || op.DesktopApp != ""
+	if creating {
+		// Validate the board change before a node can create anything. A later
+		// conflict retains the directory and project, and a retry reuses them.
+		if err := validateBoardProject(state, op); err != nil {
+			apierr.Write(w, 400, err)
+			return
+		}
+	}
 	switch op.Action {
 	case "add_card":
-		if err := s.resolveBoardCard(r.Context(), &op); err != nil {
+		var boundDirectories []string
+		for _, card := range state.Cards {
+			if s.effectiveBoardMachine(card.MachineID) == s.effectiveBoardMachine(op.MachineID) {
+				boundDirectories = append(boundDirectories, card.Cwd)
+			}
+		}
+		if err := s.resolveBoardCard(r.Context(), &op, boundDirectories...); err != nil {
 			apierr.Write(w, 400, err)
 			return
 		}
 		for _, card := range state.Cards {
-			if s.effectiveBoardMachine(card.MachineID) == op.MachineID && workspaceDirectory(card.Cwd) == workspaceDirectory(op.Cwd) {
+			if s.effectiveBoardMachine(card.MachineID) == op.MachineID && workspaceboard.CwdKey(card.Cwd) == workspaceboard.CwdKey(op.Cwd) {
 				apierr.Write(w, 400, i18n.Err("hub-workspace_board.err_already_bound"))
 				return
 			}
@@ -222,7 +242,7 @@ func (s *Service) mutateWorkspaceBoard(w http.ResponseWriter, r *http.Request) {
 }
 
 // Only the node can resolve a directory on its filesystem; the HTTP caller cannot forge discovery metadata.
-func (s *Service) resolveBoardCard(ctx context.Context, op *workspaceboard.Mutation) error {
+func (s *Service) resolveBoardCard(ctx context.Context, op *workspaceboard.Mutation, boundDirectories ...string) error {
 	m, ok := s.boardMachineOf(op.MachineID)
 	if !ok {
 		return i18n.Err("hub-workspace_board.err_unknown_machine")
@@ -231,7 +251,11 @@ func (s *Service) resolveBoardCard(ctx context.Context, op *workspaceboard.Mutat
 		return i18n.Err("hub-workspace_board.err_offline")
 	}
 	op.MachineID = m.ID
-	ctx, cancel := context.WithTimeout(ctx, 12*time.Second)
+	timeout := 12 * time.Second
+	if op.CreateDirectory || op.DesktopApp != "" {
+		timeout = 45 * time.Second
+	}
+	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	var selected *proto.Workspace
 	if op.WorkspaceID != "" {
@@ -269,7 +293,17 @@ func (s *Service) resolveBoardCard(ctx context.Context, op *workspaceboard.Mutat
 		return i18n.Err("hub-workspace_board.err_pick_directory")
 	}
 	var resolved proto.Workspace
-	if err := s.nodeCall(ctx, m.ID, "workspace.resolve", map[string]any{"path": op.Cwd}, &resolved); err != nil {
+	method := "workspace.resolve"
+	params := map[string]any{"path": op.Cwd}
+	if op.CreateDirectory || op.DesktopApp != "" {
+		method = "workspace.create"
+		params["bound_directories"] = boundDirectories
+		title := strings.TrimSpace(*op.Title)
+		key := sha256.Sum256([]byte(m.ID + "\x00" + workspaceboard.CwdKey(op.Cwd) + "\x00" + title + "\x00" + op.DesktopApp))
+		params["name"], params["desktop_app"] = title, op.DesktopApp
+		params["create_directory"], params["idempotency_key"] = op.CreateDirectory, "persona-project-"+hex.EncodeToString(key[:])
+	}
+	if err := s.nodeCall(ctx, m.ID, method, params, &resolved); err != nil {
 		return i18n.Err("hub-workspace_board.err_resolve_failed", i18n.Args{"error": err.Error()})
 	}
 	if resolved.Cwd == "" || !resolved.Available {
@@ -294,6 +328,24 @@ func (s *Service) resolveBoardCard(ctx context.Context, op *workspaceboard.Mutat
 	return nil
 }
 
+func validateBoardProject(state workspaceboard.State, op workspaceboard.Mutation) error {
+	if op.Action != "add_card" || op.WorkspaceID != "" || op.Title == nil {
+		return i18n.Err("hub-workspace_board.err_project_binding")
+	}
+	if op.DesktopApp != "" && op.DesktopApp != "codex_app" && op.DesktopApp != "claude_desktop" {
+		return i18n.Err("hub-workspace_board.err_desktop_application")
+	}
+	if strings.TrimSpace(op.Cwd) == "" {
+		return i18n.Err("hub-workspace_board.err_project_directory")
+	}
+	// Apply checks the title, destination column and capacity before filesystem
+	// work. Discovery fields below are placeholders; the node supplies the real ones.
+	op.ID, op.WorkspaceID, op.Source = "validation_"+randomHex(12), "validation", "directory"
+	op.Cwd = "/persona-project-validation/" + op.ID
+	_, err := workspaceboard.Apply(state, op)
+	return err
+}
+
 func workspaceDirectory(p string) string {
 	if canonical, err := workspaceboard.CanonicalCwd(p); err == nil {
 		return canonical
@@ -312,7 +364,12 @@ func qualifyWorkspace(machine string, w proto.Workspace) proto.Workspace {
 	if w.SourceID == "" {
 		w.SourceID = w.Cwd
 	}
-	sum := sha256.Sum256([]byte(machine + "\x00" + w.Source + "\x00" + w.SourceID))
+	identity := machine + "\x00" + w.Source + "\x00" + w.SourceID
+	if w.Source == "codex_app" || w.Source == proto.SourceClaudeDesktop {
+		// A native desktop project can have several roots, each selectable on the board.
+		identity += "\x00" + workspaceboard.CwdKey(w.Cwd)
+	}
+	sum := sha256.Sum256([]byte(identity))
 	w.ID, w.MachineID = "ws_"+hex.EncodeToString(sum[:12]), machine
 	return w
 }
@@ -372,8 +429,12 @@ func (s *Service) getWorkspaces(w http.ResponseWriter, r *http.Request) {
 	byMachine := map[string]db.WorkspaceSnapshotRow{}
 	for _, row := range cached {
 		machine := s.effectiveBoardMachine(row.MachineID)
-		if previous, ok := byMachine[machine]; ok && !row.UpdatedAt.After(previous.UpdatedAt) {
-			continue
+		if previous, ok := byMachine[machine]; ok {
+			// Windows can stamp successive snapshots with the same clock value.
+			// On a tie, the current machine's catalog supersedes an absorbed alias.
+			if row.UpdatedAt.Before(previous.UpdatedAt) || (row.UpdatedAt.Equal(previous.UpdatedAt) && (previous.MachineID == machine || row.MachineID != machine)) {
+				continue
+			}
 		}
 		byMachine[machine] = row
 	}
@@ -494,7 +555,7 @@ func (s *Service) getWorkspaces(w http.ResponseWriter, r *http.Request) {
 		sessions, listed := s.boardSessions(m.ID)
 		containsDirectory := func(cwd string) bool {
 			for _, item := range entries {
-				if workspaceDirectory(item.Cwd) == workspaceDirectory(cwd) {
+				if workspaceboard.CwdKey(item.Cwd) == workspaceboard.CwdKey(cwd) {
 					return true
 				}
 			}
@@ -519,7 +580,7 @@ func (s *Service) getWorkspaces(w http.ResponseWriter, r *http.Request) {
 		}
 		for i := range entries {
 			for _, card := range state.Cards {
-				if card.MachineID == m.ID && workspaceDirectory(card.Cwd) == entries[i].Cwd {
+				if card.MachineID == m.ID && workspaceboard.CwdKey(card.Cwd) == workspaceboard.CwdKey(entries[i].Cwd) {
 					entries[i].Available = online && result.directories[card.Cwd]
 					if entries[i].Available {
 						entries[i].LastSeen = result.at.Format(time.RFC3339Nano)
@@ -545,7 +606,7 @@ func (s *Service) getWorkspaces(w http.ResponseWriter, r *http.Request) {
 	for _, card := range state.Cards {
 		found := false
 		for _, item := range out {
-			if item.MachineID == card.MachineID && workspaceDirectory(item.Cwd) == card.Cwd {
+			if item.MachineID == card.MachineID && workspaceboard.CwdKey(item.Cwd) == workspaceboard.CwdKey(card.Cwd) {
 				found = true
 				break
 			}

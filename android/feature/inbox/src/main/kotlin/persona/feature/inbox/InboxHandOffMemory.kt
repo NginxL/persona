@@ -1,6 +1,7 @@
 package persona.feature.inbox
 
 import kotlinx.serialization.Serializable
+import persona.core.inbox.*
 
 /** One source and where its last item was handed: "main" or "agent:<machine>/<session>" (iOS also keeps "new"). */
 @Serializable

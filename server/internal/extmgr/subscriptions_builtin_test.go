@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/nwverse/persona/server/internal/connector/github"
+	"github.com/nwverse/persona/server/internal/githubwire"
 	"github.com/nwverse/persona/server/internal/subscriptions"
 )
 
@@ -60,10 +60,10 @@ func TestGitHubSearchSubscribesItemByItem(t *testing.T) {
 
 	h := newTestManager(t)
 	h.connectors = h.newConnectors(nil)
-	gh := github.New(github.Config{Auth: github.AuthConfig{FromMachine: "mac"}, APIRoot: srv.URL}, "Mac", func(context.Context, string) (string, error) {
+	gh := newTestGitHub(t, githubwire.Config{Auth: githubwire.AuthConfig{FromMachine: "mac"}, APIRoot: srv.URL}, "Mac", func(context.Context, string) (string, error) {
 		return "gho_example000000000000000000000000000001", nil
 	})
-	if err := h.addConnector(signedInGitHub{gh}); err != nil {
+	if err := h.addConnector(signedInGitHub{gh.(fullGitHub)}); err != nil {
 		t.Fatal(err)
 	}
 	clock := &stepClock{t: start}

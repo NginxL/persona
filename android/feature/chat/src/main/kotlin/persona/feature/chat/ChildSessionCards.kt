@@ -29,49 +29,95 @@ import persona.core.domain.sort.sideRollup
 import persona.core.domain.sort.sideSessions
 import java.time.Duration
 
-internal data class ChatChildren(val rows: Map<String, Session>, val repository: ChatRepository,
+internal data class ChatChildren(
+    val rows: Map<String, Session>,
+    val repository: ChatRepository,
     /** The side sessions folded under this chat's session (#7944), in their panel's order; empty in a side's own chat. */
-    val sides: List<Session> = emptyList(), val sideRollup: SideRollup = SideRollup())
+    val sides: List<Session> = emptyList(),
+    val sideRollup: SideRollup = SideRollup(),
+    /** All folded children (same-machine and cross-machine) keyed by full [SessionKey] to avoid cross-machine ID collisions. */
+    val byKey: Map<SessionKey, Session> = rows.values.associateBy { it.key },
+    /** Ordered non-side children (same-machine + cross-machine) for Session Overview and child rollups. */
+    val list: List<Session> = rows.values.toList(),
+    /** Opens a folded child's full detail view without redirecting back to its parent. */
+    val onOpenSubagent: ((SessionKey) -> Unit)? = null,
+)
 internal val LocalChatChildren = staticCompositionLocalOf<ChatChildren?> { null }
 
 data class ChildSessionHome(val key: SessionKey, val childSessionId: String? = null,
     val rows: List<Session> = emptyList())
 
-/** [side]: the route opens a side session as itself (`ChatRoute.side`, #7944), not on its parent's page. */
-internal fun childSessionHome(key: SessionKey, row: Session?, parentRow: Session? = null, side: Boolean = false): ChildSessionHome {
+/**
+ * [side]: the route opens a side session as itself (`ChatRoute.side`, #7944), not on its parent's page.
+ * [directSubagent]: the route opens a subagent's full detail view from Session Overview or a TaskCard, never redirecting to parent.
+ */
+internal fun childSessionHome(
+    key: SessionKey,
+    row: Session?,
+    parentRow: Session? = null,
+    side: Boolean = false,
+    directSubagent: Boolean = false,
+): ChildSessionHome {
+    if (directSubagent) return ChildSessionHome(key)
     if (side && row?.key == key && row.isFoldedSide) return ChildSessionHome(key)
-    val parent = row?.takeIf { it.key == key }?.foldedUnder?.takeIf { it.isNotBlank() && it != key.sessionId }
-        ?.let { SessionKey(key.machineId, it) }?.takeIf { it == parentRow?.key }
+    val parent = row?.takeIf { it.key == key }?.foldedUnderKey?.takeIf { it != key }
+        ?.takeIf { it == parentRow?.key }
     return if (parent == null) ChildSessionHome(key) else ChildSessionHome(parent, key.sessionId)
 }
 
 /** Exact lookups are page metadata, never additions to the root list's membership. */
-internal suspend fun resolveChildSessionHome(key: SessionKey, rows: List<Session>, connected: Boolean = true, side: Boolean = false,
-    lookup: suspend (SessionKey) -> Session?): ChildSessionHome {
+internal suspend fun resolveChildSessionHome(
+    key: SessionKey,
+    rows: List<Session>,
+    connected: Boolean = true,
+    side: Boolean = false,
+    directSubagent: Boolean = false,
+    lookup: suspend (SessionKey) -> Session?,
+): ChildSessionHome {
     suspend fun row(target: SessionKey): Session? = rows.firstOrNull { it.key == target } ?: if (!connected) null else try {
         lookup(target)?.takeIf { it.key == target }
     } catch (cancelled: CancellationException) { throw cancelled }
     catch (_: Exception) { null }
+    if (directSubagent) {
+        val target = row(key)
+        val embeddedParent = key.sessionId.substringBefore('@', missingDelimiterValue = "").takeIf { it.isNotBlank() && '@' in key.sessionId }
+            ?.let { row(SessionKey(key.machineId, it)) }
+        return ChildSessionHome(
+            key = key,
+            rows = listOfNotNull(target, embeddedParent).filter { found -> rows.none { it.key == found.key } },
+        )
+    }
     val child = row(key)
-    val parentKey = child?.foldedUnder?.takeIf { it.isNotBlank() && it != key.sessionId }?.let { SessionKey(key.machineId, it) }
+    val parentKey = child?.foldedUnderKey?.takeIf { it != key }
     val parent = parentKey?.let { row(it) }
-    val home = childSessionHome(key, child, parent, side)
+    val home = childSessionHome(key, child, parent, side, directSubagent = false)
     return home.copy(rows = listOfNotNull(child, parent).filter { found -> rows.none { it.key == found.key } })
 }
 
 /** Keep cached pages mounted while looking up metadata; only a confirmed child and parent change the page key. */
 @Composable
-fun rememberChildSessionHome(key: SessionKey, rows: List<Session>, actions: ChatActions?, features: Collection<String>,
-    connected: Boolean, side: Boolean = false): ChildSessionHome {
+fun rememberChildSessionHome(
+    key: SessionKey,
+    rows: List<Session>,
+    actions: ChatActions?,
+    features: Collection<String>,
+    connected: Boolean,
+    side: Boolean = false,
+    directSubagent: Boolean = false,
+): ChildSessionHome {
     val listed = rows.firstOrNull { it.key == key }
-    val parent = listed?.foldedUnder?.let { id -> rows.firstOrNull { it.machineId == key.machineId && it.sessionId == id } }
-    val local = childSessionHome(key, listed, parent, side)
-    val missing = listed == null || !listed.foldedUnder.isNullOrBlank() && parent == null
+    val parent = listed?.foldedUnderKey?.let { parentKey -> rows.firstOrNull { it.key == parentKey } }
+    val local = childSessionHome(key, listed, parent, side, directSubagent)
+    val embeddedParentMissing = directSubagent && '@' in key.sessionId &&
+        rows.none { it.key == SessionKey(key.machineId, key.sessionId.substringBefore('@')) }
+    val missing = listed == null || (!directSubagent && !listed.foldedUnder.isNullOrBlank() && parent == null) || embeddedParentMissing
     val needsLookup = missing && connected && actions != null && "sessions_lookup" in features
-    var lookedUp by remember(key, actions, listed?.foldedUnder, side) { mutableStateOf<ChildSessionHome?>(null) }
-    LaunchedEffect(key, listed?.foldedUnder, needsLookup, actions, features, side) {
+    var lookedUp by remember(key, actions, listed?.foldedUnder, listed?.foldedUnderMachineId, side, directSubagent) {
+        mutableStateOf<ChildSessionHome?>(null)
+    }
+    LaunchedEffect(key, listed?.foldedUnder, listed?.foldedUnderMachineId, needsLookup, actions, features, side, directSubagent) {
         if (needsLookup) {
-            lookedUp = resolveChildSessionHome(key, rows, connected, side) { target ->
+            lookedUp = resolveChildSessionHome(key, rows, connected, side, directSubagent) { target ->
                 actions?.completeRow(Session(target.machineId, target.sessionId))
             }
         }
@@ -96,11 +142,17 @@ fun ChildSessionHome.shownSide(rows: List<Session>, features: Collection<String>
  * which the hub lists under the side's topmost parent.
  */
 @Composable
-internal fun rememberChatChildren(key: SessionKey, parent: Session?, rows: List<Session>, chrome: ChatChromeBindings,
-    repository: ChatRepository): ChatChildren {
+internal fun rememberChatChildren(
+    key: SessionKey,
+    parent: Session?,
+    rows: List<Session>,
+    chrome: ChatChromeBindings,
+    repository: ChatRepository,
+    forceRead: Boolean = false,
+): ChatChildren {
     val features = chrome.connection?.lastHello?.features ?: LocalHubFeatures.current
     val sideFold = SideFold.FEATURE in features
-    val top = parent?.takeIf { sideFold && it.isFoldedSide }?.foldedUnder?.let { SessionKey(key.machineId, it) }
+    val top = parent?.takeIf { sideFold && it.isFoldedSide }?.foldedUnderKey
     val home = top ?: key
     val homeRow = if (top == null) parent else (rows + chrome.lookupRows).firstOrNull { it.key == top }
     val list = remember(home, chrome.actions, chrome.connection) { ChildSessionList(home) }
@@ -114,7 +166,7 @@ internal fun rememberChatChildren(key: SessionKey, parent: Session?, rows: List<
     }
     val sides = remember(folded, key, top, sideFold) { if (sideFold && top == null) sideSessions(folded, key) else emptyList() }
     val rollup = remember(parent, sides, folded) { if (sideFold && top == null) sideRollup(parent, sides, folded) else SideRollup() }
-    val hasChildren = (homeRow?.children?.total ?: 0) > 0 || folded.isNotEmpty()
+    val hasChildren = forceRead || (homeRow?.children?.total ?: 0) > 0 || folded.isNotEmpty()
     val latestParent by rememberUpdatedState(homeRow)
     val latestLocal by rememberUpdatedState(local)
     // Retain invalidations while covered/backgrounded without doing HTTP work there.
@@ -124,18 +176,26 @@ internal fun rememberChatChildren(key: SessionKey, parent: Session?, rows: List<
     }
     val connected = chrome.connection?.state?.collectAsStateWithLifecycle()?.value == ConnectionState.Online
     val lifecycle = LocalLifecycleOwner.current.lifecycle
-    LaunchedEffect(home, homeRow?.key, hasChildren, features, chrome.actions, chrome.connection, connected, chrome.covered, lifecycle) {
+    LaunchedEffect(home, homeRow?.key, hasChildren, forceRead, features, chrome.actions, chrome.connection, connected, chrome.covered, lifecycle) {
         val parentRow = homeRow
         if (parentRow == null || !hasChildren || "sessions_hierarchy" !in features || chrome.covered || !connected) return@LaunchedEffect
         lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
             val actions = chrome.actions ?: return@repeatOnLifecycle
             val events = snapshotFlow { invalidation.value }.filterNotNull()
-            list.watch(events, { needsChildSessionRead(latestParent, childSessionRows(home, latestLocal, list.state.value, emptyList())) }) {
+            list.watch(events, { forceRead && !list.state.value.loaded || needsChildSessionRead(latestParent, childSessionRows(home, latestLocal, list.state.value, emptyList())) }) {
                 actions.childPage(parentRow, it)
             }
         }
     }
-    return ChatChildren(children.associateBy { it.sessionId }, repository, sides, rollup)
+    return ChatChildren(
+        rows = children.associateBy { it.sessionId },
+        repository = repository,
+        sides = sides,
+        sideRollup = rollup,
+        byKey = children.associateBy { it.key },
+        list = children,
+        onOpenSubagent = chrome.onOpenSubagent ?: chrome.onOpenSession,
+    )
 }
 
 /** The existing task card, with its child's own metadata and a transcript read only while open. */
@@ -186,7 +246,7 @@ internal fun ChildSessionCard(sessionId: String, assistant: Boolean) {
         ChatRowActions(row.key, fullText = { children.repository.fullText(row.key, it.id) }, openPath = null,
             photos = null, pictures = { emptyList() }, openImages = { _, _ -> }, menu = null, retryLineId = null, onRetry = {})
     }
-    CompositionLocalProvider(LocalChatSubagents provides ChatSubagents(emptyMap(), null, mapOf(callId to agent)),
+    CompositionLocalProvider(LocalChatSubagents provides ChatSubagents(mapOf(callId to row.key), children.onOpenSubagent, mapOf(callId to agent)),
         LocalChatRowActions provides actions) {
         SubagentCard(call, live = status == SubagentStatus.Running, assistant = assistant, statusOverride = status, metaOverride = meta)
     }

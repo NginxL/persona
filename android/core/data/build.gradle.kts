@@ -19,7 +19,7 @@ dependencies {
     implementation(project(":core:contracts"))
     implementation(project(":core:domain"))
     implementation(project(":core:rustcore"))
-    implementation(project(":feature:inbox"))
+    api(project(":core:inbox"))
     implementation(libs.androidx.core)
     implementation(libs.room.runtime)
     implementation(libs.room.ktx)

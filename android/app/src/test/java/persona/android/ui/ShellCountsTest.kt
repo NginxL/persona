@@ -14,7 +14,7 @@ import persona.core.contracts.api.ManagerRoster
 import persona.core.domain.inbox.InboxInteraction
 import persona.core.domain.inbox.InboxItem
 import persona.core.domain.sort.AgentPreferences
-import persona.feature.inbox.InboxRecord
+import persona.core.inbox.InboxRecord
 
 /**
  * The shell's counts (Root.kt through [ShellCounts], docs/assistant/managers.md "Clients"): beside the pages only the

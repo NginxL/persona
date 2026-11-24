@@ -195,6 +195,11 @@ func TestQueuedDigestPersistsAcrossServiceRestart(t *testing.T) {
 	}
 	s.superviseTodo(ctx, task.ID, "conv1", []string{"Verified"}, 0)
 	signals := []superviseSignal{{Todo: task.ID, Kind: sigInterrupted, Key: "cut-off", Detail: "Capacity unavailable"}, {Todo: task.ID, Kind: sigUnjudged, Key: "review", Detail: "Needs review"}}
+	s.updateSupervisePending(func(pending map[string]superviseSignal) {
+		for _, g := range signals {
+			pending[g.id()] = g
+		}
+	})
 	if !s.deliverDigest(ctx, s.settings(ctx), "conv1", signals, "", time.Now(), time.Time{}) {
 		t.Fatal("not queued")
 	}
@@ -263,6 +268,46 @@ func TestQueuedDigestDoesNotRememberDrainedSignals(t *testing.T) {
 	drainQueuedDigest(t, s, f)
 	if len(s.queuedDigestSignals("conv1")) != 0 {
 		t.Fatal("already delivered signals could be merged into a later digest")
+	}
+}
+
+func TestLegacyQueuedDigestDoesNotHoldRelayWhileWaitingForSupervise(t *testing.T) {
+	s, _ := newQuietService(t)
+	legacy := superviseSignal{Todo: "legacy-todo", Kind: sigIdle, Key: "legacy-idle", Detail: "legacy text"}
+	s.supervise.mu.Lock()
+	s.supervise.queued = map[string][]superviseSignal{"conv1": {legacy}}
+	s.supervise.mu.Unlock()
+	s.relays.mu.Lock()
+	s.relays.st.Queue = map[string][]relayMsg{"conv1": {{Tool: superviseTool, Text: "legacy digest"}}}
+	s.relays.loaded = true
+	s.relays.mu.Unlock()
+
+	// The legacy fallback may wait for the supervision book, but it must not hold the relay lock meanwhile: a signal
+	// holding that book needs the relay lock for its durable outbox write, so the reverse order deadlocks both paths.
+	s.supervise.mu.Lock()
+	result := make(chan []superviseSignal, 1)
+	go func() { result <- s.queuedDigestSignals("conv1") }()
+	waitForSuperviseMutex(t, "queuedDigestSignals", &s.supervise.mu)
+	relayAvailable := make(chan struct{})
+	go func() {
+		s.relays.mu.Lock()
+		s.relays.mu.Unlock()
+		close(relayAvailable)
+	}()
+	available := false
+	select {
+	case <-relayAvailable:
+		available = true
+	case <-time.After(500 * time.Millisecond):
+	}
+	s.supervise.mu.Unlock()
+	if !available {
+		<-relayAvailable // let the deadlocked fixture unwind before failing the test
+		<-result
+		t.Fatal("legacy queued digest holds relays.mu while waiting for supervise.mu")
+	}
+	if got := <-result; len(got) != 1 || got[0].Key != legacy.Key {
+		t.Fatalf("legacy queued signals = %+v, want %q", got, legacy.Key)
 	}
 }
 

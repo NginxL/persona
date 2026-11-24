@@ -11,6 +11,7 @@ vi.hoisted(() => {
 });
 import { setToken } from "../../lib/api";
 import { childCardKey } from "../../lib/child-cards";
+import { closePanel, getPanel } from "../../lib/panel";
 import { emptyTaskIndex } from "../../lib/tasks";
 import { reset, upsertSession } from "../../lib/store";
 import type { Item, Session } from "../../lib/types";
@@ -72,11 +73,11 @@ describe("ChildSessionCard: the two lines", () => {
     const h = html();
     expect(h).toContain('data-child-card="running"');
     expect(h).toContain('data-tool-use="child:kid"');
-    expect(h).toContain(">子 Agent<");
+    expect(h).toContain(">子智能体<");
     expect(h).toContain(">Review the session handling<");
     expect(h).toContain('data-task-status="running"');
     expect(h).toContain(">Codex<");
-    expect(h).toMatch(/data-task-model[^>]*>GPT-5\.5 · 高</);
+    expect(h).toMatch(/data-task-model[^>]*>GPT-5\.5 · High</);
     expect(h).toContain("已运行 ");
     expect(h).toContain('aria-expanded="false"');
     // no tokens (a row has no usage total), no way to open it as a conversation of its own
@@ -105,7 +106,7 @@ describe("ChildSessionCard: the two lines", () => {
     upsertSession(kid({ title: "" }));
     const h = html({ lineStyle: "assistant" });
     expect(h).not.toContain(">Codex<");
-    expect(h).toContain(">子 Agent 任务<");
+    expect(h).toContain(">子智能体任务<");
     upsertSession(kid({ title: "x".repeat(200) }));
     expect(html()).toContain(`>${"x".repeat(95)}…<`);
   });
@@ -115,13 +116,13 @@ describe("ChildSessionCard: the two lines", () => {
   });
 
   it("childMeta and the chip: each piece only when known", () => {
-    expect(childModelChip({ model: "claude-sonnet-4-5", effort: "medium" })).toBe("Sonnet 4.5 · 中");
+    expect(childModelChip({ model: "claude-sonnet-4-5", effort: "medium" })).toBe("Sonnet 4.5 · Medium");
     expect(childModelChip({ model: "gpt-5.4-mini" })).toBe("GPT-5.4 Mini");
-    expect(childModelChip({ effort: "low" })).toBe("低");
+    expect(childModelChip({ effort: "low" })).toBe("Low");
     expect(childModelChip({ model: "", effort: "turbo" })).toBe("");
     expect(childMeta(kid({ model: undefined, effort: undefined, started_at: undefined }), false)).toEqual({});
-    expect(childMeta(kid({ state: "idle", status: "idle" }), true)).toEqual({ harness: "Codex", model: "GPT-5.5 · 高", took: "1m 5s" });
-    expect(childMeta(kid(), true)).toEqual({ harness: "Codex", model: "GPT-5.5 · 高", since: T0 });
+    expect(childMeta(kid({ state: "idle", status: "idle" }), true)).toEqual({ harness: "Codex", model: "GPT-5.5 · High", took: "1m 5s" });
+    expect(childMeta(kid(), true)).toEqual({ harness: "Codex", model: "GPT-5.5 · High", since: T0 });
   });
 
   it("names a tool the way the tool rows do", () => {
@@ -208,5 +209,25 @@ describe("ChildSessionCard: opened in place", () => {
     draw();
     expect(head().getAttribute("aria-expanded")).toBe("true");
     expect(childCardKey("t:", "kid")).toBe("t:child:kid");
+  });
+
+  it("shows View full when expanded and opens the subagent panel for a cross-machine child", async () => {
+    upsertSession(kid({ machine_id: "box", session_id: "remote-kid", folded_under: "p", folded_under_machine_id: "mac" }));
+    act(() =>
+      root.render(
+        <ChatContext.Provider value={ctx()}>
+          <ChildSessionCard mid="box" sid="remote-kid" parentMid="mac" parentSid="p" scope="t:" />
+        </ChatContext.Provider>,
+      ),
+    );
+    expect(host.querySelector("[data-subagent-view-full]")).toBeNull();
+    act(() => head().click());
+    await flush();
+    expect(host.querySelector("[data-child-card]")?.getAttribute("data-tool-use")).toBe("child:box/remote-kid");
+    const btn = host.querySelector<HTMLButtonElement>("[data-subagent-view-full]");
+    expect(btn?.textContent).toBe("查看完整");
+    act(() => btn!.click());
+    expect(getPanel()).toEqual({ kind: "subagent", mid: "box", sid: "remote-kid", parentMid: "mac", parentSid: "p", from: "card" });
+    closePanel();
   });
 });

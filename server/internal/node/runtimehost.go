@@ -310,6 +310,7 @@ func (rh *RuntimeHost) registerRuntime(ctx context.Context, h *runtimeConn, hell
 		rh.wakeAgyBridge()
 	}
 	if !h.isDaemon() && isOpencodeRuntimeHello(hello) {
+		rh.noteOpencodeHello(hello)
 		rh.wakeOpencodeBridge()
 	}
 	return nil

@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/nwverse/persona/server/internal/feishubot"
+	"github.com/nwverse/persona/server/internal/botcard"
 	"github.com/nwverse/persona/server/internal/proto"
 )
 
@@ -184,7 +184,7 @@ func TestFeishuMessageTypedAnswer(t *testing.T) {
 	ix := qCard("ix_q", false, "北京", "上海", "广州")
 	s, f, _, _, rs := textAnswerBot(t, nil, ix)
 	seedCard(s, ix)
-	var ev feishubot.MessageEvent
+	var ev botcard.MessageEvent
 	ev.Message.ChatType = "p2p"
 	ev.Message.MessageID, ev.Message.MessageType, ev.Message.Content = "om_in", "text", `{"text":"第二个"}`
 	st, _ := s.feishuStatus(context.Background())
@@ -202,7 +202,7 @@ func TestTypedAnswerToACardEndedElsewhereIsNotForwarded(t *testing.T) {
 	s, f, _, notes, rs := textAnswerBot(t, nil)
 	seedCard(s, ix)
 	s.feishuInteractionDone(ix, "已在 App 中回答")
-	var ev feishubot.MessageEvent
+	var ev botcard.MessageEvent
 	ev.Message.ChatType = "p2p"
 	ev.Message.MessageID, ev.Message.MessageType, ev.Message.Content = "om_in", "text", `{"text":"上海"}`
 	st, _ := s.feishuStatus(context.Background())
@@ -294,7 +294,7 @@ func TestTypedFreeAnswerInTopic(t *testing.T) {
 	// End to end: the topic message resolves the free-text question and starts no conversation.
 	s, f, _, _, rs := textAnswerBot(t, nil, free)
 	seedThreadCard(s, free, "om_topic", 1000)
-	var ev feishubot.MessageEvent
+	var ev botcard.MessageEvent
 	ev.Message.ChatType = "p2p"
 	ev.Message.MessageID, ev.Message.RootID, ev.Message.MessageType, ev.Message.Content =
 		"om_in", "om_topic", "text", `{"text":"想换个方案"}`
@@ -307,7 +307,7 @@ func TestTypedFreeAnswerInTopic(t *testing.T) {
 	// The same words in the root chat are not an answer there: the card keeps waiting and the message is sent on.
 	s, f, _, _, rs = textAnswerBot(t, nil, free)
 	seedCard(s, free)
-	ev = feishubot.MessageEvent{}
+	ev = botcard.MessageEvent{}
 	ev.Message.ChatType = "p2p"
 	ev.Message.MessageID, ev.Message.MessageType, ev.Message.Content = "om_in2", "text", `{"text":"帮我查天气"}`
 	s.feishuMessage(ev, st, "oa_1")
@@ -335,7 +335,7 @@ func TestTypedFreeAnswerInTopic(t *testing.T) {
 	s, f, _, _, rs = textAnswerBot(t, nil)
 	seedThreadCard(s, free, "om_topic", 1000)
 	s.feishuInteractionDone(free, "已在 App 中回答")
-	ev = feishubot.MessageEvent{}
+	ev = botcard.MessageEvent{}
 	ev.Message.ChatType = "p2p"
 	ev.Message.MessageID, ev.Message.RootID, ev.Message.MessageType, ev.Message.Content =
 		"om_in3", "om_topic", "text", `{"text":"帮我看看别的"}`

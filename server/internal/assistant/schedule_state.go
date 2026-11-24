@@ -61,6 +61,9 @@ func editTaskState(task *Task, input Task, raw map[string]json.RawMessage, now t
 	if _, present := raw["fresh_each_run"]; present {
 		task.FreshEachRun = input.FreshEachRun
 	}
+	if err := readTopicPolicy(raw, task); err != nil {
+		return err
+	}
 	value, present := raw["state_text"]
 	if !present {
 		return nil

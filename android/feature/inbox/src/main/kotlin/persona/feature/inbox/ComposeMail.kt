@@ -23,6 +23,7 @@ import persona.core.contracts.api.MailAccount
 import persona.core.contracts.api.MailTransport
 import persona.core.designsystem.*
 import persona.core.designsystem.icons.PhIcons
+import persona.core.inbox.*
 
 /**
  * Full-screen mail compose dialog (Compose / Reply / Reply all / Forward / mailto:).
@@ -70,7 +71,7 @@ fun ComposeMailPage(
     var confirmDiscard by remember { mutableStateOf(false) }
 
     LaunchedEffect(transport) {
-        runCatching {
+        val _ = runCatching {
             val list = transport.accounts()
             accounts = list
             if (list.isNotEmpty() && list.none { it.id == accountId }) {

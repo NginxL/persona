@@ -564,10 +564,10 @@
     "android/feature/inbox/src/main/kotlin/persona/feature/inbox/TranslationViews.kt": {
       "icon": 3
     },
-    "android/feature/knowledge/src/main/kotlin/persona/feature/knowledge/KnowledgeMinutes.kt": {
+    "android/module/knowledge-ui/src/main/kotlin/persona/module/knowledge/KnowledgeMinutes.kt": {
       "icon": 8
     },
-    "android/feature/knowledge/src/main/kotlin/persona/feature/knowledge/KnowledgeScreen.kt": {
+    "android/module/knowledge-ui/src/main/kotlin/persona/module/knowledge/KnowledgeScreen.kt": {
       "icon": 14
     },
     "android/feature/machines/src/main/kotlin/persona/feature/machines/AddComputerPage.kt": {
@@ -747,7 +747,7 @@
     "android/feature/terminal/src/main/kotlin/persona/feature/terminal/TerminalSelectText.kt": {
       "icon": 1
     },
-    "android/feature/voice/src/main/kotlin/persona/feature/voice/VoiceScreen.kt": {
+    "android/module/voice/src/main/kotlin/persona/module/voice/VoiceScreen.kt": {
       "icon": 14
     },
     "android/platform/capsule/src/main/kotlin/persona/platform/capsule/CapsuleSurface.kt": {

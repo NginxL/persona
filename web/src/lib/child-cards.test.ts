@@ -1,7 +1,7 @@
 // Child sessions as cards in their parent's chat (#5120): the exchange a card goes in and where among its steps, and that
 // the placement holds still while nothing moves it.
 import { describe, expect, it } from "vitest";
-import { childCall, childCardKey, childPlaces, childSessionOf, exchangeStarts, isChildSessionStep, placeChildren, withChildSessions, type ChildPlace } from "./child-cards";
+import { childCall, childCardKey, childMachineOf, childPlaces, childRefOfCall, childSessionOf, exchangeStarts, isChildSessionStep, placeChildren, withChildSessions, type ChildPlace } from "./child-cards";
 import { sameValue } from "./stable-lines";
 import { chatLines, exchangeSteps, segments, type ChatLine, type Step } from "./turns";
 import type { Item, Session } from "./types";
@@ -22,6 +22,33 @@ describe("childPlaces", () => {
     ]);
     // b works on: its updates do not move its card
     expect(childPlaces([row("b", { updated_at: ts(90) })], seen)).toEqual([{ sid: "b", at: ts(20) }]);
+  });
+
+  it("retains real machine_id for cross-machine archived-parent orphans and disambiguates identical session IDs across machines", () => {
+    const seen = new Map<string, string>();
+    const localSame = row("dup", { machine_id: "mac", updated_at: ts(10) });
+    const remoteOrphan = row("dup", {
+      machine_id: "box",
+      folded_under: undefined,
+      folded_under_machine_id: undefined,
+      parent_machine_id: "mac",
+      parent_session_id: "p",
+      is_subagent: true,
+      updated_at: ts(25),
+    });
+    const placed = childPlaces([localSame, remoteOrphan], seen, "mac");
+    expect(placed).toEqual([
+      { sid: "dup", at: ts(10) },
+      { mid: "box", sid: "dup", at: ts(25) },
+    ]);
+    // Both cards get distinct step IDs, card keys, and machine/session identities
+    const out = withChildSessions([step("a", 1, 0)], placed);
+    expect(ids(out)).toEqual(["a", "child:dup", "child:box/dup"]);
+    const remoteStep = out[2] as Extract<Step, { kind: "tool" }>;
+    expect(childSessionOf(remoteStep)).toBe("dup");
+    expect(childMachineOf(remoteStep, "mac")).toBe("box");
+    expect(childRefOfCall("child:box/dup")).toEqual({ mid: "box", sid: "dup" });
+    expect(childCardKey("mac/p:", "dup", "box")).toBe("mac/p:child:box/dup");
   });
 });
 

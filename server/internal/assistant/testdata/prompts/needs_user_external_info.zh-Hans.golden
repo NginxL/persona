@@ -1,0 +1,4 @@
+待用户确认（needs_user）的卡片仍在等待时，收到了新的外部信息（原卡片未改动）：
+   - 新信息（https://github.com/example/app/pull/42）：PR https://github.com/example/app/pull/42 was approved (checks: success).
+   - 当前待决问题：Should we merge PR #42 or wait for another reviewer?（推荐：Merge now）
+   - 请判断这条新信息是否已解决或覆盖当前的待决问题。如果仍需用户拍板，请调用 supervision_finish(visibility="silent") 静默结束，原卡片会保持原样；如果已解决或覆盖，请调用 task_review 给出新结论并写明自然语言原因以自动撤掉旧卡片（切勿用 task_decided 伪造用户点击）。

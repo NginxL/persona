@@ -2,7 +2,7 @@ package persona.core.data
 
 import persona.core.contracts.HubScope
 import persona.core.contracts.JsonCodec
-import persona.feature.inbox.ReplyTarget
+import persona.core.inbox.ReplyTarget
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex

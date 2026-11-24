@@ -180,9 +180,10 @@ func scanBackground(f *os.File, off *int64, m *transcript.Meta, size int64) {
 		at += int64(len(line))
 		if err == bufio.ErrBufferFull {
 			// While a fallback is active, a large reply can switch back and a large prompt can end a turn-scoped
-			// fallback. Keep those rows whole; request blobs only repeat history and are still skipped.
+			// fallback. Keep those rows and compaction boundaries whole; request blobs only repeat history.
 			if !long && (m.ModelFallback != nil || bytes.Contains(line, []byte("model_refusal_")) ||
-				bytes.Contains(line, []byte(`"type":"assistant"`))) &&
+				bytes.Contains(line, []byte(`"type":"assistant"`)) || bytes.Contains(line, []byte(`"type":"compacted"`)) ||
+				bytes.Contains(line, []byte(`"compact_boundary"`))) &&
 				!bytes.Contains(line, []byte(`"type":"api-request-blob"`)) {
 				refusalLine = append(refusalLine[:0], line...)
 			} else if refusalLine != nil {

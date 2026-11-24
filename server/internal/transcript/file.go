@@ -83,7 +83,7 @@ func (f *File) history() string {
 	if f.lines == 0 {
 		return "" // nothing read yet: no identity to compare
 	}
-	version := ""
+	version := ".items1"
 	if !f.meta.Codex {
 		version = ".items3" // Model-only interjection items are removed; reload older client history.
 	}
@@ -154,7 +154,7 @@ func (f *File) Changed() bool {
 	if revoked {
 		return true
 	}
-	st, err := os.Stat(path)
+	st, err := statTranscript(path)
 	return err != nil || !unchanged(st, offset, ino)
 }
 
@@ -165,8 +165,9 @@ func unchanged(st os.FileInfo, offset int64, ino uint64) bool {
 
 func (f *File) refresh(strict bool) ([]proto.Item, Span, error) {
 	// A file with nothing new is the common case of a watched session at rest (a refresh four times a second): a stat
-	// says so, without the open, fstat and close below. A stat that fails goes on to the open, which reports it.
-	if st, err := os.Stat(f.Path); strict {
+	// says so without parsing. Windows also reads the file index through a metadata handle. A failed stat goes on
+	// to the open, which reports it, unless an export requires a readable regular file immediately.
+	if st, err := statTranscript(f.Path); strict {
 		if err != nil {
 			return nil, Span{}, err
 		}
@@ -176,12 +177,12 @@ func (f *File) refresh(strict bool) ([]proto.Item, Span, error) {
 	} else if err == nil && unchanged(st, f.offset, f.ino) {
 		return nil, Span{f.history(), f.lines, f.lines}, nil
 	}
-	fh, err := os.Open(f.Path)
+	fh, err := openTranscript(f.Path)
 	if err != nil {
 		return nil, Span{}, err
 	}
 	defer fh.Close()
-	st, err := fh.Stat()
+	st, err := statOpenedTranscript(fh)
 	if err != nil {
 		return nil, Span{}, err
 	}
@@ -433,7 +434,7 @@ func (f *File) WithImages(items []proto.Item) []proto.Item {
 
 // reparse reads line seq again and returns its items by id.
 func (f *File) reparse(seq int, ref lineRef, scratch *Meta) (map[string]proto.Item, error) {
-	fh, err := os.Open(f.Path)
+	fh, err := openTranscript(f.Path)
 	if err != nil {
 		return nil, err
 	}
@@ -492,6 +493,13 @@ func (f *File) End() Span {
 	return Span{History: f.history(), To: f.lines}
 }
 
+// TurnClosedAfter reports whether a non-hidden turn close occurred after seq in the lines f has parsed.
+func (f *File) TurnClosedAfter(seq int) bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.meta.TurnClosed && f.meta.turnEndSeq > seq && (f.tree == nil || !f.tree.hidden[f.meta.turnEndLine])
+}
+
 // CoversClosedTurnAfter reports whether the checked end still covers every line after seq in history and the latest
 // turn ended after the send. An open turn or a closing record on a discarded branch cannot establish that.
 func (f *File) CoversClosedTurnAfter(end Span, history string, seq int, sentAt time.Time) bool {
@@ -504,7 +512,7 @@ func (f *File) CoversClosedTurnAfter(end Span, history string, seq int, sentAt t
 	if history == "" || history != end.History || end.History != f.history() || end.To != f.lines || f.base > seq || seq > f.lines || len(f.partial) != 0 {
 		return false
 	}
-	fh, err := os.Open(f.Path)
+	fh, err := openTranscript(f.Path)
 	if err != nil {
 		return false
 	}
@@ -514,6 +522,6 @@ func (f *File) CoversClosedTurnAfter(end Span, history string, seq int, sentAt t
 	if err != nil || crc32.ChecksumIEEE(first[:len(first)-1]) != f.firstHash {
 		return false
 	}
-	st, err := os.Stat(f.Path)
+	st, err := statTranscript(f.Path)
 	return err == nil && unchanged(st, f.offset, f.ino)
 }

@@ -1,4 +1,5 @@
 {
+  "manual_terminal_resume": "エージェントのターミナルを開いて「再開」を選んでください。決定は保留中です。",
   "title": "タスクの進捗：{n} 件",
   "title_needs": "{n} 件があなたの判断待ち",
   "tag_report": "レポート",
@@ -56,6 +57,8 @@
   "verdict_take": "おすすめで進める",
   "verdict_taken": "おすすめで進めます。担当の Agent に渡しました",
   "decision_handled_in_agent": "元の会話で対応済み",
+  "decision_superseded": "監督役により差し替え済み",
+  "decision_superseded_reason": "監督役により差し替え済み：{reason}",
   "verdict_reply_hint": "これに返信：「OK」で受け取ります。それ以外は ToDo の決定事項に記録し、元の Agent に渡します",
   "verdict_decide_hint": "これに返信：「OK」でおすすめのとおりに。自分の選択を書いてもかまいません。どちらも ToDo の決定事項に記録し、担当の Agent に渡します",
   "verdict_decide_hint_none": "これに返信して選択を書いてください。ToDo の決定事項に記録し、担当の Agent に渡します",
@@ -121,6 +124,8 @@
   "decision_response_explain_first": "先に背景を教えてください",
   "decision_response_noted": "「{response}」と回答しました：担当の会話に渡しました。何も実行していません",
   "decision_chosen_noted": "選択：{option}。ToDo の決定に記録し、エージェントに送りました",
+  "decision_chosen_recorded": "選択：{option}。ToDo の決定に記録しました",
+  "decision_chosen_for_supervisor": "選択：{option}。監督役が対応できるよう ToDo に記録しました",
   "verdict_taken_supervisor": "おすすめで進めます。Agent ではなく、このタスクの監督役に渡しました",
   "decision_chosen_supervisor": "選択：{option}。ToDo の決定に記録し、監督役に渡しました",
   "delivery_verification_unavailable": "タスク {task} はまだ受理できません：{pr} の配信状態を一時的に確認できません（{reason}）。作業が未完了という意味ではありません。現在の状態を維持し、検証が復旧したら再確認してください。検証不能だけを理由に再マージ、再デプロイ、保留、キャンセルを求めないでください。",

@@ -30,6 +30,7 @@ import persona.core.designsystem.PersonaTheme
 import persona.core.domain.inbox.InboxItem
 import persona.core.navigation.AppTab
 import persona.core.navigation.Navigator
+import persona.core.inbox.*
 
 /** #576 G122: exercise the real chat composer, from the typed @ to the durable request it sends. */
 @RunWith(AndroidJUnit4::class)

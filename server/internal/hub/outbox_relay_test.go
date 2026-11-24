@@ -10,6 +10,7 @@ import (
 
 	"github.com/nwverse/persona/server/internal/assistantwire"
 	"github.com/nwverse/persona/server/internal/proto"
+	"github.com/nwverse/persona/server/internal/rpc"
 )
 
 // What a manager kept while the hub was away is delivered in order, each item once: sent again (the manager did not
@@ -210,15 +211,24 @@ func TestHandedOverWhileTheStoreWasDown(t *testing.T) {
 	h := newTestHub(t)
 	st := &flakyHandOver{fail: true, seen: map[string]bool{}}
 	h.store = st
-	if !h.firstHandOver(context.Background(), "assistant", "ntf_x") {
-		t.Fatal("the first time")
+	first, rel, paused := h.beginHandOver(context.Background(), "assistant", "ntf_x")
+	if !first || paused {
+		t.Fatalf("the first time: first=%v paused=%v", first, paused)
+	}
+	if rel != nil {
+		rel()
 	}
 	st.fail = false
-	if h.firstHandOver(context.Background(), "assistant", "ntf_x") {
-		t.Fatal("delivered again once the store answered")
+	first, rel, paused = h.beginHandOver(context.Background(), "assistant", "ntf_x")
+	if first || paused || rel != nil {
+		t.Fatalf("delivered again once the store answered: first=%v paused=%v", first, paused)
 	}
-	if !h.firstHandOver(context.Background(), "assistant", "ntf_y") {
-		t.Fatal("a new one")
+	first, rel, paused = h.beginHandOver(context.Background(), "assistant", "ntf_y")
+	if !first || paused {
+		t.Fatalf("a new one: first=%v paused=%v", first, paused)
+	}
+	if rel != nil {
+		rel()
 	}
 }
 
@@ -250,12 +260,220 @@ func TestTwoSendsOfOneIDAtOnce(t *testing.T) {
 	h.store = st
 	results := make(chan bool, 2)
 	for range 2 {
-		go func() { results <- h.firstHandOver(context.Background(), "assistant", "ntf_z") }()
+		go func() {
+			first, rel, _ := h.beginHandOver(context.Background(), "assistant", "ntf_z")
+			if rel != nil {
+				rel()
+			}
+			results <- first
+		}()
 	}
 	time.Sleep(100 * time.Millisecond)
 	close(st.gate)
 	a, b := <-results, <-results
 	if a == b {
 		t.Fatalf("both %v: want exactly one delivery", a)
+	}
+}
+
+// hookHandOver records HandOverFirst / HandOverForget calls and supports hooks for quiesce interleavings.
+type hookHandOver struct {
+	Store
+	mu       sync.Mutex
+	seen     map[string]bool
+	firsts   int
+	forgets  int
+	onFirst  func(manager, id string)
+	onForget func(manager, id string)
+}
+
+func (s *hookHandOver) HandOverFirst(_ context.Context, manager, id string, _ time.Duration) (bool, error) {
+	if s.onFirst != nil {
+		s.onFirst(manager, id)
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.firsts++
+	if s.seen == nil {
+		s.seen = map[string]bool{}
+	}
+	k := manager + "/" + id
+	first := !s.seen[k]
+	s.seen[k] = true
+	return first, nil
+}
+
+func (s *hookHandOver) HandOverForget(_ context.Context, manager, id string) error {
+	if s.onForget != nil {
+		s.onForget(manager, id)
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.forgets++
+	delete(s.seen, manager+"/"+id)
+	return nil
+}
+
+// While writes are paused, outbox items are neither delivered nor marked Done (and in-memory seenItems is untouched),
+// so a post-restart replay still runs the durable HandOverFirst duplicate check after resume.
+func TestPausedOutboxSkipsDeliveryAndPreservesDurableDeduplication(t *testing.T) {
+	c := &client{device: "test-device", out: make(chan []byte, 16)}
+	h := newTestHub(t)
+	st := &hookHandOver{seen: map[string]bool{"assistant/ntf_dup": true}}
+	h.store = st
+	h.clients, h.push = map[*client]struct{}{c: {}}, newPusher(t.TempDir(), nil, t.Logf)
+	h.onClientMessage(context.Background(), c, []byte(`{"type":"client_hello","features":["ws_notify"]}`))
+	<-c.out
+	if err := h.push.setPrefs(c.device, NotifyPrefs{Input: false, Done: DoneOff}); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := h.quiesce.pause(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	n := func(id string) *assistantwire.Notification {
+		return &assistantwire.Notification{ID: id, Kind: assistantwire.NotifyPush, Title: id}
+	}
+	raw, _ := json.Marshal(assistantwire.Outbox{Items: []assistantwire.OutboxItem{
+		{ID: "ntf_dup", At: time.Now(), Notification: n("ntf_dup")},
+		{ID: "ntf_new", At: time.Now(), Notification: n("ntf_new")},
+	}})
+	out, err := busMethods[assistantwire.MethodOutbox](h, context.Background(), nil, raw)
+	if err != nil {
+		t.Fatalf("outbox while paused: %v", err)
+	}
+	res := out.(assistantwire.OutboxResult)
+	if len(res.Done) != 0 {
+		t.Fatalf("paused outbox marked items done: %v", res.Done)
+	}
+	// Live notify while paused is refused rather than silently acknowledged or delivered.
+	liveRaw, _ := json.Marshal(assistantwire.NotifyRequest{Notification: *n("ntf_live")})
+	if _, err := busMethods[assistantwire.MethodNotify](h, context.Background(), nil, liveRaw); err == nil {
+		t.Fatal("live notify succeeded while paused")
+	} else {
+		var re *rpc.Error
+		if !errors.As(err, &re) {
+			t.Fatalf("live notify error = %v, want *rpc.Error", err)
+		}
+	}
+	if st.firsts != 0 {
+		t.Fatalf("HandOverFirst called %d times while paused", st.firsts)
+	}
+	select {
+	case got := <-c.out:
+		t.Fatalf("delivered while paused: %s", got)
+	case <-time.After(150 * time.Millisecond):
+	}
+
+	h.quiesce.resume()
+
+	// After resume, ntf_dup is suppressed by the durable store and ntf_new is delivered once.
+	out, err = busMethods[assistantwire.MethodOutbox](h, context.Background(), nil, raw)
+	if err != nil {
+		t.Fatalf("outbox after resume: %v", err)
+	}
+	res = out.(assistantwire.OutboxResult)
+	if len(res.Done) != 2 || res.Done[0] != "ntf_dup" || res.Done[1] != "ntf_new" {
+		t.Fatalf("done after resume = %v", res.Done)
+	}
+	select {
+	case got := <-c.out:
+		var m map[string]any
+		if json.Unmarshal(got, &m) != nil || m["title"] != "ntf_new" {
+			t.Fatalf("unexpected delivery after resume: %s", got)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("ntf_new was not delivered after resume")
+	}
+	select {
+	case got := <-c.out:
+		t.Fatalf("duplicate delivered after resume: %s", got)
+	case <-time.After(150 * time.Millisecond):
+	}
+}
+
+// A pause starting after HandOverFirst commits and before delivery fails waits for the handover turn to finish
+// HandOverForget, so a retry after resume is not stranded against a stale durable claim.
+func TestPauseBetweenHandOverClaimAndFailedDeliveryDoesNotStrandItem(t *testing.T) {
+	c := &client{device: "test-device", out: make(chan []byte, 16)}
+	h := newTestHub(t)
+	h.clients, h.push = map[*client]struct{}{c: {}}, newPusher(t.TempDir(), nil, t.Logf)
+	h.onClientMessage(context.Background(), c, []byte(`{"type":"client_hello","features":["ws_notify"]}`))
+	<-c.out
+	if err := h.push.setPrefs(c.device, NotifyPrefs{Input: true, Done: DoneOff}); err != nil {
+		t.Fatal(err)
+	}
+
+	pauseDone := make(chan error, 1)
+	var pauseOnce sync.Once
+	st := &hookHandOver{
+		seen: map[string]bool{},
+		onFirst: func(_, _ string) {
+			pauseOnce.Do(func() {
+				go func() { pauseDone <- h.quiesce.pause(context.Background()) }()
+				waitFor(t, "quiesce paused during handover claim", func() bool {
+					h.quiesce.mu.Lock()
+					defer h.quiesce.mu.Unlock()
+					return h.quiesce.paused
+				})
+				// pause must still be waiting on the held handover turn.
+				select {
+				case err := <-pauseDone:
+					t.Fatalf("pause completed before delivery and HandOverForget settled: %v", err)
+				case <-time.After(20 * time.Millisecond):
+				}
+			})
+		},
+	}
+	h.store = st
+
+	ix := proto.Interaction{ID: "ix-pause", MachineID: "m", SessionID: "s", Kind: proto.IxQuestion, Summary: "choose"}
+	raw, _ := json.Marshal(assistantwire.Outbox{Items: []assistantwire.OutboxItem{{
+		ID:           "ntf_ix_pause",
+		At:           time.Now(),
+		Notification: &assistantwire.Notification{ID: "ntf_ix_pause", Kind: assistantwire.NotifyInput, Interaction: &ix},
+	}}})
+	// Delivery fails because the interaction card has not been reported yet.
+	if _, err := busMethods[assistantwire.MethodOutbox](h, context.Background(), nil, raw); err != nil {
+		t.Fatalf("outbox failed delivery: %v", err)
+	}
+	select {
+	case err := <-pauseDone:
+		if err != nil {
+			t.Fatalf("pause returned error: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("pause did not finish after handover settled")
+	}
+	st.mu.Lock()
+	forgets := st.forgets
+	stillClaimed := st.seen["assistant/ntf_ix_pause"]
+	st.mu.Unlock()
+	if forgets != 1 || stillClaimed {
+		t.Fatalf("durable forget did not run under the held turn: forgets=%d stillClaimed=%v", forgets, stillClaimed)
+	}
+
+	h.quiesce.resume()
+	reportInteraction(t, h, ix)
+	for drained := false; !drained; {
+		select {
+		case <-c.out:
+		case <-time.After(150 * time.Millisecond):
+			drained = true
+		}
+	}
+
+	// Retry after resume must succeed and deliver the push.
+	if _, err := busMethods[assistantwire.MethodOutbox](h, context.Background(), nil, raw); err != nil {
+		t.Fatalf("outbox retry after resume: %v", err)
+	}
+	select {
+	case got := <-c.out:
+		var m map[string]any
+		if json.Unmarshal(got, &m) != nil || m["interaction_id"] != "ix-pause" {
+			t.Fatalf("unexpected retry push: %s", got)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("retried push was stranded after pause between claim and failed delivery")
 	}
 }

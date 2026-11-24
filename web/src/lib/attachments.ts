@@ -13,15 +13,25 @@ export interface LocalAttachment {
   url?: string;
 }
 
-export function pickAttachment(file: File): LocalAttachment {
+/** `file` as an attachment, refused over MAX_IMAGE for a picture (`imageLimit`: New Agent scales them down, lib/image-scale.ts)
+ *  or MAX_FILE for anything else. */
+export function pickAttachment(file: File, imageLimit = MAX_IMAGE): LocalAttachment {
   const image = file.type.startsWith("image/");
-  if (file.size > (image ? MAX_IMAGE : MAX_FILE)) {
+  if (file.size > (image ? imageLimit : MAX_FILE)) {
     throw new Error(t(image ? "lib-attachments.too_big_image" : "lib-attachments.too_big_file", { name: file.name }));
   }
   return { id: uuid(), name: file.name || "image.png", mime: file.type || "application/octet-stream", file, url: image ? URL.createObjectURL(file) : undefined };
 }
 
-export async function imagePayload(file: File): Promise<{ mime: string; data: string }> {
+/** A picture held as base64 (a forwarded or a draft one, lib/drafts.ts DraftImage) as a file, to send as a file. */
+export function base64File(name: string, mime: string, data: string): File {
+  const bin = atob(data);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return new File([bytes], name, { type: mime });
+}
+
+export async function imagePayload(file: Blob): Promise<{ mime: string; data: string }> {
   const bytes = new Uint8Array(await file.arrayBuffer());
   let bin = "";
   for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));

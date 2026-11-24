@@ -31,10 +31,6 @@ struct ShellComposerBar<Attach: View, Modes: View>: View {
     var modesDisclosure = false
     /// What goes with the message, quoted at the top of the card (#986); quotes keep it open (`hasAttachments`).
     var quotes: Binding<[ContextRef]>? = nil
-    /// Always the card, never the one line (the Mac: the field and its row of buttons stay, as a desktop app's box).
-    var alwaysOpen = false
-    /// The conversation whose sent messages ↑ / ↓ and ⌃R bring back (the Mac, `MacSendHistory`); nil: none.
-    var history: String? = nil
     /// The main conversation cannot answer yet: send says what to do first and goes there, the draft stays.
     var gate: SendGate? = nil
     /// The iPhone's 「+」 opens the composer's panel (`AttachSheet`, a half-height system sheet), given where the button is
@@ -150,7 +146,7 @@ struct ShellComposerBar<Attach: View, Modes: View>: View {
         return Theme.Shell.composerRadius - well / 2 - (Theme.Size.tapTarget - well) / 2
     }
 
-    private var expanded: Bool { !barOn && (alwaysOpen || focused.wrappedValue || !text.isEmpty || hasAttachments) }
+    private var expanded: Bool { !barOn && (focused.wrappedValue || !text.isEmpty || hasAttachments) }
 
     /// The dictation bar is up: the composer keeps its one-line shape under it.
     private var barOn: Bool {
@@ -357,7 +353,6 @@ struct ShellComposerBar<Attach: View, Modes: View>: View {
                 }
             }
             .lineLimit(expanded ? 1...maximumLines : 1...1)
-            #if os(iOS) || os(visionOS)
             // Grown taller, the field must not stay scrolled down a line (#909, TextViewScroll).
             .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { _ in
                 #if os(iOS)
@@ -366,16 +361,10 @@ struct ShellComposerBar<Attach: View, Modes: View>: View {
                 if focused.wrappedValue { TextViewScroll.settleFocused() }
                 #endif
             }
-            #endif
             .focused(focused)
             #if os(iOS)
             // Return Key Sends (#8178): what send does, never from under the full-page editor (it keeps Return a new line).
             .returnSends(text: $text, canSend: canSend, gate: gate?.action, paused: enlarged || barOn) { endDictation(then: sendTyped) }
-            #endif
-            #if os(macOS)
-            .textFieldStyle(.plain) // the card is the field's box; the Mac's own bezel drew a second one inside
-            .macComposerKeys(focused: focused.wrappedValue, canSend: canSend, // ⏎ sends, ⇧⏎ a new line
-                             history: history.map { MacComposerHistory(key: $0, text: $text, focus: { focused.wrappedValue = true }) }, send: send)
             #endif
             .padding(.leading, expanded ? Theme.Space.l : Theme.Space.xs)
             .padding(.trailing, fieldRightInset)
@@ -667,12 +656,7 @@ struct ShellComposerBar<Attach: View, Modes: View>: View {
 
     /// Sends what the field shows: the keyboard's composition confirmed into the draft first (`TypedText`, #2203).
     private func sendTyped() {
-        #if os(iOS) || os(visionOS)
         if focused.wrappedValue { TypedText.commitFocused(into: $text) }
-        #endif
-        #if os(macOS)
-        if let history { MacSendHistory.shared.record(history, text) }
-        #endif
         send()
     }
 

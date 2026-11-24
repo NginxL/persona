@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/nwverse/persona/server/internal/botcard"
 	"github.com/nwverse/persona/server/internal/channel"
-	"github.com/nwverse/persona/server/internal/feishubot"
 	"github.com/nwverse/persona/server/internal/proto"
 )
 
@@ -22,7 +22,7 @@ func TestFeishuRecalledMessageIsNotSent(t *testing.T) {
 	f.answerApp(AppFeishu, FeishuReact, func(json.RawMessage) (any, error) { return map[string]any{"reaction_id": "r1"}, nil })
 	f.answerApp(AppFeishu, FeishuUnreact, func(json.RawMessage) (any, error) { unreacted++; return map[string]any{}, nil })
 	s := newTestService(t, f)
-	var ev feishubot.MessageEvent
+	var ev botcard.MessageEvent
 	ev.Message.MessageID, ev.Message.ChatType, ev.Message.MessageType, ev.Message.Content = "om_x", "p2p", "text", `{"text":"发错了"}`
 
 	s.FeishuRecalled(FeishuRecalled{MessageID: "om_x"})
@@ -32,7 +32,7 @@ func TestFeishuRecalledMessageIsNotSent(t *testing.T) {
 	}
 	// Recalled while it was being read (its downloads): botSend stops before it goes in.
 	ev.Message.MessageID = "om_y"
-	content := feishubot.ParseContent(ev.Message.MessageType, ev.Message.Content, nil)
+	content := botcard.ParseContent(ev.Message.MessageType, ev.Message.Content, nil)
 	s.FeishuRecalled(FeishuRecalled{MessageID: "om_y"})
 	if err := s.botSend(context.Background(), &ev, content, botTarget{Kind: targetMain}); err != nil {
 		t.Fatal(err)
@@ -75,6 +75,7 @@ func recallHub(t *testing.T) (s *Service, f *fakeHub, r *channel.Run, prog *chan
 // The owner recalls the one message a turn is answering (#5248): the turn is interrupted as /stop does, the progress
 // card ends as recalled with no answer, and the OnIt reaction goes without a DONE.
 func TestFeishuRecallStopsTheTurnAnsweringIt(t *testing.T) {
+	needsLarkLayer(t)
 	s, f, r, prog, posts, reacts, unreacts := recallHub(t)
 	prog.from = 3 // its message is in the conversation
 	s.FeishuRecalled(FeishuRecalled{MessageID: "om_m1"})
@@ -98,6 +99,7 @@ func TestFeishuRecallStopsTheTurnAnsweringIt(t *testing.T) {
 
 // An answer read just before the recall, finished after it, does not go out either.
 func TestFeishuRecalledRunSendsNoAnswer(t *testing.T) {
+	needsLarkLayer(t)
 	s, _, r, _, posts, _, _ := recallHub(t)
 	s.chans.mu.Lock()
 	r.Recalled = true
@@ -111,6 +113,7 @@ func TestFeishuRecalledRunSendsNoAnswer(t *testing.T) {
 // Recalled while its message waits behind another turn of the conversation: the run ends with no answer, but nothing
 // is interrupted (that would stop the other turn).
 func TestFeishuRecallOfAQueuedMessageInterruptsNothing(t *testing.T) {
+	needsLarkLayer(t)
 	s, f, r, _, posts, _, unreacts := recallHub(t)
 	f.setItems(proto.Item{Seq: 1, Role: "user", Kind: proto.KindText, Text: "上一条", ClientMsgID: "feishu-om_before"})
 	s.recallChannelRun(channel.Feishu, "om_m1", channel.ClientMsgID(channel.Feishu, "om_m1"))
@@ -125,6 +128,7 @@ func TestFeishuRecallOfAQueuedMessageInterruptsNothing(t *testing.T) {
 // Answered together with another message (folded): the turn goes on, only the recalled one is taken out; the answer
 // then marks just the other one done.
 func TestFeishuRecallOfAFoldedMessageKeepsTheTurn(t *testing.T) {
+	needsLarkLayer(t)
 	s, f, r, prog, posts, reacts, unreacts := recallHub(t)
 	prog.from = 3
 	s.chans.mu.Lock()

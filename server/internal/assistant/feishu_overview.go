@@ -7,13 +7,13 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/nwverse/persona/server/internal/feishubot"
+	"github.com/nwverse/persona/server/internal/botcard"
 	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/transcript"
 )
 
 type overviewCard struct {
-	card     *feishubot.Card
+	card     *botcard.Card
 	fallback string
 }
 
@@ -21,8 +21,8 @@ func (s *Service) tasksOverview(ctx context.Context) []overviewCard {
 	l, web := s.botLang(ctx), s.webBase(ctx)
 	var es []reportEntry
 	labels := map[int]bool{}
-	add := func(md string, bs []feishubot.Button) {
-		es = append(es, reportEntry{md: md, buttons: bs, bytes: feishuElBytes(func(c *feishubot.Card) {
+	add := func(md string, bs []botcard.Button) {
+		es = append(es, reportEntry{md: md, buttons: bs, bytes: feishuElBytes(func(c *botcard.Card) {
 			c.Markdown(md)
 			c.Buttons(bs...)
 		})})
@@ -42,19 +42,19 @@ func (s *Service) tasksOverview(ctx context.Context) []overviewCard {
 					where = "Persona"
 				}
 			}
-			head := "**" + feishubot.EscapeMarkdown(where) + "**"
+			head := "**" + botcard.EscapeMarkdown(where) + "**"
 			if m := s.machineName(ix.MachineID); m != "" {
-				head += " · " + feishubot.EscapeMarkdown(m)
+				head += " · " + botcard.EscapeMarkdown(m)
 			}
 			link := web
 			if ix.SessionID != "" {
 				link = sessionLink(web, ix.MachineID, ix.SessionID, s.sessionAssistantLocal(ix.MachineID, ix.SessionID))
 			}
-			var bs []feishubot.Button
+			var bs []botcard.Button
 			if b := s.openLinkButton(ctx, link); b != nil { // nil for an empty or scheme-less web base
-				bs = []feishubot.Button{b}
+				bs = []botcard.Button{b}
 			}
-			add(head+"\n"+feishubot.EscapeMarkdown(interactionQuestion(l, ix)), bs)
+			add(head+"\n"+botcard.EscapeMarkdown(interactionQuestion(l, ix)), bs)
 		}
 	} else {
 		add(i18n.T(l, "assistant-feishu_cards.tasks_no_decide"), nil)
@@ -68,7 +68,7 @@ func (s *Service) tasksOverview(ctx context.Context) []overviewCard {
 // overviewTodos appends one row per open todo, oldest first (ties by id), including manual todos that no working
 // session is bound to: todoReport's links only enumerate session-bound todos, so the open set is read straight from
 // the book under its lock. Session/Agent links are then supplemented from the report.
-func (s *Service) overviewTodos(ctx context.Context, l i18n.Lang, web string, add func(md string, bs []feishubot.Button)) {
+func (s *Service) overviewTodos(ctx context.Context, l i18n.Lang, web string, add func(md string, bs []botcard.Button)) {
 	sessions := map[string][][2]string{}
 	if r := s.todoReport(ctx); r != nil {
 		seen := map[[2]string]bool{}
@@ -100,11 +100,11 @@ func (s *Service) overviewTodos(ctx context.Context, l i18n.Lang, web string, ad
 		return
 	}
 	for _, t := range open {
-		var bs []feishubot.Button
+		var bs []botcard.Button
 		btn := func(key, u string, page bool) {
 			if b := safeLinkButton(i18n.T(l, key), u); b != nil { // nil for an empty/non-http(s) URL
 				if page { // a page of the web app: Feishu's sidebar on the desktop
-					b = feishubot.PageBtn(i18n.T(l, key), u)
+					b = botcard.PageBtn(i18n.T(l, key), u)
 				}
 				bs = append(bs, b)
 			}
@@ -114,7 +114,7 @@ func (s *Service) overviewTodos(ctx context.Context, l i18n.Lang, web string, ad
 		for _, x := range sessions[t.ID] {
 			btn("assistant-reports.open_agent", sessionLink(web, x[0], x[1], false), true)
 		}
-		md := "**" + feishubot.EscapeMarkdown(clip(oneLine(t.Title), 40)) + "**"
+		md := "**" + botcard.EscapeMarkdown(clip(oneLine(t.Title), 40)) + "**"
 		if t.StageKind != "general" { // general work has no strip, as on the other cards and in the apps (#11590)
 			md += "\n" + stageBar(l, t.Stage, false) // open work: never done
 		}
@@ -133,10 +133,10 @@ func packOverview(l i18n.Lang, es []reportEntry, labels map[int]bool) []overview
 	title := i18n.T(l, "assistant-feishu_cards.tasks_overview")
 	part := i18n.T(l, "assistant-reports.part", i18n.Args{"k": 99, "n": 99})
 	head := func(md string) int {
-		return len(feishubot.NewCard(title+part, feishubot.Blue, title).Markdown(md).JSON())
+		return len(botcard.NewCard(title+part, botcard.Blue, title).Markdown(md).JSON())
 	}
 	// Byte reservation: card 1 may carry both section labels, later cards at most one.
-	segs := reportCardSegments(es, head("**x**\n\n**x**"), head("**x**"), feishuElBytes(func(c *feishubot.Card) { c.HR() }))
+	segs := reportCardSegments(es, head("**x**\n\n**x**"), head("**x**"), feishuElBytes(func(c *botcard.Card) { c.HR() }))
 	cards := make([]overviewCard, 0, len(segs))
 	off := 0
 	for k, seg := range segs {
@@ -144,7 +144,7 @@ func packOverview(l i18n.Lang, es []reportEntry, labels map[int]bool) []overview
 		if len(segs) > 1 {
 			cardTitle += i18n.T(l, "assistant-reports.part", i18n.Args{"k": k + 1, "n": len(segs)})
 		}
-		c := feishubot.NewCard(cardTitle, feishubot.Blue, cardTitle)
+		c := botcard.NewCard(cardTitle, botcard.Blue, cardTitle)
 		lines := make([]string, 0, len(seg))
 		for j, e := range seg {
 			gi := off + j

@@ -24,6 +24,7 @@ export interface ChannelCapabilities {
   max_text?: number;
   asks?: "none" | "text" | "buttons";
   push?: boolean;
+  reply_only?: boolean;
   typing?: boolean;
   progress?: boolean;
   threads?: boolean;
@@ -101,8 +102,14 @@ export function unbindChannel(id: string): Promise<ChannelDetail> {
   return api<ChannelDetail>(`/channels/${enc(id)}/binding`, { method: "DELETE" });
 }
 
-export function testChannel(id: string): Promise<unknown> {
-  return api(`/channels/${enc(id)}/test`, { method: "POST" });
+export interface ChannelTestResult {
+  ok: boolean;
+  reply_only?: boolean;
+  note?: string;
+}
+
+export function testChannel(id: string): Promise<ChannelTestResult> {
+  return api<ChannelTestResult>(`/channels/${enc(id)}/test`, { method: "POST" });
 }
 
 // ── words ────────────────────────────────────────────────
@@ -177,6 +184,7 @@ export function capabilityText(c: ChannelCapabilities): string[] {
   if (c.max_text) out.push(t("lib-channels.max_text", { count: c.max_text }));
   if (c.asks === "text") out.push(t("lib-channels.asks_text"));
   else if (c.asks === "buttons") out.push(t("lib-channels.asks_buttons"));
+  if (c.reply_only) out.push(t("lib-channels.reply_only"));
   if (c.typing) out.push(t("lib-channels.typing"));
   if (c.progress) out.push(t("lib-channels.progress"));
   return out;

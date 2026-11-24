@@ -177,6 +177,21 @@ class ReleasePRTests(unittest.TestCase):
             self.assertEqual(release.schedule_version("nwverse/persona", "release", "v0.9.1", COMMIT, COMMIT, []), None)
             self.assertEqual(release.schedule_version("nwverse/persona", "release", "v0.9.1", COMMIT, OTHER, ["fix: repair a bug"]), "0.9.2")
             self.assertEqual(release.schedule_version("nwverse/persona", "release", "v0.9.1", COMMIT, OTHER, ["feat(ui): a feature"]), "0.10.0")
+            for subject in ("Add phone-approved encrypted secret storage from local files (#13059)",
+                            "Android: add starred messages support and Starred sidebar page (#12925)",
+                            "iOS: saved prompts in the / list and the assistant's Saved Prompts page (#9436) (#10581)",
+                            "Watch: support a new complication",
+                            "feature(iPhone): share a recording"):
+                with self.subTest(minor_subject=subject):
+                    self.assertTrue(release.feature_subject(subject))
+                    self.assertEqual(release.stable_version("v0.9.1", ["fix: repair a bug", subject]), "0.10.0")
+            for subject in ("fix(android): repair a retry", "test: add an Android fixture",
+                            "docs: document the new iOS feature", "Android: fix an offline border",
+                            "iOS: remove the unused page", "Web: refactor the settings view",
+                            "refactor: add no behavior", "Co-authored-by: Example <me@example.com>"):
+                with self.subTest(patch_subject=subject):
+                    self.assertFalse(release.feature_subject(subject))
+                    self.assertEqual(release.stable_version("v0.9.1", [subject]), "0.9.2")
 
 
     def test_orphaned_release_branches_reserve_their_versions(self):

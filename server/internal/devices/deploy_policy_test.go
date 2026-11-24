@@ -13,7 +13,7 @@ import (
 // independently of package-directory containment or previous failed attempts.
 func TestHubOnlyPolicyDoesNotDeployNodes(t *testing.T) {
 	calls := fakeSSH(t)
-	hubNodeBinary(t, "linux", "amd64")
+	hubNodeBinary(t, "linux", "amd64", "new-build")
 	d := newTestDevices(t)
 	d.cfg.HubVersion = "new-build"
 	for _, id := range []string{"one", "two", "three", "four", "five", "six"} {

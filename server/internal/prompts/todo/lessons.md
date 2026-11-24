@@ -7,7 +7,7 @@
 
 一件は一文、60 字以内。具体的で、同じプロジェクトの今後のタスクにそのまま使えるもの：何が起きたかではなく、次に何をするかを書く。このタスク限りのこと（番号、リンク、件名）、人の名前、パスワード・トークン・鍵、個人情報、健康の情報、私的なメッセージの内容は書かない。入力に示されたことだけから書き、推測しない。使い回せることがなければ空の配列にする（順調だったタスクではこれが普通）。最大 3 件、役立つ順。
 
-記録済みの教訓と同じ内容（言い方が違っても）なら、その id を same_as に入れる。
+ユーザーが削除した教訓と同じ内容なら、言い方が違っても出力しない。そのほか、記録済みの教訓と同じ内容（言い方が違っても）なら、その ID を same_as に入れる。
 
 {{.Language}}で、短い文で書く。
 
@@ -20,7 +20,7 @@
 
 One sentence each, at most 25 words. Concrete and reusable as is by later tasks of the same project: write what to do next time, not what happened. Never write things only this task has (numbers, links, titles), people's names, passwords, tokens or keys, personal data, health information or the content of private messages. Write only from what the input shows; do not guess. When nothing is reusable, answer an empty list (the usual answer for a smooth task). At most 3, the most useful first.
 
-When a lesson says what one the project already has says (even in other words), put that lesson's id in same_as.
+If a lesson repeats one the user deleted, leave it out even if it is worded differently. Otherwise, when it repeats a lesson the project already has (even in other words), put that lesson's ID in same_as.
 
 Write in {{.Language}}, in short sentences.
 
@@ -33,7 +33,7 @@ Reply JSON: {"lessons":[{"kind":"repeated_mistake","text":"…","same_as":""}]} 
 
 每条一句话，不超过 60 个字。要具体，同一个项目以后的任务拿来就能用：写下次该怎么做，而不是这次发生了什么。不写只有这件任务才有的东西（编号、链接、标题），不写人名，不写密码、令牌、密钥、个人信息、健康信息和私人消息的内容。只根据输入里有的写，不猜。没有能复用的就回空数组（顺利完成的任务通常就是这样）。最多 3 条，最有用的在前。
 
-和项目已经记下的某条经验说的是同一件事（哪怕说法不同），就把那条的 id 填进 same_as。
+如果和用户已删除的某条经验说的是同一件事，哪怕换了说法，也不要输出这条经验。否则，如果和项目已经记下的某条经验说的是同一件事（哪怕说法不同），就把那条的 ID 填进 same_as。
 
 都用中文，短句。
 

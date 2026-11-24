@@ -1,8 +1,6 @@
 import Foundation
 import Observation
-#if os(iOS) || os(visionOS)
 import UIKit
-#endif
 
 /// The app's voice call: at most one at a time, whichever page or surface started it (docs/assistant/voice.md 6.3). ChatView only
 /// asks `isBound(to:)`; the bar and the thread's tail read `current` themselves.
@@ -61,7 +59,6 @@ import UIKit
 
     init(watchesApp: Bool = false) {
         self.watchesApp = watchesApp
-        #if os(iOS) || os(visionOS)
         guard watchesApp else { return }
         observers.append(NotificationCenter.default.addObserver(forName: UIApplication.didEnterBackgroundNotification, object: nil,
                                                                 queue: .main) { @Sendable [weak self] _ in
@@ -71,7 +68,6 @@ import UIKit
                                                                 queue: .main) { @Sendable [weak self] _ in
             MainActor.assumeIsolated { self?.appWillEnterForeground() }
         })
-        #endif
     }
 
     /// Starts a call bound to `key`. The same conversation's call from the same surface is left as it is (or picked up

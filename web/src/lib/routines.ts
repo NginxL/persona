@@ -4,6 +4,7 @@
 // Pure functions of their arguments (`now` passed in), so they are tested without a DOM.
 import { formatDate, t } from "../i18n";
 import { launcherTitle, type Named } from "./provider-names";
+import { splitSkillDraft } from "./skill-mentions";
 
 export type Repeat = "once" | "daily" | "interval" | "cron";
 
@@ -56,6 +57,8 @@ export interface Task {
   id: string;
   title: string;
   prompt: string;
+  /** The task owns explicit picker selections. Unmarked prompt text stays literal. */
+  prompt_selections?: boolean;
   repeat: Repeat;
   fresh_each_run?: boolean;
   state_note?: { text: string; revision: number; updated_at: string };
@@ -142,6 +145,7 @@ export function grantKinds(task: Pick<Task, "start_grant">): GrantKind[] {
 export interface Run {
   conversation?: "source" | "resumed" | "new";
   conversation_reason?: string;
+  compatibility_fallback?: "legacy_task_execution";
   execution?: TaskExecution;
   id: string;
   kind: string;
@@ -259,11 +263,13 @@ export function untilLabel(d: Date, now: Date): string {
   return t("lib-routines.in_days", { count: Math.max(daysBetween(now, d), 1) });
 }
 
-/** Its title, or the first line of the prompt (a follow-up Persona scheduled without one). */
-export function taskTitle(task: Pick<Task, "title" | "prompt">): string {
+/** Its title, the first line of the visible prompt, or a label for its schedule type. */
+export function taskTitle(task: Pick<Task, "title" | "prompt" | "prompt_selections" | "repeat">): string {
   if (task.title?.trim()) return task.title.trim();
-  const first = (task.prompt ?? "").split("\n").find((l) => l.trim()) ?? "";
-  return first.trim() || t("lib-routines.scheduled_follow_up");
+  const prompt = task.prompt ?? "";
+  const text = task.prompt_selections ? splitSkillDraft(prompt, true).text : prompt;
+  const first = text.split("\n").find((l) => l.trim()) ?? "";
+  return first.trim() || (task.repeat === "once" ? t("lib-routines.scheduled_follow_up") : t("lib-routines.scheduled_task"));
 }
 
 /** The rule in words: "Every weekday at 09:00" / "Every 30 minutes" / "Once · New chat" / "0 10 1 * * · At 10:00, on day 1 of the month"
@@ -428,6 +434,7 @@ export function validateTask(d: Task, now: Date, saved?: Task | null): string | 
  *  another rule uses don't count). */
 export function sameTask(a: Task, b: Task): boolean {
   if (a.title.trim() !== b.title.trim() || a.prompt.trim() !== b.prompt.trim() || a.repeat !== b.repeat || a.enabled !== b.enabled) return false;
+  if (Boolean(a.prompt_selections) !== Boolean(b.prompt_selections)) return false;
   if ((a.session_id ?? "") !== (b.session_id ?? "")) return false;
   for (const key of ["launcher", "model", "effort", "cwd", "execution_machine_id"] as const) {
     if (key === "cwd" ? (a.cwd ?? "") !== (b.cwd ?? "") : (a[key] ?? "").trim() !== (b[key] ?? "").trim()) return false;
@@ -468,38 +475,49 @@ function untilBody(d: Task, saved?: Task | null): string | null | undefined {
   return draft ? draft.toISOString() : null;
 }
 
-/** The JSON for POST (no `saved`) or PUT. Execution overrides are sparse; empty explicitly restores inheritance.
- *  `push` goes only when changed from `saved`. `session_id` "" makes runs use the task's own conversation; `at` is left out when there is none (Go can't read "").
- *  `until` follows untilBody: omit to keep, null to clear. Changed state text includes the revision the editor started with. */
-export function taskBody(d: Task, saved?: Task | null): Record<string, unknown> {
-  const body: Record<string, unknown> = {
-    title: d.title.trim(),
-    prompt: d.prompt.trim(),
-    repeat: d.repeat,
-    enabled: d.enabled,
-    time: d.repeat === "daily" ? d.time ?? "" : "",
-    weekdays: d.repeat === "daily" ? normalizeDays(d.weekdays) : [],
-    every_minutes: d.repeat === "interval" ? d.every_minutes ?? 0 : 0,
-    // always sent, so a hub that knows cron tasks changes the rule (left out, it keeps a cron task's); an older one ignores it
-    cron: d.repeat === "cron" ? (d.cron ?? "").trim() : "",
-    session_id: d.session_id ?? "",
-    permission_mode: d.permission_mode ?? "",
-  };
+/** The hub uses the same sparse settings and destination to preview references and to save the task. */
+export function taskInputSettings(d: Task, saved?: Task | null): Record<string, unknown> {
+  const body: Record<string, unknown> = {};
   for (const key of ["launcher", "model", "effort", "cwd", "execution_machine_id"] as const) {
     const value = key === "cwd" ? d.cwd ?? "" : (d[key] ?? "").trim();
     const previous = key === "cwd" ? saved?.cwd ?? "" : (saved?.[key] ?? "").trim();
     if (value !== previous) body[key] = value;
   }
-  if (["launcher", "model", "effort", "cwd", "execution_machine_id"].some((key) => key in body)) body.model_revision = saved?.model_revision ?? 0;
+
+  if (Object.keys(body).length) body.model_revision = saved?.model_revision ?? 0;
+  body.repeat = d.repeat;
+  // Presence distinguishes a deliberate rule change from an old client's repeat echo.
+  body.cron = d.repeat === "cron" ? (d.cron ?? "").trim() : "";
+  body.session_id = d.session_id ?? "";
+  if ((d.push ?? "") !== (saved?.push ?? "")) body.push = d.push ?? "";
+  if (d.repeat !== "once" && Boolean(d.fresh_each_run) !== Boolean(saved?.fresh_each_run)) body.fresh_each_run = Boolean(d.fresh_each_run);
+  return body;
+}
+
+/** The JSON for POST (no `saved`) or PUT. Execution overrides are sparse; empty explicitly restores inheritance.
+ *  `push` goes only when changed from `saved`. `session_id` "" makes runs use the task's own conversation; `at` is left out when there is none (Go can't read "").
+ *  `until` follows untilBody: omit to keep, null to clear. Changed state text includes the revision the editor started with. */
+export function taskBody(d: Task, saved?: Task | null): Record<string, unknown> {
+  const prompt = d.prompt.trim();
+  // A hub that predates selected references rejects a missing prompt on both create and edit.
+  const promptField = d.prompt_selections ? "structured_prompt" : "prompt";
+  const body: Record<string, unknown> = {
+    ...taskInputSettings(d, saved),
+    title: d.title.trim(),
+    [promptField]: prompt,
+    enabled: d.enabled,
+    time: d.repeat === "daily" ? d.time ?? "" : "",
+    weekdays: d.repeat === "daily" ? normalizeDays(d.weekdays) : [],
+    every_minutes: d.repeat === "interval" ? d.every_minutes ?? 0 : 0,
+    permission_mode: d.permission_mode ?? "",
+  };
   const at = d.repeat === "daily" || d.repeat === "cron" ? null : parseTime(d.at);
   if (at) body.at = at.toISOString();
   const until = untilBody(d, saved);
   if (until !== undefined) body.until = until;
-  // Only when changed: a hub keeps it when left out, and one that does not know it never gets it.
-  if ((d.push ?? "") !== (saved?.push ?? "")) body.push = d.push ?? "";
+  // Only when changed: an older hub never receives the optional setting.
   if ((d.inbox ?? "") !== (saved?.inbox ?? "")) body.inbox = d.inbox ?? "";
   if (d.repeat !== "once") {
-    if (Boolean(d.fresh_each_run) !== Boolean(saved?.fresh_each_run)) body.fresh_each_run = Boolean(d.fresh_each_run);
     if ((d.state_note?.text ?? "") !== (saved?.state_note?.text ?? "")) {
       body.state_text = d.state_note?.text ?? "";
       if (saved) body.state_revision = saved.state_note?.revision ?? 0;
@@ -559,6 +577,8 @@ export interface Template {
   key: string;
   title: string;
   prompt: string;
+  /** The task owns explicit picker selections. Unmarked prompt text stays literal. */
+  prompt_selections?: boolean;
   repeat: Repeat;
   time?: string;
   weekdays?: number[];
@@ -648,15 +668,22 @@ export function runStatusWord(r: Pick<Run, "status" | "owner_skipped">): string 
 
 /** "Run manually" / the error / "On time" / "21 seconds late" / "3 minutes late" / "2 hours late". */
 export function runDetail(r: Run): string {
-  if (r.status !== "ok") return r.owner_skipped ? runStatusWord(r) : r.error || runStatusWord(r);
-  if (r.manual) return t("lib-routines.run_manual");
-  const at = parseTime(r.at), due = parseTime(r.due);
-  if (!at || !due) return runStatusWord(r);
-  const late = (at.getTime() - due.getTime()) / 1000;
-  if (late < 5) return t("lib-routines.run_on_time");
-  if (late < 120) return t("lib-routines.late_seconds", { count: Math.round(late) });
-  if (late < 7200) return t("lib-routines.late_minutes", { count: Math.floor(late / 60) });
-  return t("lib-routines.late_hours", { count: Math.floor(late / 3600) });
+  let detail: string;
+  if (r.status !== "ok") detail = r.owner_skipped ? runStatusWord(r) : r.error || runStatusWord(r);
+  else if (r.manual) detail = t("lib-routines.run_manual");
+  else {
+    const at = parseTime(r.at), due = parseTime(r.due);
+    if (!at || !due) detail = runStatusWord(r);
+    else {
+      const late = (at.getTime() - due.getTime()) / 1000;
+      if (late < 5) detail = t("lib-routines.run_on_time");
+      else if (late < 120) detail = t("lib-routines.late_seconds", { count: Math.round(late) });
+      else if (late < 7200) detail = t("lib-routines.late_minutes", { count: Math.floor(late / 60) });
+      else detail = t("lib-routines.late_hours", { count: Math.floor(late / 3600) });
+    }
+  }
+  if (r.compatibility_fallback === "legacy_task_execution") return `${detail} · ${t("lib-routines.run_legacy_fallback")}`;
+  return detail;
 }
 
 /** Newest first, one group per day ("Today", "Yesterday", "Wed", "Nov 2"). */

@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { BOARD_ORDER, boardSectionOf, boardSections, type BoardSectionKey } from "./task-board";
 import type { ReviewState } from "./supervision";
 import type { Session } from "./types";
-import type { Todo, TodoStatus } from "./todos";
+import { todoRank, type Todo, type TodoStatus } from "./todos";
 
 const todo = (id: string, created_at: string): Todo => ({ id, title: id, created_at, updated_at: created_at });
 const session = (sid: string): Session => ({ machine_id: "m", session_id: sid, title: sid, cwd: "/w", status: "idle", state: "idle" }) as Session;
@@ -35,7 +35,7 @@ describe("the task board (iOS TaskBoardSheet)", () => {
     ["done", "pending_review", "done"],
     ["follow_up", "", "stopped"],
     ["follow_up", "rework", "stopped"],
-    ["follow_up", "needs_user", "stopped"],
+    ["follow_up", "needs_user", "waiting"],
     ["follow_up", "accepted", "stopped"],
     ["unread", "cancelled", "unread"],
   ];
@@ -45,8 +45,47 @@ describe("the task board (iOS TaskBoardSheet)", () => {
     expect(boardSectionOf({ todo: td, status })).toBe(key);
   });
 
+  it("keeps cancelled tasks out of Done for both API representations", () => {
+    const doneAt = "2026-11-06T01:00:00Z";
+    const additive = { ...todo("additive-cancelled", "2026-11-06T00:00:00Z"), done_at: doneAt, done_by: "cancelled", cancelled_at: doneAt };
+    const legacy = supervised("legacy-cancelled", "cancelled", { done_at: doneAt, done_by: "review" });
+    const ordinaryDone = { ...todo("ordinary-done", "2026-11-06T00:00:00Z"), done_at: doneAt };
+    for (const td of [additive, legacy]) {
+      expect(boardSectionOf({ todo: td, status: "done" })).toBe("cancelled");
+      expect(todoRank(td, "done")).toBeGreaterThan(todoRank(ordinaryDone, "done"));
+    }
+    expect(boardSectionOf({ todo: ordinaryDone, status: "done" })).toBe("done");
+    expect(boardSections([
+      { todo: ordinaryDone, status: "done" },
+      { todo: additive, status: "done" },
+      { todo: legacy, status: "done" },
+    ], []).map((section) => [section.key, section.rows.map((row) => row.todo.id)])).toEqual([
+      ["done", ["ordinary-done"]],
+      ["cancelled", ["additive-cancelled", "legacy-cancelled"]],
+    ]);
+  });
+
+  it("keeps an unaccepted live delivery awaiting review", () => {
+    const td = { ...todo("live", "2026-11-06T00:00:00Z"), delivery: { state: "live" as const, at: "2026-11-06T01:00:00Z" } };
+    expect(boardSectionOf({ todo: td, status: "unread" })).toBe("review");
+    expect(boardSectionOf({ todo: { ...td, done_at: "2026-11-06T02:00:00Z" }, status: "done" })).toBe("done");
+  });
+
+  it("puts accepted and owner-waiting live deliveries before review", () => {
+    const delivery = { state: "live" as const, at: "2026-11-06T01:00:00Z" };
+    const accepted = {
+      ...supervised("accepted", "accepted", { delivery }),
+      supervision: { supervisor: "main", state: "accepted" as const, reviews: [{ at: "2026-11-06T02:00:00Z", verdict: "accepted" as const }] },
+    };
+    expect(boardSectionOf({ todo: accepted, status: "follow_up" })).toBe("done");
+    expect(todoRank(accepted, "follow_up")).toBe(8);
+    const waiting = supervised("waiting", "needs_user", { delivery });
+    expect(boardSectionOf({ todo: waiting, status: "follow_up" })).toBe("waiting");
+    expect(todoRank(waiting, "follow_up")).toBe(0);
+  });
+
   it("puts what the user must act on first: 等你, 待验收, 没开起来, then 在做, 做完了, 停着, 已完成 (#4896)", () => {
-    expect(BOARD_ORDER).toEqual(["waiting", "review", "failed", "working", "parked", "unread", "stopped", "done"]);
+    expect(BOARD_ORDER).toEqual(["waiting", "review", "failed", "working", "parked", "unread", "stopped", "done", "cancelled"]);
     const rows = [
       { todo: todo("done", "2026-11-06T07:00:00Z"), status: "done" as const },
       { todo: todo("stopped", "2026-11-06T06:00:00Z"), status: "follow_up" as const },

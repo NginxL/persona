@@ -111,7 +111,7 @@ class RustContinuityDriver(
                     }
                     // Rejected has no owner. Diagnostics must not fail another chat or release its core gates.
                     // A shadow observer gets only the signal, never a potentially content-bearing reason.
-                    runCatching {
+                    val _ = runCatching {
                         if (onRejected != null) onRejected.invoke()
                         else android.util.Log.w("ContinuityCore", effect.reason)
                     }

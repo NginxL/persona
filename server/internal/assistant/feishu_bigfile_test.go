@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/nwverse/persona/server/internal/feishubot"
+	"github.com/nwverse/persona/server/internal/botcard"
 	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/proto"
 )
@@ -35,10 +35,10 @@ func bigFileHub(t *testing.T) (*fakeHub, *Service, *[]string) {
 // file was left out.
 func TestFeishuTooLargeFileLeavesTheRest(t *testing.T) {
 	f, s, notes := bigFileHub(t)
-	var ev feishubot.MessageEvent
+	var ev botcard.MessageEvent
 	ev.Message.MessageID, ev.Message.ChatType, ev.Message.MessageType = "om_big", "p2p", "post"
 	ev.Message.Content = `{"title":"","content":[[{"tag":"text","text":"帮我看下这个录屏"}],[{"tag":"media","file_key":"file_big"}]]}`
-	content := feishubot.ParseContent(ev.Message.MessageType, ev.Message.Content, nil)
+	content := botcard.ParseContent(ev.Message.MessageType, ev.Message.Content, nil)
 	if err := s.botSend(context.Background(), &ev, content, botTarget{Kind: targetMain}); err != nil {
 		t.Fatalf("the whole message refused: %v", err)
 	}
@@ -53,10 +53,10 @@ func TestFeishuTooLargeFileLeavesTheRest(t *testing.T) {
 // Only a file too large and nothing else: nothing to send, and the answer says it is too large.
 func TestFeishuOnlyATooLargeFile(t *testing.T) {
 	f, s, _ := bigFileHub(t)
-	var ev feishubot.MessageEvent
+	var ev botcard.MessageEvent
 	ev.Message.MessageID, ev.Message.ChatType, ev.Message.MessageType = "om_big", "p2p", "file"
 	ev.Message.Content = `{"file_key":"file_big","file_name":"录屏.mov"}`
-	content := feishubot.ParseContent(ev.Message.MessageType, ev.Message.Content, nil)
+	content := botcard.ParseContent(ev.Message.MessageType, ev.Message.Content, nil)
 	err := s.botSend(context.Background(), &ev, content, botTarget{Kind: targetMain})
 	if err == nil || !strings.Contains(err.Error(), "太大") || !strings.Contains(err.Error(), "录屏.mov") {
 		t.Fatalf("err %v", err)

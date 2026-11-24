@@ -6,6 +6,7 @@ from pathlib import Path
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from unittest import mock
 
@@ -196,7 +197,7 @@ class LaunchDiagnosticsTests(unittest.TestCase):
             self.entry(processImagePath="/usr/libexec/launchd_sim",
                        eventMessage=f"Launch of {launch.BUNDLE} failed: ipc/mig server died"),
             self.entry(processImagePath="/usr/libexec/simdiskimaged",
-                       eventMessage="Performing a cryptex force unmount for iOS 26.0 (23A8464)"),
+                       eventMessage=f"Performing a cryptex force unmount for iOS 26.0 (23A8464) on {UDID}"),
             self.entry(processImagePath="/usr/libexec/launchd_sim",
                        eventMessage="Unrelated application failed"),
             self.entry(processImagePath="/usr/libexec/cryptexd",
@@ -208,6 +209,37 @@ class LaunchDiagnosticsTests(unittest.TestCase):
         self.assertEqual({item["process"] for item in exported}, {"launchd_sim", "simdiskimaged"})
         self.assertNotIn("DO NOT EXPORT", json.dumps(exported))
         self.assertIn("diagnosis still required", self.status())
+
+    def test_programmer_errors_are_not_relabelled_as_collection_unavailable(self):
+        with mock.patch.object(launch, "observation_scope", side_effect=TypeError("programmer error")):
+            with self.assertRaisesRegex(TypeError, "programmer error"):
+                launch.collect(self.output, self.destination, now=START + timedelta(minutes=1))
+        self.assertFalse((self.destination / "simulator-launch.json").exists())
+
+    def test_runtime_events_require_an_owned_udid_anchor(self):
+        self.collect(entries=[self.entry(processImagePath="/usr/libexec/cryptexd",
+                                        eventMessage="Unscoped duplicate cryptex mount for iOS 26.0")])
+        self.assertIn("no scoped launch/runtime events", self.status())
+        self.assertFalse((self.destination / "simulator-launch.json").exists())
+
+    def test_regular_scope_never_borrows_the_phone_context_or_publishes_its_name(self):
+        (self.output / "regular-readiness-context.json").write_text(json.dumps(self.context))
+        (self.output / "regular-simulator.log").write_text(UDID + "\n")
+        self.context = {**self.context, "udid": OTHER}
+        self.save()
+        (self.output / "simulator.log").write_text(OTHER + "\n")
+        regular = self.destination / "live-regular-readiness"
+        regular.mkdir()
+        calls = []
+        def reader(command):
+            calls.append(command)
+            return (json.dumps(self.entry(eventMessage=f"launch {launch.BUNDLE} on {UDID}: service unavailable")).encode() + b"\n")
+        launch.collect(self.output, regular, reader=reader, now=START + timedelta(minutes=1))
+        self.assertIn(UDID, calls[0][calls[0].index("--predicate") + 1])
+        self.assertNotIn(OTHER, calls[0][calls[0].index("--predicate") + 1])
+        self.assertEqual(json.loads((regular / "regular-readiness-context.json").read_text())["udid"], UDID)
+        self.assertFalse((regular / launch.CONTEXT).exists())
+        self.assertIn("captured 1 scoped events", (regular / "simulator-launch.status.txt").read_text())
 
     def test_streamed_collection_filters_before_the_export_limit(self):
         path = self.output / "events.ndjson"
@@ -502,6 +534,298 @@ class LaunchDiagnosticsTests(unittest.TestCase):
         self.assertEqual(set(context), {"udid", "bundle_id", "started_at"})
         self.assertEqual(context["udid"], UDID)
         self.assertEqual(datetime.fromisoformat(context["started_at"]).utcoffset(), timedelta(0))
+
+
+class LiveLaunchTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.output = Path(self.tmp.name) / "output"
+        self.output.mkdir()
+        (self.output / launch.CONTEXT).write_text(json.dumps({
+            "udid": UDID, "bundle_id": launch.BUNDLE, "started_at": START.isoformat()}))
+        (self.output / "simulator.log").write_text(UDID + "\n")
+        self.destination = self.output / "diagnostics/live-readiness"
+        self.live = None
+
+    def tearDown(self):
+        if self.live is not None and self.live.process is not None:
+            try:
+                self.live.stop()
+            except (OSError, subprocess.SubprocessError, TimeoutError):
+                if self.live.process.poll() is None:
+                    self.live.process.kill()
+                    self.live.process.wait(timeout=2)
+                self.live.thread.join(timeout=2)
+            self.assertIsNotNone(self.live.process.poll(), "live log child survived cleanup")
+            self.assertFalse(self.live.thread.is_alive(), "live log reader survived cleanup")
+
+    def start(self, body, deadline=None):
+        child = ("import json, os, signal, subprocess, sys, time\n"
+                 "def send(entry):\n"
+                 "    print(json.dumps(entry), flush=True)\n" + body)
+        def spawn(command, **kwargs):
+            actual = [sys.executable, "-c", child] if command[0] == "/usr/bin/log" else command
+            return subprocess.Popen(actual, **kwargs)
+        self.live = launch.start_live_log(self.output, self.destination,
+                                          deadline=deadline or START + timedelta(minutes=15),
+                                          now=lambda: START + timedelta(minutes=1),
+                                          popen=spawn)
+        self.assertEqual(self.live.log_pgid, self.live.process.pid)
+        self.assertNotEqual(self.live.log_pgid, os.getpgid(0))
+        self.assertIsNotNone(self.live.reaper,
+                             (self.destination / "live-launch.status.txt").read_text())
+        return self.live
+
+    def entry(self, message, process="launchd_sim"):
+        return {"timestamp": "2026-01-01 12:01:00.000000+0000",
+                "processImagePath": "/usr/libexec/" + process, "eventMessage": message}
+
+    def test_pid_association_retains_an_event_emitted_before_the_pid_query(self):
+        ready = Path(self.tmp.name) / "ready"
+        self.start(f"send({self.entry('launch request for pid=41')!r})\n"
+                   f"send({dict(self.entry('structured launch failure'), targetPid=41)!r})\n"
+                   f"send({self.entry('request for pid=41 environment credential=redacted')!r})\n"
+                   f"send({self.entry('ordinary count 41')!r})\n"
+                   f"send({self.entry('request for pid=42')!r})\n"
+                   "signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))\n"
+                   f"open({str(ready)!r}, 'w').write(str(os.getpid()))\n"
+                   "signal.pause()\n")
+        deadline = time.monotonic() + 5
+        while (not self.live.pending or not ready.exists()) and time.monotonic() < deadline:
+            time.sleep(0.005)
+        self.assertTrue(ready.exists(), "event source did not install its SIGTERM handler")
+        self.assertFalse((self.destination / "live-launch.json").exists())
+        self.live.correlate([41])
+        self.live.stop()
+        self.assertEqual(self.live.status, "captured",
+                         (self.destination / "live-launch.status.txt").read_text())
+        self.assertEqual([item["eventMessage"] for item in
+                          json.loads((self.destination / "live-launch.json").read_text())],
+                         ["launch request for pid=41", "structured launch failure"])
+        self.assertNotIn("credential", (self.destination / "live-launch.json").read_text())
+        self.assertIn("captured 2 scoped live events",
+                      (self.destination / "live-launch.status.txt").read_text())
+
+    def test_unbounded_noise_fails_closed_without_blocking_or_leaking_children(self):
+        ready = Path(self.tmp.name) / "ready"
+        self.start(f"send({self.entry('unrelated early launch line')!r})\n"
+                   f"open({str(ready)!r}, 'w').write(str(os.getpid()))\n"
+                   "for _ in range(1100):\n"
+                   "    send({'padding': 'x' * 4096})\n"
+                   "signal.pause()\n")
+        deadline = time.monotonic() + 5
+        while self.live.status == "collection incomplete" and time.monotonic() < deadline:
+            time.sleep(0.005)
+        self.assertTrue(ready.exists())
+        self.live.stop()
+        self.assertEqual(self.live.status, "output-limit",
+                         (self.destination / "live-launch.status.txt").read_text())
+        self.assertFalse((self.destination / "live-launch.json").exists())
+        self.assertIsNotNone(self.live.process.poll())
+        self.assertFalse(self.live.thread.is_alive())
+        self.assertFalse(self.live.stderr_thread.is_alive())
+
+    def test_ignoring_sigterm_is_killed_and_does_not_publish_success(self):
+        ready = Path(self.tmp.name) / "ready"
+        self.start("signal.signal(signal.SIGTERM, signal.SIG_IGN)\n"
+                   f"open({str(ready)!r}, 'w').write(str(os.getpid()))\n"
+                   "signal.pause()\n")
+        deadline = time.monotonic() + 5
+        while not ready.exists() and time.monotonic() < deadline:
+            time.sleep(0.005)
+        self.assertTrue(ready.exists(), "fixture did not install its SIGTERM handler")
+        self.live.stop()
+        self.assertEqual(self.live.process.returncode, -9)
+        self.assertIn("stop-timeout", (self.destination / "live-launch.status.txt").read_text())
+        self.assertEqual(self.live.reader_error, None)
+        self.assertFalse((self.destination / "live-launch.json").exists())
+
+    def test_stop_kills_descendants_without_touching_the_watcher_group(self):
+        ready = Path(self.tmp.name) / "ready"
+        self.start("nested = subprocess.Popen([sys.executable, '-c', 'import signal; signal.pause()'])\n"
+                   f"open({str(ready)!r}, 'w').write(str(nested.pid))\n"
+                   "signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))\n"
+                   "signal.pause()\n")
+        deadline = time.monotonic() + 5
+        while not ready.exists() and time.monotonic() < deadline:
+            time.sleep(0.005)
+        self.assertTrue(ready.exists(), "nested child did not start")
+        nested = int(ready.read_text())
+        self.assertEqual(os.getpgid(nested), self.live.process.pid)
+        watcher_pgid = os.getpgid(0)
+        self.live.stop()
+        self.assertEqual(os.getpgid(0), watcher_pgid)
+        with self.assertRaises(ProcessLookupError, msg="nested log descendant survived stop"):
+            os.kill(nested, 0)
+
+            self.assertFalse(self.live.thread.is_alive(), "live log reader survived cleanup")
+            if self.live.reaper is not None:
+                self.assertIsNotNone(self.live.reaper.poll(), "live log watchdog survived cleanup")
+
+    def test_parent_death_reaps_the_registered_log_group(self):
+        # The real watcher is killed before its finally can run; only the
+        # independently bounded watchdog can close the registered log group.
+        import textwrap
+        fixture = self.output / "parent-fixture"
+        fixture.mkdir()
+        (fixture / launch.CONTEXT).write_text(json.dumps({
+            "udid": UDID, "bundle_id": launch.BUNDLE,
+            "started_at": datetime.now(timezone.utc).isoformat()}))
+        (fixture / "simulator.log").write_text(UDID + "\n")
+        child = ("import os, signal, subprocess, sys\n"
+                 "nested = subprocess.Popen([sys.executable, '-c', 'import signal; signal.pause()'])\n"
+                 f"open({str(fixture / 'nested.pid')!r}, 'w').write(str(nested.pid))\n"
+                 "sys.exit(0)\n")
+        source = textwrap.dedent(f'''
+            import json, os, subprocess, sys
+            from pathlib import Path
+            sys.path.insert(0, {str(ROOT / "scripts/ci")!r})
+            import apple_launch_diagnostics as launch
+            root = Path({str(fixture)!r})
+            destination = root / "diagnostics/live-readiness"
+            live = launch.start_live_log(root, destination, popen=lambda command, **kwargs: subprocess.Popen(
+                [sys.executable, "-c", {child!r}] if command[0] == "/usr/bin/log" else command, **kwargs))
+            import signal, time
+            deadline = time.monotonic() + 5
+            while not root.joinpath("nested.pid").exists() and time.monotonic() < deadline:
+                time.sleep(0.005)
+            nested_pid = int(root.joinpath("nested.pid").read_text())
+            root.joinpath("processes.json").write_text(json.dumps({{
+                "stream": live.process.pid, "nested": nested_pid,
+                "watchdog": live.reaper.pid, "parent": os.getpid()}}))
+            live.reaper.poll()
+            import signal
+            signal.pause()
+        ''')
+        env = dict(os.environ, PYTHONDONTWRITEBYTECODE="1")
+        parent = subprocess.Popen([sys.executable, "-c", source], env=env,
+                                  stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+        try:
+            deadline = time.monotonic() + 5
+            record = fixture / "processes.json"
+            while not record.exists() and time.monotonic() < deadline:
+                if parent.poll() is not None:
+                    self.fail(parent.stderr.read().decode())
+                time.sleep(0.005)
+            self.assertTrue(record.exists(), "watcher did not register its owned processes")
+            pids = json.loads(record.read_text())
+            parent.kill()
+            parent.wait(timeout=2)
+            deadline = time.monotonic() + 5
+            while time.monotonic() < deadline:
+                alive = []
+                for name in ("stream", "nested", "watchdog"):
+                    try:
+                        os.kill(pids[name], 0)
+                        alive.append(name)
+                    except ProcessLookupError:
+                        pass
+                if not alive:
+                    break
+                time.sleep(0.01)
+            self.assertEqual(alive, [], f"processes survived parent death: {alive}")
+        finally:
+            parent.stderr.close()
+            if parent.poll() is None:
+                parent.kill()
+                parent.wait(timeout=2)
+
+    def test_empty_success_is_distinct_from_failures(self):
+        self.start("print('ready', file=sys.stderr, flush=True)\n")
+        self.live.thread.join(timeout=5)
+        self.assertFalse(self.live.thread.is_alive(), "empty command did not close its stdout")
+        self.live.stop()
+        self.assertEqual(self.live.exit_code, 0,
+                         (self.destination / "live-launch.status.txt").read_text())
+        self.assertIn("no scoped live launch events",
+                      (self.destination / "live-launch.status.txt").read_text())
+        self.assertEqual(json.loads((self.destination / "live-launch.json").read_text()), [])
+
+    def test_startup_failure_has_its_own_status_and_no_process(self):
+        self.live = launch.start_live_log(self.output, self.destination,
+                                          deadline=START + timedelta(minutes=15),
+                                          now=lambda: START + timedelta(minutes=1),
+                                          popen=lambda *args, **kwargs: (_ for _ in ()).throw(OSError("private path")))
+        self.assertIn("startup-failure", (self.destination / "live-launch.status.txt").read_text())
+        self.assertFalse((self.destination / "live-launch.json").exists())
+
+    def test_command_failure_has_its_own_status(self):
+        self.start("sys.exit(7)\n")
+        self.live.thread.join(timeout=5)
+        self.assertFalse(self.live.thread.is_alive(), "failed command did not close its stdout")
+        self.live.stop()
+        self.assertEqual(self.live.exit_code, 7)
+        self.assertIn("command-failure", (self.destination / "live-launch.status.txt").read_text())
+        self.assertFalse((self.destination / "live-launch.json").exists())
+
+    def test_omitted_deadline_keeps_scope_window_for_filter_and_watchdog(self):
+        """`deadline=None` must not clamp the live end to startup.
+
+        Regression guard for the P1 finding on PR #13333: with the previous
+        `end = min(end, deadline or current)` an omitted deadline collapsed the
+        live-event filter to the startup instant and shrank the watchdog
+        lifetime to ~10 seconds. The fix preserves the scope-derived end so
+        later events still pass the filter and the reaper covers the whole
+        observation window.
+        """
+        # Substitute the Linux `/usr/bin/log` invocation only; clock, Popen and
+        # reader stay real. The child emits one event at startup, then a
+        # second event later so the live filter has to advance past startup.
+        # Each event anchors the simulator UDID through CoreSimulatorService
+        # so `relevant` accepts it without needing `correlate`.
+        def entry(message, stamp):
+            return {"timestamp": stamp,
+                    "processImagePath": "/System/Library/CoreSimulatorService",
+                    "eventMessage": f"{message} for {UDID}"}
+        first = entry("initial scoped launch line", "2026-01-01 12:01:00.000000+0000")
+        later = entry("later scoped launch line", "2026-01-01 12:05:00.000000+0000")
+        child = ("import json, os, signal, sys, time\n"
+                 "def send(entry):\n"
+                 "    print(json.dumps(entry), flush=True)\n"
+                 f"send({first!r})\n"
+                 "signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))\n"
+                 f"send({later!r})\n"
+                 "signal.pause()\n")
+
+        def spawn(command, **kwargs):
+            actual = [sys.executable, "-c", child] if command[0] == "/usr/bin/log" else command
+            return subprocess.Popen(actual, **kwargs)
+
+        # `now` is 1 minute after the scope started; the scope window still
+        # extends to `started_at + READINESS_SECONDS` (well past 15 minutes).
+        self.live = launch.start_live_log(self.output, self.destination,
+                                          deadline=None,
+                                          now=lambda: START + timedelta(minutes=1),
+                                          popen=spawn)
+        self.assertIsNotNone(self.live.reaper,
+                             (self.destination / "live-launch.status.txt").read_text())
+        # The live end must equal the scope end (START + READINESS_SECONDS),
+        # not the startup instant `current = START + 1 minute`.
+        expected_end = START + timedelta(seconds=launch.READINESS_SECONDS)
+        self.assertEqual(self.live.deadline, expected_end,
+                         "live end was clamped to startup instead of the scope window")
+        # The watchdog lifetime must cover the scope window (plus the 10s
+        # margin), not collapse to ~10 seconds as in the regression.
+        reaper_cmdline = Path(f"/proc/{self.live.reaper.pid}/cmdline").read_bytes()
+        lifetime_arg = float(reaper_cmdline.split(b"\x00")[-2])
+        expected_lifetime = (expected_end - (START + timedelta(minutes=1))).total_seconds() + 10
+        self.assertGreater(lifetime_arg, 60,
+                           f"watchdog lifetime {lifetime_arg}s collapsed to the startup margin")
+        self.assertAlmostEqual(lifetime_arg, expected_lifetime, delta=1.0)
+
+        # Both the startup-time and the post-startup events must survive the
+        # live filter, because `start <= stamp <= end` covers the whole window.
+        deadline_mono = time.monotonic() + 5
+        while len(self.live.kept) < 2 and time.monotonic() < deadline_mono:
+            time.sleep(0.005)
+        self.live.stop()
+        self.assertEqual(self.live.status, "captured",
+                         (self.destination / "live-launch.status.txt").read_text())
+        messages = [item["eventMessage"] for item in
+                    json.loads((self.destination / "live-launch.json").read_text())]
+        self.assertEqual(messages, [f"initial scoped launch line for {UDID}",
+                                    f"later scoped launch line for {UDID}"])
 
 
 if __name__ == "__main__":

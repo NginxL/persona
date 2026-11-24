@@ -473,3 +473,130 @@ func TestAlwaysAllowClosesLateSiblingWithoutAnotherContinuation(t *testing.T) {
 		}
 	})
 }
+
+// #12918: when the initial wait ends unanswered, the hook returns WaitingText into the transcript as an error
+// tool_result with the original tool_use_id. Transcript reconciliation must not mistake that release message (or later
+// assistant turns) for a terminal answer and dismiss the retained 24-hour approval card.
+func TestDetachedCommandApprovalSurvivesTranscriptWaitingResult(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		shortDetachedTimers(t)
+		ft := newFleetTest(t)
+		preparedTestConversation(ft)
+		ix := detachedTestCard("ix_detached_wait")
+		ix.ToolUseID = "call_detached_wait"
+		done := startDetachedTest(t, ft, ix)
+		elapse(30 * time.Millisecond)
+		first := awaitDetachedTest(t, done)
+		if first.err != nil || !first.res.Pending || !first.res.Dismiss || !strings.Contains(first.res.Message, approvalops.WaitingText) {
+			t.Fatalf("initial hook result = %+v, %v", first.res, first.err)
+		}
+
+		var itemsCalls atomic.Int32
+		ft.d.mu.Lock()
+		ft.d.machines["mac"].call = func(method string, _ json.RawMessage) (any, error) {
+			if method == "session.items" {
+				itemsCalls.Add(1)
+				return map[string]any{
+					"items": []proto.Item{
+						{ID: "call#0", Seq: 10, TS: ix.CreatedAt, Role: "assistant", Kind: proto.KindToolUse,
+							ToolName: "Bash", ToolUseID: ix.ToolUseID, ToolInput: ix.ToolInput},
+						{ID: "result#0", Seq: 11, TS: time.Now().UTC(), Role: "user", Kind: proto.KindToolResult,
+							ToolUseID: ix.ToolUseID, IsError: true, Text: "PreToolUse:Bash hook error: " + first.res.Message},
+						{ID: "text#0", Seq: 12, TS: time.Now().Add(time.Millisecond).UTC(), Role: "assistant",
+							Kind: proto.KindText, Text: "Waiting for your confirmation in Persona."},
+					},
+					"has_more": false,
+				}, nil
+			}
+			return nil, errors.New("unexpected node call " + method)
+		}
+		ft.d.mu.Unlock()
+
+		ft.s.syncPlanInteractions("mac")
+		synctest.Wait()
+		if itemsCalls.Load() != 0 {
+			t.Fatalf("prepared approval triggered %d transcript reconciliation reads, want 0", itemsCalls.Load())
+		}
+		if pending := ft.s.pendingInteractions(); len(pending) != 1 || pending[0].ID != ix.ID {
+			t.Fatalf("pending cards after transcript revs = %+v, want [%s]", pending, ix.ID)
+		}
+		if status, res, err := ft.st.InteractionOutcome(context.Background(), ix.ID); err != nil || status != "pending" || res != nil {
+			t.Fatalf("stored interaction status = %q (%+v, %v), want pending", status, res, err)
+		}
+
+		for _, dev := range []string{DeviceAll, "mac"} {
+			raw, handled, err := ft.s.localFleetDeviceCall(context.Background(), DeviceCall{Device: dev, Method: DeviceInteractionsList})
+			if err != nil || !handled {
+				t.Fatalf("localFleetDeviceCall(%q): handled=%v err=%v", dev, handled, err)
+			}
+			var listed struct {
+				Interactions []proto.Interaction `json:"interactions"`
+			}
+			if err := json.Unmarshal(raw, &listed); err != nil || len(listed.Interactions) != 1 || listed.Interactions[0].ID != ix.ID {
+				t.Fatalf("localFleetDeviceCall(%q) = %s (%v), want %s", dev, raw, err, ix.ID)
+			}
+		}
+
+		allow := true
+		if err := ft.s.resolve(ix.ID, proto.Resolution{Allow: &allow}); err != nil {
+			t.Fatalf("late owner Allow after transcript revs failed: %v", err)
+		}
+		if result := waitApprovalResult(t, ft, ix.ID); !strings.Contains(result, "approved") {
+			t.Fatalf("continuation result = %q", result)
+		}
+		retry := ix
+		retry.ID = "ix_detached_wait_retry"
+		got, err := ft.s.nodeInteraction(context.Background(), retry)
+		if err != nil || got.Allow == nil || !*got.Allow || got.ApprovalID != ix.ID {
+			t.Fatalf("approved retry = %+v, %v", got, err)
+		}
+	})
+}
+
+// #12918: if the manager restarts while a detachable hook is still blocked in its initial wait, restoreInteractions
+// rebuilds the pending card with p.prepared == nil. When the still-live hook reconnects and replays interaction.create,
+// waitInteractionReady must adopt its prepared coordinator so keepWaiting and late Allow still mint the grant.
+func TestDetachedCommandApprovalRestoredReconnectAdoptsPreparedCoordinator(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		shortDetachedTimers(t)
+		ft := newFleetTest(t)
+		preparedTestConversation(ft)
+		ix := detachedTestCard("ix_restored_reconnect")
+		ctx, cancel := context.WithCancel(context.Background())
+		first := make(chan detachedTestResult, 1)
+		go func() {
+			res, err := ft.s.nodeInteraction(ctx, ix)
+			first <- detachedTestResult{res: res, err: err}
+		}()
+		ft.waitPending(1)
+		cancel()
+		awaitDetachedTest(t, first)
+
+		restarted := New(Options{Hub: ft.f, Store: func() Store { return ft.st }, Logf: testLogf(t), Devices: ft.d})
+		restarted.restoreInteractions(context.Background())
+		replayed := make(chan detachedTestResult, 1)
+		go func() {
+			res, err := restarted.nodeInteraction(context.Background(), ix)
+			replayed <- detachedTestResult{res: res, err: err}
+		}()
+		elapse(30 * time.Millisecond)
+		got := awaitDetachedTest(t, replayed)
+		if got.err != nil || !got.res.Pending || !got.res.Dismiss || got.res.ApprovalID != ix.ID {
+			t.Fatalf("reconnected restored hook = %+v, %v, want non-final waiting release", got.res, got.err)
+		}
+
+		allow := true
+		if err := restarted.resolve(ix.ID, proto.Resolution{Allow: &allow}); err != nil {
+			t.Fatalf("late Allow on restored detached card failed: %v", err)
+		}
+		if result := waitFakeApprovalResult(t, ft.f, ix.ID); !strings.Contains(result, "approved") {
+			t.Fatalf("continuation result = %q", result)
+		}
+		retry := ix
+		retry.ID = "ix_restored_reconnect_retry"
+		consumed, err := restarted.nodeInteraction(context.Background(), retry)
+		if err != nil || consumed.Allow == nil || !*consumed.Allow || consumed.ApprovalID != ix.ID {
+			t.Fatalf("retry after restored reconnect = %+v, %v", consumed, err)
+		}
+	})
+}

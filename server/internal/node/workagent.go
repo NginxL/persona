@@ -122,6 +122,7 @@ func (n *Node) startWorkAgent(ctx context.Context, launch host.Launcher, cwd, la
 	}
 	if kind == agyAgent {
 		mode = agyStartMode(mode)
+		n.ensureAgyHooksForLaunch() // agyhooks.go (#13950): ensure hooks exist before agy starts
 	} else {
 		effort, mode = "", ""
 	}

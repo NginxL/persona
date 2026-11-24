@@ -29,8 +29,26 @@ GUARD_SUITES = ("test_doc_paths.py", "test_doc_go_paths.py", "test_doc_sections.
                 "test_apple_l10n.py", "test_docker_entrypoint.py")
 # A python3 that records each call ("<cwd>|<args>") instead of running anything.
 FAKE_PYTHON = '#!/bin/sh\nprintf "%s|%s\\n" "$PWD" "$*" >> "$FAKE_PYTHON_LOG"\n'
-# check-fast.sh and the per-path table it reads its plan from (#11535): what a throwaway repository needs to plan.
-CHECK_FAST_FILES = ("scripts/test/check-fast.sh", "scripts/ci/check_fast_map.py")
+# check-fast.sh, the per-path table it reads its plan from (#11535), the helper that names a failure's rerun and
+# compares it with the merge base (#12733), the partitioned Go runner (#12765) and the gofmt script its gofmt job runs
+# (#12894): what a throwaway repository needs to plan and report.
+CHECK_FAST_FILES = ("scripts/test/check-fast.sh", "scripts/ci/check_fast_map.py", "scripts/ci/check_fast_compare.py",
+                    "scripts/test/go_test_partitioned.py", "scripts/test/go_partitions.py", "scripts/ci/gofmt.py")
+# A go for the --compare-main tests: TestRed fails everywhere, TestMine only outside the merge base's checkout, where
+# go also hangs when FAKE_GO_HANG names a pid file; the repo-wide guards and go vet pass. Each call is logged with its
+# directory.
+FAKE_GO_COMPARE = r"""#!/bin/sh
+printf '%s|%s\n' "$PWD" "$*" >> "$FAKE_GO_LOG"
+case "$*" in test*./internal/foo*) ;; *) exit 0 ;; esac
+case "$PWD" in
+  */compare/base/*)
+    if [ -n "${FAKE_GO_HANG:-}" ]; then echo $$ > "$FAKE_GO_HANG.tmp"; mv "$FAKE_GO_HANG.tmp" "$FAKE_GO_HANG"; exec sleep 60; fi
+    echo '--- FAIL: TestRed (0.00s)'; echo '--- PASS: TestMine (0.00s)'; echo FAIL
+    printf 'FAIL\texample.com/m/server/internal/foo\t0.1s\n'; exit 1 ;;
+esac
+echo '--- FAIL: TestRed (0.00s)'; echo '--- FAIL: TestMine (0.00s)'; echo FAIL
+printf 'FAIL\texample.com/m/server/internal/foo\t0.1s\n'; exit 1
+"""
 
 
 def copy_check_fast(repo):
@@ -424,7 +442,8 @@ class CheckFastScriptsTests(ScriptsRepoTestCase):
     def test_check_fast_and_the_slot_helper_run_every_file_of_its_tests(self):
         # check-fast.sh's tests are three files (#11017); the other two import test_check_fast.py's fixtures, and
         # test_check_fast_inputs.py runs check-fast.sh with heavy_slot.py, so a change to any of them, or to the table
-        # check-fast.sh plans from, runs them.
+        # check-fast.sh plans from, runs them. So does a change to a helper they copy into their throwaway
+        # repositories (CHECK_FAST_FILES), which no name or import leads to.
         # android.sh's own suite does not run for check-fast.sh.
         everything = ("test_check_fast.py", "test_check_fast_guards.py", "test_check_fast_inputs.py")
         for suite in (*everything, "test_heavy_slot.py", "test_android_sh.py"):
@@ -436,6 +455,9 @@ class CheckFastScriptsTests(ScriptsRepoTestCase):
             "scripts/check-fast.sh": everything,
             "scripts/test/test_check_fast.py": everything,
             "scripts/ci/check_fast_map.py": everything,  # the table check-fast plans from (#11535)
+            "scripts/ci/check_fast_compare.py": everything,  # a failure's rerun and the merge base's verdict (#12733)
+            "scripts/test/go_test_partitioned.py": everything,  # every Go group runs through it (#12765)
+            "scripts/test/go_partitions.py": everything,  # what it splits
             # test_android_sh.py runs android.sh with it (#11250).
             "scripts/heavy_slot.py": ("test_heavy_slot.py", "test_check_fast_inputs.py", "test_android_sh.py"),
         }
@@ -556,6 +578,117 @@ class CheckFastScriptsTests(ScriptsRepoTestCase):
                 self.assertNotIn("queued:", out)
 
 
+class CheckFastCompareTests(ScriptsRepoTestCase):
+    """A failure's rerun line, and --compare-main's verdicts against the merge base (#12733); the helper's own rules
+    are tested in scripts/ci/test_check_fast_compare.py."""
+
+    def go_repo(self):
+        """A server package in the base, a fake go first on PATH, and a change to the package's code."""
+        self.commit_on_top("server/go.mod", "module example.com/m/server\n", "base")
+        self.commit_on_top("server/internal/foo/foo_test.go", "package foo\n", "base")
+        self.commit_on_top("server/internal/foo/foo.go", "package foo\n", "base")
+        self.write("server/internal/foo/foo.go", "package foo\n\n// changed\n")
+        bin_dir = Path(self.toolchain_without_node_and_go())
+        for tool in ("mv", "sleep", "ps"):  # the fake go's when it hangs, and on_signal's to find what to stop
+            if shutil.which(tool) and not (bin_dir / tool).exists():
+                (bin_dir / tool).symlink_to(shutil.which(tool))
+        (bin_dir / "go").write_text(FAKE_GO_COMPARE)
+        (bin_dir / "go").chmod(0o755)
+        self.go_log = bin_dir / "go.log"
+        # The go timeout the reruns' -timeout comes from, whatever the caller's environment sets (#12733).
+        self.go_env = {"FAKE_GO_LOG": str(self.go_log), "CHECK_FAST_TIMEOUT_GO_TEST": "300"}
+        return str(bin_dir)
+
+    def worktrees(self):
+        listed = subprocess.run(["git", "-C", str(self.repo), "worktree", "list", "--porcelain"], capture_output=True,
+                                text=True, check=True).stdout
+        return [line for line in listed.splitlines() if line.startswith("worktree ")]
+
+    def test_a_failed_suite_prints_the_rerun_of_its_failing_tests(self):
+        self.write("scripts/tools/other.py", "# changed\n")
+        code, out = self.check_fast()
+        self.assertEqual(1, code, out)
+        self.assertIn("FAIL     scripts/tools/test_other.py", out)
+        self.assertIn("         rerun: (cd scripts/tools && python3 -B -m unittest -q test_other.T.test_broken)\n", out)
+        self.assertNotIn("--compare-main", out)
+
+    def test_compare_main_says_which_failures_the_merge_base_has(self):
+        path = self.go_repo()
+        code, out = self.check_fast("--base", "base", "--compare-main", path=path, env=self.go_env)
+        self.assertEqual(1, code, out)  # a failure the base has is still a failure
+        self.assertIn("         rerun: (cd server && go test -count=1 -run '^(TestRed|TestMine)$' ./internal/foo)", out)
+        base = subprocess.run(["git", "-C", str(self.repo), "rev-parse", "--short=10", "base"], capture_output=True,
+                              text=True, check=True).stdout.strip()
+        self.assertIn("ALREADY  server/internal/foo TestRed: also fails at %s (merge base with base)" % base, out)
+        self.assertIn("NEW      server/internal/foo TestMine: passes at %s (merge base with base) and fails again when "
+                      "rerun here on its own, so likely caused by this change" % base, out)
+        self.assertIn("check-fast --compare-main: 2 failure(s) against %s: 1 ALREADY" % base, out)
+        self.assertTrue(out.rstrip().splitlines()[-1].startswith("check-fast: "), out)  # the run's verdict stays last
+        calls = self.go_log.read_text().splitlines()
+        reruns = [line for line in calls if "/compare/base/" in line]
+        self.assertEqual(1, len(reruns), reruns)
+        self.assertIn("|test -count=1 -v -timeout 290s -run ^(TestRed|TestMine)$ ./internal/foo", reruns[0])
+        # TestMine passed at the base, so it ran once more here, on its own, before being called this change's.
+        here = [line for line in calls if "/compare/" not in line and " -v " in line]
+        self.assertEqual(1, len(here), calls)
+        self.assertTrue(here[0].endswith("/server|test -count=1 -v -timeout 290s -run ^(TestMine)$ ./internal/foo"),
+                        here)
+        self.assertEqual(1, len(self.worktrees()), out)  # the base's checkout is gone again
+        self.assertFalse([p for p in self.repo.glob("check-fast.*/compare/base") if p.exists()], out)
+
+    def test_compare_main_does_not_attribute_a_test_the_change_edits(self):
+        path = self.go_repo()
+        self.write("server/internal/foo/foo_test.go", "package foo\n\n// changed\n")
+        code, out = self.check_fast("--base", "base", "--compare-main", path=path, env=self.go_env)
+        self.assertEqual(1, code, out)
+        self.assertIn("EDITED   server/internal/foo TestRed: not attributable, because this change edits that test's "
+                      "files (server/internal/foo/foo_test.go)", out)
+        self.assertNotIn("/compare/base/", self.go_log.read_text())
+
+    def test_compare_main_after_a_clean_run_compares_nothing(self):
+        self.write("scripts/tools/test_new.py", PASSING)
+        code, out = self.check_fast("--base", "base", "--compare-main")
+        self.assertEqual(0, code, out)
+        self.assertIn("check-fast --compare-main: no check failed; nothing to compare", out)
+
+    def test_compare_main_is_refused_on_a_dry_run(self):
+        code, out = self.check_fast("--dry-run", "--compare-main")
+        self.assertEqual(2, code, out)
+        self.assertIn("a dry run has none", out)
+
+    @unittest.skipUnless(shutil.which("ps"), "the test lists processes with ps")
+    def test_a_signal_during_the_comparison_removes_the_checkout(self):
+        path = self.go_repo()
+        hang = self.repo / "go-at-base.pid"
+        proc = subprocess.Popen(["bash", "scripts/test/check-fast.sh", "--base", "base", "--compare-main"],
+                                cwd=self.repo, env=dict(os.environ, TMPDIR=str(self.repo), PATH=path,
+                                                        FAKE_GO_LOG=str(self.go_log), FAKE_GO_HANG=str(hang)),
+                                stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, start_new_session=True,
+                                preexec_fn=default_signals)
+        try:
+            deadline = time.monotonic() + 60
+            while not hang.exists():
+                self.assertIsNone(proc.poll(), "check-fast.sh exited before the rerun at the base started")
+                self.assertLess(time.monotonic(), deadline, "the rerun at the base never started")
+                time.sleep(0.1)
+            self.assertEqual(2, len(self.worktrees()))
+            proc.send_signal(signal.SIGTERM)
+            out, _ = proc.communicate(timeout=30)
+            self.assertEqual(143, proc.returncode, out)
+            self.assertEqual(1, len(self.worktrees()), out)
+            self.assertFalse([p for p in self.repo.glob("check-fast.*/compare/base") if p.exists()], out)
+        finally:
+            if proc.poll() is None:
+                os.killpg(proc.pid, signal.SIGKILL)
+                proc.wait()
+            proc.stdout.close()
+            if hang.exists():
+                try:
+                    os.kill(int(hang.read_text()), signal.SIGKILL)
+                except (ProcessLookupError, PermissionError, ValueError):
+                    pass
+
+
 class CheckFastTableTests(unittest.TestCase):
     """The per-path table check-fast plans from (scripts/ci/check_fast_map.py, #11535): its command line, the order its
     rules are tried in, and that check-fast.sh and the table name the same checks."""
@@ -577,7 +710,8 @@ class CheckFastTableTests(unittest.TestCase):
         run = self.run_table("".join(path + "\n" for path in paths).encode())
         self.assertEqual(0, run.returncode, run.stderr)
         self.assertEqual(["web\tsuite:scripts/test/test_doc_sections.py", "unmapped",
-                          "go-package:cmd/personad\tgo-guards\tsuite:scripts/test/test_doc_sections.py",
+                          "go-package:cmd/personad\tgo-guards\tgo-vet:cmd/personad\tgo-fmt"
+                          "\tsuite:scripts/test/test_doc_sections.py",
                           "integration:pi\tsuite:scripts/test/test_doc_sections.py",
                           "web\tsuite:scripts/test/test_doc_sections.py", ""], run.stdout.decode().split("\n"))
         self.assertEqual(b"", self.run_table(b"").stdout)
@@ -599,10 +733,12 @@ class CheckFastTableTests(unittest.TestCase):
         self.assertEqual(["external-refs", "suite:scripts/test/test_doc_sections.py"],
                          checks("scripts/test/test_external_service_refs.py"))
         # server/: a package group, a file directly in plugins/ (the guards run it), anything else a build.
-        self.assertEqual(["go-package:internal/hub", "go-guards", "suite:scripts/test/test_doc_wire.py",
-                          "suite:scripts/test/test_doc_sections.py"], checks("server/internal/hub/hub.go"))
-        self.assertEqual(["go-guards", "suite:scripts/test/test_doc_sections.py"], checks("server/plugins/plugins.go"))
-        self.assertEqual(["server-build", "go-guards"], checks("server/internal/README.md")[:2])
+        self.assertEqual(["go-package:internal/hub", "go-guards", "go-vet:internal/hub", "go-fmt",
+                          "suite:scripts/test/test_doc_wire.py", "suite:scripts/test/test_doc_sections.py"],
+                         checks("server/internal/hub/hub.go"))
+        self.assertEqual(["go-guards", "go-vet:.", "go-fmt", "suite:scripts/test/test_doc_sections.py"],
+                         checks("server/plugins/plugins.go"))
+        self.assertEqual(["server-build", "go-guards", "go-vet:."], checks("server/internal/README.md")[:3])
         # A markdown file in a wire-list package is a doc first: the four doc suites, not the wire list alone.
         self.assertIn("suite:scripts/test/test_doc_paths.py", checks("server/internal/proto/README.md"))
         # name:test_* matches the file name only: a test file is not a slot caller, a file in a test_ directory is.
@@ -610,6 +746,28 @@ class CheckFastTableTests(unittest.TestCase):
         self.assertNotIn(heavy, checks("scripts/operations/test_pr_watch.py"))
         self.assertIn(heavy, checks("scripts/operations/test_tools/watch.py"))
         self.assertIn(heavy, checks("scripts/operations/pr_watch.py"))
+
+    def test_go_vet_takes_the_changed_group_and_gofmt_the_go_files_ci_formats(self):
+        # go vet checks the whole module, and the path's group for Windows: the whole module again for a path outside
+        # every group (go.mod, a file directly in plugins/, sdk/go, which the server imports). gofmt checks the .go
+        # files of the trees CI's Go formatting step covers, and nothing else (#12894).
+        checks = self.table.checks
+        for path, group in (("server/internal/foo/foo.go", "internal/foo"), ("server/cmd/personad/main.go", "cmd/personad"),
+                            ("server/plugins/wechat/x.go", "plugins/wechat"),
+                            ("server/internal/foo/testdata/a.json", "internal/foo"), ("server/go.mod", "."),
+                            ("server/plugins/plugins.go", "."), ("sdk/go/wire/x.go", ".")):
+            with self.subTest(path=path):
+                self.assertEqual(["go-vet:" + group], [c for c in checks(path) if c.startswith("go-vet")])
+        for path in ("server/internal/foo/foo.go", "server/internal/foo/testdata/x.go", "server/go.go", "sdk/go/x.go"):
+            with self.subTest(path=path):
+                self.assertIn("go-fmt", checks(path))
+        for path in ("server/go.mod", "server/internal/foo/a.json", "web/e2e/agents_hub_test.go",
+                     "sdk/templates/go/main.go", "sdk/ts/scripts/int64-oracle.go", "docs/x.go"):
+            with self.subTest(path=path):
+                self.assertNotIn("go-fmt", checks(path))
+        for path in ("web/e2e/agents_hub_test.go", "sdk/templates/go/main.go", "docs/x.md"):
+            with self.subTest(path=path):
+                self.assertEqual([], [c for c in checks(path) if c.startswith("go-vet")])
 
     def test_check_fast_and_the_table_name_the_same_checks(self):
         text = (ROOT / "scripts/test/check-fast.sh").read_text()

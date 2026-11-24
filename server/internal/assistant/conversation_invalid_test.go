@@ -81,14 +81,33 @@ func TestSealedCompactionCancelsQueuedContinue(t *testing.T) {
 }
 
 func TestSealedCompactionRejectsManualTaskContinue(t *testing.T) {
-	s, f := workService(t)
-	f.sessions["box"] = []proto.Session{apiErrorTurn("sealed", sealedCompaction)}
-	task := Todo{ID: "task", Agents: []TodoAgent{{MachineID: "box", SessionID: "sealed"}}}
-	if _, err := s.continueTask(context.Background(), task); err == nil {
-		t.Fatal("manual Continue did not refuse the invalid conversation")
-	}
-	if got := f.sentToAgents(); len(got) != 0 {
-		t.Fatalf("manual Continue reached the invalid conversation: %v", got)
+	for _, tc := range []struct {
+		name string
+		text string
+		code string
+	}{
+		{"raw sealed compaction marker", sealedCompaction, ""},
+		{"wire compaction-sealed code with unrecognized text", "provider-specific terminal context failure", proto.TurnErrorCompactionSealed},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s, f := workService(t)
+			c := apiErrorTurn("sealed", tc.text)
+			c.TurnErrorCode = tc.code
+			f.sessions["box"] = []proto.Session{c}
+			resumingNode(f)
+			startsBefore, sendsBefore := len(startCalls(f)), sessionSends(f)
+			task := Todo{ID: "task", Agents: []TodoAgent{{MachineID: "box", SessionID: "sealed"}}}
+			_, err := s.continueTask(context.Background(), task)
+			if starts := startCalls(f)[startsBefore:]; len(starts) != 0 {
+				t.Errorf("manual Continue resumed the invalid conversation with %s: %v", DeviceSessionStart, starts)
+			}
+			if sends := sessionSends(f) - sendsBefore; sends != 0 {
+				t.Errorf("manual Continue sent %d ordinary Continue messages to the invalid conversation", sends)
+			}
+			if err == nil {
+				t.Error("manual Continue did not refuse the invalid conversation")
+			}
+		})
 	}
 }
 

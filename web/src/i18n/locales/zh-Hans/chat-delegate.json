@@ -25,5 +25,8 @@
   "error_not_sent": "新答案没能发给 Agent：{error}",
   "error_assistant_offline": "助手不在线，稍后再试",
   "error_unsupported": "这个 hub 还不支持改答，先更新 hub",
-  "error_failed": "没能改答：{error}"
+  "error_failed": "没能改答：{error}",
+  "supervisor_held": "督办者处理中",
+  "supervisor_held_hint": "这张卡由任务的督办者决定，需要你时会转给你。",
+  "supervisor_held_refused": "这张卡由任务的督办者处理，需要你时会转给你"
 }

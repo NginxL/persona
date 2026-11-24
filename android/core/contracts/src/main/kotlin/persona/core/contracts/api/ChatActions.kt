@@ -1,5 +1,6 @@
 package persona.core.contracts.api
 
+import persona.core.contracts.CodexTakeoverInfo
 import persona.core.contracts.CoreText
 import persona.core.contracts.ModelPrice
 import persona.core.contracts.QueueEdit
@@ -40,6 +41,10 @@ interface ChatActions {
     suspend fun isMuted(session: Session): Boolean
     suspend fun execute(session: Session, action: ChatAction): ChatActionResult
     suspend fun verify(session: Session, action: ChatAction): ChatActionResult
+
+    /** Answer the failed start's terminal question (feature `start_continue`), returning the session the hub kept. */
+    suspend fun continueStart(session: Session, choice: String): Session =
+        throw UnsupportedOperationException("Session start answers unavailable")
 
     /**
      * Pull everything queued while the agent works back out and re-queue the indexes in [keep], in order
@@ -119,6 +124,22 @@ interface ChatActions {
      */
     suspend fun catalogPrices(ids: List<String>): Map<String, ModelPrice?> =
         throw UnsupportedOperationException("Catalog unavailable")
+
+    /** Inspect whether a read-only Codex CLI session can be resumed or continued (`GET /api/v1/machines/{mid}/codex/{sid}/takeover`). */
+    suspend fun codexTakeoverInfo(session: Session): CodexTakeoverInfo =
+        throw UnsupportedOperationException("Codex takeover unavailable")
+
+    /** Explicitly take over a read-only Codex CLI session (`POST /api/v1/machines/{mid}/codex/{sid}/takeover`). */
+    suspend fun codexTakeover(session: Session, token: String, confirmStop: Boolean): Session =
+        throw UnsupportedOperationException("Codex takeover unavailable")
+
+    /** Start an independent Codex continuation session carrying the source transcript extract and linked to-do under [operationId]. */
+    suspend fun startCodexContinuation(session: Session, info: CodexTakeoverInfo, operationId: String): AgentStartResult =
+        throw UnsupportedOperationException("Codex continuation unavailable")
+
+    /** Reconcile an unconfirmed Codex continuation start (`GET /api/v1/ops/{operationId}`). */
+    suspend fun codexContinuationOperation(session: Session, operationId: String): AgentStartResult =
+        throw UnsupportedOperationException("Codex continuation receipt unavailable")
 }
 
 /** What "Rewind to here" restores: the conversation alone, or the files changed after the message too. */

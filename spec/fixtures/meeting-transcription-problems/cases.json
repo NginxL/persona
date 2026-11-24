@@ -1,0 +1,66 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "name": "refused",
+      "description": "The speech service refused the job: a key it won't take, a model the account hasn't turned on, a quota it says is gone (an HTTP 403).",
+      "extension_code": "upstream_forbidden",
+      "problem": "upstream_forbidden",
+      "kind": "refused"
+    },
+    {
+      "name": "busy",
+      "description": "The speech service is busy or rate-limited: too many sessions at once, the quota used up, a 429 or 5xx.",
+      "extension_code": "upstream_busy",
+      "problem": "upstream_busy",
+      "kind": "busy"
+    },
+    {
+      "name": "unreachable",
+      "description": "The service can't be reached (the hub machine's network), or no job opens (the contribution isn't running, no ready in time).",
+      "extension_code": "upstream_unavailable",
+      "problem": "upstream_unavailable",
+      "kind": "unreachable"
+    },
+    {
+      "name": "no_upstream",
+      "description": "The extension has no upstream set up: no job can be opened, read as out of reach.",
+      "extension_code": "no_upstream",
+      "problem": "upstream_unavailable",
+      "kind": "unreachable"
+    },
+    {
+      "name": "failed",
+      "description": "Anything else the service did.",
+      "extension_code": "upstream_failed",
+      "problem": "upstream_failed",
+      "kind": "failed"
+    },
+    {
+      "name": "bad_frame",
+      "description": "The extension couldn't read a frame: not about the upstream, read as failed.",
+      "extension_code": "bad_frame",
+      "problem": "upstream_failed",
+      "kind": "failed"
+    },
+    {
+      "name": "unknown_extension_code",
+      "description": "A code from a newer extension: the set is open, so it reads as failed.",
+      "extension_code": "made_up_future_code",
+      "problem": "upstream_failed",
+      "kind": "failed"
+    },
+    {
+      "name": "unknown_problem",
+      "description": "A problem from a newer hub: the phone says the hub isn't transcribing, without a reason.",
+      "problem": "made_up_future_problem",
+      "kind": null
+    },
+    {
+      "name": "no_interim",
+      "description": "Lines go on without captions: no fallback, no reason.",
+      "problem": "no_interim",
+      "kind": null
+    }
+  ]
+}

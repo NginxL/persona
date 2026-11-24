@@ -84,9 +84,6 @@ struct SourceMessage: View, Equatable {
                     .markdownTheme(.persona)
                     .readingContent()
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    #if os(macOS)
-                    .textSelection(.enabled)
-                    #endif
                     .accessibilityIdentifier("message-source-body")
             }
             if open, item.fullSize != nil, fullText == nil {

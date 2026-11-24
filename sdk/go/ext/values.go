@@ -3,6 +3,7 @@ package ext
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 	"time"
@@ -24,7 +25,7 @@ func (r *UIRequest) Number(name string) (float64, error) {
 		return 0, fmt.Errorf("%s: no value", name)
 	}
 	x, err := strconv.ParseFloat(strings.TrimSpace(s), 64)
-	if err != nil {
+	if err != nil || math.IsNaN(x) || math.IsInf(x, 0) {
 		return 0, fmt.Errorf("%s: not a number: %q", name, s)
 	}
 	return x, nil

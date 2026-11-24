@@ -1,8 +1,5 @@
 import Foundation
 import QuartzCore
-#if os(macOS)
-import AppKit
-#endif
 
 /// How long opening a file takes and how smoothly it scrolls (docs/apple/ios.md「File viewer」's measurements). DEBUG
 /// builds with `-showFilePerf YES` append lines to Caches/file-perf.log:

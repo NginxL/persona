@@ -14,6 +14,7 @@ import (
 	"os"
 	"os/exec"
 	"slices"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -83,6 +84,36 @@ func (c Client) Version(ctx context.Context) string {
 		return ""
 	}
 	return strings.TrimSpace(out)
+}
+
+// PaneInfo describes a tmux pane's current root process, tty, and modal/dead state.
+type PaneInfo struct {
+	PID    int
+	TTY    string
+	Dead   bool
+	InMode bool
+}
+
+// PaneInfo reads the pane's pid, tty, dead flag, and mode flag in a single display-message call.
+func (c Client) PaneInfo(ctx context.Context, pane string) (PaneInfo, error) {
+	out, err := c.run(ctx, "", "display-message", "-p", "-t", pane, "#{pane_pid}\t#{pane_tty}\t#{pane_dead}\t#{pane_in_mode}")
+	if err != nil {
+		return PaneInfo{}, err
+	}
+	parts := strings.Split(strings.TrimRight(out, "\r\n"), "\t")
+	if len(parts) != 4 {
+		return PaneInfo{}, fmt.Errorf("tmux: unexpected pane info %q", strings.TrimSpace(out))
+	}
+	pid, err := strconv.Atoi(strings.TrimSpace(parts[0]))
+	if err != nil || pid <= 0 {
+		return PaneInfo{}, fmt.Errorf("tmux: bad pane pid %q", parts[0])
+	}
+	return PaneInfo{
+		PID:    pid,
+		TTY:    strings.TrimSpace(parts[1]),
+		Dead:   strings.TrimSpace(parts[2]) != "0",
+		InMode: strings.TrimSpace(parts[3]) != "0",
+	}, nil
 }
 
 // Capture is what the pane shows, read as host.ReadOpts says: source "visible" (or "") is the screen alone; "recent"

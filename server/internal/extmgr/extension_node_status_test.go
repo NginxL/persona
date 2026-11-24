@@ -130,18 +130,35 @@ func TestExtensionViewStatusFollowsNodeProgram(t *testing.T) {
 	}
 
 	// Every machine stopped: the extension says stopped, still with the machine summary.
-	h.NodeEvent("box", "plugin.node.state", json.RawMessage(`{"id":"example-helper","version":"1.0.0","state":"stopped"}`))
-	view = h.extensions.view(ctx, p)
-	if view.Status != host.StateStopped || view.NodeStatus == nil || view.NodeStatus.Stopped != 1 {
-		t.Fatalf("all stopped: %+v", view)
-	}
+	withNodeSyncsHeld(h, "box", func() {
+		h.NodeEvent("box", "plugin.node.state", json.RawMessage(`{"id":"example-helper","version":"1.0.0","state":"stopped"}`))
+		view = h.extensions.view(ctx, p)
+		if view.Status != host.StateStopped || view.NodeStatus == nil || view.NodeStatus.Stopped != 1 {
+			t.Fatalf("all stopped: %+v", view)
+		}
+	})
 
 	// Only abnormal machines left: the extension itself is in error.
-	h.NodeEvent("box", "plugin.node.state", json.RawMessage(`{"id":"example-helper","version":"1.0.0","state":"error","error":"boom"}`))
-	view = h.extensions.view(ctx, p)
-	if view.Status != host.StateError || view.NodeStatus == nil || view.NodeStatus.Abnormal != 1 {
-		t.Fatalf("abnormal only: %+v", view)
-	}
+	withNodeSyncsHeld(h, "box", func() {
+		h.NodeEvent("box", "plugin.node.state", json.RawMessage(`{"id":"example-helper","version":"1.0.0","state":"error","error":"boom"}`))
+		view = h.extensions.view(ctx, p)
+		if view.Status != host.StateError || view.NodeStatus == nil || view.NodeStatus.Abnormal != 1 {
+			t.Fatalf("abnormal only: %+v", view)
+		}
+	})
+}
+
+// withNodeSyncsHeld runs check while no sync of machine's extension programs can run. Installing and configuring an
+// extension start syncs in the background (syncExtensionNodesEverywhere). Under the full suite's load one can be
+// scheduled after the test's own sync and ask the machine to start the program again after the test said it stopped;
+// the machine's answer, running, is then newer than the test's report, and the check read it (#13643). Every sync
+// records states holding this lock, and view and NodeEvent never take it: a check made while holding it sees exactly
+// what the machine reported last. A sync queued behind it runs after check.
+func withNodeSyncsHeld(h *Manager, machine string, check func()) {
+	l := h.extensions.nodes.lock(machine)
+	l.Lock()
+	defer l.Unlock()
+	check()
 }
 
 // An extension with only a node program (the hub runs no process of its own) gets the same aggregate: the hub's
@@ -171,11 +188,13 @@ func TestNodeOnlyExtensionStatusComesFromMachines(t *testing.T) {
 		t.Fatalf("one machine runs it: %+v", view)
 	}
 
-	h.NodeEvent("box", "plugin.node.state", json.RawMessage(`{"id":"example-helper","version":"1.0.0","state":"stopped"}`))
-	view = h.extensions.view(ctx, p)
-	if view.Status != host.StateStopped || view.NodeStatus == nil || view.NodeStatus.Stopped != 1 {
-		t.Fatalf("all machines stopped: %+v", view)
-	}
+	withNodeSyncsHeld(h, "box", func() {
+		h.NodeEvent("box", "plugin.node.state", json.RawMessage(`{"id":"example-helper","version":"1.0.0","state":"stopped"}`))
+		view = h.extensions.view(ctx, p)
+		if view.Status != host.StateStopped || view.NodeStatus == nil || view.NodeStatus.Stopped != 1 {
+			t.Fatalf("all machines stopped: %+v", view)
+		}
+	})
 
 	// Disabled keeps the hub's own status even if a machine state lingers before its next sync.
 	if err := reg.SetEnabled(ctx, "example-helper", false, "test"); err != nil {

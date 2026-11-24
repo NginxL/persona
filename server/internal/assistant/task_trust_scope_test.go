@@ -14,14 +14,23 @@ import (
 // A remembered kind covers its directory's tree on its machine with its access, however the directory is spelled
 // (#8095); a too-broad directory covers only itself, and nothing covers a sibling whose name only starts the same.
 func TestTrustCoversTreeSpellingsAndBreadth(t *testing.T) {
-	homes := map[string]trustHome{"box": {home: "/home/me", real: "/data/home/me"}, "mac": {home: "/Users/me"}}
+	homes := map[string]trustHome{
+		"box": {home: "/home/me", real: "/data/home/me"},
+		"mac": {home: "/Users/me"},
+		"win": {home: `C:\Users\me`, real: `D:\Profiles\me`},
+	}
 	have := map[string]bool{
-		"box|/home/me/src/tool|edit":    true,
-		"box|/home/me|edit":             true, // remembered on a card before #8095: the home itself, exact only
-		"box|/srv|edit":                 true, // right under /: exact only
-		"box|/data/home/me/notes/|edit": true, // an older key in the resolved spelling, with a trailing slash
-		"mac|~/work|read":               true,
-		"box|C:\\Users\\me|edit":        true,
+		"box|/home/me/src/tool|edit":     true,
+		"box|/home/me|edit":              true, // remembered on a card before #8095: the home itself, exact only
+		"box|/srv|edit":                  true, // right under /: exact only
+		"box|/data/home/me/notes/|edit":  true, // an older key in the resolved spelling, with a trailing slash
+		"mac|~/work|read":                true,
+		`box|\\server\share\app|edit`:    true, // UNC paths match only as written
+		`win|C:\Users\me|edit`:           true, // the Windows home itself: exact only (case- and slash-insensitive)
+		`win|C:\Users|edit`:              true, // right under drive root: exact only
+		`win|c:/Users/Me/src/tool/|edit`: true, // legacy Windows key with forward slashes and mixed case
+		`win|D:\Profiles\me\notes|edit`:  true, // legacy Windows key in HomeReal spelling
+		"win|~/docs|read":                true,
 	}
 	for _, tc := range []struct {
 		key  string
@@ -48,8 +57,24 @@ func TestTrustCoversTreeSpellingsAndBreadth(t *testing.T) {
 		{"other|/home/me/src/tool/cli|edit", false},
 		{"mac|/Users/me/work/app|read", true},
 		{"mac|/Users/me/work/app|edit", false},
-		{"box|C:\\Users\\me|edit", true},
-		{"box|C:\\Users\\me\\x|edit", false},
+		{`box|\\server\share\app|edit`, true},
+		{`box|\\server\share\app\x|edit`, false},
+		{`win|C:\Users\me|edit`, true},
+		{`win|c:/users/ME/|edit`, true},
+		{`win|D:\Profiles\me|edit`, true},
+		{`win|C:\Users\me\x|edit`, false},
+		{`win|C:\Users|edit`, true},
+		{`win|c:/users/|edit`, true},
+		{`win|C:\Users\other|edit`, false},
+		{`win|C:\Users\me\src\tool|edit`, true},
+		{`win|C:\Users\ME\src\tool\cli|edit`, true},
+		{`win|c:/users/me/src/./tool/../tool/cli/|edit`, true},
+		{`win|D:\Profiles\me\src\tool\cli|edit`, true},
+		{`win|~/src/tool/cli|edit`, true},
+		{`win|C:\Users\me\src\toolbox|edit`, false},
+		{`win|C:\Users\me\notes\today|edit`, true},
+		{`win|C:\Users\me\docs\spec|read`, true},
+		{`win|C:\Users\me\docs\spec|edit`, false},
 	} {
 		if got := trustCovers(have, homes, tc.key); got != tc.want {
 			t.Errorf("trustCovers(%q) = %v, want %v", tc.key, got, tc.want)
@@ -63,6 +88,16 @@ func TestTrustCoversTreeSpellingsAndBreadth(t *testing.T) {
 		"/home/me/src": true, "/opt/repo": true, "/home/me/*": false} {
 		if got := trustTreeDir(trustDir(dir, homes["box"]), homes["box"]); got != want {
 			t.Errorf("trustTreeDir(%q) = %v, want %v", dir, got, want)
+		}
+	}
+	for dir, want := range map[string]bool{
+		`C:\`: false, "C:/": false, `C:\Users`: false, "c:/Program Files": false,
+		`C:\Users\me`: false, "c:/users/ME/": false, `D:\Profiles\me`: false, "d:/profiles/ME": false,
+		"~": false, "~/..": false, `\\server\share\work`: false, `C:work`: false, `\work`: false,
+		`C:\Users\me\*`: false, `C:\Users\me\src`: true, "c:/Projects/app": true, "~/src": true,
+	} {
+		if got := trustTreeDir(trustDir(dir, homes["win"]), homes["win"]); got != want {
+			t.Errorf("win trustTreeDir(%q) = %v, want %v", dir, got, want)
 		}
 	}
 }
@@ -122,9 +157,12 @@ func TestTaskTrustSettingsTool(t *testing.T) {
 	approve := func(card string) {
 		go func() {
 			q, ok := awaitCard(s)
-			if !ok || q.Summary != card {
-				t.Errorf("card %+v, want %q", q, card)
+			if !ok {
+				t.Error("no card appeared")
 				return
+			}
+			if q.Summary != card {
+				t.Errorf("card %+v, want %q", q, card)
 			}
 			allow := true
 			raw, _ := json.Marshal(proto.Resolution{Allow: &allow})
@@ -174,5 +212,83 @@ func TestTaskTrustSettingsTool(t *testing.T) {
 	}
 	if out, isErr := change("remove", `{"machine":"box","directory":"/home/me/src/tools"}`); isErr || !strings.Contains(out, "Not remembered") || len(s.pendingQuestions()) != 0 {
 		t.Fatalf("remove what is not there: %s", out)
+	}
+}
+
+func TestTaskTrustSettingsToolWindows(t *testing.T) {
+	ctx := context.Background()
+	s, f := trustFixture(t)
+	f.devices = append(f.devices, Device{ID: "win", Name: "Bell", Home: `C:\Users\alice`, HomeReal: `D:\Profiles\alice`, Online: true, Reachable: true})
+	tool := func(args string) (string, bool) {
+		r := s.Tool(ctx, ToolCall{Name: "persona_settings", Arguments: json.RawMessage(args), MachineID: "server", SessionID: "c1"})
+		return r.Content[0].Text, r.IsError
+	}
+	change := func(action, value string) (string, bool) {
+		return tool(`{"action":"` + action + `","key":"tasks.trust","value":` + value + `}`)
+	}
+	approve := func(card string) {
+		go func() {
+			q, ok := awaitCard(s)
+			if !ok {
+				t.Error("no card appeared")
+				return
+			}
+			if q.Summary != card {
+				t.Errorf("card %+v, want %q", q, card)
+			}
+			allow := true
+			raw, _ := json.Marshal(proto.Resolution{Allow: &allow})
+			if _, err := s.Action(ctx, Action{Op: "answer", InteractionID: q.ID, Answer: raw}); err != nil {
+				t.Error(err)
+			}
+		}()
+	}
+
+	for _, bad := range []string{
+		`{"machine":"win","directory":"C:\\"}`,
+		`{"machine":"win","directory":"C:/"}`,
+		`{"machine":"win","directory":"C:\\Users"}`,
+		`{"machine":"win","directory":"C:/Program Files"}`,
+		`{"machine":"win","directory":"C:\\Users\\ALICE"}`,
+		`{"machine":"win","directory":"d:/profiles/alice/"}`,
+		`{"machine":"win","directory":"~"}`,
+		`{"machine":"win","directory":"~/.."}`,
+		`{"machine":"win","directory":"\\\\server\\share\\work"}`,
+		`{"machine":"win","directory":"C:work"}`,
+		`{"machine":"win","directory":"\\work"}`,
+		`{"machine":"win","directory":"C:\\Users\\alice\\*"}`,
+	} {
+		if out, isErr := change("add", bad); !isErr || len(s.pendingQuestions()) != 0 {
+			t.Fatalf("add %s: %s (error %v)", bad, out, isErr)
+		}
+	}
+
+	approve(i18n.T(i18n.Default, "assistant-settings_tool.change_task_trust_add_edit", i18n.Args{"machine": "Bell", "directory": `C:\Users\alice\src\tools`}))
+	if out, isErr := change("add", `{"machine":"Bell","directory":"~/src//tools/"}`); isErr || !strings.Contains(out, "Remembered") {
+		t.Fatalf("add ~/src//tools/ approved: %s", out)
+	}
+	if got := storedTrust(t, s.store().(*memStore)); !slices.Equal(got, []string{`win|C:\Users\alice\src\tools|edit`}) {
+		t.Fatalf("tasks.trust = %v", got)
+	}
+	for _, cwd := range []string{`C:\Users\alice\src\tools`, `c:/users/ALICE/src/tools/sub`, `D:\Profiles\alice\src\tools\sub`} {
+		if !s.planStartsAtOnce(ctx, []PlanTask{{Machine: "win", Cwd: cwd}}) {
+			t.Fatalf("task in %s waits for Start, want it covered", cwd)
+		}
+	}
+	if s.planStartsAtOnce(ctx, []PlanTask{{Machine: "win", Cwd: `C:\Users\alice\src\toolbox`}}) {
+		t.Fatal("sibling directory started without asking")
+	}
+	if out, _ := tool(`{"action":"get","key":"tasks.trust"}`); !strings.Contains(out, `win C:\Users\alice\src\tools (and every directory under it), edit`) {
+		t.Fatalf("get: %s", out)
+	}
+	if out, isErr := change("add", `{"machine":"win","directory":"d:/profiles/ALICE/src/tools/a"}`); isErr || !strings.Contains(out, "Already remembered") || len(s.pendingQuestions()) != 0 {
+		t.Fatalf("add under remembered Windows folder: %s", out)
+	}
+	approve(i18n.T(i18n.Default, "assistant-settings_tool.change_task_trust_remove_edit", i18n.Args{"machine": "Bell", "directory": `C:\users\ALICE\src\tools`}))
+	if out, isErr := change("remove", `{"machine":"win","directory":"c:/users/ALICE/src/tools"}`); isErr || !strings.Contains(out, "Forgotten") {
+		t.Fatalf("remove approved: %s", out)
+	}
+	if got := storedTrust(t, s.store().(*memStore)); len(got) != 0 {
+		t.Fatalf("tasks.trust after remove = %v", got)
 	}
 }

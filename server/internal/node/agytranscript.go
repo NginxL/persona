@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -20,28 +21,74 @@ import (
 )
 
 const agyTranscriptPath = ".system_generated/logs/transcript.jsonl"
+const agyFullTranscriptPath = ".system_generated/logs/transcript_full.jsonl"
 const agyWakeReceipts = ".persona-observed-wakes"
 
+type agyStepUsage struct {
+	InputTokens              int64 `json:"input_tokens"`
+	OutputTokens             int64 `json:"output_tokens"`
+	CacheReadTokens          int64 `json:"cache_read_tokens"`
+	CacheReadInputTokens     int64 `json:"cache_read_input_tokens"`
+	CacheWriteTokens         int64 `json:"cache_write_tokens"`
+	CacheCreationInputTokens int64 `json:"cache_creation_input_tokens"`
+	CacheWrite1hTokens       int64 `json:"cache_write_1h_tokens"`
+	ContextWindow            int   `json:"context_window"`
+	ModelContextWindow       int   `json:"model_context_window"`
+}
+
+type agyToolCall struct {
+	Name string          `json:"name"`
+	Args json.RawMessage `json:"args"`
+}
+
 type agyStep struct {
-	Index           *int            `json:"step_index"`
-	Type            string          `json:"type"`
-	Source          string          `json:"source"`
-	Status          string          `json:"status"`
-	CreatedAt       string          `json:"created_at"`
-	Content         string          `json:"content"`
-	ClientMsgID     string          `json:"client_msg_id"`
-	Thinking        string          `json:"thinking"`
-	Error           string          `json:"error"`
-	TruncatedFields []string        `json:"truncated_fields"`
-	Media           json.RawMessage `json:"media"`
-	ToolCalls       []*struct {
-		Name string          `json:"name"`
-		Args json.RawMessage `json:"args"`
-	} `json:"tool_calls"`
-	seq    int
-	key    string
-	branch string
-	record [32]byte
+	Index                    *int            `json:"step_index"`
+	Type                     string          `json:"type"`
+	Source                   string          `json:"source"`
+	Status                   string          `json:"status"`
+	CreatedAt                string          `json:"created_at"`
+	Content                  string          `json:"content"`
+	ClientMsgID              string          `json:"client_msg_id"`
+	Thinking                 string          `json:"thinking"`
+	Error                    string          `json:"error"`
+	Model                    string          `json:"model"`
+	InputTokens              int64           `json:"input_tokens"`
+	OutputTokens             int64           `json:"output_tokens"`
+	CacheReadTokens          int64           `json:"cache_read_tokens"`
+	CacheReadInputTokens     int64           `json:"cache_read_input_tokens"`
+	CacheWriteTokens         int64           `json:"cache_write_tokens"`
+	CacheCreationInputTokens int64           `json:"cache_creation_input_tokens"`
+	CacheWrite1hTokens       int64           `json:"cache_write_1h_tokens"`
+	ContextWindow            int             `json:"context_window"`
+	ModelContextWindow       int             `json:"model_context_window"`
+	Usage                    *agyStepUsage   `json:"usage"`
+	TruncatedFields          []string        `json:"truncated_fields"`
+	Media                    json.RawMessage `json:"media"`
+	ToolCalls                []*agyToolCall  `json:"tool_calls"`
+	seq                      int
+	key                      string
+	branch                   string
+	record                   [32]byte
+	rendered                 [32]byte
+}
+
+type agyStepMemo struct {
+	seq      int
+	key      string
+	rendered [32]byte
+	running  bool
+}
+
+type agyTranscriptUsage struct {
+	model         string
+	contextTokens int
+	contextWindow int
+	outputTokens  int
+	compactions   int
+	turns         int
+	compacted     bool
+	hasUsage      bool
+	first         string // the first message the user typed, as shown (agyUserText): an untitled pane's title (agytitle.go)
 }
 
 type agyHistory struct {
@@ -49,15 +96,94 @@ type agyHistory struct {
 	observedWakeRevision string
 	seq                  int
 	items                []proto.Item
+	usage                agyTranscriptUsage
 	// A compact export can leave full tool output in its step directory.
-	outputs map[string]int
-	media   map[string]agyMedia
+	outputs    map[string]int
+	media      map[string]agyMedia
+	stepHashes map[int][32]byte
 }
 
 type agyRevision struct {
 	length                  int
 	hash                    [32]byte
 	branch, native, rewrite string
+	steps                   []agyStepMemo
+	full                    os.FileInfo // snapshot that supplied restored text
+}
+
+func isAgyStepRunning(status string) bool {
+	switch strings.ToUpper(strings.TrimSpace(status)) {
+	case "RUNNING", "PENDING", "IN_PROGRESS", "QUEUED":
+		return true
+	default:
+		return false
+	}
+}
+
+// renderedHash hashes only the fields projected into transcript items so
+// status-only transitions (such as RUNNING -> DONE) or unrendered metadata
+// changes do not masquerade as history rewrites.
+func (s agyStep) renderedHash() [32]byte {
+	h := sha256.New()
+	write := func(v string) {
+		var lenBuf [8]byte
+		n := len(v)
+		for i := range lenBuf {
+			lenBuf[i] = byte(n >> (i * 8))
+		}
+		_, _ = h.Write(lenBuf[:])
+		_, _ = h.Write([]byte(v))
+	}
+	write(s.Type)
+	write(s.Source)
+	write(s.Content)
+	write(s.ClientMsgID)
+	write(s.Thinking)
+	write(s.Error)
+	if s.Status == "ERROR" {
+		write("ERROR")
+	} else {
+		write("")
+	}
+	write(strings.Join(s.TruncatedFields, "\x00"))
+	write(string(bytes.TrimSpace(s.Media)))
+	for _, tc := range s.ToolCalls {
+		if tc == nil {
+			write("")
+			continue
+		}
+		write(tc.Name)
+		write(string(bytes.TrimSpace(tc.Args)))
+	}
+	var sum [32]byte
+	h.Sum(sum[:0])
+	return sum
+}
+
+// agyStepsRewritten reports whether a prefix change or file truncation altered
+// settled history, rather than normal RUNNING -> DONE progress or non-rendered
+// metadata updates.
+func agyStepsRewritten(oldSteps, newSteps []agyStepMemo) bool {
+	if len(newSteps) < len(oldSteps) {
+		return true
+	}
+	bySeq := make(map[int]agyStepMemo, len(newSteps))
+	for _, s := range newSteps {
+		bySeq[s.seq] = s
+	}
+	for _, prev := range oldSteps {
+		cur, ok := bySeq[prev.seq]
+		if !ok {
+			return true
+		}
+		if cur.key != prev.key {
+			return true
+		}
+		if cur.rendered != prev.rendered && !prev.running {
+			return true
+		}
+	}
+	return false
 }
 
 func agyDigest(s string) string {
@@ -120,6 +246,7 @@ func parseAgySteps(raw []byte, conversation string) ([]agyStep, agyRevision) {
 			continue
 		}
 		step.record = sha256.Sum256(line)
+		step.rendered = step.renderedHash()
 		if step.Index != nil && *step.Index >= 0 {
 			step.seq = *step.Index + 1
 		} else if len(steps) > 0 {
@@ -140,11 +267,19 @@ func parseAgySteps(raw []byte, conversation string) ([]agyStep, agyRevision) {
 			if step.seq < last.seq && (floor < 0 || steps[floor].seq != step.seq) {
 				at = floor + 1
 				rev.native = fmt.Sprintf("%x", step.record[:10])
+			} else if step.seq < last.seq && floor >= 0 && steps[floor].seq == step.seq &&
+				isAgyStepRunning(steps[floor].Status) && step.Type == steps[floor].Type && step.CreatedAt == steps[floor].CreatedAt {
+				// An earlier RUNNING step (such as a background tool call) finished after later steps were logged.
+				// Update it in place without treating it as a branch rewind or discarding later steps.
+				step.branch = steps[floor].branch
+				step.key = steps[floor].key
+				steps[floor] = step
+				continue
 			} else {
 				if step.seq < last.seq || step.Type != last.Type || step.CreatedAt != last.CreatedAt {
 					rev.branch = agyDigest(rev.branch + "\n" + string(line))
 					rev.native = ""
-				} else if step.record != last.record {
+				} else if !isAgyStepRunning(last.Status) && step.rendered != last.rendered {
 					rev.native = fmt.Sprintf("%x", step.record[:10])
 				}
 				for len(steps) > 0 && steps[len(steps)-1].seq >= step.seq {
@@ -158,6 +293,15 @@ func parseAgySteps(raw []byte, conversation string) ([]agyStep, agyRevision) {
 		step.branch = rev.branch
 		step.key = strconv.Itoa(step.seq) + "@" + agyDigest(conversation+"\n"+step.CreatedAt+"\n"+rev.branch)
 		steps = slices.Insert(steps, at, step)
+	}
+	rev.steps = make([]agyStepMemo, len(steps))
+	for i, s := range steps {
+		rev.steps[i] = agyStepMemo{
+			seq:      s.seq,
+			key:      s.key,
+			rendered: s.rendered,
+			running:  isAgyStepRunning(s.Status),
+		}
 	}
 	return steps, rev
 }
@@ -203,6 +347,10 @@ func agyContextEndNames() string {
 	return strings.Join(alt, "|")
 }
 
+// Antigravity writes embedded ACP resources into USER_INPUT.content. Require the complete
+// leading Persona envelope so a quoted label or another URI scheme keeps its text.
+var agyContextResource = lazyre.New(`(?s)^(?:Content of persona-context://[^\r\n]*:\r?\n<persona-context>.*?</persona-context>` + agySpace + `*)+`)
+
 var agyTrimSpace = lazyre.New(`^` + agySpace + `+|` + agySpace + `+$`)
 
 var agyInterruptedError = lazyre.New(`(?is)^(?:api error:\s*)?the stream was interrupted\.?(?:\s+please continue\b.*)?$`)
@@ -223,7 +371,7 @@ func agyUserText(text string) string {
 		text = m[1]
 	}
 	for {
-		clean := agyContextEnd.ReplaceAllString(agySnapshot.ReplaceAllString(text, ""), "")
+		clean := agyContextEnd.ReplaceAllString(agySnapshot.ReplaceAllString(agyContextResource.ReplaceAllString(text, ""), ""), "")
 		if clean == text {
 			return agyTrimSpace.ReplaceAllString(text, "")
 		}
@@ -238,6 +386,226 @@ func agyToolOutput(text string) string {
 		}
 	}
 	return text
+}
+
+var (
+	agyFenceRe    = lazyre.New(`^((?:[ \t]*>[ \t]?)*)[ \t]*(?:(?:[-*+]|\d{1,9}[.)])[ \t]+)?[ \t]*(` + "`{3,}" + `|~{3,})(.*)$`)
+	agyListItemRe = lazyre.New(`^(?:[ \t]*>)*[ \t]*(?:[-*+]|\d{1,9}[.)])[ \t]`)
+	agyQuotePreRe = lazyre.New(`^(?:[ \t]*>[ \t]?)+`)
+	agyRefDefRe   = lazyre.New(`^([ ]{0,3}\[[^\]\n]+\]:[ \t]+)(<([^>\r\n]+)>|(\S+))(.*)$`)
+	agyLinkTailRe = lazyre.New(`^[ \t]*(?:(?:"(?:\\[\s\S]|[^"\\])*"|'(?:\\[\s\S]|[^'\\])*'|\((?:\\[\s\S]|[^)\\])*\))[ \t]*)?\)`)
+	agyWinDriveRe = lazyre.New(`^/([A-Za-z])(?::|%3[Aa])/(.+)$`)
+)
+
+func agyLocalFileURLToPath(dest string) string {
+	if len(dest) <= 8 || !strings.EqualFold(dest[:7], "file://") {
+		return ""
+	}
+	for i := 0; i < len(dest); i++ {
+		if dest[i] < 0x20 || dest[i] == 0x7f {
+			return ""
+		}
+	}
+	if strings.Contains(strings.ToLower(dest), "%00") {
+		return ""
+	}
+	raw, frag := dest[7:], ""
+	if hash := strings.IndexByte(raw, '#'); hash >= 0 {
+		raw, frag = raw[:hash], raw[hash:]
+	}
+	if strings.ContainsRune(raw, '?') {
+		return ""
+	}
+	var p string
+	switch {
+	case strings.HasPrefix(raw, "/"):
+		p = raw
+	case len(raw) >= 10 && strings.EqualFold(raw[:10], "localhost/"):
+		p = raw[9:]
+	default:
+		return ""
+	}
+	if p == "/" || strings.HasPrefix(p, "//") {
+		return ""
+	}
+	decoded := p
+	if u, err := url.PathUnescape(p); err == nil {
+		decoded = u
+	}
+	lower := strings.ToLower(decoded)
+	if lower == "/api/v1" || strings.HasPrefix(lower, "/api/v1/") {
+		return ""
+	}
+	if m := agyWinDriveRe.FindStringSubmatch(p); m != nil {
+		return m[1] + ":/" + m[2] + frag
+	}
+	return p + frag
+}
+
+func agyUnescapedBracket(line string, idx int) bool {
+	slashes := 0
+	for i := idx - 1; i >= 0 && line[i] == '\\'; i-- {
+		slashes++
+	}
+	return slashes%2 == 0
+}
+
+func agyRewriteFileLinksLine(line string) string {
+	if !strings.Contains(strings.ToLower(line), "file://") {
+		return line
+	}
+	if def := agyRefDefRe.FindStringSubmatch(line); def != nil {
+		dest, angled := def[4], false
+		if def[3] != "" {
+			dest, angled = def[3], true
+		}
+		if next := agyLocalFileURLToPath(dest); next != "" {
+			if angled {
+				return def[1] + "<" + next + ">" + def[5]
+			}
+			return def[1] + next + def[5]
+		}
+	}
+	var out strings.Builder
+	for i := 0; i < len(line); {
+		if line[i] == '`' {
+			n := 0
+			for i+n < len(line) && line[i+n] == '`' {
+				n++
+			}
+			j, closed := i+n, -1
+			for j < len(line) {
+				if line[j] == '`' {
+					m := 0
+					for j+m < len(line) && line[j+m] == '`' {
+						m++
+					}
+					if m == n {
+						closed = j + m
+						break
+					}
+					j += m
+				} else {
+					j++
+				}
+			}
+			end := i + n
+			if closed >= 0 {
+				end = closed
+			}
+			out.WriteString(line[i:end])
+			i = end
+			continue
+		}
+		if line[i] == ']' && i+1 < len(line) && line[i+1] == '(' && agyUnescapedBracket(line, i) {
+			j := i + 2
+			for j < len(line) && (line[j] == ' ' || line[j] == '\t') {
+				j++
+			}
+			if j < len(line) && line[j] == '<' {
+				k := j + 1
+				for k < len(line) && line[k] != '>' && line[k] != '<' {
+					if line[k] == '\\' && k+1 < len(line) {
+						k += 2
+					} else {
+						k++
+					}
+				}
+				if k < len(line) && line[k] == '>' && agyLinkTailRe.MatchString(line[k+1:]) {
+					if next := agyLocalFileURLToPath(line[j+1 : k]); next != "" {
+						out.WriteString(line[i:j])
+						out.WriteByte('<')
+						out.WriteString(next)
+						out.WriteByte('>')
+						i = k + 1
+						continue
+					}
+				}
+			} else {
+				k, depth := j, 0
+				for k < len(line) {
+					ch := line[k]
+					if ch == '\\' && k+1 < len(line) {
+						k += 2
+						continue
+					}
+					if ch == ' ' || ch == '\t' || ch == '\r' {
+						break
+					}
+					if ch == '(' {
+						depth++
+						k++
+					} else if ch == ')' {
+						if depth == 0 {
+							break
+						}
+						depth--
+						k++
+					} else {
+						k++
+					}
+				}
+				if k > j && depth == 0 && agyLinkTailRe.MatchString(line[k:]) {
+					if next := agyLocalFileURLToPath(line[j:k]); next != "" {
+						out.WriteString(line[i:j])
+						out.WriteString(next)
+						i = k
+						continue
+					}
+				}
+			}
+		}
+		out.WriteByte(line[i])
+		i++
+	}
+	return out.String()
+}
+
+// agyAssistantText mirrors cleanAssistantText in integrations/antigravity/lib/file-links.js:
+// Antigravity assistant replies emit local file:// links and images, which Persona clients
+// exclude at the generic Markdown boundary (#12102, #12296). Normalize local file:// links
+// outside code blocks and inline code spans into plain machine paths.
+func agyAssistantText(raw string) string {
+	if !strings.Contains(strings.ToLower(raw), "file://") {
+		return raw
+	}
+	lines := strings.Split(raw, "\n")
+	var fenceCh byte
+	fenceLen := 0
+	blank, inList, inIndented := true, false, false
+	for i, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		indented := strings.HasPrefix(line, "    ") || strings.HasPrefix(line, "\t")
+		if fenceLen > 0 {
+			rest := strings.TrimSpace(agyQuotePreRe.ReplaceAllString(line, ""))
+			if len(rest) >= fenceLen && rest[0] == fenceCh && strings.Trim(rest, string(fenceCh)) == "" {
+				fenceLen = 0
+			}
+			blank = false
+			continue
+		}
+		if inIndented {
+			if trimmed == "" || indented {
+				continue
+			}
+			inIndented = false
+		}
+		if trimmed != "" && !strings.HasPrefix(line, " ") && !strings.HasPrefix(line, "\t") {
+			inList = agyListItemRe.MatchString(line) || (inList && !blank)
+		}
+		if open := agyFenceRe.FindStringSubmatch(line); open != nil && !(open[2][0] == '`' && strings.ContainsRune(open[3], '`')) {
+			fenceCh, fenceLen = open[2][0], len(open[2])
+			blank = false
+			continue
+		}
+		if blank && !inList && trimmed != "" && indented {
+			inIndented = true
+			continue
+		}
+		blank = trimmed == ""
+		lines[i] = agyRewriteFileLinksLine(line)
+	}
+	return strings.Join(lines, "\n")
 }
 
 // Match the opaque, branch-specific native step identities written by the AGY companion.
@@ -257,6 +625,9 @@ func (s agyStep) wakeKey() string {
 
 func mapAgySteps(steps []agyStep, fallback time.Time, receipts map[string]bool) agyHistory {
 	var history agyHistory
+	if len(steps) > 0 {
+		history.stepHashes = make(map[int][32]byte, len(steps))
+	}
 	var pending []string
 	if fallback.IsZero() {
 		fallback = time.Now()
@@ -267,6 +638,7 @@ func mapAgySteps(steps []agyStep, fallback time.Time, receipts map[string]bool) 
 	var notified bool
 	for _, step := range steps {
 		history.seq = step.seq
+		history.stepHashes[step.seq] = step.rendered
 		at, err := time.Parse(time.RFC3339Nano, step.CreatedAt)
 		if err != nil || at.IsZero() {
 			at = fallback
@@ -331,6 +703,7 @@ func mapAgySteps(steps []agyStep, fallback time.Time, receipts map[string]bool) 
 			notified = delivered != ""
 		case "USER_INPUT":
 			if step.Source == "" || step.Source == "USER_EXPLICIT" {
+				history.usage.turns++
 				delivered, notified = "", false
 				text := agyUserText(step.Content)
 				if text != "" {
@@ -339,22 +712,35 @@ func mapAgySteps(steps []agyStep, fallback time.Time, receipts map[string]bool) 
 				addMedia("user", "", step.ClientMsgID, agyAttachedImagePaths(text))
 			}
 		case "CHECKPOINT":
+			history.usage.observeCheckpoint()
 			add("0", "system", proto.KindNotice, transcript.CompactedNotice)
 		case "PLANNER_RESPONSE":
+			stepModel := step.normalizedModel()
+			stepUsage, hasUsage := history.usage.observePlanner(step)
+			firstIdx := len(history.items)
 			for _, part := range []struct{ kind, text string }{{proto.KindThinking, step.Thinking}, {proto.KindText, step.Content}} {
 				if text := strings.TrimSpace(part.text); text != "" {
-					add(part.kind, "assistant", part.kind, text)
+					if part.kind == proto.KindText {
+						text = agyAssistantText(text)
+					}
+					it := add(part.kind, "assistant", part.kind, text)
+					it.Model = stepModel
 				}
 			}
+			truncatedCalls := slices.Contains(step.TruncatedFields, "tool_calls")
 			for k, call := range step.ToolCalls {
 				if call == nil {
 					continue
 				}
-				name, input := agyTool(call.Name, call.Args)
+				name, input := agyToolInput(call.Name, call.Args, truncatedCalls)
 				callID := fmt.Sprintf("call_%s_%d", step.key, k)
 				it := add("tool"+strconv.Itoa(k), "assistant", proto.KindToolUse, "")
+				it.Model = stepModel
 				it.ToolName, it.ToolInput, it.ToolUseID = name, input, callID
 				pending = append(pending, callID)
+			}
+			if hasUsage && len(history.items) > firstIdx {
+				history.items[firstIdx].Usage = []proto.TokenUsage{stepUsage}
 			}
 		case "GENERIC":
 			callID := "call_" + step.key + "_0"
@@ -428,7 +814,99 @@ var agyToolNames = map[string]string{
 	"web_fetch": "WebFetch", "web_search": "WebSearch", "todo_write": "TodoWrite",
 }
 
+// agyArgPreview splits a clipped argument at the exporter's marker. A zero
+// omitted count means the value has no valid marker.
+func agyArgPreview(value string) (head, tail string, omitted int) {
+	match := agyTailTruncation.FindStringSubmatchIndex(value)
+	if match == nil {
+		match = agyTruncation.FindStringSubmatchIndex(value)
+	}
+	if match != nil {
+		if n, err := strconv.Atoi(value[match[2]:match[3]]); err == nil && n > 0 {
+			return value[:match[0]], value[match[1]:], n
+		}
+	}
+	return value, "", 0
+}
+
+// agyDecodeArgString decodes one JSON string, closing a clipped prefix after
+// dropping any escape the exporter cut in half.
+func agyDecodeArgString(value string, clipped bool) (string, bool) {
+	if !strings.HasPrefix(value, `"`) {
+		return "", false
+	}
+	if clipped {
+		if slash := strings.LastIndexByte(value, '\\'); slash >= 0 {
+			escape := value[slash+1:]
+			if escape == "" || strings.HasPrefix(escape, "u") && len(escape) < 5 {
+				start := slash
+				for start > 0 && value[start-1] == '\\' {
+					start--
+				}
+				if (slash-start)%2 == 0 {
+					value = value[:slash]
+				}
+			}
+		}
+		value += `"`
+	}
+	var decoded string
+	err := json.Unmarshal([]byte(value), &decoded)
+	return decoded, err == nil
+}
+
+// agyNormalizeArgValue copies the arguments so a failed decode leaves the original
+// call available. Older exports can contain literal quotes in plain arguments.
+func agyNormalizeArgValue(v any, truncated, encoded bool) (any, bool) {
+	switch v := v.(type) {
+	case string:
+		head, tail, omitted := v, "", 0
+		if truncated {
+			head, tail, omitted = agyArgPreview(v)
+		}
+		if encoded {
+			decoded, ok := agyDecodeArgString(head, omitted > 0)
+			if !ok {
+				return nil, false
+			}
+			if omitted > 0 {
+				// The missing text and any retained suffix are counted in encoded bytes.
+				return decoded + transcript.ApproximateClipNote(len(decoded)+omitted+len(tail)), true
+			}
+			return decoded, true
+		}
+		if omitted > 0 {
+			return head + transcript.ClipNote(len(head)+omitted+len(tail)), true
+		}
+	case []any:
+		out := make([]any, len(v))
+		for i, elem := range v {
+			normalized, ok := agyNormalizeArgValue(elem, truncated, encoded)
+			if !ok {
+				return nil, false
+			}
+			out[i] = normalized
+		}
+		return out, true
+	case map[string]any:
+		out := make(map[string]any, len(v))
+		for k, elem := range v {
+			normalized, ok := agyNormalizeArgValue(elem, truncated, encoded)
+			if !ok {
+				return nil, false
+			}
+			out[k] = normalized
+		}
+		return out, true
+	}
+	return v, true
+}
+
 func agyTool(name string, raw json.RawMessage) (string, json.RawMessage) {
+	return agyToolInput(name, raw, false)
+}
+
+func agyToolInput(name string, raw json.RawMessage, truncated bool) (string, json.RawMessage) {
 	if name == "" {
 		name = "tool"
 	}
@@ -444,11 +922,17 @@ func agyTool(name string, raw json.RawMessage) (string, json.RawMessage) {
 		}
 		return appName, raw
 	}
-	var args map[string]any
-	dec := json.NewDecoder(bytes.NewReader(raw))
-	dec.UseNumber()
-	if dec.Decode(&args) != nil || args == nil {
+	args, ok := agyDecodeToolArgs(raw)
+	if !ok {
 		return appName, json.RawMessage("{}")
+	}
+	// The compact export wraps every string argument in a JSON string literal.
+	// Decode only when the whole call fits that format.
+	if decoded, ok := agyNormalizeArgValue(args, truncated, true); ok {
+		args = decoded.(map[string]any)
+	} else if truncated {
+		preview, _ := agyNormalizeArgValue(args, true, false)
+		args = preview.(map[string]any)
 	}
 	first := func(keys ...string) any {
 		for _, key := range keys {

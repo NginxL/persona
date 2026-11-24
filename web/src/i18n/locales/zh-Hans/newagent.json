@@ -79,5 +79,7 @@
   "temporary_session": "临时会话",
   "runs": "运行次数",
   "runs_hint": "把这个任务启动 {count} 次，每次在单独的 worktree 里，再对比结果。",
-  "start_runs": "启动 {count} 次"
+  "start_runs": "启动 {count} 次",
+  "desktop_unavailable": "这台电脑上的 {app} 桌面启动器不可用。请另选启动器后继续。",
+  "desktop_project_detached": "本次会话不再关联原先选择的桌面项目。"
 }

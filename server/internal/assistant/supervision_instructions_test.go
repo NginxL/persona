@@ -27,6 +27,20 @@ func TestGoldenSupervisionInstructions(t *testing.T) {
 	}
 }
 
+// A bullet must start on its own line. A dropped newline ("...rule.- `next`: ...") renders two rules as one bullet,
+// and the size ratchet/golden do not catch it because they are regenerated from the glued text (#12648 review).
+func TestSupervisionInstructionsBulletsAreSeparateLines(t *testing.T) {
+	raw, err := os.ReadFile("../prompts/assistant/supervision_instructions.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, line := range strings.Split(string(raw), "\n") {
+		if strings.Contains(line, ".- ") {
+			t.Fatalf("two bullets are glued on one line (missing newline): %q", line)
+		}
+	}
+}
+
 func TestSupervisionInstructionsDispatchIsolation(t *testing.T) {
 	s, f, todo := newSupervisedService(t)
 	ctx := context.Background()
@@ -52,7 +66,7 @@ func TestSupervisionInstructionsDispatchIsolation(t *testing.T) {
 		machine, id string
 		want        bool
 	}{
-		{"server", "conv1", false}, {"server", "lead1", true},
+		{"server", "conv1", true}, {"server", "lead1", true},
 		{"server", "background", true}, {"server", "side", true},
 		{"server", "ordinary", false}, {"server", "worker", false},
 		{"server", "health", false}, {"server", "gone", false},
@@ -138,16 +152,22 @@ func TestSupervisionInstructionsFirstStartAndWarm(t *testing.T) {
 			}
 		})
 	}
+	// The legacy preference no longer demotes main: it retains authority for its own tasks and lead escalations.
+	setSettings(t, s, func(v *Settings) { v.MainSupervisesOwnTasks = nil })
+	if got := mustSupervisionInstructions(t, s, ctx, "server", s.settings(ctx).Main); got != policy {
+		t.Fatal("main lost its policy with the legacy preference unset")
+	}
+	no := false
+	setSettings(t, s, func(v *Settings) { v.MainSupervisesOwnTasks = &no })
+	if got := mustSupervisionInstructions(t, s, ctx, "server", s.settings(ctx).Main); got != policy {
+		t.Fatal("main lost its policy with the legacy preference off")
+	}
 	s.noBackground = false
-	if _, err := s.startBackground(ctx); err != nil {
-		t.Fatal(err)
+	setSettings(t, s, func(v *Settings) { v.BackgroundSupervisor, v.BackgroundSupervisorMachineID = "bg1", "server" })
+	if got := mustSupervisionInstructions(t, s, ctx, "server", "bg1"); got != policy {
+		t.Fatal("the existing legacy background supervisor lacks exact static policy")
 	}
-	f.mu.Lock()
-	got := f.sends[len(f.sends)-1]["supervision_instructions"]
-	f.mu.Unlock()
-	if got != policy {
-		t.Fatal("background supervisor's first start lacks exact static policy")
-	}
+	setSettings(t, s, func(v *Settings) { v.BackgroundSupervisor, v.BackgroundSupervisorMachineID = "", "" })
 	s.warm("")
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -175,14 +195,12 @@ func TestRelayAcknowledgementAndSilentSupervisionInstructions(t *testing.T) {
 	ctx := context.Background()
 	yes := true
 	setSettings(t, s, func(v *Settings) { v.MainSupervisesOwnTasks = &yes })
-	background, err := s.startBackground(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
+	// #5732 does not start a new background supervisor. Use an existing legacy conversation to test its relay behavior.
+	withBackgroundBG1(t, s, f)
 	const acknowledgement = "`conversation_send` 中继只需确认时，在本对话写一行正文，不调用 `conversation_send` 回传"
 	const relayHeader = "只是确认收到就不要回"
-	const silent = "call `supervision_finish visibility=\"silent\"` with a one-sentence summary, then stop without a user-facing reply"
-	for name, id := range map[string]string{"main": "conv1", "background": background} {
+	const silent = "supervision_finish visibility=\"silent\""
+	for name, id := range map[string]string{"main": "conv1", "background": "bg1"} {
 		t.Run(name, func(t *testing.T) {
 			if _, err := s.prepare(ctx, "server"); err != nil {
 				t.Fatal(err)
@@ -256,10 +274,7 @@ func TestSupervisionEventsContainFactsNotPolicy(t *testing.T) {
 			}
 		}
 	}
-	start := prompts.RenderSupervisorStart(prompts.SupervisorStart{Owner: "Example user"})
-	if strings.Contains(start, "task_review") || strings.Contains(start, "不要调用工具") {
-		t.Fatal("background startup repeated handling policy instead of role facts")
-	}
+	// #5732 has no background startup prompt: an existing legacy conversation only finishes its old work.
 }
 
 func mustSupervisionInstructions(t *testing.T, s *Service, ctx context.Context, machine, id string) string {

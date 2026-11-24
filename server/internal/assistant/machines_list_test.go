@@ -3,6 +3,7 @@ package assistant
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -178,5 +179,52 @@ func TestMachinesListBatteryAndTemp(t *testing.T) {
 	}
 	if _, ok := desktop["temp_c"]; ok {
 		t.Fatalf("desktop must omit temp_c: %v", desktop)
+	}
+}
+
+func TestMachinesListSilentNodeIsNotOnline(t *testing.T) {
+	f := newFakeHub()
+	f.devices = []Device{
+		{ID: "mini", Name: "Mini", Online: true, Reachable: true},
+		{ID: "fresh", Name: "Fresh", Online: true, Reachable: true},
+		{ID: "reconnected", Name: "Reconnected", Online: true, Reachable: true},
+	}
+	f.devicesFull = true
+	d := &resourceDevs{fleetDevs: newFleetDevs(), machines: map[string]*proto.Machine{"mini": {}, "fresh": {}, "reconnected": {}},
+		samples: map[string]*proto.MetricSample{
+			"mini":        {T: time.Now().Add(-27 * time.Minute).Unix()},
+			"fresh":       {T: time.Now().Add(-20 * time.Second).Unix()},
+			"reconnected": {T: time.Now().Add(-27 * time.Minute).Unix()},
+		}, versions: map[string]*bool{}}
+	for _, id := range []string{"mini", "fresh", "reconnected"} {
+		d.add(id, id)
+	}
+	d.mu.Lock()
+	d.fleetDevs.machines["reconnected"].connected = time.Now().Add(-10 * time.Second)
+	d.mu.Unlock()
+	s := newTestService(t, f)
+	s.devs = d
+	s.health.loaded = true
+	text, err := s.runTool(context.Background(), "", "", "machines_list", json.RawMessage(`{}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out struct {
+		Machines []machineFacts `json:"machines"`
+	}
+	if err := json.Unmarshal([]byte(text), &out); err != nil {
+		t.Fatal(err)
+	}
+	mini, fresh, rec := out.Machines[0], out.Machines[1], out.Machines[2]
+	reason, ok := mini.StateReason.Value.(map[string]any)
+	if mini.State != "unresponsive" || !ok || reason["category"] != "no_recent_report" || reason["last_report_age_seconds"].(float64) < 1500 {
+		t.Fatalf("silent node reported as %q: %s", mini.State, text)
+	}
+	if fresh.State != "online" || rec.State != "online" {
+		t.Fatalf("fresh/reconnected must stay online: %s", text)
+	}
+	agents := s.describeAgents(context.Background(), "all", "", "")
+	if !strings.Contains(agents, "unresponsive machines") || !strings.Contains(agents, "Mini") || strings.Contains(agents, "Fresh (") {
+		t.Fatalf("agents_list: %s", agents)
 	}
 }

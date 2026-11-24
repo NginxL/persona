@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -49,6 +50,53 @@ type agyBridge struct {
 	wakeCh     chan struct{}
 	yieldGrace time.Duration
 	takeover   sync.Mutex
+	// providerEnv is the Gemini API key provider a Persona-managed agy launcher gives the companion (#13762): the
+	// launcher's GOOGLE_GEMINI_BASE_URL / GEMINI_API_KEY plus PERSONA_AGY_MODEL_PROVIDER=gemini, nil without one. It
+	// only ever goes into the companion's environment, never into its arguments, logs or a file.
+	providerEnv []string
+}
+
+// agyProviderEnv is what the managed agy launchers say about the provider: the first one (by name) that carries a key
+// is the machine's, since one companion serves every agy session here. None when agy runs on its own sign-in.
+func (n *Node) agyProviderEnv() []string {
+	n.managed.mu.Lock()
+	names := make([]string, 0, len(n.managed.byID))
+	for name, l := range n.managed.byID {
+		if l.AgentType() == "agy" {
+			names = append(names, name)
+		}
+	}
+	n.managed.mu.Unlock()
+	sort.Strings(names)
+	for _, name := range names {
+		if l, ok := n.managedLauncher(name); ok && l.APIKey != "" {
+			return append(managedEnv(l), "PERSONA_AGY_MODEL_PROVIDER=gemini")
+		}
+	}
+	return nil
+}
+
+// syncAgyProvider hands the companion the provider the managed launchers name now; it restarts when that changed.
+func (n *Node) syncAgyProvider() {
+	if n.runtimeHost != nil {
+		n.runtimeHost.setAgyProviderEnv(n.agyProviderEnv())
+	}
+}
+
+func (rh *RuntimeHost) setAgyProviderEnv(env []string) {
+	rh.agy.mu.Lock()
+	changed := !slices.Equal(rh.agy.providerEnv, env)
+	rh.agy.providerEnv = env
+	rh.agy.mu.Unlock()
+	if changed {
+		rh.wakeAgyBridge()
+	}
+}
+
+func (rh *RuntimeHost) agyProviderEnv() []string {
+	rh.agy.mu.Lock()
+	defer rh.agy.mu.Unlock()
+	return slices.Clone(rh.agy.providerEnv)
 }
 
 func (rh *RuntimeHost) builtinAgyInstance() string {
@@ -210,7 +258,8 @@ var agyBridgeCommand = func(ctx context.Context, rh *RuntimeHost, agyBin, instan
 		args = append(args, "--instance", instance)
 	}
 	cmd := exec.Command(js.Path, args...)
-	cmd.Env = js.env(append(os.Environ(), "PERSONA_RUNTIME_SOCKET="+rh.path))
+	env := append(os.Environ(), "PERSONA_RUNTIME_SOCKET="+rh.path)
+	cmd.Env = js.env(append(env, rh.agyProviderEnv()...))
 	cmd.Dir = dir
 	return cmd, nil
 }
@@ -285,6 +334,7 @@ func (rh *RuntimeHost) runAgyBridge(ctx context.Context, agyBin string, wake <-c
 		rh.agy.mu.Unlock()
 	}()
 
+	started := rh.agyProviderEnv() // read before the command is made: a change in between restarts it
 	cmd, err := agyBridgeCommand(ctx, rh, agyBin, instance)
 	if err != nil {
 		return false, err
@@ -326,6 +376,11 @@ func (rh *RuntimeHost) runAgyBridge(ctx context.Context, agyBin string, wake <-c
 		}
 	}
 	for {
+		if !slices.Equal(started, rh.agyProviderEnv()) {
+			rh.logger.Printf("agy runtime: the agy launcher's model provider changed; restarting")
+			stopChild()
+			return true, nil
+		}
 		if _, external := rh.agyPeers(instance); external {
 			rh.logger.Printf("agy runtime: yielding to external agy runtime")
 			stopChild()

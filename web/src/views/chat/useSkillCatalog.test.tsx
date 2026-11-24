@@ -19,8 +19,8 @@ let pending: { resolve: (catalog: SkillCatalog) => void }[];
 let host: HTMLDivElement;
 let root: Root;
 
-function Catalog({ source }: { source: SkillSource }) {
-  const current = useSkillCatalog(source, "computer", "/example");
+function Catalog({ source, enabled = true }: { source: SkillSource; enabled?: boolean }) {
+  const current = useSkillCatalog(source, "computer", "/example", undefined, enabled);
   return <>
     <span data-catalog-state>{current.status ?? "ready"}</span>
     {current.catalog?.skills.map((s) => <span data-skill key={s.id}>{s.name}</span>)}
@@ -28,8 +28,8 @@ function Catalog({ source }: { source: SkillSource }) {
   </>;
 }
 
-function render(source: SkillSource) {
-  act(() => root.render(<Catalog source={source} />));
+function render(source: SkillSource, enabled = true) {
+  act(() => root.render(<Catalog source={source} enabled={enabled} />));
 }
 
 async function settle(index: number, catalog: SkillCatalog) {
@@ -95,5 +95,18 @@ it("ignores an abandoned request that answers after the newer environment", asyn
   await settle(0, answer(1, true, [skill("a", "abandoned-late")]));
   expect(names()).toEqual(["newer-environment"]);
   expect(host.textContent).not.toContain("abandoned-late");
+  expect(state()).toBe("ready");
+});
+
+it("does not request the catalog or report an error while disabled, then reads once when enabled", async () => {
+  render(A, false);
+  expect(api).not.toHaveBeenCalled();
+  expect(names()).toEqual([]);
+  expect(host.querySelector("[role=status]")).toBeNull();
+  render(A, true);
+  expect(api).toHaveBeenCalledTimes(1);
+  expect(state()).toBe("loading");
+  await settle(0, answer(1, true, [skill("a", "persona-office")]));
+  expect(names()).toEqual(["persona-office"]);
   expect(state()).toBe("ready");
 });

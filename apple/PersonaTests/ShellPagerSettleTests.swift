@@ -1,4 +1,3 @@
-#if os(iOS)
 import SwiftUI
 import Testing
 @testable import Persona
@@ -80,4 +79,3 @@ struct ShellPagerSettleTests {
         #expect(pager.page == page)
     }
 }
-#endif

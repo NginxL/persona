@@ -57,12 +57,15 @@ import persona.core.domain.tasks.TaskState
 import persona.core.domain.tasks.Interruption
 import persona.core.domain.tasks.notDoneReason
 import persona.core.domain.tasks.orphanedLine
+import persona.core.domain.tasks.planTaskOf
+import persona.core.domain.tasks.retryLauncher
 import persona.core.domain.tasks.TasksStore
 import persona.core.domain.tasks.assistantEntries
 import persona.core.domain.tasks.finishedSummary
+import persona.core.domain.tasks.showsJustFinished
 import persona.core.domain.tasks.triage
-import persona.core.domain.tasks.TriageSection
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 import persona.core.domain.tasks.HeldPushItem
 import persona.core.domain.tasks.HeldPushDestination
@@ -111,13 +114,17 @@ internal fun trayProgress(todos: List<Todo>, plans: List<TaskPlan>, host: Assist
     feed: List<FeedItem> = emptyList(), projected: List<AssistantTaskCard> = emptyList(), everyTodo: Boolean = false): List<TrayProgress> {
     // the main conversation watches every task (docs/assistant/unified-entry.md): a row for each to-do, whatever its origin (#3331)
     val own = { todo: Todo -> everyTodo || todo.origin == host.conversation }
+    val todosById = todos.associateBy { it.id }
+    val sessionsByKey = host.sessions.associateBy { it.key }
     val bound = plans.flatMap { plan -> plan.tasks.mapIndexedNotNull { index, task ->
-        task.todoId?.takeIf { id -> todos.firstOrNull { it.id == id }?.planId?.let { it == plan.id } != false }
+        task.todoId?.takeIf { id -> todosById[id]?.planId?.let { it == plan.id } != false }
             ?.let { it to "plan:${plan.id}:$index" }
     } }.toMap()
-    val rows = todos.filter(own).map { todo ->
-        val lead = host.tasks.lead(todo, host.sessions)
-        val state = host.tasks.stateOf(todo, host.sessions)
+    val ownTodos = todos.filter(own)
+    val rows = ownTodos.map { todo ->
+        val agents = host.tasks.agentsOf(todo, sessionsByKey)
+        val lead = host.tasks.leadOfAgents(agents)
+        val state = host.tasks.stateOfAgents(todo, agents)
         val report = todo.supervision?.progress
         val plan = lead?.plan
         val reportAt = parseTime(report?.at)
@@ -145,14 +152,14 @@ internal fun trayProgress(todos: List<Todo>, plans: List<TaskPlan>, host: Assist
     }
     val pending = plans.filter { it.conversation == host.conversation && it.state == "open" }.flatMap { plan ->
         plan.tasks.mapIndexedNotNull { index, task ->
-            if (task.todoId != null && todos.any { it.id == task.todoId }) null
+            if (task.todoId != null && task.todoId in todosById) null
             else TrayProgress("plan:${plan.id}:$index", task.title, plan = plan, text = task.why, blocked = task.error != null)
         }
     }
     val fallback = (pending + rows).distinctBy { it.id }
     val merged = persona.core.domain.tasks.AssistantTaskCards.merge(feed,
         plans.filter { it.conversation == host.conversation }.associateBy { it.id },
-        todos.filter(own), projected)
+        ownTodos, projected)
     val byTodo = rows.associateBy { it.todo?.id }
     val byId = fallback.associateBy { it.id }
     val authoritative = merged.filter { card ->
@@ -256,37 +263,71 @@ internal fun AssistantTrays(host: AssistantTaskHost, state: AssistantTrayState,
         if (!showHeldEntry && state.expanded == AssistantTray.HeldPushes) state.expanded = null
         if (state.expanded != AssistantTray.HeldPushes) p2Open = false
     }
-    val progress = trayProgress(todos, plans.values.toList(), host, feed, taskCards[host.conversation].orEmpty(),
-        everyTodo = main != null && main == host.conversation)
-    val progressByTodo = progress.mapNotNull { row -> row.todo?.let { it.id to row } }.toMap()
-    val bySession = host.sessions.associateBy { it.key }
+    val everyTodo = main != null && main == host.conversation
+    val conversationTaskCards = taskCards[host.conversation].orEmpty()
+    val progress = remember(todos, plans, host.conversation, host.sessions, host.tasks, feed, conversationTaskCards, everyTodo) {
+        trayProgress(todos, plans.values.toList(), host, feed, conversationTaskCards, everyTodo = everyTodo)
+    }
+    val progressByTodo = remember(progress) {
+        progress.mapNotNull { row -> row.todo?.let { it.id to row } }.toMap()
+    }
+    val bySession = remember(host.sessions) { host.sessions.associateBy { it.key } }
     val context = LocalContext.current
     val restores = remember(context) { TodoRestores(context) }
+    var restoredMap by remember(restores) { mutableStateOf(restores.read()) }
+    DisposableEffect(restores) {
+        val unregister = restores.observe { restoredMap = it }
+        onDispose { unregister() }
+    }
     val scope = rememberCoroutineScope()
     // a minute's tick moves tasks across the 48 h shelving line, and a usage limit across its grace, while nothing else changes
     var nowMs by remember { mutableLongStateOf(System.currentTimeMillis()) }
     LaunchedEffect(Unit) { while (true) { delay(60_000); nowMs = System.currentTimeMillis() } }
-    val clock = maxOf(nowMs, System.currentTimeMillis())
-    val entries = assistantEntries(host.conversation, main, todos, host.sessions, requests, plans.values, feed.filterNot { it.id in later },
-        clock, restores.read(), hierarchy)
+    val visibleFeed = remember(feed, later) { feed.filterNot { it.id in later } }
+    val entries = remember(host.conversation, main, todos, host.sessions, requests, plans, visibleFeed, nowMs, restoredMap, hierarchy) {
+        val clock = maxOf(nowMs, System.currentTimeMillis())
+        assistantEntries(host.conversation, main, todos, host.sessions, requests, plans.values, visibleFeed, clock, restoredMap, hierarchy)
+    }
     // "Later" is only a local, card-scoped choice; it never hides a newer draft for the same source item.
     // the conversation's own cards (Persona asking) are always the user's; they come first after the asking rows
-    val own = requests.filter { it.sessionId == host.conversation }
-    val asking = entries.needsYou.filter { (it as? NeedsYouEntry.Task)?.asks?.isNotEmpty() == true || (it as? NeedsYouEntry.Agent)?.asks?.isNotEmpty() == true }
-    val plansWaiting = entries.needsYou.filterIsInstance<NeedsYouEntry.Plan>()
-    val deciding = entries.needsYou.filter { it is NeedsYouEntry.Task && it !in asking }.map { it as NeedsYouEntry.Task }
-    val drafts = trayDrafts(inbox, entries.needsYou.filterIsInstance<NeedsYouEntry.Message>().map { it.item })
+    val own = remember(requests, host.conversation) { requests.filter { it.sessionId == host.conversation } }
+    val asking = remember(entries.needsYou) {
+        entries.needsYou.filter { (it as? NeedsYouEntry.Task)?.asks?.isNotEmpty() == true || (it as? NeedsYouEntry.Agent)?.asks?.isNotEmpty() == true }
+    }
+    val plansWaiting = remember(entries.needsYou) { entries.needsYou.filterIsInstance<NeedsYouEntry.Plan>() }
+    val deciding = remember(entries.needsYou, asking) {
+        entries.needsYou.filter { it is NeedsYouEntry.Task && it !in asking }.map { it as NeedsYouEntry.Task }
+    }
+    val drafts = remember(inbox, entries.needsYou) {
+        trayDrafts(inbox, entries.needsYou.filterIsInstance<NeedsYouEntry.Message>().map { it.item })
+    }
     val needsCount = asking.size + own.size + plansWaiting.size + deciding.size + drafts.size
-    val needsGroups = needsYouGroups(entries.needsYou, host.conversation, groupByOrigin)
-    val shownRequests = own + asking.flatMap { (it as? NeedsYouEntry.Task)?.asks ?: (it as NeedsYouEntry.Agent).asks }
-    val approvals = shownRequests.mapNotNull { r -> trayApproval(r, bySession[GroupKeys.rawKey(r.sessionKey)])?.let { r to it } }
-    val standalone = persona.core.domain.tasks.dockAgents(host.conversation, main, host.sessions, todos, hierarchy)
+    val needsGroups = remember(entries.needsYou, host.conversation, groupByOrigin) {
+        needsYouGroups(entries.needsYou, host.conversation, groupByOrigin)
+    }
+    val shownRequests = remember(own, asking) {
+        own + asking.flatMap { (it as? NeedsYouEntry.Task)?.asks ?: (it as NeedsYouEntry.Agent).asks }
+    }
+    val approvals = remember(shownRequests, bySession) {
+        shownRequests.mapNotNull { r -> trayApproval(r, bySession[GroupKeys.rawKey(r.sessionKey)])?.let { r to it } }
+    }
+    val standalone = remember(host.conversation, main, host.sessions, todos, hierarchy) {
+        persona.core.domain.tasks.dockAgents(host.conversation, main, host.sessions, todos, hierarchy)
+    }
     // Glass folds the shelved tasks into one line under In progress, as iOS (#4339 C18); Brief and Board keep the tray as it was.
     val shelvedLine = PersonaTheme.style == AppStyle.Glass
     // the tray closes once its last thing is handled; tapped while empty it still opens "All caught up"
     LaunchedEffect(needsCount) { if (needsCount == 0 && state.expanded == AssistantTray.NeedsYou) state.expanded = null }
     BackHandler(state.expanded != null) { state.expanded = null }
-    Column(Modifier.padding(horizontal = Tokens.Space.m, vertical = Tokens.Space.xs), verticalArrangement = Arrangement.spacedBy(Tokens.Space.s)) {
+    // The entry pills already sit inside a 48dp touch box, so only an expanded tray card adds top breathing room.
+    Column(
+        Modifier.padding(
+            start = Tokens.Space.m,
+            end = Tokens.Space.m,
+            top = if (state.expanded != null) Tokens.Space.xs else Tokens.Space.flush,
+        ),
+        verticalArrangement = Arrangement.spacedBy(Tokens.Space.xs),
+    ) {
         state.expanded?.let { tray ->
             JCard(Modifier.fillMaxWidth().testTag("assistant-tray-${tray.tag}"), padding = Tokens.Space.xs) {
                 // The room is read while measuring: it follows the keyboard frame by frame without composing the tray again.
@@ -421,7 +462,7 @@ internal fun AssistantTrays(host: AssistantTaskHost, state: AssistantTrayState,
                                 when (entry) {
                                     is RunningEntry.Task -> {
                                         if (entry.status == TriageStatus.UsageLimit) {
-                                            TrayUsageLimitRow(entry, host, enabled, taskBusy, clock)
+                                            TrayUsageLimitRow(entry, host, enabled, taskBusy, nowMs)
                                         } else {
                                             val projected = progressByTodo[entry.todo.id] ?: TrayProgress("todo:${entry.todo.id}", entry.todo.title, todo = entry.todo)
                                             // Only replace the projection's state when a shared Agent's requests belong elsewhere (#7531).
@@ -753,6 +794,7 @@ private fun TrayUsageLimitRow(entry: RunningEntry.Task, host: AssistantTaskHost,
  * A failed start or a cut-off turn (#8237): a danger wash, ink words, and its own buttons under the row. The row opens
  * the task. Retry and Remove, or Continue, are separate taps.
  */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun TrayOutcomeRow(entry: NeedsYouEntry.Task, host: AssistantTaskHost, enabled: Boolean, taskBusy: Set<String>) {
     val palette = PersonaTheme.palette
@@ -760,7 +802,13 @@ private fun TrayOutcomeRow(entry: NeedsYouEntry.Task, host: AssistantTaskHost, e
     val failed = entry.status == TriageStatus.Failed
     val lead = host.tasks.lead(todo, host.sessions)
     val cut = Interruption.of(lead)
-    val why = if (failed) startFailureRowLine(todo.startError.orEmpty()) else interruptedWhy(lead?.turnError)
+    val plans by host.tasks.plans.collectAsStateWithLifecycle()
+    val features by (host.tasks.features ?: remember { MutableStateFlow(emptySet<String>()) }).collectAsStateWithLifecycle()
+    val failedTask = if (failed) planTaskOf(todo, plans) else null
+    val instead = retryLauncher(failedTask, features)
+    val why = if (failed) startFailureCodeLine(failedTask?.errorCode, failedTask?.errorArgs)
+        ?: startFailureRowLine(todo.startError.orEmpty())
+        else if (cut?.invalid == true) cut.reason.text() else interruptedWhy(lead?.turnError)
     val retrying = TasksStore.retryKey(todo.id) in taskBusy
     Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(Tokens.Radius.card)).background(palette.danger.tint)
         .testTag(if (failed) "assistant-tray-failed" else "assistant-tray-interrupted")) {
@@ -772,10 +820,21 @@ private fun TrayOutcomeRow(entry: NeedsYouEntry.Task, host: AssistantTaskHost, e
                     else (if (failed) TaskState.Failed else TaskState.Interrupted).label).text(),
                     style = PersonaTheme.type.micro, color = palette.ink, maxLines = 1)
             })
-        Row(Modifier.padding(start = Tokens.Space.m, end = Tokens.Space.s, bottom = Tokens.Space.s),
-            horizontalArrangement = Arrangement.spacedBy(Tokens.Space.s)) {
+        if (failed && failedTask != null) TaskShellQuestion(todo, failedTask, host.tasks,
+            Modifier.padding(horizontal = Tokens.Space.s, vertical = Tokens.Space.xs))
+        val actions: @Composable () -> Unit = {
             if (failed) {
+                if (instead != null) JButton(
+                    stringResource(persona.core.designsystem.R.string.designsystem_use_launcher_instead, instead),
+                    { host.tasks.retryTaskOnLauncher(todo, instead, host.onError) },
+                    modifier = Modifier.testTag("assistant-tray-retry-launcher"),
+                    size = JButtonSize.Small,
+                    icon = PersonaIcons.retry,
+                    enabled = enabled && !retrying,
+                    loading = retrying,
+                )
                 JButton(stringResource(R.string.chat_tasks_retry), { host.tasks.retryTask(todo, host.onError) },
+                    kind = if (instead == null) JButtonKind.Primary else JButtonKind.Secondary,
                     size = JButtonSize.Small, enabled = enabled, loading = retrying, modifier = Modifier.testTag("assistant-tray-retry"))
                 JButton(stringResource(R.string.chat_tasks_remove), { host.tasks.removeTask(todo, host.onError) },
                     kind = JButtonKind.Destructive, size = JButtonSize.Small, enabled = enabled,
@@ -785,6 +844,10 @@ private fun TrayOutcomeRow(entry: NeedsYouEntry.Task, host: AssistantTaskHost, e
                     size = JButtonSize.Small, enabled = enabled, loading = retrying, modifier = Modifier.testTag("assistant-tray-continue"))
             }
         }
+        val actionModifier = Modifier.padding(start = Tokens.Space.m, end = Tokens.Space.s, bottom = Tokens.Space.s)
+        if (instead == null) Row(actionModifier, horizontalArrangement = Arrangement.spacedBy(Tokens.Space.s)) { actions() }
+        else FlowRow(actionModifier, horizontalArrangement = Arrangement.spacedBy(Tokens.Space.s),
+            verticalArrangement = Arrangement.spacedBy(Tokens.Space.s)) { actions() }
     }
 }
 
@@ -807,7 +870,7 @@ private fun FinishedRow(entry: FinishedEntry, host: AssistantTaskHost, feed: Lis
         if (entry.fresh && host.tasks.features?.value?.contains("todo_seen") == true) scope.launch {
             try {
                 val placed = todo.triage({ sessions[it] }, System.currentTimeMillis())
-                if (placed.section == TriageSection.JustDone) host.tasks.setTodoSeen(todo.id, true, after = placed.last)
+                if (todo.showsJustFinished(placed, System.currentTimeMillis())) host.tasks.setTodoSeen(todo.id, true, after = placed.last)
             } catch (e: CancellationException) {
                 throw e
             } catch (_: Throwable) {

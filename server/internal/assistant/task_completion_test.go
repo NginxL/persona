@@ -21,7 +21,7 @@ func TestTaskCompletionOwnBackgroundWorkNeedsNoReport(t *testing.T) {
 			todo := startedTask(t, s, f)
 			ctx := context.Background()
 			s.superviseTodo(ctx, todo.ID, "conv1", []string{"Login regression test passes"}, 0)
-			s.taskWorking(ctx, "box", "s1")
+			s.taskWorking(ctx, "box", "s1", startRow{})
 			f.judge = `{"verdict":"done","reason":"The original login task and its tests are complete"}`
 			f.setItems(proto.Item{Kind: proto.KindText, Role: "user", Text: todo.Notes},
 				proto.Item{Kind: proto.KindToolUse, Role: "assistant", ToolName: "Bash", ToolUseID: "login-tests", ToolInput: json.RawMessage(`{"command":"go test ./login"}`)})
@@ -50,7 +50,7 @@ func TestTaskCompletionLimitContinueNeedsNoReport(t *testing.T) {
 			todo := startedTask(t, s, f)
 			ctx := context.Background()
 			s.superviseTodo(ctx, todo.ID, "conv1", []string{"Login regression test passes"}, 0)
-			s.taskWorking(ctx, "box", "s1")
+			s.taskWorking(ctx, "box", "s1", startRow{})
 			continuation := proto.Item{Kind: proto.KindText, Role: "user", Text: prompts.RenderAgentLimitContinue("")}
 			if parsed {
 				continuation.Injected = prompts.ParseInjected(continuation.Text)
@@ -97,7 +97,7 @@ func TestTaskCompletionSideConversationGate(t *testing.T) {
 			ctx := context.Background()
 			s.superviseTodo(ctx, todo.ID, "conv1", []string{"Login regression test passes"}, 0)
 			f.judge = `{"verdict":"done","reason":"The latest answer is complete"}`
-			s.taskWorking(ctx, "box", "s1")
+			s.taskWorking(ctx, "box", "s1", startRow{})
 			answer := "已告知另一会话：本会话未处理该问题" // i18n-ignore: synthetic regression answer
 			if tc.wantDone {
 				answer = "The login fix is complete; the regression test passes and the result is ready for review."
@@ -145,7 +145,7 @@ func TestTaskCompletionSideTurnNeedsFreshTaskReport(t *testing.T) {
 			todo := startedTask(t, s, f)
 			ctx := context.Background()
 			s.superviseTodo(ctx, todo.ID, "conv1", []string{"Login regression test passes"}, 0)
-			s.taskWorking(ctx, "box", "s1")
+			s.taskWorking(ctx, "box", "s1", startRow{})
 			f.judge = `{"verdict":"done","reason":"The current task report is complete"}`
 			at := time.Now()
 			reportAt := at.Add(time.Second)
@@ -242,7 +242,7 @@ func TestTaskCompletionRejectsChangedAcceptanceCriteria(t *testing.T) {
 	todo := startedTask(t, s, f)
 	ctx := context.Background()
 	s.superviseTodo(ctx, todo.ID, "conv1", []string{"Login test passes"}, 0)
-	s.taskWorking(ctx, "box", "s1")
+	s.taskWorking(ctx, "box", "s1", startRow{})
 	todo = todoNow(s, todo.ID)
 	f.judge = `{"verdict":"done","reason":"Previous acceptance criteria met"}`
 	f.setItems(proto.Item{Kind: proto.KindText, Role: "assistant", Text: "Login test passes"})
@@ -299,7 +299,7 @@ func TestTaskCompletionRejectsAResumedTurnDuringJudgment(t *testing.T) {
 				todo = todoNow(s, todo.ID)
 			}
 			f.judge = `{"verdict":"done","reason":"The previous answer claims success"}`
-			s.taskWorking(ctx, "box", "s1")
+			s.taskWorking(ctx, "box", "s1", startRow{})
 			s.tasks.mu.Lock()
 			work := s.tasks.working[todo.ID]
 			s.tasks.mu.Unlock()
@@ -310,7 +310,7 @@ func TestTaskCompletionRejectsAResumedTurnDuringJudgment(t *testing.T) {
 					return
 				}
 				changed = true
-				s.taskWorking(ctx, "box", "s1")
+				s.taskWorking(ctx, "box", "s1", startRow{})
 				// Even a short resumed turn that already stopped invalidates the older judgment.
 				f.setSessions("box", proto.Session{MachineID: "box", SessionID: "s1", Status: proto.StatusDone, LastText: "More work remains"})
 			}})
@@ -331,7 +331,7 @@ func TestTaskReceiptDoesNotCompleteARunningToolOrMissingAgent(t *testing.T) {
 		s, f := newTaskService(t)
 		startedTask(t, s, f)
 		f.judge = `{"verdict":"done","reason":"Progress looks finished"}`
-		s.taskWorking(context.Background(), "box", "s1")
+		s.taskWorking(context.Background(), "box", "s1", startRow{})
 		if missing {
 			f.setSessions("box")
 		} else {
@@ -352,7 +352,7 @@ func TestTaskCompletionWaitsForTheAnswerAfterATool(t *testing.T) {
 			todo := startedTask(t, s, f)
 			f.judge = `{"verdict":"done","reason":"Delivery verified"}`
 			ctx := context.Background()
-			s.taskWorking(ctx, "box", "s1")
+			s.taskWorking(ctx, "box", "s1", startRow{})
 			idle := proto.Session{MachineID: "box", SessionID: "s1", Status: proto.StatusIdle,
 				LastText: "The first check passed", UpdatedAt: time.Now()}
 			f.setSessions("box", idle)
@@ -371,7 +371,10 @@ func TestTaskCompletionWaitsForTheAnswerAfterATool(t *testing.T) {
 			final.Status, final.LastText, final.UpdatedAt = finalStatus, "Delivery verified", time.Now()
 			f.setSessions("box", final)
 			s.setSessions("box", []proto.Session{final})
-			waitFor(t, "completion after the final session update", func() bool { return todoNow(s, todo.ID).DoneAt != nil })
+			waitFor(t, "completion after the final session update", func() bool {
+				c := todoNow(s, todo.ID).Check
+				return c != nil && c.Verdict == verdictDone
+			})
 			f.mu.Lock()
 			judged := f.judged
 			f.mu.Unlock()
@@ -387,7 +390,7 @@ func TestTaskCompletionReconcilesAnAnswerArrivingDuringTheRead(t *testing.T) {
 	todo := startedTask(t, s, f)
 	f.judge = `{"verdict":"done","reason":"Delivery verified"}`
 	ctx := context.Background()
-	s.taskWorking(ctx, "box", "s1")
+	s.taskWorking(ctx, "box", "s1", startRow{})
 	idle := proto.Session{MachineID: "box", SessionID: "s1", Status: proto.StatusIdle, Rev: 1}
 	f.setSessions("box", idle)
 	s.fleetKeepPrevious("box", []proto.Session{idle})
@@ -406,7 +409,10 @@ func TestTaskCompletionReconcilesAnAnswerArrivingDuringTheRead(t *testing.T) {
 		s.setSessions("box", []proto.Session{final})
 	}})
 	s.taskTurnEnded(ctx, "box", "s1")
-	waitFor(t, "completion without another session update", func() bool { return todoNow(s, todo.ID).DoneAt != nil })
+	waitFor(t, "completion without another session update", func() bool {
+		c := todoNow(s, todo.ID).Check
+		return c != nil && c.Verdict == verdictDone
+	})
 }
 
 func TestAutoDoneSkipRecognizesCancellation(t *testing.T) {
@@ -446,7 +452,7 @@ func TestCancelledTaskSettledAgentDoesNotIssueDoneReceipt(t *testing.T) {
 	s, f := newTaskService(t)
 	todo := startedTask(t, s, f)
 	ctx := context.Background()
-	s.taskWorking(ctx, "box", "s1")
+	s.taskWorking(ctx, "box", "s1", startRow{})
 	f.judge = `{"verdict":"done","reason":"Delivery verified"}`
 
 	// Cancel the task
@@ -485,7 +491,7 @@ func TestReassignedAbortedAgentSettledDoesNotCompleteTask(t *testing.T) {
 	s, f := newTaskService(t)
 	todo := startedTask(t, s, f)
 	ctx := context.Background()
-	s.taskWorking(ctx, "box", "s1")
+	s.taskWorking(ctx, "box", "s1", startRow{})
 	f.judge = `{"verdict":"done","reason":"Delivery verified"}`
 
 	// Reassign task: link a new agent on box/s2, releasing box/s1
@@ -527,7 +533,7 @@ func TestReassignedAbortedAgentSettledDoesNotCompleteTask(t *testing.T) {
 	}
 
 	// Now the new active agent box/s2 finishes and settles
-	s.taskWorking(ctx, "box", "s2")
+	s.taskWorking(ctx, "box", "s2", startRow{})
 	idle2 := proto.Session{MachineID: "box", SessionID: "s2", Status: proto.StatusDone,
 		LastText: "New agent really finished", UpdatedAt: time.Now()}
 	f.setSessions("box", idle2)
@@ -537,6 +543,9 @@ func TestReassignedAbortedAgentSettledDoesNotCompleteTask(t *testing.T) {
 
 	s.taskTurnEnded(ctx, "box", "s2")
 
-	// Now the task SHOULD complete properly by the real agent!
-	waitFor(t, "task completion by active agent", func() bool { return todoNow(s, todo.ID).DoneAt != nil })
+	// Now the active agent's work is judged done and delivered for review; the released agent never reached this point.
+	waitFor(t, "task completion by active agent", func() bool {
+		c := todoNow(s, todo.ID).Check
+		return c != nil && c.Verdict == verdictDone
+	})
 }

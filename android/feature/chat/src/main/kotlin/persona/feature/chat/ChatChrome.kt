@@ -1,17 +1,22 @@
 package persona.feature.chat
 
+import persona.core.moduleapi.asMenuActions
 import persona.core.designsystem.dense
 import persona.core.designsystem.text
 import androidx.annotation.StringRes
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.compose.currentStateAsState
 import persona.core.contracts.*
 import persona.core.contracts.api.*
 import persona.core.designsystem.*
@@ -19,8 +24,10 @@ import persona.core.designsystem.icons.PersonaIcons
 import persona.core.designsystem.icons.PhIcons
 import persona.core.domain.lines.isLiveStatus
 import persona.core.domain.sort.AgentSession
+import persona.core.domain.sort.ChildRollupKind
 import persona.core.domain.sort.SessionRename
 import persona.core.domain.sort.SideRollup
+import persona.core.domain.sort.childRollup
 import persona.core.domain.sort.canAttach
 import persona.core.domain.sort.canClose
 import persona.core.domain.sort.canInterrupt
@@ -70,18 +77,68 @@ internal fun ChatHeader(
     sides: List<Session> = emptyList(),
     sideRollup: SideRollup = SideRollup(),
     onOpenSide: ((SessionKey) -> Unit)? = null,
+    /** Branches the whole conversation up to its latest completed turn into a new session and opens it (#12996). */
+    onForkSession: (() -> Unit)? = null,
+    forking: Boolean = false,
+    /** Explicit Codex takeover / continuation coordinator shared with the bottom read-only bar. */
+    takeover: CodexTakeoverCoordinator? = null,
     menuOpen: MutableState<Boolean> = remember { mutableStateOf(false) },
+    /** All known computers, for cross-machine origin chips in Session Overview. */
+    machines: List<Machine> = emptyList(),
+    /** Folded child sessions (same-machine + cross-machine) for Session Overview and subagent rollup. */
+    childRows: List<Session> = emptyList(),
+    /** Opens a subagent's full detail view without redirecting back to its parent. */
+    onOpenSubagent: ((SessionKey) -> Unit)? = null,
+    /** Opens BackgroundTasksPanel at a specific destination from Session Overview's Background tasks section. */
+    onOpenBackgroundDestination: ((BackgroundDestination) -> Unit)? = null,
+    /** Stops an active loop from Session Overview's Background tasks section. */
+    onStopLoop: (() -> Unit)? = null,
+    /** Hub actions and connection for Background tasks detail loading inside Session Overview. */
+    overviewActions: ChatActions? = null,
+    overviewConnection: HubConnection? = null,
+    /** One-shot trigger to open Session Overview focused on its Subagents section (from Agents list parent row). */
+    openSubagentsRequested: Boolean = false,
+    onOpenSubagentsHandled: () -> Unit = {},
+    /** Reports when Session Overview is open so child sessions can refresh on demand. */
+    onOverviewVisible: (Boolean) -> Unit = {},
     actions: @Composable RowScope.() -> Unit = {},
 ) {
     var menu by menuOpen
     var sharing by remember(session?.key, agentShares) { mutableStateOf<AgentShares?>(null) }
     var dialog by rememberSaveable { mutableStateOf<String?>(null) }
+    var scrollToSubagents by rememberSaveable { mutableStateOf(false) }
+    var reopenOverviewOnReturn by rememberSaveable { mutableStateOf(false) }
+    var leftWhilePushingSubagent by rememberSaveable { mutableStateOf(false) }
+    var savedOverviewIndex by rememberSaveable { mutableIntStateOf(0) }
+    var savedOverviewOffset by rememberSaveable { mutableIntStateOf(0) }
+    var savedOverviewEndedExpanded by rememberSaveable(session?.key?.path) { mutableStateOf(false) }
+    val lifecycleState by LocalLifecycleOwner.current.lifecycle.currentStateAsState()
+    LaunchedEffect(openSubagentsRequested) {
+        if (openSubagentsRequested) {
+            scrollToSubagents = true
+            dialog = "info"
+            onOpenSubagentsHandled()
+        }
+    }
+    LaunchedEffect(lifecycleState, reopenOverviewOnReturn) {
+        if (!reopenOverviewOnReturn) {
+            leftWhilePushingSubagent = false
+        } else if (lifecycleState != Lifecycle.State.RESUMED) {
+            leftWhilePushingSubagent = true
+        } else if (leftWhilePushingSubagent) {
+            leftWhilePushingSubagent = false
+            reopenOverviewOnReturn = false
+            dialog = "info"
+        }
+    }
+    LaunchedEffect(dialog) { onOverviewVisible(dialog == "info") }
     var title by rememberSaveable { mutableStateOf("") }
     var tabName by rememberSaveable { mutableStateOf("") }
     val copy = rememberCopy()
     val peers = remember(session, sessions) { spaceCompanions(session, sessions) }
     val places = remember(session, peers) { companionPlaces(session, peers) }
-    val children = session?.subagents.orEmpty().filter { it.running && it.sessionId.isNotBlank() }
+    val subagentRollup = remember(session, childRows) { session?.let { childRollup(it, childRows) } }
+    val subagentOpener = onOpenSubagent ?: onOpenSession
     val linkTitle = connectionTitle(connection)
     val online = connection == null || connection == ConnectionState.Online
     val canAct = state.available && online && machine?.online != false && !readOnly && session != null
@@ -154,6 +211,21 @@ internal fun ChatHeader(
         val sidesShown = sideRollup.count > 0 && onOpenSide != null
         if (sidesShown) JIconButton(PersonaIcons.sideSessions, sideSessionsLabel(sideRollup), { dialog = "sides" },
             badge = sideRollup.needsYou, count = sideRollup.count)
+        // Active subagents entry: opens Session Overview directly at the Subagents section.
+        if (subagentRollup != null && session?.assistant != true) {
+            val label = stringResource(
+                if (subagentRollup.kind == ChildRollupKind.NeedsYou) R.string.chat_overview_subagents_button_needs_you
+                else R.string.chat_overview_subagents_button_running,
+                subagentRollup.count,
+            )
+            JIconButton(
+                PersonaIcons.agents,
+                label,
+                { scrollToSubagents = true; dialog = "info" },
+                badge = subagentRollup.kind == ChildRollupKind.NeedsYou,
+                count = subagentRollup.count,
+            )
+        }
         actions()
         // The permission mode, always in view and changed here (#3957, iOS #3719).
         // Glass has the mode in the composer, by the model pill (Q11, #5055); Brief and Board keep it here.
@@ -186,12 +258,18 @@ internal fun ChatHeader(
             )
             TerminalResume.Hidden -> Unit
         }
+        if (session != null && takeover != null && !session.archived) {
+            addAll(codexTakeoverMenuActions(session, takeover, enabled = online && machine?.online != false))
+        }
         onSearch?.let { add(JAction(stringResource(R.string.chat_chrome_search), PhIcons.MagnifyingGlass, onClick = it)) }
         onFiles?.let { add(JAction(stringResource(R.string.chat_chrome_files), PhIcons.FolderSimple, onClick = it)) }
         onGit?.let { add(JAction(gitLabel, onClick = it)) }
         onBackgroundTasks?.let { add(JAction(stringResource(R.string.chat_background_title), PersonaIcons.backgroundTasks, onClick = it)) }
         add(JAction(stringResource(R.string.chat_chrome_details), onClick = onDetails))
-        add(JAction(stringResource(R.string.chat_chrome_info), PhIcons.Info, enabled = session != null) { dialog = "info" })
+        add(JAction(stringResource(R.string.chat_overview_title), PhIcons.Info, enabled = session != null) {
+            scrollToSubagents = false
+            dialog = "info"
+        })
         if (session?.assistant == false) {
             val unavailable = stringResource(R.string.chat_agent_share_authority)
             add(JAction(stringResource(R.string.chat_agent_share_title), PhIcons.ShareNetwork, enabled = agentShares != null && online) {
@@ -207,9 +285,17 @@ internal fun ChatHeader(
             PersonaIcons.sideSessions, subtitle = if (sideRollup.needsYou) stringResource(R.string.chat_side_sessions_needs_you) else null) {
             dialog = "sides"
         })
+        if (onForkSession != null && session != null) {
+            val turnRunning = session.agentState == AgentState.Working || session.agentState == AgentState.NeedsYou
+            add(JAction(
+                stringResource(R.string.chat_menu_fork),
+                PersonaIcons.forkChat,
+                enabled = online && machine?.online != false && !forking && !turnRunning,
+                subtitle = if (turnRunning) stringResource(R.string.chat_menu_fork_wait_turn) else null,
+                onClick = onForkSession,
+            ))
+        }
         add(JAction(stringResource(R.string.chat_chrome_switch_session), enabled = session != null) { dialog = "peers" })
-        children.forEach { child -> add(JAction(stringResource(R.string.chat_chrome_subagent, child.description?.takeIf(String::isNotBlank) ?: child.type),
-            enabled = onOpenSession != null) { onOpenSession?.invoke(SessionKey(session!!.machineId, child.sessionId)) }) }
         if (linkTitle != null) add(JAction(linkTitle) { dialog = "connection" })
         add(JAction(stringResource(R.string.chat_chrome_interrupt), enabled = canAct && session?.status in listOf("working", "blocked") && session?.canInterrupt != false) {
             state.run(session!!, ChatAction.Interrupt)
@@ -226,6 +312,9 @@ internal fun ChatHeader(
                 copy(command, resumeCopied)
             })
         }
+        // The modules' session actions (#13847), after the session's own and before closing it.
+        addAll(persona.core.moduleapi.LocalModuleActions.current.actions(persona.core.moduleapi.MenuSlot.SessionActions,
+            persona.core.moduleapi.ModuleActionTarget(session?.machineId, session?.sessionId)).asMenuActions { menu = false })
         // Persona's conversations are not agents in a pane; a session without a terminal closes where its node says it can
         // (a runtime's, #6294).
         if (session?.assistant != true && session?.canClose != false)
@@ -279,7 +368,46 @@ internal fun ChatHeader(
                 }, destructive = true, confirmEnabled = canAct && WorktreeCleanups.ready(worktree, cleanup),
                 content = worktree?.let { st -> { WorktreeCleanupSection(st, cleanup, { cleanup = it }, machine?.home) } })
         }
-        "info" -> session?.let { target -> ChatSessionInfoSheet(target, machine, state, onOpenTodo = onOpenTodo, onDismiss = { dialog = null }) }
+        "info" -> session?.let { target ->
+            val overviewListState = rememberLazyListState(
+                initialFirstVisibleItemIndex = savedOverviewIndex,
+                initialFirstVisibleItemScrollOffset = savedOverviewOffset,
+            )
+            SessionOverviewSheet(
+                session = target,
+                machine = machine,
+                machines = machines,
+                childRows = childRows,
+                state = state,
+                actions = overviewActions,
+                connection = overviewConnection,
+                scrollToSubagents = scrollToSubagents,
+                onSubagentsScrolled = { scrollToSubagents = false },
+                endedExpanded = savedOverviewEndedExpanded,
+                onEndedExpandedChange = { savedOverviewEndedExpanded = it },
+                listState = overviewListState,
+                onOpenTodo = onOpenTodo,
+                onOpenSubagent = subagentOpener?.let { open ->
+                    { childKey ->
+                        savedOverviewIndex = overviewListState.firstVisibleItemIndex
+                        savedOverviewOffset = overviewListState.firstVisibleItemScrollOffset
+                        reopenOverviewOnReturn = true
+                        dialog = null
+                        open(childKey)
+                    }
+                },
+                onOpenBackground = onOpenBackgroundDestination,
+                onStopLoop = onStopLoop,
+                onDismiss = {
+                    savedOverviewIndex = 0
+                    savedOverviewOffset = 0
+                    savedOverviewEndedExpanded = false
+                    scrollToSubagents = false
+                    reopenOverviewOnReturn = false
+                    dialog = null
+                },
+            )
+        }
         "peers" -> JSheet(onDismiss = { dialog = null }, title = stringResource(R.string.chat_chrome_peers_title)) {
             if (peers.isEmpty()) JEmptyState(stringResource(R.string.chat_chrome_peers_empty_title), stringResource(R.string.chat_chrome_peers_empty_text))
             LazyColumn(Modifier.fillMaxWidth().heightIn(max = 400.dp), contentPadding = PaddingValues(bottom = 16.dp.dense)) {

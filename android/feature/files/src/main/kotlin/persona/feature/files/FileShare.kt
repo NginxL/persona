@@ -33,7 +33,7 @@ internal object FileShare {
             else -> {
                 val copy = if (text == null && file.stream) {
                     val into = withContext(Dispatchers.IO) { shareFile(context, file.name.ifEmpty { "file" }) }
-                    download(file.path, into)
+                    val _ = download(file.path, into)
                     into
                 } else {
                     val bytes = withContext(Dispatchers.Default) {

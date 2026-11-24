@@ -66,6 +66,7 @@ import persona.core.designsystem.JRow
 import persona.core.designsystem.LayoutDensity
 import persona.core.designsystem.LocalAppFeedback
 import persona.core.designsystem.PersonaTheme
+import persona.core.designsystem.ReadingContent
 import persona.core.designsystem.Tokens
 import persona.core.designsystem.dense
 import persona.feature.settings.generated.AboutVersionRow
@@ -211,7 +212,7 @@ class AboutVersionMatrixTest {
             val base = LocalDensity.current
             CompositionLocalProvider(LocalDensity provides Density(base.density, fontScale = 3f)) {
                 actualFontScale = LocalDensity.current.fontScale
-                DensityRows(generated, onHeight = { actualHeight = it })
+                DensityRows(generated, onHeight = { actualHeight = it }, onFontScale = { actualFontScale = it })
             }
         }
         val minimumHeight = with(rule.density) { 56.dp.roundToPx() }
@@ -256,15 +257,20 @@ class AboutVersionMatrixTest {
     }
 
     @Composable
-    private fun DensityRows(generated: Boolean, onHeight: (Int) -> Unit) {
+    private fun DensityRows(generated: Boolean, onHeight: (Int) -> Unit, onFontScale: (Float) -> Unit) {
         PersonaTheme(darkTheme = false, reduceMotion = true, style = AppStyle.Glass) {
-            JGroupItem(GroupPosition.of(0, 3)) {
-                val modifier = Modifier.testTag("version-row").onSizeChanged { onHeight(it.height) }
-                if (generated) {
-                    AboutVersionRow(ImmutableAboutVersionModel(AboutVersionSnapshot("1.42.0"), LocalResources.current),
-                        modifier = modifier)
-                } else {
-                    JRow(stringResource(R.string.settings_about_version), value = "1.42.0", modifier = modifier)
+            // This white-box density probe needs the synthetic 3x content to clear JRow's fixed minimum. Lift the
+            // interface cap in this test only; the production Version row remains interface content.
+            ReadingContent {
+                onFontScale(LocalDensity.current.fontScale)
+                JGroupItem(GroupPosition.of(0, 3)) {
+                    val modifier = Modifier.testTag("version-row").onSizeChanged { onHeight(it.height) }
+                    if (generated) {
+                        AboutVersionRow(ImmutableAboutVersionModel(AboutVersionSnapshot("1.42.0"), LocalResources.current),
+                            modifier = modifier)
+                    } else {
+                        JRow(stringResource(R.string.settings_about_version), value = "1.42.0", modifier = modifier)
+                    }
                 }
             }
         }
@@ -435,7 +441,7 @@ class AboutVersionMatrixTest {
             it.config.getOrNull(SemanticsProperties.Text).orEmpty().any { value -> value.text == text }
         }
         val layouts = mutableListOf<TextLayoutResult>()
-        node.config[SemanticsActions.GetTextLayoutResult].action?.invoke(layouts)
+        val _ = node.config[SemanticsActions.GetTextLayoutResult].action?.invoke(layouts)
         return layouts.single()
     }
 

@@ -46,6 +46,9 @@ const (
 	fleetDoneLinger = 5 * time.Minute // only finished agents left: keep showing them this long
 	fleetMaxItems   = 3
 	fleetMaxAge     = 8 * time.Hour // the system ends an activity after about this long; past it, start a new one
+	// fleetRetireBefore: an activity this close to fleetMaxAge is ended by the hub, while its token still reaches it, so the
+	// one that replaces it never sits beside a card iOS ended but left on the Lock Screen (#12982).
+	fleetRetireBefore = 20 * time.Minute
 )
 
 // forDevice is what one device gets: its settings and persona, and of the assistant and the numbers only what it
@@ -55,6 +58,16 @@ func forDevice(s FleetState, p NotifyPrefs, stats FleetStats) FleetState {
 	d.Details = p.LockDetails
 	d.Look = p.Look
 	d.Left, d.Right = p.Island.sides()
+	if !p.LockDetails {
+		// Without names on the Lock Screen a request reads "A permission request is waiting": nobody can tell who asks
+		// or what approving does, so it gets no Allow / Deny there, only a tap into the app (#12982).
+		d.Items = slices.Clone(s.Items)
+		for i := range d.Items {
+			if k := d.Items[i].Kind; k == "permission" || k == "plan" { // the kinds with buttons; others keep naming their card
+				d.Items[i].Interaction = ""
+			}
+		}
+	}
 	shows := func(slot string) bool { return d.Left == slot || d.Right == slot }
 	if !shows(SlotAssistant) {
 		d.Assistant = false
@@ -196,11 +209,13 @@ type liveActivities struct {
 	deferred map[string]time.Time
 	// The last fleet broadcast to the open apps, and when: what an app that closed its connection cleanly (gone to
 	// the background) left its activity showing (phoneLeft).
-	shownState FleetState
-	shownStats FleetStats
-	shownAt    time.Time
-	repair     bool        // a device's activity shows something unknown: flush without waiting for a change
-	widgets    widgetWaker // which phones' Home Screen widgets to wake, and when (widget_wake.go)
+	shownState    FleetState
+	shownStats    FleetStats
+	shownAt       time.Time
+	shownIntake   uint64        // the last intake revision the open apps were sent (intakeSent)
+	repair        bool          // a device's activity shows something unknown: flush without waiting for a change
+	widgets       widgetWaker   // which phones' Home Screen widgets to wake, and when (widget_wake.go)
+	widgetChanges chan struct{} // intake revisions wake widgets without offering Live Activity content
 	// wake: when the run loop's timer goes off next (zero: not set), for a merge or a device's turn after fleetMinGap.
 	wake         time.Time
 	now          func() time.Time
@@ -211,6 +226,31 @@ type liveActivities struct {
 	answerMu  sync.Mutex
 	answers   []phoneAnswer
 	answering bool
+	// quiescedStart, deferredHolds and deferredSaves hold writes refused while
+	// a development snapshot pauses hub writers (quiesce.go). holdReplayMu
+	// serializes deferred hold replay ahead of newer holds/lifts and start
+	// claims, and saveMu serializes SaveLiveActivity per device so resumed
+	// saves cannot overwrite newer state.
+	holdReplayMu  sync.Mutex
+	holdReplaying bool
+	quiescedStart bool
+	deferredHolds []deferredLiveHold
+	deferredSaves map[string]bool
+	rowGen        map[string]uint64
+	saveMu        map[string]*sync.Mutex
+	saveWaiters   map[string][]*liveSaveWaiter
+}
+
+type liveSaveWaiter struct {
+	wantGen uint64
+	done    bool
+	err     error
+}
+
+type deferredLiveHold struct {
+	device string
+	asOf   time.Time
+	hold   time.Duration
 }
 
 // phoneAnswer is one register_phone: the push id it named, its connection's credential, and when it arrived.
@@ -220,7 +260,7 @@ type phoneAnswer struct {
 }
 
 func newLiveActivities(h *Hub) *liveActivities {
-	return &liveActivities{h: h, signal: make(chan struct{}, 1), rows: map[string]db.LiveActivity{}, started: map[string]int{},
+	return &liveActivities{h: h, signal: make(chan struct{}, 1), widgetChanges: make(chan struct{}, 1), rows: map[string]db.LiveActivity{}, started: map[string]int{},
 		deferred: map[string]time.Time{}, sent: map[string][]byte{}, sentAt: map[string]time.Time{}, now: time.Now, minGap: fleetMinGap, storeTimeout: deviceStoreTimeout}
 }
 
@@ -311,6 +351,8 @@ func (la *liveActivities) run(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			return
+		case <-la.widgetChanges:
+			la.wakeWidgets(la.snapshot())
 		case <-la.signal:
 			la.mu.Lock()
 			resend, repair := la.resend, la.repair
@@ -373,6 +415,7 @@ func (la *liveActivities) tick() {
 	}
 	la.wakeWidgets(la.snapshot()) // a change held back for widgetGap, the heartbeat
 	now := la.now()
+	la.retire(now)
 	la.mu.Lock()
 	over := !la.emptyAt.IsZero() && now.Sub(la.emptyAt) >= fleetEndAfter
 	doneLong := la.last.Phase == "done" && !la.doneSince.IsZero() && now.Sub(la.doneSince) >= fleetDoneLinger
@@ -490,11 +533,13 @@ func (la *liveActivities) phoneLeft(device string, clean bool) {
 	}
 	d, ok := la.h.push.device(device)
 	now := la.now()
-	// The app wrote its widgets as it went: they show what it showed (widget_wake.go).
+	// The app wrote its widgets as it went: they show what it showed (widget_wake.go), the intake revision it was
+	// last sent included, not one that moved after.
 	la.mu.Lock()
-	shown := la.shownState
+	shown := widgetCountsOf(la.shownState)
+	shown.intake = la.shownIntake
 	la.mu.Unlock()
-	la.widgets.wrote(device, widgetCountsOf(shown), now)
+	la.widgets.wrote(device, shown, now)
 	la.mu.Lock()
 	r := la.rows[device]
 	needsStart := r.PushToStartToken != "" && (r.PushToken == "" || now.Sub(r.StartedAt) >= fleetMaxAge)
@@ -691,6 +736,24 @@ func (la *liveActivities) claimStart(r db.LiveActivity, now time.Time) (time.Tim
 		la.h.logf("live activity start deferred: reason=store_unavailable device=%s due=%s", trafficIdentity(r.DeviceID), retry.UTC().Format(time.RFC3339))
 		return retry, false
 	}
+	for !la.drainDeferredHolds() {
+		if !la.h.quiesce.beginOrDefer(func() {
+			la.mu.Lock()
+			la.quiescedStart = true
+			la.mu.Unlock()
+		}) {
+			return retry, false
+		}
+		la.h.quiesce.end()
+	}
+	if !la.h.quiesce.beginOrDefer(func() {
+		la.mu.Lock()
+		la.quiescedStart = true
+		la.mu.Unlock()
+	}) {
+		return retry, false
+	}
+	defer la.h.quiesce.end()
 	ctx, cancel := context.WithTimeout(context.Background(), la.storeTimeout)
 	defer cancel()
 	due, claimed, err := la.h.store.ClaimLiveActivityStart(ctx, r.DeviceID, r.PushToStartToken, now, fleetRefresh, fleetMaxAge)
@@ -737,10 +800,109 @@ func (la *liveActivities) holdStart(ctx context.Context, device string, asOf tim
 	if la.h.store == nil {
 		return
 	}
+	held := quiesceHeld(ctx)
+	if !la.drainDeferredHoldsFor(held, deferredLiveHold{device: device, asOf: asOf, hold: hold}) {
+		return
+	}
+	if !held {
+		if !la.h.quiesce.beginOrDefer(func() {
+			la.mu.Lock()
+			la.deferredHolds = append(la.deferredHolds, deferredLiveHold{device: device, asOf: asOf, hold: hold})
+			la.mu.Unlock()
+		}) {
+			return
+		}
+		defer la.h.quiesce.end()
+	}
 	ctx, cancel := context.WithTimeout(ctx, la.storeTimeout)
 	defer cancel()
 	if _, err := la.h.store.HoldLiveActivityStart(ctx, device, asOf, hold); err != nil {
 		la.h.logf("live activity start hold: device=%s hold=%s error=%v", trafficIdentity(device), hold, err)
+	}
+}
+
+// drainDeferredHoldsFor drains any holds queued during a pause before a new
+// holdStart/liftHold writes to the store, without holding holdReplayMu across
+// the caller's own HoldLiveActivityStart call. Returns false if writes paused
+// again and incoming was appended behind the remaining deferred holds.
+func (la *liveActivities) drainDeferredHoldsFor(held bool, incoming deferredLiveHold) bool {
+	la.mu.Lock()
+	if len(la.deferredHolds) == 0 && !la.holdReplaying {
+		la.mu.Unlock()
+		return true
+	}
+	la.mu.Unlock()
+
+	la.holdReplayMu.Lock()
+	defer la.holdReplayMu.Unlock()
+	if !la.drainDeferredHoldsLocked(held) {
+		la.mu.Lock()
+		la.deferredHolds = append(la.deferredHolds, incoming)
+		la.mu.Unlock()
+		return false
+	}
+	return true
+}
+
+func (la *liveActivities) replayHold(h deferredLiveHold, held bool) bool {
+	if la.h.store == nil {
+		return true
+	}
+	if !held {
+		if !la.h.quiesce.beginOrDefer(func() {
+			la.mu.Lock()
+			la.deferredHolds = append([]deferredLiveHold{h}, la.deferredHolds...)
+			la.mu.Unlock()
+		}) {
+			return false
+		}
+		defer la.h.quiesce.end()
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), la.storeTimeout)
+	defer cancel()
+	if _, err := la.h.store.HoldLiveActivityStart(ctx, h.device, h.asOf, h.hold); err != nil {
+		la.h.logf("live activity start hold: device=%s hold=%s error=%v", trafficIdentity(h.device), h.hold, err)
+	}
+	return true
+}
+
+// drainDeferredHolds persists holds deferred during a quiesce pause in FIFO
+// order before any newer hold/lift or start claim can touch the store budget.
+// Returns false if writes were paused again before all deferred holds drained.
+func (la *liveActivities) drainDeferredHolds() bool {
+	if la.h.store == nil {
+		return true
+	}
+	la.holdReplayMu.Lock()
+	defer la.holdReplayMu.Unlock()
+	return la.drainDeferredHoldsLocked(false)
+}
+
+func (la *liveActivities) drainDeferredHoldsLocked(held bool) bool {
+	la.mu.Lock()
+	if len(la.deferredHolds) == 0 {
+		la.mu.Unlock()
+		return true
+	}
+	la.holdReplaying = true
+	la.mu.Unlock()
+	defer func() {
+		la.mu.Lock()
+		la.holdReplaying = false
+		la.mu.Unlock()
+	}()
+	for {
+		la.mu.Lock()
+		if len(la.deferredHolds) == 0 {
+			la.mu.Unlock()
+			return true
+		}
+		h := la.deferredHolds[0]
+		la.deferredHolds = la.deferredHolds[1:]
+		la.mu.Unlock()
+		if !la.replayHold(h, held) {
+			return false
+		}
 	}
 }
 
@@ -862,6 +1024,10 @@ func (la *liveActivities) endCredential(credential string) {
 		delete(la.started, d.DeviceID)
 		delete(la.deferred, d.DeviceID)
 		delete(la.resend, d.DeviceID)
+		delete(la.deferredSaves, d.DeviceID)
+		if la.rowGen != nil {
+			la.rowGen[d.DeviceID]++
+		}
 		la.mu.Unlock()
 		if r.PushToken != "" {
 			// No agent details in the final state, even if dismissal is delayed by the phone.
@@ -957,6 +1123,54 @@ func fleetSentence(l i18n.Lang, st FleetState) string {
 	return strings.Join(parts, " · ")
 }
 
+// retire ends each activity about to reach fleetMaxAge while its token still reaches it, and forgets that it was
+// started this episode, so the next flush may start a fresh one instead of leaving a card iOS ended (and keeps on the
+// Lock Screen for hours, stale) beside the new one (#12982). An open app's activity is the app's to replace.
+func (la *liveActivities) retire(now time.Time) {
+	la.mu.Lock()
+	var old []db.LiveActivity
+	for _, r := range la.rows {
+		if r.PushToken != "" && !r.StartedAt.IsZero() && now.Sub(r.StartedAt) >= fleetMaxAge-fleetRetireBefore {
+			old = append(old, r)
+		}
+	}
+	la.mu.Unlock()
+	for _, r := range old {
+		if la.h.phoneOpen(r.DeviceID) {
+			continue
+		}
+		la.endToken(r.DeviceID, r.PushToken, now)
+		la.mu.Lock()
+		delete(la.sent, r.DeviceID)
+		delete(la.sentAt, r.DeviceID)
+		delete(la.started, r.DeviceID)
+		la.mu.Unlock()
+		la.update(r.DeviceID, func(v *db.LiveActivity) {
+			if v.PushToken == r.PushToken {
+				v.PushToken, v.ActivityID = "", ""
+			}
+		})
+	}
+}
+
+// endToken ends (and takes off the Lock Screen at once) the activity behind token on device: one being retired, or one
+// another activity of the same phone replaced (#12982). Best effort: an activity iOS already ended stays until iOS
+// removes it.
+func (la *liveActivities) endToken(device, token string, now time.Time) {
+	if token == "" || la.h.push == nil {
+		return
+	}
+	d, ok := la.h.push.device(device)
+	if !ok {
+		return
+	}
+	la.mu.Lock()
+	last := la.last
+	la.mu.Unlock()
+	la.h.logf("live activity: ending a replaced or retiring activity on %s", d.Name)
+	la.h.push.sendLiveActivity(d, token, liveActivityPayload("end", last, now), "10", func() {})
+}
+
 func (la *liveActivities) send(d Device, r db.LiveActivity, payload map[string]any, urgent bool) {
 	prio := "5"
 	if urgent {
@@ -992,6 +1206,18 @@ func (la *liveActivities) update(device string, fn func(*db.LiveActivity)) {
 	_ = la.updateContext(context.Background(), device, fn)
 }
 
+func (la *liveActivities) deviceSaveMuLocked(device string) *sync.Mutex {
+	if la.saveMu == nil {
+		la.saveMu = map[string]*sync.Mutex{}
+	}
+	m := la.saveMu[device]
+	if m == nil {
+		m = &sync.Mutex{}
+		la.saveMu[device] = m
+	}
+	return m
+}
+
 // updateContext changes one device's row and bounds persistence by the caller's context and the store timeout.
 func (la *liveActivities) updateContext(ctx context.Context, device string, fn func(*db.LiveActivity)) error {
 	la.mu.Lock()
@@ -1000,20 +1226,191 @@ func (la *liveActivities) updateContext(ctx context.Context, device string, fn f
 	v.DeviceID = device
 	fn(&v)
 	la.rows[device] = v
+	var devMu *sync.Mutex
+	var waiter *liveSaveWaiter
+	if la.h.store != nil {
+		if la.rowGen == nil {
+			la.rowGen = map[string]uint64{}
+		}
+		la.rowGen[device]++
+		wantGen := la.rowGen[device]
+		if la.deferredSaves == nil {
+			la.deferredSaves = map[string]bool{}
+		}
+		la.deferredSaves[device] = true
+		waiter = &liveSaveWaiter{wantGen: wantGen}
+		if la.saveWaiters == nil {
+			la.saveWaiters = map[string][]*liveSaveWaiter{}
+		}
+		la.saveWaiters[device] = append(la.saveWaiters[device], waiter)
+		devMu = la.deviceSaveMuLocked(device)
+	}
 	la.mu.Unlock()
 	defer la.changed() // a new token gets the current state even if persistence needs a retry
 	if v.PushToken != "" && v.PushToken != was {
 		la.phoneAnswered(ctx, device) // only the phone reports an update token
 	}
-	if la.h.store != nil {
-		ctx, cancel := context.WithTimeout(ctx, la.storeTimeout)
-		defer cancel()
-		if err := la.h.store.SaveLiveActivity(ctx, v); err != nil {
-			la.h.logf("save live activity: %v", err)
-			return err
-		}
+	if waiter != nil {
+		return la.flushDeviceSave(ctx, device, devMu, waiter)
 	}
 	return nil
+}
+
+func (la *liveActivities) removeSaveWaiter(device string, waiter *liveSaveWaiter) {
+	la.mu.Lock()
+	list := la.saveWaiters[device]
+	if i := slices.Index(list, waiter); i >= 0 {
+		list = slices.Delete(list, i, i+1)
+		if len(list) == 0 {
+			delete(la.saveWaiters, device)
+		} else {
+			la.saveWaiters[device] = list
+		}
+	}
+	la.mu.Unlock()
+}
+
+func (la *liveActivities) waiterResultLocked(waiter *liveSaveWaiter) error {
+	if waiter != nil && waiter.done {
+		return waiter.err
+	}
+	return nil
+}
+
+func (la *liveActivities) flushDeviceSave(ctx context.Context, device string, devMu *sync.Mutex, waiter *liveSaveWaiter) error {
+	if waiter != nil {
+		defer la.removeSaveWaiter(device, waiter)
+	}
+	if la.h.store == nil {
+		return nil
+	}
+	devMu.Lock()
+	defer devMu.Unlock()
+	held := quiesceHeld(ctx)
+	first := true
+	for {
+		la.mu.Lock()
+		if !la.deferredSaves[device] {
+			err := la.waiterResultLocked(waiter)
+			la.mu.Unlock()
+			return err
+		}
+		v, ok := la.rows[device]
+		gen := la.rowGen[device]
+		delete(la.deferredSaves, device)
+		la.mu.Unlock()
+		if !ok {
+			la.mu.Lock()
+			err := la.waiterResultLocked(waiter)
+			la.mu.Unlock()
+			return err
+		}
+		if !held {
+			if !la.h.quiesce.beginOrDefer(func() {
+				la.mu.Lock()
+				if la.rowGen[device] == gen {
+					if la.deferredSaves == nil {
+						la.deferredSaves = map[string]bool{}
+					}
+					la.deferredSaves[device] = true
+				}
+				la.mu.Unlock()
+			}) {
+				la.mu.Lock()
+				err := la.waiterResultLocked(waiter)
+				la.mu.Unlock()
+				return err
+			}
+		}
+		baseCtx := context.Background()
+		if first && ctx != nil {
+			baseCtx = ctx
+		}
+		first = false
+		sctx, cancel := context.WithTimeout(baseCtx, la.storeTimeout)
+		err := la.h.store.SaveLiveActivity(sctx, v)
+		cancel()
+		if !held {
+			la.h.quiesce.end()
+		}
+		if err != nil {
+			la.h.logf("save live activity: %v", err)
+		}
+		la.mu.Lock()
+		for _, w := range la.saveWaiters[device] {
+			if !w.done && gen >= w.wantGen {
+				w.done = true
+				w.err = err
+			}
+		}
+		la.mu.Unlock()
+	}
+}
+
+// resumeWrites flushes Live Activity holds, saves and start claims deferred
+// while a development snapshot paused hub writers (quiesce.go). Deferred holds
+// are persisted before the repair flush is signaled so a resumed start claim
+// cannot read a stale start budget.
+func (la *liveActivities) resumeWrites() {
+	if la == nil {
+		return
+	}
+	type saveItem struct {
+		device string
+		mu     *sync.Mutex
+	}
+	la.mu.Lock()
+	quiescedStart := la.quiescedStart
+	la.quiescedStart = false
+	hasHolds := len(la.deferredHolds) > 0
+	var saves []saveItem
+	for device := range la.deferredSaves {
+		saves = append(saves, saveItem{device: device, mu: la.deviceSaveMuLocked(device)})
+	}
+	if quiescedStart && !hasHolds {
+		la.repair = true
+	}
+	la.mu.Unlock()
+	signalRepair := func() {
+		la.mu.Lock()
+		la.repair = true
+		la.mu.Unlock()
+		select {
+		case la.signal <- struct{}{}:
+		default:
+		}
+	}
+	if quiescedStart && !hasHolds {
+		select {
+		case la.signal <- struct{}{}:
+		default:
+		}
+	}
+	if !hasHolds && len(saves) == 0 {
+		return
+	}
+	la.h.nodeWorkers.Add(1)
+	go func() {
+		defer la.h.nodeWorkers.Done()
+		if hasHolds {
+			replayed := la.drainDeferredHolds()
+			if quiescedStart {
+				if replayed {
+					signalRepair()
+				} else if la.h.quiesce.beginOrDefer(func() {
+					la.mu.Lock()
+					la.quiescedStart = true
+					la.mu.Unlock()
+				}) {
+					la.h.quiesce.end()
+					signalRepair()
+				}
+			}
+		}
+		for _, s := range saves {
+			_ = la.flushDeviceSave(nil, s.device, s.mu, nil)
+		}
+	}()
 }
 
 func (la *liveActivities) routes(api *http.ServeMux) {
@@ -1029,6 +1426,7 @@ func (la *liveActivities) routes(api *http.ServeMux) {
 			writeBodyErr(w, err, err)
 			return
 		}
+		var replaced string // the token of the activity this report's activity takes over from (#12982)
 		err := la.updateContext(r.Context(), r.PathValue("id"), func(v *db.LiveActivity) {
 			if body.PushToStartToken != "" {
 				v.PushToStartToken = body.PushToStartToken
@@ -1041,6 +1439,9 @@ func (la *liveActivities) routes(api *http.ServeMux) {
 			case body.PushToken != "":
 				if body.ActivityID != v.ActivityID {
 					v.StartedAt = time.Now().UTC()
+					if v.ActivityID != "" && v.PushToken != "" && v.PushToken != body.PushToken {
+						replaced = v.PushToken
+					}
 				}
 				v.ActivityID, v.PushToken = body.ActivityID, body.PushToken
 			}
@@ -1052,6 +1453,11 @@ func (la *liveActivities) routes(api *http.ServeMux) {
 		if err != nil {
 			writeErr(w, http.StatusServiceUnavailable, i18n.Err("http-status.unavailable"))
 			return
+		}
+		if replaced != "" {
+			// One card per phone: the hub updates only the newest activity, so the one before it would sit frozen
+			// beside it, "Waiting for hub update…", until iOS removed it hours later.
+			la.endToken(r.PathValue("id"), replaced, la.now())
 		}
 		writeJSON(w, map[string]any{"ok": true})
 	})

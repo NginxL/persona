@@ -121,8 +121,11 @@ func (s *Service) nodeAnswer(ctx context.Context, machine, method string, params
 		return nil, true, err
 	}
 	var p struct {
-		SessionID string                           `json:"session_id"`
-		Ack       []assistantwire.ViewErrorReceipt `json:"ack"`
+		SessionID       string                           `json:"session_id"`
+		RecoveryID      string                           `json:"recovery_id"`
+		RecoveryOnly    bool                             `json:"recovery_only"`
+		PrepareRecovery bool                             `json:"prepare_recovery"`
+		Ack             []assistantwire.ViewErrorReceipt `json:"ack"`
 	}
 	switch method {
 	case assistantwire.MethodDecisionRaise:
@@ -187,7 +190,7 @@ func (s *Service) nodeAnswer(ctx context.Context, machine, method string, params
 		if !s.assistantCaller(ctx, machine, p.SessionID) {
 			return ContextResult{}, true, nil
 		}
-		return s.Context(ctx, ContextParams{SessionID: p.SessionID, MachineID: machine, Ack: p.Ack}), true, nil
+		return s.Context(ctx, ContextParams{SessionID: p.SessionID, MachineID: machine, Ack: p.Ack, RecoveryID: p.RecoveryID, RecoveryOnly: p.RecoveryOnly, PrepareRecovery: p.PrepareRecovery}), true, nil
 	}
 	return nil, false, nil
 }

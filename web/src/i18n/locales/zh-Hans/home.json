@@ -46,5 +46,13 @@
   "continue_label": "（「{title}」）",
   "continue_placeholder_to": "接下来让 {agent} 做什么？",
   "continue_failed_plain": "没发出去，打开对话看原因。",
+  "outbox_reason_unknown": "没有说明原因",
+  "outbox_failed": "消息没发出去：{reason}。可以重试或删除。",
+  "outbox_uncertain": "还不确定消息是否送达：{reason}。先检查原消息，再决定是否重试。",
+  "not_sent": "未发出",
+  "computer_setup_detail": "完成电脑设置后，Agent 才能使用这台电脑。",
+  "computer_offline_detail": "电脑不可用：{reason}。打开设置以重新连接。",
+  "setup_needed": "待完成设置",
+  "open_setup": "打开设置",
   "arrange": "整理总览"
 }

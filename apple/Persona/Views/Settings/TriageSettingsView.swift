@@ -41,8 +41,7 @@ struct TriageSettingsView: View {
                         TriageExampleView(kind: .wake, replyMinutes: replyMinutes)
                     }
                     // Ask for a Closeout (#3612) and for the status afterwards (#3616). A hub that does not know a
-                    // switch names none: no row. The native Mac app is frozen and gets neither row.
-                    #if !os(macOS)
+                    // switch names none: no row.
                     if model?.switches?.closeout != nil {
                         toggle(\.asksCloseout, String(localized: "Ask for a Closeout"), String(localized: "Holds an agent's stop once to ask what's done, merged, deployed and missing"), Theme.Icon.closeout, id: "triage-closeout") {
                             TriageExampleView(kind: .closeout, replyMinutes: replyMinutes)
@@ -53,7 +52,6 @@ struct TriageSettingsView: View {
                             TriageExampleView(kind: .closeoutAsk, replyMinutes: replyMinutes)
                         }
                     }
-                    #endif
                 } header: {
                     Text("After Triage")
                 } footer: {

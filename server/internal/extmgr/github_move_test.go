@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/nwverse/persona/server/internal/connector/github"
 	"github.com/nwverse/persona/server/internal/extension"
+	"github.com/nwverse/persona/server/internal/githubwire"
 )
 
 // installGitHubExtension is one install of a GitHub extension whose settings have proxy and host, installed at `at`
@@ -43,7 +43,7 @@ func TestGitHubConfigMovesIntoEachInstall(t *testing.T) {
 	setup := func(t *testing.T) *Manager {
 		h := newTestManager(t)
 		h.store = newBotStore()
-		h.cfg.GitHub = &github.Config{Proxy: "http://proxy.example:3128", Auth: github.AuthConfig{Host: "github.example.com"}}
+		h.cfg.GitHub = &githubwire.Config{Proxy: "http://proxy.example:3128", Auth: githubwire.AuthConfig{Host: "github.example.com"}}
 		return h
 	}
 	first := time.Date(2026, 11, 6, 8, 0, 0, 0, time.UTC)

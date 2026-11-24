@@ -7,6 +7,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.serialization.json.JsonObject
+import persona.core.inbox.*
 
 /**
  * The documents read lately, so one opened again (or read ahead while its link waited in a reply) shows at once, as

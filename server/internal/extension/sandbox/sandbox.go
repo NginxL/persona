@@ -137,13 +137,33 @@ func (s Support) Available() bool {
 }
 
 var (
-	probeOnce sync.Once
-	probed    Support
+	// probeMu guards the probe's cache; probeFn runs the probe itself (tests replace it).
+	probeMu  sync.Mutex
+	probeFn  = probe
+	probed   Support
+	probedAt time.Time
+	probedOK bool
 )
 
-// Probe finds out once what this machine can do.
+// probeRetryInterval is how long a failed probe is reused before it is tried again. A missing bwrap is the exception
+// (see Probe): LookPath is cheap, so it is tried on every call and recovers the moment bwrap is installed.
+const probeRetryInterval = 2 * time.Second
+
+// Probe finds out what this machine can do. A machine that can sandbox is probed once. A machine that cannot is
+// probed again at most every probeRetryInterval (a broken mount stays cached so list endpoints do not spawn bwrap over
+// and over), except that a missing bwrap is checked on every call: LookPath costs microseconds and one installed a
+// moment ago is picked up at once (#13540).
 func Probe() Support {
-	probeOnce.Do(func() { probed = probe() })
+	probeMu.Lock()
+	defer probeMu.Unlock()
+	if probedOK {
+		return probed
+	}
+	if !probedAt.IsZero() && (probed.Reason == nil || probed.Reason.Key != "extension-status.sandbox_no_bwrap") && time.Since(probedAt) < probeRetryInterval {
+		return probed
+	}
+	probed, probedAt, probedOK = probeFn(), time.Now(), false
+	probedOK = probed.Available()
 	return probed
 }
 

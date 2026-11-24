@@ -34,6 +34,7 @@
   "end_gone": "会話は閉じられました",
   "end_offline": "コンピューターがオフライン",
   "end_recalled": "取り消されたため、このターンを止めました",
+  "end_unrelated": "別の依頼が始まったため終了",
   "tools_called_one": "ツールを {count} 回呼び出し",
   "tools_called_other": "ツールを {count} 回呼び出し",
   "state_working": "処理中",

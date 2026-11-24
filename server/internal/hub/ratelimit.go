@@ -143,6 +143,7 @@ func (h *Hub) securityError(w http.ResponseWriter, r *http.Request, status int, 
 	}
 	message := map[string]string{
 		"tls_required":            "TLS is required for public requests",
+		codePrivateNetworkOnly:    "this hub answers only its private network: connect through your organization's network or VPN",
 		"master_token_local_only": "the master token is restricted to local networks",
 		"rate_limited":            "too many authentication failures",
 		bus.CodeTokenRevoked:      "this token was revoked or replaced",

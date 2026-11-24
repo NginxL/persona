@@ -1,12 +1,8 @@
 import SwiftUI
 
 nonisolated extension ComponentSpec {
-    /// The picker's line under Liquid Glass: the system's own look on either platform.
-    #if os(macOS)
-    private static var glassSubtitle: String { String(localized: "Native and simple") }
-    #else
+    /// The picker's line under Liquid Glass: the system's own look.
     private static var glassSubtitle: String { String(localized: "Native iOS, simple") }
-    #endif
 
     /// Liquid Glass: iOS 26's own look, Liquid Glass on the system's pages.
     static let glass = ComponentSpec(

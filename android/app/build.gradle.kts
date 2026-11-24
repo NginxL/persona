@@ -6,6 +6,8 @@ plugins {
     id("persona.compose")
     id("persona.hilt")
     id("org.jetbrains.kotlin.plugin.serialization")
+    // :app:moduleGuard (docs/android/android.md "Modules"): no core project depends on a module.
+    id("persona.module.guard")
 }
 
 // The application id is personal (docs/operations/config.md): scripts/android.sh passes it from ~/.config/persona/config.json.
@@ -116,6 +118,29 @@ android {
     }
 }
 
+// The modules this build carries (docs/android/android.md "Modules"): every :module:* project, unless
+// -Ppersona.modules=<id,id…> names fewer; -Ppersona.modules= (empty) builds Persona Core alone. A module left out stays on
+// the compile classpath only, so Modules.kt still compiles, but none of its code, resources or manifest entries ship and
+// Modules.kt never loads it (BuildConfig.PERSONA_MODULES).
+val knownModules = rootProject.subprojects.filter { it.path.startsWith(":module:") && it.path.count { c -> c == ':' } == 2 }
+    .map { it.name }.sorted()
+val carriedModules = providers.gradleProperty("persona.modules").orNull
+    ?.split(',')?.map(String::trim)?.filter(String::isNotEmpty) ?: knownModules
+require(carriedModules.all { it in knownModules }) {
+    "-Ppersona.modules names unknown modules ${carriedModules - knownModules.toSet()}; known: $knownModules"
+}
+android.defaultConfig.buildConfigField("String[]", "PERSONA_MODULES",
+    carriedModules.joinToString(", ", "{", "}") { "\"$it\"" })
+// A left-out module's class is still named by Modules.kt (in an entry that never runs). R8 needs no rule for it: AGP
+// hands R8 the compile classpath, compileOnly jars included, as library classes, so the class is known but not packaged
+// (checked with -Ppersona.modules= :app:assembleRelease, #13433).
+dependencies {
+    knownModules.forEach { id ->
+        if (id in carriedModules) implementation(project(":module:$id")) else compileOnly(project(":module:$id"))
+    }
+    implementation(project(":core:moduleapi"))
+}
+
 dependencies {
     implementation(project(":core:contracts"))
     implementation(project(":core:domain"))
@@ -138,8 +163,6 @@ dependencies {
     implementation(project(":feature:terminal"))
     implementation(project(":feature:machines"))
     implementation(project(":feature:files"))
-    implementation(project(":feature:knowledge"))
-    implementation(project(":feature:voice"))
     implementation(project(":platform:phonetools"))
     implementation(project(":core:demo"))
     implementation(libs.room.runtime)

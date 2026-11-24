@@ -62,6 +62,7 @@ final class NodeMenuUITests: XCTestCase {
         let row = text(app, containing: "给天气 App 加主屏幕小组件")
         XCTAssertTrue(reveal(app, row), "no row for the agent")
         row.press(forDuration: 1.2)
+        app.openAgentMenuMore() // the pane's items are More's (#13396)
         XCTAssertTrue(app.buttons["拆分窗格"].waitForExistence(timeout: 5), "no 拆分窗格 in the row's menu")
     }
 

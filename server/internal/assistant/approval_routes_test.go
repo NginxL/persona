@@ -14,8 +14,8 @@ import (
 
 	approvalops "github.com/nwverse/persona/server/internal/approval"
 	"github.com/nwverse/persona/server/internal/assistantwire"
+	"github.com/nwverse/persona/server/internal/botcard"
 	"github.com/nwverse/persona/server/internal/channel"
-	"github.com/nwverse/persona/server/internal/feishubot"
 	"github.com/nwverse/persona/server/internal/proto"
 )
 
@@ -107,8 +107,8 @@ func TestFeishuClarifyRequiresFreshCardBoundOwnerActionAndRoutesAnswerHome(t *te
 		used[action] = true
 		return map[string]any{}, nil
 	})
-	press := func(token, action, question string) *feishubot.CardResponse {
-		var a feishubot.CardAction
+	press := func(token, action, question string) *botcard.CardResponse {
+		var a botcard.CardAction
 		a.Token = token
 		a.Action.Value = map[string]any{"a": "ix", "id": "ix_lark_question", "clarify": "1"}
 		a.Action.FormValue = map[string]any{"question": question, "password": "must-not-travel"}
@@ -172,7 +172,7 @@ func TestFeishuTokenlessCallbacksDoNotCollapseDistinctQuestions(t *testing.T) {
 	})
 	press := func(action, question string) {
 		t.Helper()
-		var a feishubot.CardAction
+		var a botcard.CardAction
 		a.Action.Value = map[string]any{"a": "ix", "id": "ix_lark_tokenless", "clarify": "1"}
 		a.Action.FormValue = map[string]any{"question": question}
 		a.Context.ChatID, a.Context.MessageID = "oc_owner", "om_card"

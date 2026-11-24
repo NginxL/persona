@@ -257,26 +257,28 @@ var (
 	// EventTopics are the events by topic; how the install screen says each is extension-permissions.event_<topic with
 	// _ for .> (Explain). No text here: the catalogs are read on first use, not when the package starts (#1308).
 	EventTopics = map[string]bool{
-		"kb.changed":      true,
-		"kb.forgotten":    true,
-		"inbox.changed":   true,
-		"agent.needs_you": true,
-		"agent.finished":  true,
-		"todo.changed":    true,
-		"todo.decision":   true,
-		"leader.changed":  true,
-		"leader.report":   true,
+		"assistant.entries.changed": true,
+		"kb.changed":                true,
+		"kb.forgotten":              true,
+		"inbox.changed":             true,
+		"agent.needs_you":           true,
+		"agent.finished":            true,
+		"todo.changed":              true,
+		"todo.decision":             true,
+		"leader.changed":            true,
+		"leader.report":             true,
 	}
 
 	// EventScopes are the hub scopes an event needs besides the subscription: only an extension granted the scope
 	// (or the legacy full-hub grant) is told. A topic not listed needs none.
 	EventScopes = map[string]string{
-		"kb.changed":     ScopeKBRead,
-		"kb.forgotten":   ScopeKBRead,
-		"todo.changed":   ScopeTodosRead,
-		"todo.decision":  ScopeTodosRead,
-		"leader.changed": ScopeLeadersRead,
-		"leader.report":  ScopeLeadersRead,
+		"assistant.entries.changed": ScopeAssistantEntriesRead,
+		"kb.changed":                ScopeKBRead,
+		"kb.forgotten":              ScopeKBRead,
+		"todo.changed":              ScopeTodosRead,
+		"todo.decision":             ScopeTodosRead,
+		"leader.changed":            ScopeLeadersRead,
+		"leader.report":             ScopeLeadersRead,
 	}
 )
 

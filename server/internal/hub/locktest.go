@@ -93,6 +93,12 @@ func (h *Hub) lockTestClient(deviceID string) *client {
 }
 
 func (h *Hub) dispatchLockTests(ctx context.Context, now time.Time) error {
+	// A snapshot pauses hub writers; due lock tests stay scheduled and
+	// resumeDevelopmentWriters wakes startLockTests to dispatch them.
+	if !h.quiesce.begin() {
+		return nil
+	}
+	defer h.quiesce.end()
 	tests, err := h.store.DueLockTests(ctx, now)
 	if err != nil {
 		return err

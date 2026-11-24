@@ -324,12 +324,17 @@ func TestAgyPaneSessionList(t *testing.T) {
 			} else {
 				want[agyTestRow] = model
 			}
+			// A pane whose conversation is known is titled after it (agytitle.go), else after its terminal.
+			title := "agy"
+			if tc.conversation != "" && !tc.ambiguous {
+				title = "ACP conversation"
+			}
 			herdr.reply("session.snapshot", snapshot(nil, nil, agents, nil))
 			rows := listSessions(t, n)
 			got := make(map[string]string, len(rows))
 			for _, row := range rows {
 				got[row.SessionID] = row.Model
-				if row.SessionID == agyTestRow && (row.PaneID != agyTestPane || row.Host != host.Herdr || row.Status != tc.status || row.Title != "agy") {
+				if row.SessionID == agyTestRow && (row.PaneID != agyTestPane || row.Host != host.Herdr || row.Status != tc.status || row.Title != title) {
 					t.Errorf("pane metadata changed: %+v", row)
 				}
 			}
@@ -449,7 +454,7 @@ func TestAgyPaneConversationIsolation(t *testing.T) {
 			}
 			seedAgents(t, n, f, first, second)
 			got, _ := agyTestItems(t, n, row2, nil)
-			if len(got) != 1 || got[0].Kind != "notice" || got[0].TS.IsZero() || !strings.Contains(got[0].Text, "herdr integration install antigravity-cli") {
+			if len(got) != 1 || got[0].Kind != "notice" || got[0].TS.IsZero() || !strings.Contains(got[0].Text, "personad node doctor") {
 				t.Fatalf("terminal notice: %+v", got)
 			}
 			assertMissingItem(row2, items[0].ID)
@@ -656,6 +661,89 @@ func TestAgyPaneWatchAppendPartialAndRewrites(t *testing.T) {
 	}
 }
 
+func TestAgyPaneRunningStepUpdatesKeepHistoryStable(t *testing.T) {
+	n, f, home := herdrNode(t)
+	t.Setenv("ANTIGRAVITY_CLI_CONFIG_DIR", "")
+	seedAgents(t, n, f, agyTestAgent(agyTestPane, home, agyTestID))
+
+	const (
+		step0      = `{"step_index":0,"type":"USER_INPUT","source":"USER_EXPLICIT","status":"DONE","created_at":"2026-11-01T00:00:00Z","content":"Run checks"}` + "\n"
+		step1      = `{"step_index":1,"type":"PLANNER_RESPONSE","status":"DONE","created_at":"2026-11-01T00:00:01Z","tool_calls":[{"name":"run_command","args":{"CommandLine":"go test"}},{"name":"view_file","args":{"AbsolutePath":"a.go"}}]}` + "\n"
+		step2Run   = `{"step_index":2,"type":"GENERIC","status":"RUNNING","created_at":"2026-11-01T00:00:02Z","content":""}` + "\n"
+		step2Done  = `{"step_index":2,"type":"GENERIC","status":"DONE","created_at":"2026-11-01T00:00:02Z","content":"ok"}` + "\n"
+		step3Run   = `{"step_index":3,"type":"GENERIC","status":"RUNNING","created_at":"2026-11-01T00:00:03Z","content":"reading"}` + "\n"
+		step3Done  = `{"step_index":3,"type":"GENERIC","status":"DONE","created_at":"2026-11-01T00:00:03Z","content":"reading"}` + "\n"
+		step4Run   = `{"step_index":4,"type":"PLANNER_RESPONSE","status":"RUNNING","created_at":"2026-11-01T00:00:04Z","content":"Checking..."}` + "\n"
+		step4Done  = `{"step_index":4,"type":"PLANNER_RESPONSE","status":"DONE","created_at":"2026-11-01T00:00:04Z","content":"All checks passed."}` + "\n"
+		step4Fixed = `{"step_index":4,"type":"PLANNER_RESPONSE","status":"DONE","created_at":"2026-11-01T00:00:04Z","content":"Settled rewrite."}` + "\n"
+	)
+
+	file := agyTestFile(t, n.agyDataRoot(), agyTestID, step0+step1+step2Run+step3Run)
+	_, initialPage := agyTestItems(t, n, agyTestRow, nil)
+	baseHistory := initialPage["history"].(string)
+
+	hub := withHub(t, n)
+	agyTestCall(t, n, "session.watch", agyTestRow, map[string]any{"since_seq": initialPage["to_seq"]})
+	t.Cleanup(func() { n.unwatch(agyTestRow) })
+
+	// 1. In-place status-only transition (RUNNING -> DONE shrinks file by 3 bytes) must not rewrite history.
+	agyTestWrite(t, file, step0+step1+step2Run+step3Done)
+	_, page := agyTestItems(t, n, agyTestRow, nil)
+	if page["history"] != baseHistory {
+		t.Fatalf("in-place RUNNING->DONE status flip changed history: got %q, want %q", page["history"], baseHistory)
+	}
+
+	// 2. Appending completion for an earlier RUNNING step (step 2) after later step 3 must update in place
+	// without rewinding/dropping step 3 or changing history, and watcher receives the updated item in place.
+	agyTestAppend(t, file, step2Done)
+	waitFor(t, "earlier RUNNING step update reaches watcher", func() bool { return len(hub.spans()) >= 1 })
+	items, page := agyTestItems(t, n, agyTestRow, nil)
+	if page["history"] != baseHistory {
+		t.Fatalf("earlier RUNNING step completion changed history: got %q, want %q", page["history"], baseHistory)
+	}
+	if len(items) != 5 || items[3].Text != "ok" || items[4].Text != "reading" {
+		t.Fatalf("earlier RUNNING step completion lost or misordered items: %+v", items)
+	}
+	if batch := hub.spans()[0]; batch.history != baseHistory || batch.fromSeq != 4 || batch.toSeq != 4 {
+		t.Fatalf("earlier RUNNING step update reset watcher: %+v", batch)
+	}
+
+	// 3. Appending a new RUNNING step and then completing it (same-step RUNNING -> DONE with updated content)
+	// must keep history stable and deliver the completion without a from_seq=0 reset.
+	agyTestAppend(t, file, step4Run)
+	waitFor(t, "new RUNNING step reaches watcher", func() bool { return len(hub.spans()) >= 2 })
+	if batch := hub.spans()[1]; batch.history != baseHistory || batch.fromSeq != 4 || batch.toSeq != 5 {
+		t.Fatalf("new RUNNING step batch: %+v", batch)
+	}
+	agyTestAppend(t, file, step4Done)
+	waitFor(t, "same-step RUNNING->DONE completion reaches watcher", func() bool { return len(hub.spans()) >= 3 })
+	items, page = agyTestItems(t, n, agyTestRow, nil)
+	if page["history"] != baseHistory {
+		t.Fatalf("same-step RUNNING->DONE changed history: got %q, want %q", page["history"], baseHistory)
+	}
+	if batch := hub.spans()[2]; batch.history != baseHistory || batch.fromSeq != 5 || batch.toSeq != 5 || items[len(items)-1].Text != "All checks passed." {
+		t.Fatalf("same-step RUNNING->DONE batch: %+v, items: %+v", batch, items)
+	}
+
+	// 4. Rewriting an already-settled (DONE) step in place MUST still bump history and reset the watcher.
+	agyTestWrite(t, file, step0+step1+step2Done+step3Done+step4Fixed)
+	waitFor(t, "settled in-place rewrite triggers history reset", func() bool { return len(hub.spans()) >= 4 })
+	_, page = agyTestItems(t, n, agyTestRow, nil)
+	settledHistory := page["history"].(string)
+	if batch := hub.spans()[3]; settledHistory == baseHistory || batch.history != settledHistory || batch.fromSeq != 0 {
+		t.Fatalf("settled in-place rewrite did not bump history: page %q, batch %+v", settledHistory, batch)
+	}
+
+	// 5. Truncating/compacting earlier steps MUST still bump history and reset the watcher.
+	agyTestWrite(t, file, step0+step1)
+	waitFor(t, "truncation triggers history reset", func() bool { return len(hub.spans()) >= 5 })
+	_, page = agyTestItems(t, n, agyTestRow, nil)
+	truncatedHistory := page["history"].(string)
+	if batch := hub.spans()[4]; truncatedHistory == settledHistory || batch.history != truncatedHistory || batch.fromSeq != 0 || batch.toSeq != 2 {
+		t.Fatalf("truncation did not bump history: page %q, batch %+v", truncatedHistory, batch)
+	}
+}
+
 func TestAgyPaneWatchConversationIsolation(t *testing.T) {
 	n, home := testNode(t)
 	t.Setenv("ANTIGRAVITY_CLI_CONFIG_DIR", "")
@@ -818,5 +906,367 @@ func TestAgyPaneKeepsCursorTerminalBehavior(t *testing.T) {
 	})
 	if got := workAgentResume(cursorAgent, "cursor-agent", agyTestID); got != "cursor-agent" {
 		t.Fatalf("Cursor resume: %s", got)
+	}
+}
+
+func TestAgySubagentDetection(t *testing.T) {
+	const (
+		parentID  = "11111111-2222-4333-8444-555555555555"
+		subSys    = "aaaaaaaa-1111-4222-8333-444444444441"
+		subNoSrc  = "aaaaaaaa-1111-4222-8333-444444444442"
+		subCort   = "aaaaaaaa-1111-4222-8333-444444444443"
+		wakeUserS = "aaaaaaaa-1111-4222-8333-444444444444"
+		subOther  = "aaaaaaaa-1111-4222-8333-444444444445"
+		errSys    = "aaaaaaaa-1111-4222-8333-444444444446"
+		normExp   = "bbbbbbbb-1111-4222-8333-444444444441"
+		normEmp   = "bbbbbbbb-1111-4222-8333-444444444442"
+		fullSub   = "cccccccc-1111-4222-8333-444444444441"
+		emptyID   = "dddddddd-1111-4222-8333-444444444441"
+		partID    = "dddddddd-1111-4222-8333-444444444442"
+		missID    = "dddddddd-1111-4222-8333-444444444443"
+		unrID     = "dddddddd-1111-4222-8333-444444444444"
+	)
+	root := t.TempDir()
+	agyTestFile(t, root, subSys, `{"step_index":0,"type":"SYSTEM_MESSAGE","source":"SYSTEM","content":"Subagent prompt"}`+"\n")
+	agyTestFile(t, root, subNoSrc, `{"step_index":0,"type":"SYSTEM_MESSAGE","content":"Subagent prompt"}`+"\n")
+	agyTestFile(t, root, subCort, `{"step_index":0,"type":"CORTEX_STEP_TYPE_SYSTEM_MESSAGE","source":"SYSTEM","content":"Subagent prompt"}`+"\n")
+	agyTestFile(t, root, wakeUserS, `{"step_index":0,"type":"USER_INPUT","source":"SYSTEM","content":"Background wake input"}`+"\n"+
+		`{"step_index":1,"type":"PLANNER_RESPONSE","content":"Wake handled"}`+"\n")
+	agyTestFile(t, root, subOther, `{"step_index":0,"type":"USER_INPUT","source":"SUBAGENT","content":"Delegated prompt"}`+"\n")
+	agyTestFile(t, root, errSys, `{"step_index":0,"type":"ERROR_MESSAGE","source":"SYSTEM","error":"temporary error"}`+"\n")
+	agyTestFile(t, root, normExp, `{"step_index":0,"type":"USER_INPUT","source":"USER_EXPLICIT","content":"User prompt"}`+"\n")
+	agyTestFile(t, root, normEmp, `{"step_index":0,"type":"USER_INPUT","content":"Minimal fixture"}`+"\n")
+	agyTestFile(t, root, emptyID, "")
+	agyTestFile(t, root, partID, `{"step_index":0,"type":"USER_INPUT","source":"USER_EXPLICIT","content":"still writing"}`)
+
+	// Empty transcript.jsonl falls back to transcript_full.jsonl.
+	agyTestFile(t, root, fullSub, "")
+	fullPath := filepath.Join(root, "brain", fullSub, agyFullTranscriptPath)
+	agyTestWrite(t, fullPath, `{"step_index":0,"type":"SYSTEM_MESSAGE","source":"SYSTEM","content":"Full subagent"}`+"\n")
+
+	for _, tc := range []struct {
+		name string
+		id   string
+		want agyTranscriptKind
+	}{
+		{"system_message_with_source", subSys, agyTranscriptSubagent},
+		{"system_message_without_source", subNoSrc, agyTranscriptSubagent},
+		{"cortex_system_message", subCort, agyTranscriptSubagent},
+		{"user_input_system_source_is_normal", wakeUserS, agyTranscriptNormal},
+		{"error_message_system_source_is_normal", errSys, agyTranscriptNormal},
+		{"user_input_subagent_source", subOther, agyTranscriptSubagent},
+		{"full_transcript_fallback", fullSub, agyTranscriptSubagent},
+		{"normal_explicit_user", normExp, agyTranscriptNormal},
+		{"normal_empty_source", normEmp, agyTranscriptNormal},
+		{"empty_file", emptyID, agyTranscriptEmpty},
+		{"partial_line_without_newline", partID, agyTranscriptEmpty},
+		{"missing_transcript", missID, agyTranscriptMissing},
+	} {
+		t.Run("probe/"+tc.name, func(t *testing.T) {
+			if got := probeAgyConversation(root, tc.id); got != tc.want {
+				t.Fatalf("probeAgyConversation(%s) = %v, want %v", tc.id, got, tc.want)
+			}
+		})
+	}
+
+	if os.Geteuid() != 0 {
+		unrFile := agyTestFile(t, root, unrID, `{"step_index":0,"type":"USER_INPUT","content":"locked"}`+"\n")
+		if err := os.Chmod(unrFile, 0o000); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = os.Chmod(unrFile, 0o600) })
+		if got := probeAgyConversation(root, unrID); got != agyTranscriptUnreadable {
+			t.Fatalf("probeAgyConversation(unreadable) = %v, want %v", got, agyTranscriptUnreadable)
+		}
+	}
+
+	const (
+		refInvoke   = "eeeeeeee-1111-4222-8333-444444444441"
+		refOutOrder = "eeeeeeee-1111-4222-8333-444444444442"
+		refTrunc    = "eeeeeeee-1111-4222-8333-444444444443"
+		refSendMsg  = "eeeeeeee-1111-4222-8333-444444444444"
+		refManage   = "eeeeeeee-1111-4222-8333-444444444445"
+		mentioned   = "ffffffff-1111-4222-8333-444444444441"
+		viewedFile  = "ffffffff-1111-4222-8333-444444444442"
+	)
+	parentTranscript := strings.Join([]string{
+		fmt.Sprintf(`{"step_index":0,"type":"USER_INPUT","source":"USER_EXPLICIT","content":"Investigate %s"}`, mentioned),
+		`{"step_index":1,"type":"PLANNER_RESPONSE","tool_calls":[{"name":"view_file","args":{"AbsolutePath":"notes.txt"}},{"name":"invoke_subagent","args":{"Prompt":"check"}}]}`,
+		fmt.Sprintf(`{"step_index":2,"type":"GENERIC","content":"contains %s"}`, viewedFile),
+		fmt.Sprintf(`{"step_index":3,"type":"GENERIC","content":"Subagent started: conversationId=%s"}`, refInvoke),
+		// Parallel tool call where call 0 (run_command) has not landed yet and call 1 (invoke_subagent) arrives first at step 6.
+		`{"step_index":4,"type":"PLANNER_RESPONSE","tool_calls":[{"name":"run_command","args":{"CommandLine":"sleep 5"}},{"name":"invoke_subagent","args":{"Prompt":"parallel"}}]}`,
+		fmt.Sprintf(`{"step_index":6,"type":"GENERIC","content":"conversationId: %s"}`, strings.ToUpper(refOutOrder)),
+		// Truncated invoke_subagent result whose UUID lives in step output.txt.
+		`{"step_index":7,"type":"PLANNER_RESPONSE","tool_calls":[{"name":"invoke_subagent","args":{"Prompt":"truncated"}}]}`,
+		`{"step_index":8,"type":"GENERIC","content":"truncated preview","truncated_fields":["content"]}`,
+		// send_message and manage_subagents targeting subagents.
+		fmt.Sprintf(`{"step_index":9,"type":"PLANNER_RESPONSE","tool_calls":[{"name":"send_message","args":{"Recipient":%q,"Message":"hi"}},{"name":"manage_subagents","args":{"Action":"kill","ConversationIds":[%q]}}]}`, refSendMsg, refManage),
+	}, "\n") + "\n"
+	agyTestFile(t, root, parentID, parentTranscript)
+	step8Out := filepath.Join(root, "brain", parentID, ".system_generated", "steps", "8", "output.txt")
+	if err := os.MkdirAll(filepath.Dir(step8Out), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	agyTestWrite(t, step8Out, "Created At: 2026-11-01\nOutput:\nconversationId: "+refTrunc+"\n")
+
+	// Even if a referenced child transcript starts with USER_INPUT, the parent reference flags it as subagent.
+	agyTestFile(t, root, refInvoke, `{"step_index":0,"type":"USER_INPUT","source":"USER_EXPLICIT","content":"child"}`+"\n")
+	agyTestFile(t, root, mentioned, `{"step_index":0,"type":"USER_INPUT","source":"USER_EXPLICIT","content":"unrelated user conv"}`+"\n")
+	agyTestFile(t, root, viewedFile, `{"step_index":0,"type":"USER_INPUT","source":"USER_EXPLICIT","content":"unrelated viewed conv"}`+"\n")
+
+	var n Node
+	for _, tc := range []struct {
+		name      string
+		candidate string
+		want      agyCandidateDecision
+	}{
+		{"subagent_header", subSys, agyCandidateSubagent},
+		{"referenced_by_invoke_subagent", refInvoke, agyCandidateSubagent},
+		{"referenced_out_of_order_parallel", refOutOrder, agyCandidateSubagent},
+		{"referenced_in_truncated_output", refTrunc, agyCandidateSubagent},
+		{"referenced_by_send_message", refSendMsg, agyCandidateSubagent},
+		{"referenced_by_manage_subagents", refManage, agyCandidateSubagent},
+		{"missing_during_invoke_subagent_race", missID, agyCandidatePending},
+		{"empty_in_progress", emptyID, agyCandidatePending},
+		{"partial_in_progress", partID, agyCandidatePending},
+		{"unrelated_uuid_in_user_input", mentioned, agyCandidateNormal},
+		{"unrelated_uuid_in_view_file_result", viewedFile, agyCandidateNormal},
+		{"system_sourced_wake_user_input", wakeUserS, agyCandidateNormal},
+		{"normal_new_conversation", normExp, agyCandidateNormal},
+	} {
+		t.Run("classify/"+tc.name, func(t *testing.T) {
+			if got := n.classifyAgyCandidate(root, parentID, tc.candidate); got != tc.want {
+				t.Fatalf("classifyAgyCandidate(%s) = %v, want %v", tc.candidate, got, tc.want)
+			}
+		})
+	}
+	if os.Geteuid() != 0 {
+		if got := n.classifyAgyCandidate(root, parentID, unrID); got != agyCandidatePending {
+			t.Fatalf("classifyAgyCandidate(unreadable) = %v, want %v", got, agyCandidatePending)
+		}
+	}
+}
+
+func TestAgyPaneWatchIgnoresSubagentConversation(t *testing.T) {
+	n, f, home := herdrNode(t)
+	t.Setenv("ANTIGRAVITY_CLI_CONFIG_DIR", "")
+	const (
+		parentID   = agyTestID
+		subSysID   = "aaaaaaaa-2222-4333-8444-555555555551"
+		subRefID   = "aaaaaaaa-2222-4333-8444-555555555552"
+		subRaceID  = "aaaaaaaa-2222-4333-8444-555555555553"
+		subEmptyID = "aaaaaaaa-2222-4333-8444-555555555554"
+	)
+
+	parentFile := agyTestFile(t, n.agyDataRoot(), parentID, ""+
+		`{"step_index":0,"type":"USER_INPUT","source":"USER_EXPLICIT","created_at":"2026-11-21T10:00:00Z","content":"Investigate issue"}`+"\n"+
+		`{"step_index":1,"type":"PLANNER_RESPONSE","status":"DONE","created_at":"2026-11-21T10:00:01Z","model":"gemini-test","input_tokens":5000,"output_tokens":100,"content":"Spawning subagent.","tool_calls":[{"name":"invoke_subagent","args":{"Prompt":"inspect files"}}]}`+"\n")
+	agyTestFile(t, n.agyDataRoot(), subSysID, ""+
+		`{"step_index":0,"type":"SYSTEM_MESSAGE","source":"SYSTEM","created_at":"2026-11-21T10:00:02Z","content":"You are a subagent"}`+"\n"+
+		`{"step_index":1,"type":"PLANNER_RESPONSE","status":"DONE","created_at":"2026-11-21T10:00:03Z","model":"gemini-sub","input_tokens":100,"output_tokens":20,"content":"Subagent working"}`+"\n")
+	agyTestFile(t, n.agyDataRoot(), subEmptyID, `{"step_index":0,"type":"SYSTEM_MESSAGE"`)
+
+	seedAgents(t, n, f, agyTestAgent(agyTestPane, home, parentID))
+	const model = "test-model"
+	n.noteWorkAgent(context.Background(), n.hosts.Get(host.Herdr).(*herdrHost), agyTestPane, agyTestRow, home, agyAgent, agyAgent, model, "", "")
+	assertAgyResumeReport(t, f, 0, model, "", parentID)
+
+	initialItems, initialPage := agyTestItems(t, n, agyTestRow, nil)
+	baseHistory := initialPage["history"].(string)
+	if len(initialItems) != 3 || initialItems[0].Text != "Investigate issue" {
+		t.Fatalf("initial parent items: %+v", initialItems)
+	}
+
+	hub := withHub(t, n)
+	agyTestCall(t, n, "session.watch", agyTestRow, map[string]any{"since_seq": initialPage["to_seq"]})
+	t.Cleanup(func() { n.unwatch(agyTestRow) })
+	n.mu.Lock()
+	w := n.watches[agyTestRow]
+	n.mu.Unlock()
+
+	// 1. Subagent PreInvocation overwrites herdr's reported conversation with subSysID.
+	f.reply("session.snapshot", snapshot(nil, nil, []any{agyTestAgent(agyTestPane, home, subSysID)}, nil))
+	rows := listSessions(t, n)
+	for range 3 {
+		n.pollAgyPane(w)
+	}
+	if spans := hub.spans(); len(spans) != 0 {
+		t.Fatalf("subagent report triggered unexpected watch push/reset: %+v", spans)
+	}
+	items, page := agyTestItems(t, n, agyTestRow, nil)
+	if page["history"] != baseHistory || len(items) != 3 || items[0].Text != "Investigate issue" {
+		t.Fatalf("session.items switched away from parent during subagent: page=%+v items=%+v", page, items)
+	}
+	expanded := agyTestCall(t, n, "session.item", agyTestRow, map[string]any{"item_id": initialItems[0].ID}).(proto.Item)
+	if expanded.Text != "Investigate issue" {
+		t.Fatalf("session.item failed during subagent: %+v", expanded)
+	}
+	info := agyTestCall(t, n, "session.info", agyTestRow, nil).(map[string]any)
+	if info["context_tokens"] != 5000 || info["output_tokens"] != 100 {
+		t.Fatalf("session.info switched to subagent usage: %+v", info)
+	}
+	// listSessions and resume backfill must keep the parent conversation, not report subSysID.
+	for _, row := range rows {
+		if row.SessionID == agyTestRow && row.ContextTokens != 5000 {
+			t.Fatalf("session list row switched to subagent usage: %+v", row)
+		}
+	}
+	n.mu.Lock()
+	keptResume := n.launches[agyTestPane].AgyConversation
+	n.mu.Unlock()
+	if keptResume != parentID {
+		t.Fatalf("launch AgyConversation = %q, want %q", keptResume, parentID)
+	}
+	if got := f.trace("pane.report_agent_session"); len(got) != 1 {
+		t.Fatalf("resume report unexpectedly overwritten during subagent: %v", got)
+	}
+
+	// 2. While herdr still reports subSysID, parent appends invoke_subagent result (referencing subRefID)
+	// and a follow-up reply: watcher must stream parent's new steps incrementally with NO reset.
+	agyTestAppend(t, parentFile, ""+
+		fmt.Sprintf(`{"step_index":2,"type":"GENERIC","status":"DONE","created_at":"2026-11-21T10:00:04Z","content":"Launched subagent conversationId=%s"}`, subRefID)+"\n"+
+		`{"step_index":3,"type":"PLANNER_RESPONSE","status":"DONE","created_at":"2026-11-21T10:00:05Z","content":"Parent continuing."}`+"\n")
+	n.pollAgyPane(w)
+	waitFor(t, "parent incremental update during subagent", func() bool { return len(hub.spans()) >= 1 })
+	if spans := hub.spans(); len(spans) != 1 || spans[0].history != baseHistory || spans[0].fromSeq != 2 || spans[0].toSeq != 4 {
+		t.Fatalf("parent update while subagent reported caused reset or wrong span: %+v", spans)
+	}
+
+	// 3. Subagent referenced by parent invoke_subagent (even if its transcript starts with USER_INPUT),
+	// missing-transcript startup race, and partial in-progress transcript must all keep parent bound.
+	agyTestFile(t, n.agyDataRoot(), subRefID, `{"step_index":0,"type":"USER_INPUT","source":"USER_EXPLICIT","content":"child transcript"}`+"\n")
+	for _, subID := range []string{subRefID, subRaceID, subEmptyID} {
+		seedAgents(t, n, f, agyTestAgent(agyTestPane, home, subID))
+		n.pollAgyPane(w)
+		if spans := hub.spans(); len(spans) != 1 {
+			t.Fatalf("subagent %s triggered watch push/reset: %+v", subID, spans)
+		}
+		if _, p := agyTestItems(t, n, agyTestRow, nil); p["history"] != baseHistory {
+			t.Fatalf("subagent %s changed active history: got %q, want %q", subID, p["history"], baseHistory)
+		}
+	}
+
+	// 4. Parent PreInvocation reports parentID again: no reset, same history.
+	seedAgents(t, n, f, agyTestAgent(agyTestPane, home, parentID))
+	n.pollAgyPane(w)
+	if spans := hub.spans(); len(spans) != 1 {
+		t.Fatalf("returning to parent triggered unexpected reset: %+v", spans)
+	}
+	if w.agy.conversation != parentID || w.agy.history != baseHistory {
+		t.Fatalf("watch drifted from parent: conv=%q history=%q", w.agy.conversation, w.agy.history)
+	}
+}
+
+func TestAgyPaneLegitimateConversationSwitches(t *testing.T) {
+	n, f, home := herdrNode(t)
+	t.Setenv("ANTIGRAVITY_CLI_CONFIG_DIR", "")
+	const (
+		subID    = "aaaaaaaa-3333-4444-8555-666666666661"
+		parentID = agyTestID
+		nextID   = agyOtherTestID
+	)
+	agyTestFile(t, n.agyDataRoot(), subID, `{"step_index":0,"type":"SYSTEM_MESSAGE","source":"SYSTEM","content":"Subagent first"}`+"\n")
+	agyTestFile(t, n.agyDataRoot(), parentID, ""+
+		`{"step_index":0,"type":"USER_INPUT","source":"USER_EXPLICIT","content":"Parent task"}`+"\n"+
+		`{"step_index":1,"type":"PLANNER_RESPONSE","tool_calls":[{"name":"invoke_subagent","args":{"Prompt":"help"}}]}`+"\n")
+
+	// 1. First bind must not bind to a subagent conversation.
+	seedAgents(t, n, f, agyTestAgent(agyTestPane, home, subID))
+	items, _ := agyTestItems(t, n, agyTestRow, nil)
+	if len(items) != 1 || items[0].Kind != "notice" {
+		t.Fatalf("initial subagent report should remain unbound notice, got: %+v", items)
+	}
+
+	// 2. First bind to the real parent conversation succeeds.
+	seedAgents(t, n, f, agyTestAgent(agyTestPane, home, parentID))
+	items, page := agyTestItems(t, n, agyTestRow, nil)
+	if len(items) != 2 || items[0].Text != "Parent task" {
+		t.Fatalf("first bind to parent failed: %+v", items)
+	}
+	parentHistory := page["history"].(string)
+
+	hub := withHub(t, n)
+	agyTestCall(t, n, "session.watch", agyTestRow, map[string]any{"since_seq": page["to_seq"]})
+	t.Cleanup(func() { n.unwatch(agyTestRow) })
+	n.mu.Lock()
+	w := n.watches[agyTestRow]
+	n.mu.Unlock()
+
+	// Subagent report while bound is ignored.
+	seedAgents(t, n, f, agyTestAgent(agyTestPane, home, subID))
+	n.pollAgyPane(w)
+	if spans := hub.spans(); len(spans) != 0 {
+		t.Fatalf("subagent triggered push: %+v", spans)
+	}
+
+	// 3. Legitimate user switch (e.g. /clear -> new conversation): held while line 0 is incomplete,
+	// then switches cleanly once step 0 USER_INPUT is complete.
+	nextFile := agyTestFile(t, n.agyDataRoot(), nextID, `{"step_index":0,"type":"USER_INPUT","source":"USER_EXPLICIT","content":"Fresh`)
+	seedAgents(t, n, f, agyTestAgent(agyTestPane, home, nextID))
+	n.pollAgyPane(w)
+	if spans := hub.spans(); len(spans) != 0 {
+		t.Fatalf("incomplete new transcript caused premature reset: %+v", spans)
+	}
+	if _, p := agyTestItems(t, n, agyTestRow, nil); p["history"] != parentHistory {
+		t.Fatalf("incomplete new transcript replaced parent history: %q", p["history"])
+	}
+
+	agyTestWrite(t, nextFile, `{"step_index":0,"type":"USER_INPUT","source":"USER_EXPLICIT","content":"Fresh conversation"}`+"\n")
+	waitFor(t, "legitimate switch to new conversation", func() bool { return len(hub.spans()) >= 1 })
+	spans := hub.spans()
+	got := hub.got()
+	wantNextHistory := agyStepsHistory(nextID).token
+	if len(spans) != 1 || spans[0].fromSeq != 0 || spans[0].toSeq != 1 || spans[0].history != wantNextHistory || len(got) != 1 || got[0].Text != "Fresh conversation" {
+		t.Fatalf("legitimate switch failed: spans=%+v items=%+v", spans, got)
+	}
+
+	// 4. Cross-pane ambiguity on the bound parent while reporting a subagent must not keep the ambiguous parent.
+	seedAgents(t, n, f, agyTestAgent(agyTestPane, home, subID), agyTestAgent("w1:p2", home, nextID))
+	items, _ = agyTestItems(t, n, agyTestRow, nil)
+	if len(items) != 1 || items[0].Kind != "notice" {
+		t.Fatalf("cross-pane ambiguity on bound parent was not cleared: %+v", items)
+	}
+
+	// 5. A conversation whose first step is a SYSTEM-sourced wake/background USER_INPUT must not be
+	// misclassified as a subagent: both first bind (session.items, session.info, resume) and switching
+	// from an already-bound parent conversation must succeed.
+	const wakeID = "bbbbbbbb-3333-4444-8555-666666666662"
+	agyTestFile(t, n.agyDataRoot(), wakeID, ""+
+		`{"step_index":0,"type":"USER_INPUT","source":"SYSTEM","created_at":"2026-11-21T11:00:00Z","content":"Background wake prompt"}`+"\n"+
+		`{"step_index":1,"type":"PLANNER_RESPONSE","status":"DONE","created_at":"2026-11-21T11:00:01Z","model":"gemini-wake","input_tokens":1200,"output_tokens":40,"content":"Handled background wake."}`+"\n")
+
+	// First bind on an unbound pane (pane was cleared by ambiguity above).
+	seedAgents(t, n, f, agyTestAgent(agyTestPane, home, wakeID))
+	items, wakePage := agyTestItems(t, n, agyTestRow, nil)
+	if len(items) != 1 || items[0].Text != "Handled background wake." || wakePage["history"] != agyStepsHistory(wakeID).token {
+		t.Fatalf("first bind to SYSTEM-sourced USER_INPUT conversation failed: page=%+v items=%+v", wakePage, items)
+	}
+	info := agyTestCall(t, n, "session.info", agyTestRow, nil).(map[string]any)
+	if info["context_tokens"] != 1200 || info["output_tokens"] != 40 {
+		t.Fatalf("session.info for SYSTEM-sourced USER_INPUT conversation = %+v", info)
+	}
+	const resumeModel = "test-model"
+	n.noteWorkAgent(context.Background(), n.hosts.Get(host.Herdr).(*herdrHost), agyTestPane, agyTestRow, home, agyAgent, agyAgent, resumeModel, "", "")
+	assertAgyResumeReport(t, f, 0, resumeModel, "", wakeID)
+
+	// Switch from a bound parent conversation (which previously invoked a subagent) to wakeID.
+	seedAgents(t, n, f, agyTestAgent(agyTestPane, home, parentID))
+	if _, p := agyTestItems(t, n, agyTestRow, nil); p["history"] != parentHistory {
+		t.Fatalf("rebind to parent failed: %+v", p)
+	}
+	n.pollAgyPane(w)
+	waitFor(t, "watch rebounds to parent", func() bool {
+		spans := hub.spans()
+		return len(spans) > 0 && spans[len(spans)-1].history == parentHistory
+	})
+	beforeSwitch := len(hub.spans())
+	seedAgents(t, n, f, agyTestAgent(agyTestPane, home, wakeID))
+	n.pollAgyPane(w)
+	waitFor(t, "switch from parent to SYSTEM-sourced USER_INPUT conversation", func() bool { return len(hub.spans()) > beforeSwitch })
+	lastSpan := hub.spans()[len(hub.spans())-1]
+	lastItem := hub.got()[len(hub.got())-1]
+	if lastSpan.fromSeq != 0 || lastSpan.history != agyStepsHistory(wakeID).token || lastItem.Text != "Handled background wake." {
+		t.Fatalf("switch to SYSTEM-sourced USER_INPUT conversation failed: span=%+v item=%+v", lastSpan, lastItem)
 	}
 }

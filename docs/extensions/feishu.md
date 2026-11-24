@@ -39,6 +39,30 @@ Three optional hub integrations: Lark gateway (third-party user-authenticated we
 - Chats / messages / read / send / reactions / card buttons use dedicated hub routes (`docs/protocol/protocol.md` Lark APIs).
 - **Without gateway, official `lark-cli`** (`docs/plans/plan-lark-cli.md`,#273): assistant integration and the `larkcli` connector are available, with `lark.cli` in the manager's manager.json, assistant PATH, and the same write gate (`docs/assistant/assistant.md` “Lark: `lark-cli`”). Watched document comments enter the Inbox as `kind: "doc"` (#2691); chat Inbox / knowledge / `/agent` / app Lark pages are added progressively in the L4 branch and later plan steps.
 
+## Reading message images in a conversation
+
+When the running Lark extension provides both the Messaging source and the read tool
+`lark_messages`, the assistant also has `lark_image`. Pass a message ID as
+`message` to inspect that message. If the extension's text listing only shows
+`[Image]`, pass the Inbox item's `chat_id`, or a topic's root ID as `thread`.
+A page reads up to ten messages, newest shown first, with their IDs.
+Use its `before` cursor for older messages or pass a listed ID to narrow the read.
+
+Each call attempts at most three top-level image parts, newest message first.
+The manager uses GET for the message and its source-relative media, including
+`messages/<id>/media/<key>`. It sends the selected account on every media read.
+On a multi-account source, omitting `account` looks up the default with
+`GET accounts` and pins both reads to it. If the default lookup fails, retry
+with an explicit account. A missing or oversized image leaves the message text
+available. Each image is limited to 1 MiB and 2000 pixels a side, with at most
+8 million pixels combined. Supported formats are JPEG, PNG and WebP. Recalled
+or private messages and external media addresses are skipped.
+
+The extension must serve Messaging message reads with image parts and relative
+media references. To support a direct lookup from every `lark_messages` row,
+its renderer must include the source message ID. The page form of `lark_image`
+works from the conversation ID alone. The CLI connector uses separate IDs.
+
 ## Gateway and hub on separate computers
 
 Gateway Agent API remains source-loopback-only. If source can reach hub, dedicated SSH user reverse-tunnels hub loopback port to source Agent API. Source user systemd service `Restart=always`, `ExitOnForwardFailure=yes`, SSH keepalive, linger, independent of developer machine. Pin hub SSH host key.

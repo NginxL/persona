@@ -329,13 +329,18 @@ func (s *Service) toolTaskRetry(ctx context.Context, self string, args json.RawM
 		if err := s.retryOn(ctx, &pt, m, with); err != nil {
 			return "", err
 		}
+	} else {
+		pt.RetryFromAgent, pt.RetryFromAllowAll = "", false
+		if m, ok := s.machineByName(ctx, pt.Machine); ok {
+			s.rememberRetryFrom(ctx, &pt, m, from)
+		}
 	}
 	st, claimed := s.claimTaskStart(todo.ID)
 	if !claimed {
 		return "", errors.New("it is starting again already")
 	}
-	moved := pt.Launcher != p.Tasks[i].Launcher || pt.Model != p.Tasks[i].Model // retryOn pinned another
-	switched := pt.Launcher != p.Tasks[i].Launcher && pt.Launcher != from       // not the launcher that failed
+	moved := pt.Launcher != p.Tasks[i].Launcher || pt.Model != p.Tasks[i].Model || pt.Tier != p.Tasks[i].Tier // retryOn pinned another launch or cleared its tier
+	switched := pt.Launcher != p.Tasks[i].Launcher && pt.Launcher != from                                     // not the launcher that failed
 	inPane := ""
 	if time.Now().Before(pt.Start.Until) && !switched && pt.Model == p.Tasks[i].Model {
 		inPane = pt.Start.Pane // another launcher starts in a new tab: an agent of the old one may hold the kept tab
@@ -344,6 +349,10 @@ func (s *Service) toolTaskRetry(ctx context.Context, self string, args json.RawM
 		if moved {
 			t.Launcher, t.Model, t.Tier, t.Effort, t.Permission, t.Why = pt.Launcher, pt.Model, pt.Tier, pt.Effort, pt.Permission, pt.Why
 		}
+		if with.launcher != "" {
+			t.LauncherDefaultModel = pt.LauncherDefaultModel
+		}
+		t.RetryFromAgent, t.RetryFromAllowAll = pt.RetryFromAgent, pt.RetryFromAllowAll
 		t.Start.Attempt, t.Start.By, t.Start.At = attempt, "assistant", time.Now().UTC()
 		t.Error, t.ErrorCode, t.ErrorArgs, t.RetryWith = "", "", nil, nil
 	}); err != nil {
@@ -432,12 +441,15 @@ func (s *Service) giveUpStart(ctx context.Context, id, by string, told bool) {
 	}
 }
 
-// failedStartNotice tells the user in conversation that task t did not start, and why, and pushes it: what the hub
-// says itself when the supervision turn that saw the failure did not (#2570).
+// failedStartNotice tells the user in conversation that task t did not start, and why, and pushes it when no
+// conversation supervises t: what the hub says itself when the supervision turn that saw the failure did not (#2570).
 func (s *Service) failedStartNotice(ctx context.Context, conversation string, t Todo, machine, reason string) {
 	text := i18n.T(s.lang(ctx), "assistant-tasks.start_remedy_notice", i18n.Args{"title": t.Title, "reason": reason})
 	if _, err := s.appendFeed(ctx, conversation, feedNotice, "", noticeBody{Text: text}); err != nil {
 		s.logf("task %s: notice: %v", t.ID, err)
+	}
+	if t.Supervision != nil && t.Supervision.Supervisor != "" {
+		return // its supervisor gave up on the start (or had no remedy left): the owner hears only what it passes up
 	}
 	s.notifyTaskFailed(ctx, t, machine, reason)
 }
@@ -540,6 +552,11 @@ func (s *Service) remedyEntry(ctx context.Context, t Todo, e *prompts.SuperviseE
 	}
 	pt := p.Tasks[i]
 	e.RetryWith = pt.RetryWith
+	if pt.ErrorCode == proto.CodeAgentStartStalled {
+		// What the agent's screen showed when it stopped (a dialog the computer does not know, every choice of it), as
+		// its rows: the failure's reason is one clipped line. Also for a start that failed for good, whose tab is gone.
+		e.Screen = strings.TrimRight(pt.ErrorArgs["screen"], "\n")
+	}
 	r := pt.Start
 	if r == nil || r.State != remedying || !time.Now().Before(r.Until) {
 		return

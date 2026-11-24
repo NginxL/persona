@@ -280,6 +280,12 @@
     <string name="chat_source_unknown">送信元</string>
     <string name="chat_source_expand">もっと見る</string>
     <string name="chat_source_collapse">折りたたむ</string>
+    <string name="chat_bubble_show_more">展開</string>
+    <string name="chat_bubble_show_less">折りたたむ</string>
+    <string name="chat_card_height_label">カードの高さ</string>
+    <string name="chat_card_height_toggle">最大とデフォルトの高さを切り替え</string>
+    <string name="chat_card_height_taller">カードを高くする</string>
+    <string name="chat_card_height_shorter">カードを低くする</string>
     <string name="chat_injected_open_task">タスクを開く</string>
     <string name="chat_injected_view_request">タスクの依頼内容を見る</string>
     <string name="chat_read_only_history">過去のセッションは閲覧のみです。先にこのセッションを再開してください</string>
@@ -499,6 +505,8 @@
     <string name="chat_turn_fix_model_route">モデル未接続：このモデルは使えません</string>
     <string name="chat_turn_fix_model_route_launcher">%1$sでモデルを使えません</string>
     <string name="chat_turn_fix_model_route_detail">モデル名が正しくないか、このモデルは今使えません。別のモデルを試してください。</string>
+    <string name="chat_turn_fix_tool_search_unsupported">モデル未接続：このゲートウェイはツールの必要時読み込みに対応していません</string>
+    <string name="chat_turn_fix_tool_search_unsupported_detail">再試行してください。</string>
     <string name="chat_turn_fix_action">直す</string>
     <string name="chat_slash_saved_prompts">保存済みプロンプト</string>
 </resources>

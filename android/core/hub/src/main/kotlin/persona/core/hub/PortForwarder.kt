@@ -101,7 +101,7 @@ class PortForwarder(
         private fun accept(server: ServerSocket) {
             while (!server.isClosed) {
                 val conn = try { server.accept() } catch (_: IOException) { break }
-                runCatching { Pump(conn, connectRequest(key)).start() }.onFailure { runCatching { conn.close() } }
+                runCatching { Pump(conn, connectRequest(key)).start() }.onFailure { val _ = runCatching { conn.close() } }
             }
         }
 
@@ -111,12 +111,12 @@ class PortForwarder(
          * pairing's forwarder find the number still taken and bind another one (#3483) whenever the CPU was busy.
          */
         fun close() {
-            listeners.forEach { runCatching { it.close() } }
+            listeners.forEach { val _ = runCatching { it.close() } }
             listeners.clear()
             val deadline = System.nanoTime() + CLOSE_WAIT_NANOS
             acceptors.filter { it !== Thread.currentThread() }.forEach { thread ->
                 val left = (deadline - System.nanoTime()) / 1_000_000
-                if (left > 0) runCatching { thread.join(left) }
+                if (left > 0) { val _ = runCatching { thread.join(left) } }
             }
             acceptors.clear()
         }
@@ -138,7 +138,7 @@ class PortForwarder(
             socket = sockets.newWebSocket(request, this)
         }
 
-        fun cancel() { runCatching { socket?.cancel() }; finish() }
+        fun cancel() { val _ = runCatching { socket?.cancel() }; finish() }
 
         override fun onOpen(webSocket: WebSocket, response: Response) {
             Thread({ readLocal(webSocket, conn.getInputStream()) }, "port-pump").apply { isDaemon = true }.start()
@@ -173,7 +173,7 @@ class PortForwarder(
         override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) = finish()
 
         private fun finish() {
-            if (done.compareAndSet(false, true)) { pumps -= this; runCatching { conn.close() } }
+            if (done.compareAndSet(false, true)) { pumps -= this; val _ = runCatching { conn.close() } }
         }
     }
 

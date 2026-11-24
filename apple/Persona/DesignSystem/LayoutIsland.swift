@@ -1,7 +1,6 @@
 import BeautifulUI
 import SwiftUI
 
-#if os(iOS) || os(visionOS)
 import UIKit
 
 /// A piece of a page laid out on its own: in a hosting controller of its own, so what changes inside it (a text field
@@ -179,8 +178,3 @@ extension View where Self: Equatable {
         if enabled { LayoutIsland(content: self) } else { self.equatable() }
     }
 }
-#else
-extension View where Self: Equatable {
-    func layoutIsland(enabled: Bool = true) -> some View { self }
-}
-#endif

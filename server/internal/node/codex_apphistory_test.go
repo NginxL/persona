@@ -3,6 +3,7 @@ package node
 import (
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -633,8 +634,14 @@ func TestCodexDBTargetIsThePathUnlessClosedInWALMode(t *testing.T) {
 		t.Fatalf("rollback journal: %q", got)
 	}
 	closeLikeTheApp(t, db)
-	if got, want := codexDBTarget(db), "file://"+filepath.ToSlash(strings.ReplaceAll(db, " ", "%20"))+"?immutable=1"; got != want {
-		t.Fatalf("closed: %q, want %q", got, want)
+	target := codexDBTarget(db)
+	u, err := url.Parse(target)
+	if err != nil || u.Scheme != "file" || u.Host != "" || u.Query().Get("immutable") != "1" ||
+		strings.TrimPrefix(u.Path, "/") != strings.TrimPrefix(filepath.ToSlash(db), "/") {
+		t.Fatalf("closed: %q is not the immutable URI for %q: %v", target, db, err)
+	}
+	if out, err := exec.Command(sqlite3WithJSON(t), "-readonly", target, "SELECT count(*) FROM x;").CombinedOutput(); err != nil || strings.TrimSpace(string(out)) != "0" {
+		t.Fatalf("closed database is not readable: %v: %s", err, out)
 	}
 	os.WriteFile(db+"-shm", nil, 0o600)
 	if got := codexDBTarget(db); got != db {

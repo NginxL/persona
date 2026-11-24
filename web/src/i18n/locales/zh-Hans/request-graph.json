@@ -28,6 +28,7 @@
   "empty_body": "助手把一个要求拆成几条待办时，每一件会显示在这里：谁在做、在等什么。",
   "all_done": "手上的要求都做完了。",
   "done_fold_other": "已完成的要求 {count} 条",
+  "cancelled_fold_other": "已取消的要求 {count} 条",
   "show_more_other": "再显示 {count} 条",
   "queued": "排队中",
   "why_ready": "可以开始了，还没派给 Agent"

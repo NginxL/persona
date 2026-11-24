@@ -180,3 +180,31 @@ test('a frame split at any byte, or a ping between two fragments, still gives th
   assert.deepEqual((await run(long, header)).got, [big.toString('utf8')])
   assert.deepEqual([one, fragmented, long].map((b) => b.toString('hex')), before, 'the chunks fed in are not changed')
 })
+
+test('rejects 1-byte Close payloads and unexpected RSV bits with 1002, and bounds outgoing Close reasons to 123 UTF-8 bytes', () => {
+  const oneByteClose = fakeSocket()
+  const ws1 = new WsClient(oneByteClose)
+  let code1 = 0
+  ws1.once('close', (code) => { code1 = code })
+  oneByteClose.emit('data', frame(0x8, Buffer.from([0x03])))
+  assert.equal(code1, 1002)
+  assert.equal(oneByteClose.written.length, 1)
+  assert.equal(unmasked(oneByteClose.written[0]).readUInt16BE(0), 1002)
+
+  const rsvSock = fakeSocket()
+  const ws2 = new WsClient(rsvSock)
+  let code2 = 0
+  ws2.once('close', (code) => { code2 = code })
+  rsvSock.emit('data', Buffer.from([0xc1, 2, 0x6f, 0x6b]))
+  assert.equal(code2, 1002)
+
+  const longClose = fakeSocket()
+  const ws3 = new WsClient(longClose)
+  ws3.close(1000, '😀'.repeat(50))
+  assert.equal(longClose.written.length, 1)
+  assert.ok((longClose.written[0][1] & 0x7f) <= 125, 'control frame length stays <= 125')
+  const body = unmasked(longClose.written[0])
+  assert.equal(body.readUInt16BE(0), 1000)
+  assert.ok(body.length <= 125)
+  assert.equal(body.subarray(2).toString('utf8'), '😀'.repeat(30))
+})

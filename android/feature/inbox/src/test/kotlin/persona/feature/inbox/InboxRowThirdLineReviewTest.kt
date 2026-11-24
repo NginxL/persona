@@ -13,6 +13,7 @@ import org.robolectric.annotation.Config
 import persona.core.contracts.InboxEventFields
 import persona.core.domain.inbox.InboxItem
 import java.util.Locale
+import persona.core.inbox.*
 
 /**
  * F-7: whether or not the hub sends `where`, one row structure — title, the AI summary, then a third line that

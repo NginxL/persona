@@ -6,6 +6,7 @@ vi.hoisted(() => { window.matchMedia ??= ((query: string) => ({ matches: false, 
 import { initI18n } from "../i18n";
 import { credentialOwner, setToken } from "../lib/api";
 import { createTodoWithRepositories, repositoryRequestContext, type RepositoryCatalog, type TaskRepositorySet } from "../lib/task-repositories";
+import type { PRFacts } from "../lib/todos";
 import { NewTodoRepositoryBindings, TodoRepositoryBindings } from "./TaskRepositoryBindingsEditor";
 import { Toasts } from "./atoms";
 
@@ -54,6 +55,13 @@ const answerEditor = async (catalogBody: unknown, setBody: unknown) => {
 };
 const legacy = (url: string) => ({ url, text: url.endsWith("/3211") ? "PR #3211" : "PR" });
 const render = async (manager = "assistant", todoId = "todo_example", prURL?: string, version?: unknown) => act(async () => root.render(<><TodoRepositoryBindings manager={manager} todoId={todoId} owner={credentialOwner()} legacyPRs={prURL ? [legacy(prURL)] : []} version={version} /><Toasts /></>));
+const showPRs = (prStatus?: PRFacts, otherPRs?: PRFacts[]) => act(async () => root.render(
+  <TodoRepositoryBindings manager="assistant" owner={credentialOwner()} todoId="todo_example" prStatus={prStatus} otherPRs={otherPRs} />));
+const observedPR: PRFacts = { url: identity.canonical_url + "/pull/7", title: "Original title", state: "open", draft: false,
+  conflicts: false, review: "pending", checks: "none", checked_at: "2026-01-01T00:00:00Z" };
+const savedWithTitle = (title: string, revision: number): TaskRepositorySet => ({ ...set, revision, repositories: [{
+  ...set.repositories[0], links: [{ ...set.repositories[0].links[0], title }],
+}] });
 const settle = async () => act(async () => { await Promise.resolve(); await Promise.resolve(); });
 /** The editor's add-link field: named by its own label, not by a repository's link count. */
 const linkInput = () => document.querySelector<HTMLInputElement>('input[type="url"]')!;
@@ -90,6 +98,81 @@ it("shows the Agent's saved links without an editor, and the load rides on the d
   const dialog = document.querySelector('[role="dialog"]')!;
   expect(dialog.textContent).toContain("#7");
   expect(dialog.textContent).toContain("Pull request");
+});
+
+it("matches current and earlier PR facts to their own rows as observations change", async () => {
+  const base = identity.canonical_url + "/pull/";
+  const current: PRFacts = { url: base.toUpperCase() + "7/?view=1", state: "open", draft: false, conflicts: true,
+    title: "Observed title", review: "pending", checks: "none", checked_at: "2026-01-01T00:00:00Z" };
+  const earlier: PRFacts = { ...current, url: base + "8", title: "Earlier title", state: "merged", draft: true };
+  await showPRs(current, [earlier]);
+  const [first, second] = twoLinks.repositories[0].links;
+  await answer(calls[0], { ...twoLinks, repositories: [{ ...twoLinks.repositories[0], links: [
+    { ...first, title: "Saved title" }, second, { ...second, kind: "issue", canonical_url: identity.canonical_url + "/issues/8" },
+  ] }] });
+  const [one, two, issue] = host.querySelectorAll("[data-repository-link]");
+  expect(one.querySelector("a")?.textContent).toContain("Saved title");
+  expect(one.textContent).not.toContain("Observed title");
+  expect(one.textContent).toContain("Open");
+  expect(one.textContent).toContain("Conflict");
+  expect(two.querySelector("a")?.textContent).toContain("Earlier title");
+  expect(two.textContent).toContain("Merged");
+  expect(two.textContent).not.toMatch(/Conflict|Draft/);
+  expect(issue.textContent).not.toMatch(/Earlier title|Merged/);
+
+  await showPRs({ ...current, draft: true, conflicts: false }, [{ ...earlier, state: "closed", title: undefined }]);
+  expect(one.textContent).toContain("Draft");
+  expect(one.textContent).not.toMatch(/Conflict|Open/);
+  expect(two.querySelector("a")?.getAttribute("aria-label")).toContain("Pull request #8");
+  expect(two.textContent).toContain("Closed");
+  expect(two.textContent).not.toContain("Conflict");
+  await showPRs(current, [{ ...earlier, url: other.canonical_url + "/pull/8" }]);
+  expect(two.textContent).not.toMatch(/Merged|Earlier title|Closed/);
+  expect(calls).toHaveLength(1);
+});
+
+it.each(["current", "earlier"])("refreshes a renamed %s PR in an open detail without a to-do version change", async (which) => {
+  const show = (pr: PRFacts) => which === "current" ? showPRs(pr) : showPRs(undefined, [pr]);
+  await show(observedPR);
+  await answer(calls[0], savedWithTitle("Original title", 1));
+  const link = host.querySelector("[data-repository-link] a")!;
+  expect(link.textContent).toContain("Original title");
+
+  const renamed = { ...observedPR, title: "Renamed while reading", url: observedPR.url + "#discussion" };
+  await show(renamed);
+  expect(calls).toHaveLength(2);
+  expect(calls[1].path).toBe("/todos/todo_example/repositories");
+  await answer(calls[1], savedWithTitle("Renamed while reading", 2));
+  expect(link.textContent).toContain("Renamed while reading");
+  expect(link.getAttribute("aria-label")).not.toContain("Original title");
+
+  await show({ ...renamed, state: "merged", checked_at: "2026-01-01T00:05:00Z" });
+  expect(host.querySelector("[data-repository-link]")?.textContent).toContain("Merged");
+  expect(calls).toHaveLength(2);
+});
+
+it("keeps a late repository response from reverting a newer PR title", async () => {
+  await showPRs(observedPR);
+  await showPRs({ ...observedPR, title: "Renamed before the first read returned" });
+  expect(calls).toHaveLength(2);
+  await answer(calls[1], savedWithTitle("Renamed before the first read returned", 2));
+  await answer(calls[0], savedWithTitle("Original title", 1));
+  expect(host.querySelector("[data-repository-link] a")?.textContent).toContain("Renamed before the first read returned");
+});
+
+it("uses the newest earlier observation across URL variants and gives the current PR precedence", async () => {
+  const newest: PRFacts = { ...observedPR, url: observedPR.url.toUpperCase() + "/?view=all", title: "Ready", state: "merged" };
+  const oldest: PRFacts = { ...observedPR, url: observedPR.url + "#details", title: "In progress", conflicts: true };
+  await showPRs(undefined, [newest, oldest]);
+  await answer(calls[0], set);
+  const row = host.querySelector("[data-repository-link]")!;
+  expect(row.querySelector("a")?.textContent).toContain("Ready");
+  expect(row.textContent).toContain("Merged");
+  expect(row.textContent).not.toMatch(/In progress|Open|Conflict/);
+
+  await showPRs({ ...newest, state: "closed" }, [oldest, newest]);
+  expect(row.textContent).toContain("Closed");
+  expect(row.textContent).not.toMatch(/Merged|In progress|Conflict/);
 });
 
 it("adds a link by its URL, refuses another repository's, and saves the whole set with both revisions", async () => {

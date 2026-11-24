@@ -50,15 +50,17 @@ import persona.core.designsystem.R as DesignR
 @Composable
 internal fun ReplyMarkdown(text: String, id: String, ownReply: Boolean, selectable: Boolean = false,
     viewKeys: ((Int) -> String)? = null, streaming: Boolean? = null) {
-    val actions = LocalChatRowActions.current
-    val source = actions?.replyImages
-    val localImages = actions?.localImages
-    if ((source == null && localImages == null) || "![" !in text || LocalInPicture.current) {
-        ChatMarkdown(text, id, selectable = selectable, viewKeys = viewKeys, streaming = streaming)
-        return
-    }
-    WithReplyPictures(text, id, source, localImages, ownReply, actions.openImages, actions.openPath) { markdown ->
-        ChatMarkdown(markdown, id, selectable = selectable, viewKeys = viewKeys, streaming = streaming)
+    ReadingContent {
+        val actions = LocalChatRowActions.current
+        val source = actions?.replyImages
+        val localImages = actions?.localImages
+        if ((source == null && localImages == null) || "![" !in text || LocalInPicture.current) {
+            ChatMarkdown(text, id, selectable = selectable, viewKeys = viewKeys, streaming = streaming)
+        } else {
+            WithReplyPictures(text, id, source, localImages, ownReply, actions.openImages, actions.openPath) { markdown ->
+                ChatMarkdown(markdown, id, selectable = selectable, viewKeys = viewKeys, streaming = streaming)
+            }
+        }
     }
 }
 
@@ -68,7 +70,7 @@ fun ExternalReplyMarkdown(text: String, source: ReplyImageSource, modifier: Modi
     var viewer by remember(source, text) { mutableStateOf<ViewerRequest?>(null) }
     Box(modifier) {
         WithReplyPictures(text, text, source, localImages = null, ownReply = false, open = { images, index -> viewer = ViewerRequest(images, index) }, openPath = null) { markdown ->
-            ChatMarkdown(markdown, selectable = false)
+            ReadingContent { ChatMarkdown(markdown, selectable = false) }
         }
     }
     viewer?.let { persona.feature.chat.media.ChatImageViewer(it.images, it.index, onDismiss = { viewer = null }) }
@@ -265,12 +267,12 @@ private fun ReplyTile(gallery: ReplyGallery, index: Int, column: Float, square: 
             val opacity by animateFloatAsState(if (bitmap != null) 1f else 0f,
                 animationSpec = if (PersonaTheme.reduceMotion) tween(Tokens.Motion.reduced) else SharedMotion.reveal(), label = "reply picture")
             if (bitmap != null) Image(bitmap.asImageBitmap(), null, Modifier.fillMaxSize().alpha(opacity), contentScale = ContentScale.Crop)
-            else if (!allowed) Text(load, style = PersonaTheme.type.callout, color = palette.ink2)
+            else if (!allowed) InterfaceContent { Text(load, style = PersonaTheme.type.callout, color = palette.ink2) }
             else if (failedState != null) JIcon(PersonaIcons.photo, tint = palette.ink3)
             if (more > 0) Box(Modifier.fillMaxSize().background(palette.scrim), contentAlignment = Alignment.Center) {
-                Text("+$more", style = PersonaTheme.type.title, color = palette.onMediaBackdrop)
+                InterfaceContent { Text("+$more", style = PersonaTheme.type.title, color = palette.onMediaBackdrop) }
             }
-            if (menu) {
+            if (menu) InterfaceContent {
                 val menuActions = if (localPath != null) {
                     listOfNotNull(gallery.openPath?.let { open ->
                         JAction(openFileLabel, PersonaIcons.openExternal, section = LocalMarkdownPath.fileName(localPath)) {
@@ -289,17 +291,19 @@ private fun ReplyTile(gallery: ReplyGallery, index: Int, column: Float, square: 
         }
         if (failedState != null && localPath != null) {
             val reason = failedState.reason ?: stringResource(R.string.chat_local_image_load_failed)
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(Tokens.Space.s),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(reason, style = PersonaTheme.type.caption, color = palette.ink2)
-                Text(
-                    retryLabel,
-                    style = PersonaTheme.type.caption,
-                    color = palette.accent,
-                    modifier = Modifier.clickable(role = Role.Button, onClick = triggerRetry),
-                )
+            InterfaceContent {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(Tokens.Space.s),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(reason, style = PersonaTheme.type.caption, color = palette.ink2)
+                    Text(
+                        retryLabel,
+                        style = PersonaTheme.type.caption,
+                        color = palette.accent,
+                        modifier = Modifier.clickable(role = Role.Button, onClick = triggerRetry),
+                    )
+                }
             }
         }
     }
@@ -336,10 +340,12 @@ private class InlineReplyPictures(private val gallery: ReplyGallery, private val
         val uri = LocalUriHandler.current
         val original = stringResource(R.string.chat_reply_image_original)
         var menu by remember(picture.url) { mutableStateOf(false) }
-        if (menu) JMenu(true, { menu = false }, listOf(JAction(original, PersonaIcons.openExternal, section = picture.host) {
-            menu = false
-            uri.openUri(picture.url)
-        }))
+        if (menu) InterfaceContent {
+            JMenu(true, { menu = false }, listOf(JAction(original, PersonaIcons.openExternal, section = picture.host) {
+                menu = false
+                uri.openUri(picture.url)
+            }))
+        }
         return ImageData(painter, Modifier.combinedClickable(role = Role.Button,
             onClickLabel = if (!allowed) load else if (state is TileState.Failed) retry else description,
             onLongClickLabel = original, onLongClick = { menu = true }, onClick = {

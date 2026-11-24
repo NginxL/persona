@@ -1,10 +1,6 @@
-// Persona's model providers in pi (docs/integrations/pi.md "Persona's model providers", #8194): the providers of
-// Settings › Model providers that this computer is in scope for and that speak a protocol pi has, asked of the node
-// on this machine (node.sock, `launcher.pi`, with the machine's launch key as `personad launch` sends it) and
-// registered with pi.registerProvider(). Their keys stay in this process's memory: nothing is written to disk.
-//
-// The user's own pi configuration wins: a provider id their models.json already has is left to it, and a default
-// model their settings name, or a --model / --provider / --models on the command line, is not replaced.
+// Persona's model providers in pi (docs/integrations/pi.md, #8194): in-scope providers from Settings › Model
+// providers asked of node.sock (`launcher.pi` with launch.key) and registered via pi.registerProvider() in memory.
+// User configuration wins: provider ids in models.json, default models in settings, or CLI model flags stay theirs.
 
 import { readFileSync } from 'node:fs'
 import { createConnection } from 'node:net'
@@ -44,6 +40,7 @@ export function askPersonaProviders({ socket = nodeSocketPath(), timeoutMs = 300
       resolve(v)
     }
     const conn = createConnection(socket)
+    conn.setEncoding('utf8')
     const timer = setTimeout(() => { log('persona providers: the node did not answer in time'); finish(null) }, timeoutMs)
     conn.on('error', () => finish(null))
     conn.on('close', () => finish(null))
@@ -84,7 +81,11 @@ export function userPiConfig({ agentDir = piAgentDir(), cwd = process.cwd() } = 
 
 /** The command line picks the model itself. */
 export function argvPicksModel(argv = process.argv) {
-  return argv.some((a) => ['--model', '--provider', '--models'].includes(a) || /^--(model|provider|models)=/.test(a))
+  for (const a of argv) {
+    if (a === '--') return false
+    if (['-m', '--model', '--provider', '--models'].includes(a) || /^(?:-m|--(?:model|provider|models))=/.test(a)) return true
+  }
+  return false
 }
 
 /** One provider of the node's answer as pi's registerProvider takes it. */

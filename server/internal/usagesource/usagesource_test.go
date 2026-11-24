@@ -364,6 +364,38 @@ func TestGenericSourceKeepsTheFirstAccountOfARepeatedID(t *testing.T) {
 	}
 }
 
+func TestGenericSourceCapsKeptWindowsNotRawEntries(t *testing.T) {
+	var rawWindows []string
+	for i := 0; i < 20; i++ {
+		rawWindows = append(rawWindows, `{"label":"5h"}`)
+	}
+	for i := 0; i < 10; i++ {
+		rawWindows = append(rawWindows, `{"label":"credits","used_percent":0}`)
+	}
+	for i := 0; i < 5; i++ {
+		rawWindows = append(rawWindows, `{"label":"5h","used_percent":20}`)
+	}
+	rawWindows = append(rawWindows, `{"label":"7d","used_percent":55}`)
+	for i := 1; i <= 35; i++ {
+		rawWindows = append(rawWindows, fmt.Sprintf(`{"label":"7d","model":"m%02d","used_percent":10}`, i))
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.WriteString(w, `{"accounts":[{"id":"acct-1","provider":"codex","name":"seat","windows":[`+strings.Join(rawWindows, ",")+`]}]}`)
+	}))
+	defer srv.Close()
+	res, err := Fetch(context.Background(), Config{Type: TypeGeneric, URL: srv.URL, Key: testKey}, now)
+	if err != nil || len(res.Accounts) != 1 {
+		t.Fatalf("%v %+v", err, res.Accounts)
+	}
+	got := res.Accounts[0].Windows
+	if len(got) != WindowsMost || res.Seen.Windows != WindowsMost {
+		t.Fatalf("windows = %d (seen %d), want %d", len(got), res.Seen.Windows, WindowsMost)
+	}
+	if got[0].Label != "5h" || got[0].UsedPercent != 20 || got[1].Label != "7d" || got[1].Model != "" || got[1].UsedPercent != 55 {
+		t.Fatalf("first windows = %+v", got[:2])
+	}
+}
+
 func TestUnknownTypeAndBadAddress(t *testing.T) {
 	if _, err := Fetch(context.Background(), Config{Type: "nope", URL: "https://gw.example.com"}, now); CodeOf(err) != CodeBadConfig {
 		t.Error(err)

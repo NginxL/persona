@@ -107,13 +107,9 @@ import PersonaWire
 
     @Test func declarationsAdvertiseOnlyWhatTheAppDraws() {
         #expect(!ExtensionPageStream.components.contains("html"))
-        // UI version 6's pictures and tiles: drawn on iOS (#827); the frozen Mac app keeps its earlier list.
+        // UI version 6's pictures and tiles: drawn on iOS (#827).
         for media in ["image", "grid", "carousel"] {
-            #if os(macOS)
-            #expect(!ExtensionPageStream.components.contains(media))
-            #else
             #expect(ExtensionPageStream.components.contains(media))
-            #endif
         }
         let watchFeatures = LiveConnection.queryItems(EventCursor()).first?.value ?? ""
         #expect(!watchFeatures.contains(ExtensionPageStream.feature))

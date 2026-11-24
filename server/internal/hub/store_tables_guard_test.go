@@ -23,7 +23,19 @@ import (
 // declares, take the methods *db.DB serves of them, and look at the SQL those methods (and the db functions they
 // call) run.
 
-var createTableRE = regexp.MustCompile(`(?i)CREATE TABLE (?:IF NOT EXISTS )?([a-z_]+)`)
+var createTableRE = regexp.MustCompile(`(?i)CREATE TABLE (?:IF NOT EXISTS )?([a-z_][a-z0-9_]*)`)
+
+// extractCreateTables returns sorted, unique lowercase table names declared by CREATE TABLE statements in sql.
+func extractCreateTables(sql string) []string {
+	var out []string
+	for _, m := range createTableRE.FindAllStringSubmatch(sql, -1) {
+		if tb := strings.ToLower(m[1]); !slices.Contains(out, tb) {
+			out = append(out, tb)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
 
 // setTables are the tables migrations/<part> makes.
 func setTables(t *testing.T, part string) []string {
@@ -38,8 +50,8 @@ func setTables(t *testing.T, part string) []string {
 		if err != nil {
 			t.Fatal(err)
 		}
-		for _, m := range createTableRE.FindAllStringSubmatch(string(b), -1) {
-			if tb := strings.ToLower(m[1]); !slices.Contains(out, tb) {
+		for _, tb := range extractCreateTables(string(b)) {
+			if !slices.Contains(out, tb) {
 				out = append(out, tb)
 			}
 		}
@@ -205,6 +217,51 @@ func storeMethods(t *testing.T, dir string) []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+// Regression test for #12846 / #12833: table names with digits (such as a2a_tasks) must be parsed intact rather than
+// truncated at the first digit into single-letter names that cause false positives on SQL aliases or English words.
+func TestCreateTableREParsesDigitTableNames(t *testing.T) {
+	sql := `
+		CREATE TABLE a2a_tasks (id text PRIMARY KEY);
+		CREATE TABLE IF NOT EXISTS v2_items_3 (id int);
+		create table OAuth2_Tokens (id text);
+		CREATE TABLE a2a_tasks (id text);
+	`
+	got := extractCreateTables(sql)
+	want := []string{"a2a_tasks", "oauth2_tokens", "v2_items_3"}
+	if !slices.Equal(got, want) {
+		t.Fatalf("extractCreateTables() = %v, want %v", got, want)
+	}
+
+	managerTables := setTables(t, "manager")
+	if !slices.Contains(managerTables, "a2a_tasks") {
+		t.Fatalf("manager tables %v do not contain a2a_tasks", managerTables)
+	}
+	if slices.Contains(managerTables, "a") {
+		t.Fatalf("manager tables %v contain truncated single-letter table name \"a\"", managerTables)
+	}
+
+	funcs := map[string]dbFunc{
+		"DB.HubQueryWithAliasA": {
+			strs: []string{
+				"SELECT 1 FROM share_machine_authorities a WHERE a.id = $1",
+				"phone write arguments must be a JSON object of at most 64 KiB",
+			},
+		},
+		"DB.ManagerQueryA2ATasks": {
+			strs: []string{
+				"SELECT id FROM a2a_tasks WHERE state = $1",
+			},
+		},
+	}
+	all := append([]string{"share_machine_authorities"}, got...)
+	if touched := tablesTouched(funcs, "HubQueryWithAliasA", all); !slices.Equal(touched, []string{"share_machine_authorities"}) {
+		t.Fatalf("HubQueryWithAliasA touched %v, want [share_machine_authorities]", touched)
+	}
+	if touched := tablesTouched(funcs, "ManagerQueryA2ATasks", all); !slices.Equal(touched, []string{"a2a_tasks"}) {
+		t.Fatalf("ManagerQueryA2ATasks touched %v, want [a2a_tasks]", touched)
+	}
 }
 
 // The hub's store touches only the hub's tables; the managers' stores only the manager's.

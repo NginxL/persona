@@ -51,6 +51,7 @@ import persona.core.navigation.AppTab
 import persona.core.navigation.Navigator
 import java.io.File
 import java.io.IOException
+import persona.core.inbox.*
 
 /** The assistant's own connector rows keep their conversation presentation rather than looking like external mail. */
 @RunWith(AndroidJUnit4::class)

@@ -288,7 +288,7 @@ internal fun CommentLine(c: ExtensionViewComment) {
                 ago?.let { Spacer(Modifier.width(Tokens.Space.s)); Text(it, style = type.micro, color = palette.ink3, maxLines = 1) }
                 c.badge?.takeIf { it.text.isNotBlank() }?.let { Spacer(Modifier.width(Tokens.Space.s)); JTag(it.text, ExtensionViewText.tone(it.tone)) }
             }
-            c.body?.takeIf { it.isNotBlank() }?.let { ExtensionMarkdown(it) }
+            c.body?.takeIf { it.isNotBlank() }?.let { ReadingContent { ExtensionMarkdown(it) } }
         }
     }
 }

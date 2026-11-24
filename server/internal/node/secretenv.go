@@ -90,6 +90,13 @@ func randomHex(n int) (string, error) {
 	return hex.EncodeToString(b), nil
 }
 
+// A hand-off's values, kept for its start's ticket; the handler zeroes the params it is handed, as secret.run does.
+func init() {
+	nodeRPC(proto.MethodSecretStage, func(n *Node, _ context.Context, params json.RawMessage) (any, error) {
+		return n.secretStageCall(params)
+	})
+}
+
 // secretStageCall answers secret.stage: to a check, a one-time key; to a hand-off sealed to one, a one-time ticket.
 func (n *Node) secretStageCall(params json.RawMessage) (any, error) {
 	var p proto.SecretStageParams

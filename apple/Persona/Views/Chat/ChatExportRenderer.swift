@@ -238,6 +238,8 @@ struct ExportAssets {
     var images: [String: UIImage] = [:]
     var photos: [String: [UIImage]] = [:]
     var column: CGFloat = 0
+    /// Your message's photos an exported page draws: a layout choice, not the pictures a message may carry (#12973).
+    static let photosDrawn = 4
 
     static func load(_ messages: [ExportMessage], dark: Bool, column: CGFloat, scale: CGFloat,
                      loadImage: (String) async -> UIImage?) async -> ExportAssets {
@@ -245,7 +247,7 @@ struct ExportAssets {
         for m in messages {
             if m.isUser {
                 var photos: [UIImage] = []
-                for path in m.images.prefix(MessagePhotos.limit) {
+                for path in m.images.prefix(Self.photosDrawn) {
                     if let img = await loadImage(path) { photos.append(img) }
                 }
                 out.photos[m.id] = photos

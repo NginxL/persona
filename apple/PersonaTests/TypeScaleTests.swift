@@ -15,9 +15,14 @@ struct TypeScaleTests {
     private static let stackSpacing = try! NSRegularExpression(pattern: #"VStack\([^)\n]*spacing: *[1-9][0-9.]*[,)]"#)
 
     private static func sources() throws -> [(name: String, lines: [String])] {
-        let dir = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().appending(path: "Persona")
-        let files = FileManager.default.enumerator(at: dir, includingPropertiesForKeys: nil)?
-            .compactMap { $0 as? URL }.filter { $0.pathExtension == "swift" } ?? []
+        let apple = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+        let dir = apple.appending(path: "Persona")
+        // The app's own sources and its feature modules' (apple/Modules, docs/apple/ios.md "Modules").
+        var files: [URL] = []
+        for root in [dir, apple.appending(path: "Modules")] {
+            let all = FileManager.default.enumerator(at: root, includingPropertiesForKeys: nil)?.compactMap { $0 as? URL } ?? []
+            files += all.filter { $0.pathExtension == "swift" }
+        }
         #expect(files.count > 100, "the app's sources are not at \(dir.path)")
         return try files.filter { !exempt.contains($0.lastPathComponent) }.map {
             ($0.lastPathComponent, try String(contentsOf: $0, encoding: .utf8).components(separatedBy: "\n"))

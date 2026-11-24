@@ -45,9 +45,11 @@ class AssistantMenuShotsTest {
             PersonaTheme(darkTheme = dark, reduceMotion = true, style = AppStyle.Glass) {
                 val res = LocalResources.current
                 val copy = AssistantCopyText(row, main, main = true, config = null, assistantMachine = "", machines = emptyList())
-                val sections = assistantMenu(offline = true, voice = true, main = main, active = main, compact = true, newMain = true, working = true)
+                // A module's action where the voice module puts "Voice chat" (Modules.kt), so the picture keeps every item.
+                val voice = persona.core.moduleapi.ModuleMenuAction("example.chat", "Voice chat", persona.core.designsystem.icons.PersonaIcons.voiceChannel) {}
+                val sections = assistantMenu(offline = true, modules = listOf(voice), main = main, active = main, compact = true, newMain = true, working = true)
                 JActionSheet(sections.flatMapIndexed { index, items ->
-                    items.mapIndexed { i, item -> JAction(res.getString(item.label), item.icon, separatorBefore = index > 0 && i == 0) {} }
+                    items.mapIndexed { i, item -> JAction(item.label(res), item.icon, separatorBefore = index > 0 && i == 0) {} }
                 }, onDismiss = {}, title = copy.menuTitle(res, "Persona"))
             }
         }

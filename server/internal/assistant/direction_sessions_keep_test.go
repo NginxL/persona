@@ -193,6 +193,9 @@ func TestDirectionFilingWritePublishesKeep(t *testing.T) {
 		p := e.f.lastSnapshot().Profile
 		return p != nil && slices.Contains(p.Keep, chat)
 	}
+	// The setup publishes twice: setSettings at once, and directionsSync from a goroutine it does not wait for
+	// (directions.go). Count from after both, or a late second one looks like the filing's (#13945).
+	waitFor(t, "the setup's two snapshots", func() bool { return directionSnaps(e.f) >= 2 })
 	n := directionSnaps(e.f)
 	directionFilingMustPut(t, e.s, "server", "chat-a", "conv_lead_a")
 	if got := directionSnaps(e.f); got != n+1 || !kept() {

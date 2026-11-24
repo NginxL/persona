@@ -1,7 +1,9 @@
 package devices
 
 import (
+	"encoding/json"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 
@@ -9,25 +11,30 @@ import (
 )
 
 func TestHideUsageProviders(t *testing.T) {
-	in := []proto.UsageAccount{{Provider: "codex", Name: "Codex Pro"}, {Provider: "Claude", Name: "Claude"}}
-	if got := hideUsageProviders(in, nil); len(got) != 2 {
+	in := []proto.UsageAccount{
+		{Provider: "codex", Name: "Codex Pro"}, {Provider: "Claude", Name: "Claude"},
+		{Provider: "agy", Name: "Antigravity"}, {Provider: "antigravity", Name: "Antigravity · Gemini"},
+	}
+	if got := hideUsageProviders(in, nil); len(got) != 4 {
 		t.Fatalf("nothing hidden: %v", got)
 	}
 	got := hideUsageProviders(in, []string{"codex"})
-	if len(got) != 1 || got[0].Provider != "Claude" {
+	if len(got) != 3 || got[0].Provider != "Claude" {
 		t.Fatalf("codex hidden: %v", got)
 	}
-	if got := hideUsageProviders(in, []string{"claude", "codex"}); len(got) != 0 {
-		t.Fatalf("all hidden: %v", got)
+	for _, alias := range []string{"agy", "antigravity"} {
+		if got := hideUsageProviders(in, []string{alias}); len(got) != 2 || got[0].Provider != "codex" || got[1].Provider != "Claude" {
+			t.Fatalf("hide %s: %+v", alias, got)
+		}
 	}
-	if len(in) != 2 {
+	if len(in) != 4 {
 		t.Fatal("the input was changed")
 	}
 }
 
 func TestCleanHiddenProviders(t *testing.T) {
-	got, ok := cleanHiddenProviders([]string{" Codex ", "claude", "codex"})
-	if !ok || len(got) != 2 || got[0] != "claude" || got[1] != "codex" {
+	got, ok := cleanHiddenProviders([]string{" Codex ", "claude", "codex", " Agy ", "antigravity"})
+	if !ok || len(got) != 3 || got[0] != "antigravity" || got[1] != "claude" || got[2] != "codex" {
 		t.Fatalf("got %v %v", got, ok)
 	}
 	for _, bad := range [][]string{{""}, {"a b"}, {"../x"}, make([]string, 17)} {
@@ -35,6 +42,33 @@ func TestCleanHiddenProviders(t *testing.T) {
 			t.Fatalf("accepted %q", bad)
 		}
 	}
+}
+
+func TestAdminUsageReadsLegacyAntigravityVisibility(t *testing.T) {
+	d, c := usageTestDevices(t, `{"usage":{"hidden_providers":["agy","antigravity"]}}`)
+	if code, body, _ := c.do("GET", "/api/v1/admin/usage-sources", ""); code != http.StatusOK || !oneAntigravity(body["hidden_providers"]) || len(body["providers"].([]any)) != 3 {
+		t.Fatalf("want a single Antigravity admin switch: %d %v", code, body)
+	}
+	now := time.Now()
+	d.usageWin.merged = []proto.UsageAccount{{Provider: "antigravity"}}
+	d.usageWin.at = now
+	code, body, _ := c.do("GET", "/api/v1/usage/windows", "")
+	if code != http.StatusOK || len(body["accounts"].([]any)) != 0 || !oneAntigravity(body["hidden_providers"]) {
+		t.Fatalf("legacy visibility in usage response: %d %v", code, body)
+	}
+	code, body, _ = c.do("PUT", "/api/v1/admin/usage-sources", `{"hidden_providers":["agy"]}`)
+	if code != http.StatusOK || !oneAntigravity(body["hidden_providers"]) {
+		t.Fatalf("legacy alias on write: %d %v", code, body)
+	}
+	u := managerJSON(t, d)["usage"].(map[string]any)
+	if !oneAntigravity(u["hidden_providers"]) {
+		t.Fatalf("canonical visibility on disk: %v", u)
+	}
+}
+
+func oneAntigravity(v any) bool {
+	p, _ := v.([]any)
+	return len(p) == 1 && p[0] == "antigravity"
 }
 
 // The setting is display only: the usage route leaves the provider out, the poll (which the scheduler's capacity view
@@ -101,5 +135,25 @@ func TestAdminUsageHiddenProviders(t *testing.T) {
 	}
 	if u, _ := managerJSON(t, d)["usage"].(map[string]any); u["hidden_providers"] != nil {
 		t.Fatalf("cleared setting left in manager.json: %v", u)
+	}
+}
+
+// The answer names the hidden providers (#13179) and is unchanged when nothing is hidden.
+func TestUsageWindowsAnswerHiddenProviders(t *testing.T) {
+	now := time.Unix(1_700_000_000, 0)
+	plain := usageWindowsAnswer(nil, nil, now)
+	if _, ok := plain["hidden_providers"]; ok {
+		t.Fatalf("nothing hidden must not add the field: %v", plain)
+	}
+	if acc, _ := plain["accounts"].([]proto.UsageAccount); acc == nil {
+		t.Fatalf("accounts must be an empty list, not null: %v", plain)
+	}
+	got := usageWindowsAnswer(nil, []string{"claude", "codex"}, now)
+	if h, _ := got["hidden_providers"].([]string); len(h) != 2 || h[0] != "claude" || h[1] != "codex" {
+		t.Fatalf("hidden_providers = %v", got["hidden_providers"])
+	}
+	raw, err := json.Marshal(got)
+	if err != nil || !strings.Contains(string(raw), `"hidden_providers":["claude","codex"]`) {
+		t.Fatalf("json = %s (%v)", raw, err)
 	}
 }

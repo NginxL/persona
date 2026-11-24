@@ -1,3 +1,7 @@
+.subagent-avatar-stack > * + * {
+  margin-inline-start: -0.375rem;
+}
+
 .session-overview {
   order: -1;
   max-block-size: 45%;

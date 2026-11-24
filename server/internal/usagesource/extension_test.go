@@ -2,6 +2,7 @@ package usagesource
 
 import (
 	"encoding/json"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -84,3 +85,50 @@ func TestStoredTypeKeepsExtension(t *testing.T) {
 		t.Fatal("extension is read from manager.json, not one the admin page makes")
 	}
 }
+
+// A gateway's protection line can differ per account and per window: each valid one (0-100) is kept on its own window,
+// and anything else (absent, below 0, above 100, not a number) is "not said", never clamped into a value.
+func TestFromExtensionKeepsEachWindowsProtectionLine(t *testing.T) {
+	now := time.Date(2026, 11, 20, 12, 0, 0, 0, time.UTC)
+	raw := json.RawMessage(`{"accounts": [
+		{"provider": "claude", "name": "Seat 1", "windows": [
+		  {"label": "5h", "used_percent": 40, "protect_percent": 98},
+		  {"label": "7d", "used_percent": 10, "protect_percent": 99.5}]},
+		{"provider": "claude", "name": "Seat 2", "windows": [
+		  {"label": "5h", "used_percent": 40, "protect_percent": 90},
+		  {"label": "7d", "used_percent": 10, "protect_percent": 0}]},
+		{"provider": "claude", "name": "Seat 3", "windows": [
+		  {"label": "5h", "used_percent": 40},
+		  {"label": "7d", "used_percent": 10, "protect_percent": 140}]},
+		{"provider": "claude", "name": "Seat 4", "windows": [
+		  {"label": "5h", "used_percent": 40, "protect_percent": -1}]}
+	]}`)
+	res, err := FromExtension(raw, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	line := func(a, w int) string {
+		p := res.Accounts[a].Windows[w].ProtectPercent
+		if p == nil {
+			return "none"
+		}
+		return strings.TrimRight(strings.TrimRight(strconvF(*p), "0"), ".")
+	}
+	for _, c := range []struct {
+		a, w int
+		want string
+	}{{0, 0, "98"}, {0, 1, "99.5"}, {1, 0, "90"}, {1, 1, "0"}, {2, 0, "none"}, {2, 1, "none"}, {3, 0, "none"}} {
+		if got := line(c.a, c.w); got != c.want {
+			t.Errorf("account %d window %d: protect_percent %s, want %s", c.a, c.w, got, c.want)
+		}
+	}
+	// Absent on the wire stays absent, so a hub or an extension that never heard of it adds nothing.
+	if b, _ := json.Marshal(res.Accounts[2].Windows[0]); strings.Contains(string(b), "protect_percent") {
+		t.Errorf("an unsaid line is not sent: %s", b)
+	}
+	if b, _ := json.Marshal(res.Accounts[0].Windows[0]); !strings.Contains(string(b), `"protect_percent":98`) {
+		t.Errorf("the line is sent as a number: %s", b)
+	}
+}
+
+func strconvF(f float64) string { return strconv.FormatFloat(f, 'f', 6, 64) }

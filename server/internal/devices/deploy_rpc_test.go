@@ -2,6 +2,7 @@ package devices
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -23,27 +24,28 @@ import (
 )
 
 type updatingNode struct {
-	mu          sync.Mutex
-	machine     *Machine
-	peer        *rpc.Peer
-	data        []byte
-	expected    []byte
-	begin       int
-	commits     int
-	confirms    int
-	aborts      int
-	resume      int64
-	badOffset   bool
-	busyCommit  bool
-	busySession bool
-	sessionErr  error
-	background  bool
-	sessions    []proto.Session // when set, what sessions.list answers
-	updateBusy  *bool           // with sessions: the node's update_busy (nil leaves it out)
-	installErr  error
-	stayOld     bool
-	target      string // the build it confirms ("" the fixture hub's, new-build)
-	committed   chan struct{}
+	mu                  sync.Mutex
+	machine             *Machine
+	peer                *rpc.Peer
+	data                []byte
+	expected            []byte
+	begin               int
+	commits             int
+	confirms            int
+	aborts              int
+	resume              int64
+	badOffset           bool
+	busyCommit          bool
+	busySession         bool
+	sessionErr          error
+	background          bool
+	sessions            []proto.Session // when set, what sessions.list answers
+	updateBusy          *bool           // with sessions: the node's update_busy (nil leaves it out)
+	installErr          error
+	stayOld             bool
+	target              string // the build it confirms ("" the fixture hub's, new-build)
+	committed           chan struct{}
+	handoffGraceSeconds int
 }
 
 func (n *updatingNode) handle(_ context.Context, method string, params json.RawMessage) (any, error) {
@@ -77,7 +79,7 @@ func (n *updatingNode) handle(_ context.Context, method string, params json.RawM
 			return nil, err
 		}
 		sum := sha256.Sum256(n.expected)
-		if p.Size != int64(len(n.expected)) || p.SHA256 != hex.EncodeToString(sum[:]) || p.Version != "new-build" {
+		if p.Size != int64(len(n.expected)) || p.SHA256 != hex.EncodeToString(sum[:]) || p.Version != cmp.Or(n.target, "new-build") {
 			return nil, errors.New("wrong update metadata")
 		}
 		n.begin++
@@ -102,6 +104,13 @@ func (n *updatingNode) handle(_ context.Context, method string, params json.RawM
 		}
 		return map[string]any{"offset": offset}, nil
 	case "node.update.commit":
+		var p proto.NodeUpdateCommitParams
+		if err := json.Unmarshal(params, &p); err != nil {
+			return nil, err
+		}
+		if p.HandoffGraceSeconds != nil {
+			n.handoffGraceSeconds = *p.HandoffGraceSeconds
+		}
 		n.commits++
 		if n.busyCommit && n.commits == 1 {
 			return nil, &rpc.Error{Code: "node_update_busy", Message: "node is busy"}
@@ -114,7 +123,7 @@ func (n *updatingNode) handle(_ context.Context, method string, params json.RawM
 		}
 		if !n.stayOld {
 			n.machine.mu.Lock()
-			n.machine.info.Version = "new-build"
+			n.machine.info.Version = cmp.Or(n.target, "new-build")
 			n.machine.mu.Unlock()
 		}
 		if n.committed != nil {
@@ -191,7 +200,7 @@ func TestStaleDeployErrorClearsWhenTheNodeMatches(t *testing.T) {
 }
 
 func TestLinkedDeployCapabilities(t *testing.T) {
-	hubNodeBinary(t, "linux", "amd64")
+	hubNodeBinary(t, "linux", "amd64", "new-build")
 	for _, kind := range []string{kindLink, kindService} {
 		t.Run(kind, func(t *testing.T) {
 			_, m, _, _ := linkedDeployFixture(t, kind)
@@ -247,7 +256,7 @@ func TestLinkedDeployTransfersAndConfirms(t *testing.T) {
 // Redeploy sends the kind of program the node says it runs: persona-node to persona-node, personad to the rest; so
 // does an update the hub queued before it restarted, when the node comes back (nodeUpdateConnected).
 func TestRedeployBringsTheProgramTheNodeRuns(t *testing.T) {
-	fullBuild := updatetest.Program(t, nodeproto.ProgramPersonad, "linux", "amd64")
+	fullBuild := updatetest.VersionedProgram(t, nodeproto.ProgramPersonad, "linux", "amd64", "new-build") // linkedDeployFixture's hub
 	nodeBuild := updatetest.Program(t, nodeproto.ProgramPersonaNode, "linux", "amd64")
 	for _, tc := range []struct{ program, via, path string }{
 		{nodeproto.ProgramPersonaNode, "redeploy", ""},

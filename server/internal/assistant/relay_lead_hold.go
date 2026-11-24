@@ -2,6 +2,7 @@ package assistant
 
 import (
 	"context"
+	"strings"
 	"time"
 )
 
@@ -17,6 +18,23 @@ import (
 // a lead. Only task_plan reads it: agent_start, agent_send with resume and the lead's own tools are unchanged, and so is
 // everything that is no such hand-over (an unquoted message, an answer, a hand-over still queued and never tried, a
 // conversation that is no lead, the main conversation). Read-only tasks and kinds the owner trusts start as before.
+//
+// Decision rights (2026-11-23) took the Start card off a lead's own plans: words handed to the wrong lead start work in
+// the wrong place, which is reversible and the supervisor's to set right, none of the six kinds only the owner decides.
+// A lead's plan starts at once whatever the mark says (task_plan's orchestrates), and a scheduled round drops
+// user_requested before the hold is read: the mark is still kept, but no longer holds a plan back.
+//
+// What the hold keeps from #12953 on, so a lead starts and closes its own work without the owner or the main conversation
+// starting it (heldOutsideOwnKinds):
+//
+//   - A task whose brief carries the owner's words as the hub verified them (relay_quote.go) from a hand-over that was
+//     delivered into this very lead keeps user_requested and starts as the main conversation's would: the owner asked
+//     for it in those words, and the to-do's brief shows them. The owner chose this over a Start card for every relayed
+//     request ("the lead should send it").
+//   - Any other task in a held lead (a turn a task's report or a follow-up opened, where user_requested is only the
+//     model's word) keeps it only when it is of a kind (trustKey: the machine, the repository or exact folder, reading
+//     or writing) that a started plan of this same lead already ran, where the owner already let the lead work; work in
+//     a place new to the lead waits for the owner's Start, as before.
 
 // holdForHandover: message msg is about to be sent into conversation to (deliverRelay). When it is a hand-over of the
 // owner's quoted words, still kept, and to is a direction's lead, the lead waits from now, saved before the send
@@ -117,4 +135,68 @@ func (s *Service) handoverKept(id string) bool {
 	}
 	e, ok := b.m[id]
 	return ok && time.Since(e.At) <= handoverMemory
+}
+
+// heldOutsideOwnKinds takes user_requested off the tasks of a plan from held lead lead (handedOver) that neither carry
+// the owner's verified words of a hand-over delivered into it (handedWords) nor are of a kind a started plan of that lead
+// ran (trustKey, or trustFolderKey from before the repository was known): those wait for the owner's Start. A continuation
+// keeps its inherited brief, but may instead carry the verified hand-over in the current conversation, as todo_id does.
+func (s *Service) heldOutsideOwnKinds(ctx context.Context, machine, lead string, tasks []PlanTask) {
+	var own map[string]bool
+	var current *briefRecord
+	for i := range tasks {
+		t := tasks[i]
+		if !t.UserRequested || t.Brief != nil && s.handedWords(lead, t.Brief.Request) {
+			continue
+		}
+		if t.Continues != "" {
+			if current == nil {
+				origin := s.briefOrigin(ctx, machine, lead)
+				current = &origin
+			}
+			if s.handedWords(lead, current.Request) {
+				continue
+			}
+		}
+		if own == nil {
+			own = map[string]bool{}
+			plans, err := s.conversationPlans(ctx, lead)
+			if err != nil {
+				s.logf("lead %s: its started plans: %v", short(lead), err) // read nothing: a place is new to the lead
+			}
+			for _, p := range plans {
+				if p.State != planStarted {
+					continue
+				}
+				for _, pt := range p.Tasks {
+					own[trustKey(pt)], own[trustFolderKey(pt)] = true, true
+				}
+			}
+		}
+		if !own[trustKey(t)] && !own[trustFolderKey(t)] {
+			tasks[i].UserRequested = false
+		}
+	}
+}
+
+// handedWords: request r is the owner's message of a kept hand-over that was delivered into conversation lead (a quoted
+// part of a message names that message).
+func (s *Service) handedWords(lead string, r *BriefRequest) bool {
+	if r == nil || r.MessageID == "" {
+		return false
+	}
+	msg, _, _ := strings.Cut(r.MessageID, "#")
+	b := &s.handovers
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if !b.loadLocked(context.Background(), s) {
+		return false
+	}
+	for _, e := range b.m {
+		id, _, _ := strings.Cut(e.MessageID, "#")
+		if e.To == lead && id == msg && e.Conversation == r.Conversation && (e.State == handoverDelivered || e.State == handoverAnswered) {
+			return true
+		}
+	}
+	return false
 }

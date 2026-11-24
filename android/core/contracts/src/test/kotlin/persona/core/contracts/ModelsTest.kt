@@ -81,6 +81,16 @@ class ModelsTest {
         assertEquals(java.time.Instant.parse("2026-10-31T05:58:40.205893083Z"), parseTime("2026-10-31T13:58:40.205893083+08:00"))
         assertEquals(java.time.Instant.parse("2026-10-31T05:58:40.205893083Z"), parseTime("2026-10-31T05:58:40.205893083Z"))
         assertNull(parseTime("not a time"))
+        // Fast-path edge cases: negative & sub-hour offsets, leap years, non-leap Feb 29, lowercase t/z, fractional lengths, 2000 boundary.
+        assertEquals(java.time.Instant.parse("2024-02-29T23:59:59Z"), parseTime("2024-02-29T23:59:59Z"))
+        assertEquals(java.time.Instant.parse("2000-02-29T00:00:00Z"), parseTime("2000-02-29t00:00:00z"))
+        assertNull(parseTime("2025-02-29T00:00:00Z"))
+        assertNull(parseTime("2100-02-29T00:00:00Z"))
+        assertEquals(java.time.Instant.parse("2026-11-02T14:00:00.123456Z"), parseTime("2026-11-02T08:30:00.123456-05:30"))
+        assertEquals(java.time.Instant.parse("2000-01-01T00:00:00Z"), parseTime("2000-01-01T08:00:00+08:00"))
+        assertNull(parseTime("2000-01-01T07:59:59+08:00"))
+        assertNull(parseTime("2026-13-02T08:30:00Z"))
+        assertNull(parseTime("2026-11-02T08:30:00+25:00"))
     }
 
     @Test fun resolutionOmitsUnsetFields() {
@@ -123,6 +133,32 @@ class ModelsTest {
         val encoded = JsonCodec.encodeToString(said)
         assertTrue(encoded, encoded.contains(""""rewind_code":false"""))
         assertEquals(said, JsonCodec.decodeFromString<SessionCapabilities>(encoded))
+    }
+
+    @Test fun codexTakeoverCapabilityAndDtosDecodeSafelyAndRoundTrip() {
+        val withTakeover = JsonCodec.decodeFromString<SessionCapabilities>(
+            """{"read":true,"send":false,"takeover":{"running":true,"can_resume":false,"reason":"encrypted_context"}}""",
+        )
+        assertTrue(withTakeover.read && !withTakeover.send)
+        assertEquals(CodexTakeoverCapability(running = true, canResume = false, reason = "encrypted_context"), withTakeover.takeover)
+        val roundTripped = JsonCodec.decodeFromString<SessionCapabilities>(JsonCodec.encodeToString(withTakeover))
+        assertEquals(withTakeover, roundTripped)
+
+        // Malformed takeover drops only itself without discarding sibling capabilities.
+        val malformed = JsonCodec.decodeFromString<SessionCapabilities>("""{"read":true,"takeover":"bad"}""")
+        assertEquals(SessionCapabilities(read = true, takeover = null), malformed)
+
+        // Older hubs omit takeover.
+        val older = JsonCodec.decodeFromString<SessionCapabilities>("""{"read":true}""")
+        assertNull(older.takeover)
+
+        val info = JsonCodec.decodeFromString<CodexTakeoverInfo>(
+            """{"running":false,"can_resume":true,"token":"tok-1","cwd":"/work","transcript_path":"/tmp/t","continuation_prompt":"Continue"}""",
+        )
+        assertEquals(CodexTakeoverInfo(running = false, canResume = true, token = "tok-1", cwd = "/work", transcriptPath = "/tmp/t", continuationPrompt = "Continue"), info)
+        assertEquals("""{"token":"tok-1","confirm_stop":true}""", JsonCodec.encodeToString(CodexTakeoverRequest("tok-1", confirmStop = true)))
+        val response = JsonCodec.decodeFromString<CodexTakeoverResponse>("""{"session":{"machine_id":"m","session_id":"s","status":"working"}}""")
+        assertEquals(SessionKey("m", "s"), response.session.key)
     }
 
     @Test fun agentLabelNamesEveryAgent() {

@@ -26,7 +26,7 @@ struct AppStorageRatchetTests {
     @Test func noNewAppStorage() throws {
         let apple = Self.here.deletingLastPathComponent()
         var holding: Set<String> = []
-        for dir in ["Persona", "Shared"] {
+        for dir in ["Persona", "Modules", "Shared"] {
             let files = FileManager.default.enumerator(at: apple.appending(path: dir), includingPropertiesForKeys: nil)?
                 .compactMap { $0 as? URL }.filter { $0.pathExtension == "swift" } ?? []
             for url in files where try String(contentsOf: url, encoding: .utf8).contains("@AppStorage") {

@@ -150,9 +150,11 @@ func (s *Service) Push(ctx context.Context, by Actor, in PushRequest) (PushResul
 	next.LastOKAt, next.LastNewCount, next.NextRunAt = &now, len(fresh), nil
 	next.SinceAt = &now
 	run := Run{At: now, Trigger: TriggerPush, New: len(fresh), Count: len(items)}
-	if !s.commit(ctx, *cur, next, &commitData{seen: seen, items: fresh}, &run, now, true) {
+	committed, ok := s.commit(ctx, *cur, next, &commitData{seen: seen, items: fresh}, &run, now, true)
+	if !ok {
 		return PushResult{}, errorf(http.StatusInternalServerError, CodeCallFailed, "the items could not be kept")
 	}
+	next, fresh = committed.Sub, committed.Items
 	if len(fresh) > 0 {
 		s.o.Logf("subscription %s: %d pushed, %d new", cur.ID, len(items), len(fresh))
 		if on(next) {
@@ -167,6 +169,10 @@ func (s *Service) Push(ctx context.Context, by Actor, in PushRequest) (PushResul
 	return PushResult{Subscription: shown(*out), New: len(fresh), Count: len(items)}, nil
 }
 
+// pushSourceID makes competing managers contend on the subscriptions primary key instead of creating two sources.
+// Existing push sources keep their original random IDs.
+func pushSourceID(device string) string { return "sub_" + hashOf("push-source", device)[:20] }
+
 // pushSource is by's push source, made now when it has none. Its label names the device, in the user's language.
 func (s *Service) pushSource(ctx context.Context, by Actor, now time.Time) (*Subscription, error) {
 	all, err := s.o.Store.ListSubscriptions(ctx)
@@ -180,9 +186,19 @@ func (s *Service) pushSource(ctx context.Context, by Actor, now time.Time) (*Sub
 	}
 	device := cmpOr(clip(oneLine(by.Name), 100), "iPhone")
 	label := i18n.T(s.o.Lang(), "subscriptions-deliver.push_label", i18n.Args{"device": device})
-	sub := Subscription{ID: newID(), Connector: PushConnector, Source: by.ID, SourceName: device, Label: label, Icon: "bell",
+	sub := Subscription{ID: pushSourceID(by.ID), Connector: PushConnector, Source: by.ID, SourceName: device, Label: label, Icon: "bell",
 		Recipe: pushRecipe, RecipeOrigin: OriginPush, RecipeAt: now, RunState: StateOK, Revision: 1, CreatedAt: now, UpdatedAt: now}
 	if err := s.o.Store.CreateSubscription(ctx, sub); err != nil {
+		// Another service won the same deterministic ID between our read and insert. Use its source; if this was
+		// another database error, the failed lookup below simply returns the original error.
+		all, listErr := s.o.Store.ListSubscriptions(ctx)
+		if listErr == nil {
+			for _, existing := range all {
+				if IsPush(existing) && existing.Source == by.ID {
+					return &existing, nil
+				}
+			}
+		}
 		return nil, err
 	}
 	s.o.Audit(ctx, PushConnector, "subscription_created", by, map[string]any{"subscription": sub.ID, "source": "push"})

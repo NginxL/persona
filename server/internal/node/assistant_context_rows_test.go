@@ -67,6 +67,10 @@ func readBlock(t *testing.T, view map[string]string, block string) map[string]st
 			continue
 		}
 		old, had := view[name]
+		if inline := inlineIDs[name]; inline != nil && had {
+			view[name] = readInline(t, old, rows, inline, block)
+			continue
+		}
 		id := rowIDs[name]
 		if !had || id == nil {
 			t.Fatalf("%q is told by its rows and the conversation has no such rows:\n%s", name, block)
@@ -109,6 +113,49 @@ func readBlock(t *testing.T, view map[string]string, block string) map[string]st
 		view[name] = strings.Join(append([]string{head}, have...), "\n")
 	}
 	return view
+}
+
+// readInline is a one-line section of items (inlineIDs) after the rows a block tells of it: a changed item replaces
+// its own, a new one goes first (the index lists the newest first), and the removed ones are dropped.
+func readInline(t *testing.T, old string, rows []string, id func(string) string, block string) string {
+	t.Helper()
+	head, items, ids, ok := inlineItems(old, id)
+	if !ok {
+		t.Fatalf("%q is told by its items and cannot be read by them:\n%s", old, block)
+	}
+	_, rest, _ := strings.Cut(old, "：")
+	parts := strings.Split(rest, "；")
+	trailer := ""
+	if len(parts) > len(ids) {
+		trailer = parts[len(parts)-1]
+	}
+	var added []string
+	for _, r := range rows {
+		if list, ok := strings.CutPrefix(r, rowsRemoved); ok {
+			for k := range strings.SplitSeq(strings.TrimSuffix(list, "）"), "；") {
+				i := slices.Index(ids, k)
+				if i < 0 {
+					t.Fatalf("item %q is removed and was never there:\n%s", k, block)
+				}
+				ids = slices.Delete(ids, i, i+1)
+			}
+			continue
+		}
+		item := strings.TrimPrefix(r, "  - ")
+		k := id(item)
+		if _, known := items[k]; !known {
+			added = append(added, k)
+		}
+		items[k] = item
+	}
+	var out []string
+	for _, k := range append(added, ids...) {
+		out = append(out, items[k])
+	}
+	if trailer != "" {
+		out = append(out, trailer)
+	}
+	return head + "：" + strings.Join(out, "；")
 }
 
 // sameAsSnapshot fails unless view, in the snapshot's order, is the snapshot byte for byte (less its blank lines,

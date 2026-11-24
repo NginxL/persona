@@ -141,3 +141,35 @@ func TestAssistantNewProfileSeedsBypassHook(t *testing.T) {
 		t.Fatal("source settings were modified")
 	}
 }
+
+func TestAssistantExistingProfilePreservesDefaultMode(t *testing.T) {
+	n := codexTestNode(t)
+	n.dir = t.TempDir()
+	n.home = t.TempDir()
+	profile := filepath.Join(n.dir, "profiles", "custom-claude")
+	if err := os.MkdirAll(profile, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	settingsPath := filepath.Join(profile, "settings.json")
+	before := []byte("{\n  \"permissions\": {\"defaultMode\": \"bypassPermissions\", \"allow\": [\"Read(/tmp/**)\"]},\n  \"theme\": \"dark\"\n}\n")
+	if err := os.WriteFile(settingsPath, before, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	// A node upgrade reconstructs the Node around the same on-disk profile. Neither
+	// the first preparation nor the upgraded one may replace the owner's settings.
+	upgraded := codexTestNode(t)
+	upgraded.dir, upgraded.home = n.dir, n.home
+	for name, current := range map[string]*Node{"current": n, "upgraded": upgraded} {
+		if err := current.prepareAssistantProfile(profile); err != nil {
+			t.Fatalf("%s node: %v", name, err)
+		}
+		after, err := os.ReadFile(settingsPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(after) != string(before) {
+			t.Fatalf("%s node rewrote profile settings:\nbefore: %s\nafter:  %s", name, before, after)
+		}
+	}
+}

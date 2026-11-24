@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/nwverse/persona/server/internal/modelhttp"
 	"github.com/nwverse/persona/server/internal/proto"
 )
 
@@ -147,10 +148,11 @@ func TestAssistantModelComesFromTheHub(t *testing.T) {
 		t.Fatalf("asked the hub about %q", got)
 	}
 	fh.mu.Lock()
-	fh.model = map[string]any{"origin": originInbox, "origin_known": true}
+	source := modelhttp.Source{Role: "background", Session: testThread}
+	fh.model = map[string]any{"origin": originInbox, "origin_known": true, "inbox_permission_mode": proto.ModeBypass, "model_source": source}
 	fh.mu.Unlock()
-	if _, m, answered := n.assistantModelDecision(context.Background(), testThread); !answered || m.Origin != originInbox || !m.OriginKnown {
-		t.Fatalf("the hub's Inbox attestation was lost: %+v answered=%v", m, answered)
+	if _, m, answered := n.assistantModelDecision(context.Background(), testThread); !answered || m.Origin != originInbox || !m.OriginKnown || m.InboxPermissionMode != proto.ModeBypass || m.Source != source {
+		t.Fatalf("the hub's Inbox attestation, own mode or model source was lost: %+v answered=%v", m, answered)
 	}
 	fh.mu.Lock()
 	fh.model = map[string]any{} // a successful scope refusal is not an ordinary-origin decision

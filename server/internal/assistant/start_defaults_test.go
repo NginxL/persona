@@ -330,8 +330,9 @@ func TestStartDefaultsGoalRefusedStartsWithoutIt(t *testing.T) {
 	}
 }
 
-// The facts a start gives say who follows the task up, so a source can tell a leader's worker from the main
-// conversation's own task; read-only and the task's role ride along.
+// The facts a start gives say which conversation actually follows the task up, not which one planned it. New work
+// planned by a lead, or explicitly assigned to one by main, uses that lead’s class; read-only and role ride along.
+// The explicit manual-Agent and task-leader worker topologies keep their specialized class.
 func TestStartDefaultsFactsSayWhoSupervises(t *testing.T) {
 	s, f := newQuietService(t)
 	f.devices = []Device{{ID: "box", Name: "box", Home: "/home/me", Online: true, Reachable: true}}
@@ -346,7 +347,7 @@ func TestStartDefaultsFactsSayWhoSupervises(t *testing.T) {
 		task["machine"], task["cwd"], task["why"] = "box", "/code/app", "the repo is on box"
 		args := map[string]any{"tasks": []map[string]any{task}}
 		if supervisor != "" {
-			args["supervisor"] = supervisor // the whole plan goes to a leader conversation
+			args["supervisor"] = supervisor // explicit initial assignment by main
 		}
 		raw, _ := json.Marshal(args)
 		res, err := s.toolTaskPlan(ctx, conversation, raw)
@@ -376,13 +377,13 @@ func TestStartDefaultsFactsSayWhoSupervises(t *testing.T) {
 	waitFor(t, "the starts to finish their bookkeeping", func() bool { return s.taskStarting.Load() == 0 })
 	got := seen()
 	if a := got[0]; a.Supervisor != dispatchClassLeader || a.Readonly || a.Role != "worker" || a.DoneWhen != 1 || a.Machine != "box" {
-		t.Fatalf("leader's task: %+v", a)
+		t.Fatalf("task planned by the leader: %+v", a)
 	}
 	if b := got[1]; b.Supervisor != dispatchClassMain || !b.Readonly {
 		t.Fatalf("main's own task: %+v", b)
 	}
 	if c := got[2]; c.Supervisor != dispatchClassLeader {
-		t.Fatalf("task handed to the leader: %+v", c)
+		t.Fatalf("task with an explicit supervisor: %+v", c)
 	}
 }
 
@@ -402,9 +403,9 @@ func putStartDefaults(t *testing.T, s *Service, role, ext, body string) (int, st
 	return rec.Code, rec.Body.String()
 }
 
-// A policy whose rule picks the tasks a leader conversation follows up: those start with the defaults, the main
-// conversation's own task starts exactly as it would without the policy, and a read-only task is left alone too. The
-// policy is the one an extension wrote through the route.
+// A policy matches the actual supervisor, not the planning conversation. A leader-only rule leaves new work alone even
+// when a leader planned it; the explicit manual-leader worker topology still matches. Replacing it with a main rule
+// fills writable starts, while read-only stays untouched. The policy is the one an extension wrote through the route.
 func TestStartDefaultsPolicyOnlyWhereItsRuleMatches(t *testing.T) {
 	s, f := newQuietService(t)
 	f.devices = []Device{{ID: "box", Name: "box", Home: "/home/me", Online: true, Reachable: true}}
@@ -443,16 +444,47 @@ func TestStartDefaultsPolicyOnlyWhereItsRuleMatches(t *testing.T) {
 		return startsOf(f)[before]
 	}
 	led := start("lead1", false)
-	if led["ultracode"] != true || led["effort"] != "max" || led["goal"] == nil {
-		t.Fatalf("a leader's worker started without the defaults: %v", led)
+	if led["ultracode"] != true || led["goal"] == nil || led["effort"] != "max" {
+		t.Fatalf("the planning lead missed its defaults: %v", led)
 	}
 	own := start("conv1", false)
 	if own["ultracode"] != nil || own["goal"] != nil || own["effort"] == "max" {
-		t.Fatalf("the main conversation's own task got the defaults: %v", own)
+		t.Fatalf("the main conversation's own task got the leader-only defaults: %v", own)
+	}
+	// The specialized manual-leader topology still matches. Its worker takes the leader conversation's class from the
+	// parent task's ledger, rather than from the new-plan default (#5732).
+	putTodo(s, Todo{ID: "todo_leader_defaults", Title: "L", Supervision: &Supervision{Supervisor: "lead1"},
+		Agents: []TodoAgent{{MachineID: "server", SessionID: "lead1", Source: sourceLeader, Agent: "claude"}}})
+	worker := PlanTask{Title: "W", Prompt: "fix it", Machine: "box", Cwd: "/code/app", Permission: "bypassPermissions",
+		DoneWhen: []string{"CI is green"}, ExpectMinutes: 30, Parent: "todo_leader_defaults"}
+	if _, _, err := s.startTaskAgent(ctx, &worker, false); err != nil {
+		t.Fatal(err)
+	}
+	led = startsOf(f)[2]
+	if led["ultracode"] != true || led["effort"] != "max" || led["goal"] == nil {
+		t.Fatalf("a manual leader's worker started without the defaults: %v", led)
 	}
 	ro := start("lead1", true)
 	if ro["ultracode"] != nil || ro["goal"] != nil || ro["effort"] == "max" {
-		t.Fatalf("a read-only task got the defaults: %v", ro)
+		t.Fatalf("a read-only task got the leader-only defaults: %v", ro)
+	}
+
+	code, body = putStartDefaults(t, s, roleExtension, "kit", `{"start_defaults":{"expires_at":"`+expires+`","rules":[
+		{"when":{"supervisor":["main"],"readonly":false},"then":{"effort":"max","ultracode":true,"goal":"done_when"}}]}}`)
+	if code != http.StatusOK {
+		t.Fatalf("put main rule: %d %s", code, body)
+	}
+	led = start("lead1", false)
+	if led["ultracode"] != nil || led["effort"] == "max" || led["goal"] != nil {
+		t.Fatalf("the planning lead received main-only defaults: %v", led)
+	}
+	own = start("conv1", false)
+	if own["ultracode"] != true || own["effort"] != "max" || own["goal"] == nil {
+		t.Fatalf("the main conversation's own task missed the defaults: %v", own)
+	}
+	ro = start("lead1", true)
+	if ro["ultracode"] != nil || ro["goal"] != nil || ro["effort"] == "max" {
+		t.Fatalf("a read-only task got the main defaults: %v", ro)
 	}
 	waitFor(t, "the starts to finish their bookkeeping", func() bool { return s.taskStarting.Load() == 0 })
 }
@@ -938,7 +970,8 @@ func TestStartDefaultsPermissionOfThePolicysAgentNotStored(t *testing.T) {
 }
 
 // A rule that fits but fills nothing in (here: a goal for a task without criteria) leaves the start as it is without
-// the feature, and the launch the plan keeps is the one this try resolved, as without the feature.
+// the feature, and the launch the plan keeps is the same as without the feature: the task's own, which names nothing,
+// not the launcher and model Model configuration › Agents resolved for this try (#12618).
 func TestStartDefaultsARuleThatFillsNothingStoresAsWithout(t *testing.T) {
 	stored := func(rule bool) startPick {
 		t.Helper()
@@ -957,7 +990,7 @@ func TestStartDefaultsARuleThatFillsNothingStoresAsWithout(t *testing.T) {
 		return task.storedLaunch()
 	}
 	with, without := stored(true), stored(false)
-	if !reflect.DeepEqual(with, without) || with.launcher != "gateway" || with.model != "gw-model" {
+	if !reflect.DeepEqual(with, without) || with.launcher != "" || with.model != "" || with.effort != "" {
 		t.Fatalf("with a rule that fills nothing: %+v\nwithout the feature: %+v", with, without)
 	}
 }
@@ -1205,5 +1238,93 @@ func TestDefaultGoalRefusedOn(t *testing.T) {
 		if got := defaultGoalRefusedOn(c.m, c.params, c.agent); got != c.want {
 			t.Errorf("%s: %v, want %v", c.name, got, c.want)
 		}
+	}
+}
+
+func TestCodexTerminalFallbackPublishedBeforeStart(t *testing.T) {
+	ctx := context.Background()
+	s, f := defaultsHub(t)
+	f.zshrc["box"] = append(f.zshrc["box"], proto.Launcher{Name: "cx", Source: "zshrc", Agent: "codex"})
+	task := defaultsTask()
+	task.Launcher, task.Effort, task.TodoID = "cx", "high", "todo_effort"
+	putTodo(s, Todo{ID: task.TodoID, Origin: "owner", Supervision: &Supervision{Supervisor: "owner"}})
+
+	var checked bool
+	f.onStart = func(f *fakeHub, params map[string]any) {
+		if params["codex_effort_fallback"] == proto.CodexFallbackNotify {
+			f.failStart = &rpc.Error{Code: proto.CodeCodexEffortTerminal}
+			return
+		}
+		f.failStart = nil
+		tsk, _ := s.todoNow(task.TodoID)
+		if params["codex_effort_fallback"] != proto.CodexFallbackAnnounced || tsk.Supervision.Progress == nil || tsk.Supervision.Progress.Text == "" {
+			t.Errorf("missing pre-start card notice: %+v", tsk.Supervision)
+		}
+
+		checked = true
+	}
+	if _, _, err := s.startTaskAgent(ctx, &task, false); err != nil {
+		t.Fatal(err)
+	}
+	if !checked || len(startsOf(f)) != 2 {
+		t.Fatal("expected one preflight refusal followed by the announced start")
+	}
+}
+
+func TestAgentStartCodexFallbackKeepsPlacement(t *testing.T) {
+	s, f := launcherFitHub(t)
+	f.zshrc["box"] = append(f.zshrc["box"], proto.Launcher{Name: "cx", Source: "zshrc", Agent: "codex"})
+	f.onStart = func(f *fakeHub, params map[string]any) {
+		f.failStart = nil
+		if params["codex_effort_fallback"] == proto.CodexFallbackNotify {
+			f.failStart = &rpc.Error{Code: proto.CodeCodexEffortTerminal}
+		}
+	}
+	_, err := s.runTool(t.Context(), "server", "owner", "agent_start", json.RawMessage(
+		`{"machine":"box","cwd":"/Users/me/code","launcher":"cx","effort":"high","prompt":"Check the build"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if starts := startsOf(f); len(starts) != 2 || starts[1]["codex_effort_fallback"] != proto.CodexFallbackAnnounced {
+		t.Fatalf("expected the announced retry, got %v", starts)
+	}
+	task := onlyTodo(s)
+	p := onlyStoredPlacement(t, s.store().(settingsPrefixStore))
+	if len(task.Agents) != 1 || p.Mode != "enforce" || p.Choice != "box" || p.TaskID != task.ID || p.SessionID == "" || p.SessionID != task.Agents[0].SessionID {
+		t.Fatalf("placement %+v for task %s, agents %+v", p, task.ID, task.Agents)
+	}
+}
+
+func TestCodexFallbackReportOnTaskCard(t *testing.T) {
+	ctx := t.Context()
+	s, _ := newTaskService(t)
+	todo := Todo{ID: "todo_effort", Origin: "task_owner"}
+	putTodo(s, todo)
+	params := map[string]any{"effort": "high"}
+	calls := 0
+	err := s.startWithCodexRouteNotice(ctx, todo.ID, "codex", params, func() error {
+		calls++
+		if calls == 1 {
+			return &rpc.Error{Code: proto.CodeCodexEffortTerminal}
+		}
+		items, err := s.feedItems(ctx, todo.Origin, time.Time{})
+		if err != nil {
+			return err
+		}
+		cards, err := s.taskCards(ctx, items, nil)
+		if err != nil {
+			return err
+		}
+		if len(items) != 1 || len(cards) != 1 || cards[0].TodoID != todo.ID || cards[0].ReportID != items[0].ID {
+			t.Fatalf("published cards: %+v, feed: %+v", cards, items)
+		}
+		var report reportBody
+		if json.Unmarshal(items[0].Body, &report) != nil || report.Kind != upReportProgress || !strings.Contains(report.Text, "Codex") {
+			t.Fatalf("published report %+v", report)
+		}
+		return nil
+	})
+	if calls != 2 || err != nil {
+		t.Fatalf("starts=%d, err=%v", calls, err)
 	}
 }

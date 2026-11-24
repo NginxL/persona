@@ -127,6 +127,12 @@ func workOf(l i18n.Lang, sess proto.Session, reported *proto.WorkState, asking m
 	if w.InteractionID != "" && (!asks || ix.ID != w.InteractionID) {
 		w.InteractionID = "" // answered, withdrawn, or not shown yet
 	}
+	// Normalize old records too: the guard on opening a card did not run for
+	// read-only sessions, so their unsupported waits could reach storage.
+	clearUnsupportedUserWait(&w, l)
+	if !workShown(&w) {
+		return nil
+	}
 	if w.WakeAt != nil && time.Since(*w.WakeAt) > wakeGrace {
 		w.WakeAt = nil // long overdue: nobody is waking it, it is no wait that ends by itself
 	}

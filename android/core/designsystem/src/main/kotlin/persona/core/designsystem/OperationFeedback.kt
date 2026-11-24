@@ -41,6 +41,8 @@ fun operationFeedback(error: Throwable): OperationFeedback {
         return operationFeedback(mapOperationFailure("already_handled", "none", false))
     if (error is persona.core.contracts.api.InteractionPromptChangedException)
         return operationFeedback(mapOperationFailure("prompt_changed", "none", false))
+    if (error is persona.core.contracts.api.LauncherRetryUnsupportedException)
+        return OperationFeedback(UiText.Res(R.string.designsystem_retry_launcher_unsupported), FailureAction.None)
     val failure = HubFailure.from(error)
     // Cloudflare Access in front of the hub, not the hub: what to fix is the service token in Settings › hub.
     when (failure.kind) {

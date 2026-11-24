@@ -211,4 +211,33 @@ class SessionSourceTest {
         assertEquals("traex resume 'abc'", (claude.copy(agent = "traex", cwd = "").resumeCommand(id = "abc")).zhAny())
         assertEquals("cd -- '/x' && codex resume 's'\"'\"'1'", (claude.copy(agent = "codex").resumeCommand(cwd = "/x")).zhAny())
     }
+
+    @Test fun codexTakeoverAndContinueCapabilitiesRequireReadOnlyCodexWithTakeover() {
+        val resumable = session(
+            """{"session_id":"s1","agent":"codex","source_kind":"codex_history","capabilities":{"read":true,"send":false,"takeover":{"running":true,"can_resume":true}}}""",
+        )
+        assertTrue(resumable.canContinueCodex)
+        assertTrue(resumable.canTakeover)
+
+        val continueOnly = session(
+            """{"session_id":"s2","agent":"codex","source_kind":"codex_history","capabilities":{"read":true,"send":false,"takeover":{"running":false,"can_resume":false,"reason":"encrypted_context"}}}""",
+        )
+        assertTrue(continueOnly.canContinueCodex)
+        assertFalse(continueOnly.canTakeover)
+
+        // Writable Codex sessions and sessions without capabilities.takeover offer neither.
+        val writable = session(
+            """{"session_id":"s3","agent":"codex","source_kind":"codex_app_server","capabilities":{"read":true,"send":true,"takeover":{"running":false,"can_resume":true}}}""",
+        )
+        assertFalse(writable.canContinueCodex)
+        assertFalse(writable.canTakeover)
+
+        val withoutTakeover = session("""{"session_id":"s4","agent":"codex","source_kind":"codex_history","capabilities":{"read":true}}""")
+        assertFalse(withoutTakeover.canContinueCodex)
+        assertFalse(withoutTakeover.canTakeover)
+
+        val claude = session("""{"session_id":"s5","agent":"claude","source_kind":"claude_cli","capabilities":{"read":true,"send":false,"takeover":{"running":false,"can_resume":true}}}""")
+        assertFalse(claude.canContinueCodex)
+        assertFalse(claude.canTakeover)
+    }
 }

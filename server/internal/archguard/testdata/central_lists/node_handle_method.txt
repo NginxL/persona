@@ -1,0 +1,186 @@
+# The labels server/internal/node/node.go's Node.handleMethod may have for methods that are not bound to a session,
+# frozen (#12920): server/internal/archguard/central_lists_test.go fails on any other. Such a method registers from an
+# init() in its domain's own file, func init() { nodeRPC(name, (*Node).x) } (docs/server/architecture.md "Registering a
+# domain's entries"). A label is its source text; a prefix handleMethod routes on is `prefix <text>`. Session-bound
+# labels, delivery aliases and labels under a reserved prefix are not listed: they stay in the switch.
+# Delete a line once the test's notice names it; add none.
+"agy.settings"
+"agy.settings.set"
+"assistant.cache_clear"
+"assistant.compact"
+"assistant.directory"
+"assistant.execution"
+"assistant.guest_delete"
+"assistant.guest_prepare"
+"assistant.handoff"
+"assistant.memory"
+"assistant.prepare"
+"assistant.warm"
+"browser.call"
+"browser.cancel"
+"browser.cookies.clear"
+"browser.cookies.import"
+"browser.cookies.list"
+"browser.install"
+"browser.open"
+"browser.status"
+"claude.auth_status"
+"claude.dirs.list"
+"claude.settings"
+"claude.settings.set"
+"codex.settings"
+"codex.settings.set"
+"computer.call"
+"computer.cancel"
+"computer.clipboard"
+"computer.cursor"
+"computer.grant"
+"computer.install"
+"computer.lock"
+"computer.nolock"
+"computer.status"
+"connector.changes"
+"connector.chats"
+"connector.list"
+"connector.older"
+"connector.search"
+"credential.gh_token"
+"dirs.list"
+"engine.use"
+"grok.settings"
+"grok.settings.set"
+"health.reports.delete"
+"health.reports.list"
+"herdr.client.open"
+"herdr.server.start"
+"herdr.server.status"
+"launchers.catalog"
+"launchers.check"
+"launchers.http"
+"launchers.list"
+"launchers.managed"
+"launchers.model.check"
+"launchers.models"
+"launchers.own_service"
+"launchers.probe"
+"launchers.repair"
+"launchers.show"
+"launchers.zshrc"
+"node.configure"
+"node.info"
+"omp.settings"
+"omp.settings.set"
+"panes.agent"
+"panes.close"
+"panes.close_finished"
+"panes.git"
+"panes.list"
+"panes.new"
+"panes.split"
+"ping"
+"port.dial"
+"port.probe"
+"screen.dial"
+"screen.phone"
+"sessions.list"
+"skills.import"
+"skills.list"
+"space.rename"
+"start.keys"
+"tabs.close"
+"tabs.rename"
+"todo.sync_session_tokens"
+"usage.windows"
+"workspace.close"
+"workspace.resolve"
+"workspaces.list"
+devicewire.KnowledgeRead
+devicewire.KnowledgeSearch
+methodFileChmod
+methodFileChunk
+methodFileConvert
+methodFileCopy
+methodFileMkdir
+methodFileMove
+methodFileOperation
+methodFileRead
+methodFileRename
+methodFileRestore
+methodFileThumb
+methodFileTrash
+methodFileUploadAbort
+methodFileUploadBegin
+methodFileUploadChunk
+methodFileUploadEnd
+methodFileWrite
+methodFileZip
+methodFsFind
+methodFsList
+methodFsStat
+methodFsWatch
+methodGitBlob
+methodGitBranches
+methodGitCommit
+methodGitDiff
+methodGitLog
+methodGitPR
+methodGitPRCreate
+methodGitPRMerge
+methodGitPull
+methodGitPush
+methodGitReview
+methodGitShow
+methodGitStage
+methodGitStash
+methodGitStatus
+methodGitSwitch
+methodPreviewOpen
+methodPreviewServers
+methodPreviewStart
+methodWorktreeAdd
+methodWorktreeCreate
+methodWorktreeDelete
+methodWorktreePrepare
+methodWorktreePreset
+methodWorktreeRemove
+methodWorktreeRename
+methodWorktreeSnapshot
+methodWorktreeSource
+methodWorktreeStatus
+prefix "assistant.segment."
+prefix "node.update."
+prefix "plugin.node."
+prefix "task.workspace."
+prefix methodGitBackendPrefix
+proto.MethodMachineCleanup
+proto.MethodMachineDiagnose
+proto.MethodMachineFilesChunk
+proto.MethodMachineFilesList
+proto.MethodMachineFilesPreview
+proto.MethodMachineFilesRoots
+proto.MethodMachineFilesTail
+proto.MethodMachineToolchain
+proto.MethodStartAnswer
+proto.MethodStartContinue
+
+# Pending: the names the PRs open when this freeze landed were adding, each with its PRs
+# (python3 scripts/test/name_freezes.py pending --write, 2026-11-22; drafts idle more than 14 days left out).
+# A name stays when its PR merges; a rerun of --write drops one whose PRs have all closed. No PR opened later gets a
+# line here.
+"assistant.content" #11552 #11612 #11681 #12378
+"assistant.start_prepared" #10048
+"workspace.create" #7063
+methodFsTaskList #11552 #11612 #11681 #12378
+nodeproto.StopIfIdle #6924
+prefix "agentbot." #12806
+proto.MethodMachineFilesCreate #12448
+proto.MethodMachineFilesDelete #12448
+proto.MethodMachineFilesRename #12448
+proto.MethodMachineFilesUploadAbort #12448
+proto.MethodMachineFilesUploadBegin #12448
+proto.MethodMachineFilesUploadChunk #12448
+proto.MethodMachineFilesUploadEnd #12448
+proto.MethodMachineFilesWrite #12448
+proto.MethodMachineStorage #12392 #12473 #12478
+proto.MethodMachineStorageCleanup #12392 #12473 #12478
+proto.MethodMachineStorageHotspots #12392 #12473 #12478

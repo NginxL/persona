@@ -16,6 +16,7 @@ import persona.core.contracts.api.MailTranslation
 import persona.core.contracts.api.TranslationPrefs
 import persona.core.contracts.api.TranslationTransport
 import persona.core.domain.translate.LanguageGuess
+import persona.core.inbox.*
 
 /** Settings › Translation for the inbox; null where nothing is translated (demo mode, previews). */
 val LocalTranslator = staticCompositionLocalOf<Translator?> { null }

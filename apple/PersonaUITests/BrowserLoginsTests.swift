@@ -86,7 +86,9 @@ final class BrowserLoginsTests: XCTestCase {
         XCTAssertTrue(sure.waitForExistence(timeout: 5), "no confirmation")
         sure.tap()
         XCTAssertTrue(site("example.com").waitForNonExistence(timeout: 10), "the site was not cleared")
-        XCTAssertTrue(site("example.org").exists, "the list did not stay open")
+        // Three sites fit the machine page's section again, which lists example.org too: only the bar tells them apart.
+        XCTAssertTrue(app.navigationBars["浏览器登录"].exists, "the list did not stay open")
+        XCTAssertTrue(site("example.org").exists, "the other sites went with it")
     }
 
     /// iPhone's one top-trailing menu keeps Select and sorting reachable from the sidebar's machine detail.

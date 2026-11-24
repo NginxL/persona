@@ -129,4 +129,31 @@ describe("independent workspace catalog", () => {
     for (const candidate of [workspaceKey(w, "other", scope.manager), workspaceKey(w, scope.owner, "other"), workspaceKey({ ...w, machine_id: "other" }, scope.owner, scope.manager), workspaceKey({ ...w, source: "herdr" }, scope.owner, scope.manager)]) expect(candidate).not.toBe(key);
     expect(workspaceTarget(w, scope.owner, scope.manager)).toEqual({ ...scope, machineId: w.machine_id, host: "orca", workspaceId: w.source_id, cwd: w.cwd, label: "Main" });
   });
+
+  it.each([["codex_app", "codex-project:home"], ["claude_desktop", "claude-environment:account"]])("keys each %s root by its canonical directory while keeping distinct projects separate", (source, prefix) => {
+    const w = { ...row(), source, source_id: `${prefix}:project-a`, cwd: "C:\\Projects\\App" };
+    const key = (patch: Partial<HostWorkspace> = {}) => workspaceKey({ ...w, ...patch }, scope.owner, scope.manager);
+    expect(key({ cwd: "c:/projects/app/src/../" })).toBe(key());
+    expect(key({ cwd: "C:\\Projects\\Other" })).not.toBe(key());
+    expect(key({ source_id: `${prefix}:project-b` })).not.toBe(key());
+    expect(key({ cwd: "/projects/App" })).not.toBe(key({ cwd: "/projects/app" }));
+    expect(workspaceTarget(w, scope.owner, scope.manager).cwd).toBe("C:\\Projects\\App");
+  });
+
+  it.each([["codex_app", "codex-project:home"], ["claude_desktop", "claude-environment:account"]])("retains every %s project root across catalog refreshes", async (source, prefix) => {
+    const a = { ...row("App"), id: "root-a", source, source_id: `${prefix}:project`, cwd: "C:\\Projects\\App" };
+    const b = { ...a, id: "root-b", title: "Docs", cwd: "C:\\Projects\\Docs" };
+    const other = { ...a, id: "other-project", source_id: `${prefix}:other` };
+    let rows = [a, b, other];
+    const catalog = new WorkspaceCatalog(scope, transport(async () => ({ workspaces: rows })), () => scope);
+    await catalog.refresh();
+    const first = catalog.snapshot();
+    expect(first.workspaces.map((w) => w.id).sort()).toEqual(["other-project", "root-a", "root-b"]);
+    rows = rows.map((w) => ({ ...w })).reverse();
+    await catalog.refresh();
+    expect(catalog.snapshot()).toBe(first);
+    rows = [a, other];
+    await catalog.refresh();
+    expect(catalog.snapshot().workspaces.map((w) => w.id).sort()).toEqual(["other-project", "root-a"]);
+  });
 });

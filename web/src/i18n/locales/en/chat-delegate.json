@@ -25,5 +25,8 @@
   "error_not_sent": "Couldn't send the new answer to the agent: {error}",
   "error_assistant_offline": "The assistant is offline. Try again shortly",
   "error_unsupported": "This hub can't change answers yet. Update the hub first",
-  "error_failed": "Couldn't change the answer: {error}"
+  "error_failed": "Couldn't change the answer: {error}",
+  "supervisor_held": "Supervisor handling",
+  "supervisor_held_hint": "The task's supervisor decides this card. It will be passed to you if it needs you.",
+  "supervisor_held_refused": "The task's supervisor is handling this card. It will be passed to you if it needs you"
 }

@@ -10,7 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/nwverse/persona/server/internal/screenlink"
+	_ "github.com/nwverse/persona/server/internal/modules/all/node" // the screen-share module, as the node runs it
+	"github.com/nwverse/persona/server/internal/node/screenport"
 	"github.com/nwverse/persona/server/internal/streams"
 )
 
@@ -24,8 +25,22 @@ type linkRig struct {
 	served chan net.Conn // Screen Sharing's end of each connection the node dialed
 }
 
+// The screen session's wire as the phone speaks it (spec/fixtures/screen-link, the module's screenlink/wire.go): the
+// message types and the RFB channel this test reads and writes.
+const (
+	linkTypeData     byte = 1
+	linkTypePaths    byte = 3
+	linkTypeAttach   byte = 4
+	linkTypeAttached byte = 5
+	linkRFB          byte = 1
+)
+
 func newLinkRig(t *testing.T) *linkRig {
 	t.Helper()
+	newLinks := screenport.New()
+	if newLinks == nil {
+		t.Skip("built without the screen-share module (persona_without_screen_share, persona_core_only)")
+	}
 	vnc, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
@@ -58,7 +73,7 @@ func newLinkRig(t *testing.T) *linkRig {
 		return nil
 	})
 	r.n = &Node{screens: newScreenLogins(), streams: nodeMux,
-		links: screenlink.NewRegistry(screenlink.DefaultLimits, t.Logf)}
+		links: newLinks(t.Logf)}
 	return r
 }
 
@@ -167,14 +182,16 @@ func TestPortDialWithLinkCarriesTheSession(t *testing.T) {
 		t.Fatalf("answer %v", res)
 	}
 	typ, body := linkMessage(t, phone)
-	var paths screenlink.Paths
-	if typ != screenlink.TypePaths || json.Unmarshal(body, &paths) != nil || paths.Token == "" {
+	var paths struct {
+		Token string `json:"token"`
+	}
+	if typ != linkTypePaths || json.Unmarshal(body, &paths) != nil || paths.Token == "" {
 		t.Fatalf("first message %d %q", typ, body)
 	}
 	ss := r.screenSharing()
 	go ss.Write([]byte("RFB 003.889\n"))
 	typ, body = linkMessage(t, phone)
-	if typ != screenlink.TypeData || body[0] != screenlink.RFB || binary.BigEndian.Uint64(body[1:9]) != 0 || string(body[9:]) != "RFB 003.889\n" {
+	if typ != linkTypeData || body[0] != linkRFB || binary.BigEndian.Uint64(body[1:9]) != 0 || string(body[9:]) != "RFB 003.889\n" {
 		t.Fatalf("data %d %q", typ, body)
 	}
 	// The login observer still follows Screen Sharing's own bytes: video binds to the pair as before.
@@ -190,8 +207,8 @@ func TestPortDialWithLinkCarriesTheSession(t *testing.T) {
 		t.Fatalf("rejoining: %v %v", res, err)
 	}
 	tok, _ := json.Marshal(map[string]string{"token": paths.Token})
-	go again.Write(linkFrame(screenlink.TypeAttach, tok))
-	if typ, _ := linkMessage(t, again); typ != screenlink.TypeAttached {
+	go again.Write(linkFrame(linkTypeAttach, tok))
+	if typ, _ := linkMessage(t, again); typ != linkTypeAttached {
 		t.Fatalf("after the token: %d", typ)
 	}
 	select {

@@ -4,6 +4,7 @@ import org.junit.Assert.*
 import org.junit.Test
 import persona.core.domain.inbox.InboxItem
 import persona.feature.inbox.*
+import persona.core.inbox.*
 
 class CapsuleInboxNoticesTest {
     private fun row(id: String = "room", version: String = "v1", message: String? = null,

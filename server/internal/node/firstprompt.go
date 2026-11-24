@@ -35,7 +35,7 @@ const firstPromptTries = 3
 // message typed again cannot mix with them. goal, when set, is typed as /goal once the transcript has the message,
 // still under the lock (startgoal.go). An error: the host refused the first message (nothing went in).
 func (n *Node) firstPrompt(ctx context.Context, pane, id, prompt string, a *host.Agent, goal string) error {
-	prompt = inertControls(keepImagePaths(prompt)) // the same image-path/paste form as other Claude sends
+	prompt = claudeMessageText(inertControls(keepImagePaths(prompt))) // the same image-path/paste form as other Claude sends
 	since := time.Now()
 	if a != nil && a.AgentStatus == proto.StatusBlocked {
 		// A dialog of Claude's own has the keyboard: the message would answer it. Held until the dialog is answered

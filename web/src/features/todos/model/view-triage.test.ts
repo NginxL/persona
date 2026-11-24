@@ -24,7 +24,7 @@ describe("drawnFromView", () => {
       todo("todo_d", { view: view("a_newer_section", "rest") }), // a view this web cannot read
     ];
     const r = drawnFromView(triageTodos(list, undefined, NOW), NOW);
-    expect(ids(r)).toEqual({ waiting: [["todo_a"]], other: [["todo_b"], ["todo_d"]], just_done: [["todo_c"]] });
+    expect(ids(r)).toEqual({ waiting: [["todo_a"]], other: [["todo_b"], ["todo_d"]], done: [["todo_c"]] });
     expect(r.todoCounts.waiting).toBe(1);
     expect([r.open, r.shelved, r.finished]).toEqual([3, 0, 1]);
   });
@@ -83,10 +83,33 @@ describe("drawnFromView", () => {
       todo("todo_old", { done_at: ago(30) }),
     ];
     const r = drawnFromView(triageTodos(list, undefined, NOW), NOW);
-    expect(ids(r)).toEqual({ waiting: [["todo_f"]], other: [["todo_k"], ["todo_s"]], just_done: [["todo_c"], ["todo_g"]], shelved: [["todo_e"]], done: [["todo_old"]] });
+    expect(ids(r)).toEqual({ waiting: [["todo_f"]], other: [["todo_k"], ["todo_s"]], just_done: [["todo_g"]], shelved: [["todo_e"]], done: [["todo_c"], ["todo_old"]] });
     expect(r.sections.waiting[0].triage.get("todo_f")?.rule).toBe("failed_start");
     expect([r.open, r.shelved, r.finished]).toEqual([3, 1, 2]);
     const drawn = new Map(TRIAGE_SECTIONS.flatMap((s) => r.sections[s].flatMap((g) => g.members.map((m) => [m.id, openAsDrawn(m, g.triage.get(m.id)!)] as const))));
     expect(Object.fromEntries(drawn)).toEqual({ todo_f: true, todo_k: true, todo_s: false, todo_g: true, todo_c: false, todo_e: false, todo_old: false });
+  });
+
+  it("keeps cancellations apart and an unaccepted deployed view awaiting review (#5732)", () => {
+    const list = [
+      todo("todo_x", { done_at: ago(2), view: view("done", "canceled", { phase: "done" }) }),
+      todo("todo_d", { view: view("just_finished", "finished_recent", { phase: "ready", line: { key: "deployed" } }) }),
+    ];
+    const r = drawnFromView(triageTodos(list, undefined, NOW), NOW);
+    expect(ids(r)).toEqual({ just_done: [["todo_d"]], cancelled: [["todo_x"]] });
+    expect(r.sections.just_done[0].triage.get("todo_d")?.rule).toBe("finished_unseen");
+    expect(r.sections.cancelled[0].triage.get("todo_x")?.rule).toBe("cancelled");
+    expect([r.open, r.finished, r.cancelled]).toEqual([1, 0, 1]);
+  });
+
+  it("uses local freshness for a closed concern, not its kind alone", () => {
+    const list = [
+      todo("todo_fresh_concern", { kind: "concern", done_at: ago(1), done_by: "reported", view: view("just_finished", "closed_unseen", { phase: "done" }) }),
+      todo("todo_stale_concern", { kind: "concern", done_at: ago(30), done_by: "reported", view: view("just_finished", "closed_unseen", { phase: "done" }) }),
+    ];
+    const local = triageTodos(list, undefined, NOW);
+    const r = drawnFromView(local, NOW);
+    expect(r.sections.just_done.flatMap((g) => g.members.map((m) => m.id))).toEqual(["todo_fresh_concern"]);
+    expect(r.sections.done.flatMap((g) => g.members.map((m) => m.id))).toEqual(["todo_stale_concern"]);
   });
 });

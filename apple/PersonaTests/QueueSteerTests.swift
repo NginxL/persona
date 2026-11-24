@@ -119,15 +119,16 @@ struct QueueSteerTests {
         let (model, key) = try personaModel("photo", payload: restored)
         let held = model.composerAttachments(key)
         let existing = ImagePayload(mime: "image/jpeg", data: "eA==")
-        held.images = (0..<MessagePhotos.limit).map { _ in (UIImage(), existing) }
+        let limit = model.imageLimits(key).perMessage // the hub's (#12973): the standard 20 with no hello
+        held.images = (0..<limit).map { _ in (UIImage(), existing) }
 
         await model.editQueued(key, index: 0, delete: false)
-        #expect(held.images.count == MessagePhotos.limit + 1, "a pathless hub photo must not disappear when the composer is full")
+        #expect(held.images.count == limit + 1, "a pathless hub photo must not disappear when the composer is full")
         #expect(held.images.last?.1.data == restored.data)
 
         let accepted = model.sendNow(key, text: "next", images: held.images.map(\.1))
         #expect(!accepted)
-        #expect(model.chat(key).pending.isEmpty, "restoring may exceed the picker limit, but sending more than four stays blocked")
+        #expect(model.chat(key).pending.isEmpty, "restoring may exceed the hub's pictures, but sending more stays blocked")
         #expect(model.toast?.style == .error)
     }
 

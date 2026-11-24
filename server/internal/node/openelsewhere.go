@@ -48,6 +48,8 @@ type claudeProc struct {
 	// busy, idle, shell (idle with background commands running) or waiting (claudebg.go).
 	Kind   string `json:"kind"`
 	Status string `json:"status"`
+	// StatusUpdatedAt is when Status was last written, in Unix milliseconds (0 from a Claude Code that writes none).
+	StatusUpdatedAt int64 `json:"statusUpdatedAt"`
 	// ParkedJobID is set while an interactive claude has sent its own session to the background (claudebg.go).
 	ParkedJobID string `json:"parkedJobId"`
 	JobID       string `json:"jobId"` // a background session's job (claudebg.go)

@@ -112,5 +112,13 @@
   "bulk_undo": "直前の変更を元に戻す",
   "selection_hint": "表示中のワークスペースのみ選択します。エージェントは動作を続けます。",
   "bulk_saving": "ワークスペースを更新中…",
-  "activity": "変更履歴"
+  "activity": "変更履歴",
+  "mode_project": "新規プロジェクト",
+  "project_name": "プロジェクト名",
+  "project_app": "デスクトップアプリ",
+  "project_persona": "Persona でのみ管理",
+  "create_project": "作成",
+  "create_project_hint": "既存のフォルダーを選ぶか、既存の親フォルダー内に新しいフォルダーを指定できます。作成してから会話を始められます。",
+  "project_desktop_unavailable": "現在、プロジェクト名を Codex や Claude のデスクトップのサイドバーに同期できないため、ここでは両アプリのプロジェクトを作成できません。デスクトップアプリで作成してから「既存のワークスペース」で関連付けてください。",
+  "project_directory_placeholder": "プロジェクトフォルダーの絶対パス（既存または新規）"
 }

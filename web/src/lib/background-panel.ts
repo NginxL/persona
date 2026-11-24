@@ -23,7 +23,7 @@ export function openBackgroundPanel(mid: string, sid: string, run?: string) {
 /** The header's button: closes the session's panel when it is open, else opens it at its list. */
 export function toggleBackgroundPanel(mid: string, sid: string) {
   if (backgroundPanelOf(getPanel(), mid, sid)) openPanel(null);
-  else openBackgroundPanel(mid, sid);
+  else openPanel({ kind: "background", mid, sid }, { push: false });
 }
 
 /** Whether the session has anything the panel lists now: a /loop, a background task, or a workflow run that runs or ended
@@ -55,6 +55,8 @@ export function latestWorkflowRun(s: Session | undefined, now = Date.now()): str
 export interface BackgroundChat {
   stopLoop: () => void;
   jumpToCall?: (call: string) => void;
+  /** Whether the parent chat currently holds a launching tool call or placed child card for `call`. */
+  hasCall?: (call: string) => boolean;
 }
 
 const chats = new Map<string, BackgroundChat[]>();

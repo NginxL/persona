@@ -122,16 +122,24 @@ func TestDoneTaskBusyAgentIsNeverClosed(t *testing.T) {
 	}
 }
 
-// An agent stopped for being idle is not an ended session: it keeps its terminal with the setting on.
-func TestIdleStopKeepsTheTerminal(t *testing.T) {
-	ctx := context.Background()
-	s, f := newTaskService(t)
-	closeOnEnd(t, s, true)
-	c := idleAgent(time.Now().Add(-48 * time.Hour))
-	f.setSessions("box", c)
-	s.retireAgent(ctx, taskCloseRefused{}, "idle", "box", c, time.Now())
-	if got := retireCalls(f); len(got) != 1 || !strings.HasPrefix(got[0], deviceSessionStop+" ") {
-		t.Fatalf("idle stop asked %v", got)
+// An agent Persona started, stopped for being idle, ends like a done task's: with the setting on its terminal is
+// closed too; off, it is only stopped and keeps it.
+func TestIdleStopClosesTheTerminalWithTheSetting(t *testing.T) {
+	for _, on := range []bool{false, true} {
+		ctx := context.Background()
+		s, f := newTaskService(t)
+		closeOnEnd(t, s, on)
+		c := idleAgent(time.Now().Add(-48 * time.Hour))
+		f.setSessions("box", c)
+		s.retireAgent(ctx, taskCloseRefused{}, "idle", "box", c, time.Now())
+		got := retireCalls(f)
+		want := deviceSessionStop + " "
+		if on {
+			want = deviceSessionRetire + " close_terminal=true,after_exit=true,stop_cause=idle"
+		}
+		if len(got) != 1 || !strings.HasPrefix(got[0], want) {
+			t.Fatalf("on=%v: idle stop asked %v, want %q", on, got, want)
+		}
 	}
 }
 
@@ -278,5 +286,54 @@ func TestCloseEndedTerminalsHTTP(t *testing.T) {
 		if w.Code != 200 || view.CloseEndedTerminals != on || s.closeEndedTerminals(context.Background()) != on {
 			t.Fatalf("PUT %v: %d %v", on, w.Code, view.CloseEndedTerminals)
 		}
+	}
+}
+
+func TestOpenTaskKeepsTerminalAfterUnexplainedStop(t *testing.T) {
+	s, f, todo := newSupervisedService(t)
+	closeOnEnd(t, s, true)
+	a := todo.Agents[0]
+	run := idleAgent(time.Now())
+	run.SessionID = a.SessionID
+	seen := endedSeen{[2]string{a.MachineID, a.SessionID}: true}
+	run.PaneID, run.Status, run.State = "", proto.StatusOffline, proto.StateUnknown
+	run.StartedByPersona = true
+	run.Capabilities = &proto.SessionCapabilities{Read: true, Terminal: true}
+	f.setSessions(a.MachineID, run)
+	s.closeEndedAgentTerminals(t.Context(), seen)
+	if got := retireCalls(f); len(got) != 0 {
+		t.Fatalf("closed the open task's terminal: %v", got)
+	}
+}
+
+func TestTerminalResumeOptionTargetsOnlyItsBoundAgent(t *testing.T) {
+	task := Todo{Agents: []TodoAgent{{MachineID: "box", SessionID: "00000001-example"}}}
+	label := "Resume 00000001 on its terminal page"
+	if target := decisionTerminal(task, label); target == nil || target.MachineID != "box" {
+		t.Fatal(target)
+	}
+	if decisionTerminal(task, "Resume 00000002 on its terminal page") != nil {
+		t.Fatal("unrelated terminal")
+	}
+	if terminalResumeLabel("Start a replacement") {
+		t.Fatal("ordinary decision classified as a terminal action")
+	}
+	now := time.Now()
+	task.Agents[0].ReleasedAt = &now
+	if decisionTerminal(task, label) != nil || soleDecisionAgent(task, now) != nil {
+		t.Fatal("released Agent")
+	}
+}
+
+func TestNeedsUserRejectsTerminalControlAsDecision(t *testing.T) {
+	s, f, todo := newSupervisedService(t)
+	waitsForReview(t, s, f, todo.ID, "The owner can choose the next step.")
+	args := rolloutDecision()
+	const manual = "Resume the Agent on its terminal page"
+	args["recommend"] = manual
+	args["options"] = []DecisionOption{{Label: manual, LeadsTo: "Open the terminal"}, {Label: "Replace", LeadsTo: "Start a new Agent"}}
+	got, err := reviewErr(s, todo.ID, args)
+	if err == nil || !strings.Contains(err.Error(), "terminal page") {
+		t.Fatalf("unexecutable decision accepted: %s, %v", got, err)
 	}
 }

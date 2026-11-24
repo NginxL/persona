@@ -6,6 +6,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/nwverse/persona/server/internal/assistantwire"
+	"github.com/nwverse/persona/server/internal/modelretry"
 	"github.com/nwverse/persona/server/internal/proto"
 )
 
@@ -24,7 +26,7 @@ func (m *Meta) ClaudeTurnStarted(wake bool) {
 	}
 	resumes := m.TurnErrorResumes && wake
 	m.clearTurnError()
-	m.TurnErrorResumes, m.turnWorked, m.turnSucceeded = resumes, false, false
+	m.TurnErrorResumes, m.turnWorked, m.turnSucceeded, m.turnErrorCounted = resumes, false, false, false
 	m.turnParts = nil
 	m.resumesSaid = m.resumesSaid || !wake
 }
@@ -54,8 +56,31 @@ func (m *Meta) clearTurnError() {
 func (m *Meta) claudeReply(e *entry, blocks []block, shown bool) {
 	if !e.IsAPIErrorMessage {
 		if shown && e.Message.Model != "<synthetic>" {
+			if len(blocks) > 0 && blocks[0].Type == "text" && assistantwire.CutOff(blocks[0].Text) {
+				allText := true
+				var parts []string
+				for _, b := range blocks {
+					if b.Type != "text" {
+						allText = false
+						break
+					}
+					parts = append(parts, b.Text)
+				}
+				if allText {
+					joined := strings.TrimSpace(strings.Join(parts, "\n"))
+					// Older Claude Code wrote cut-off "API Error: …" lines without isApiErrorMessage or <synthetic>:
+					// treat no-work upstream 5xx cut-offs as part of the streak rather than substantive model work.
+					if !m.turnWorked && modelretry.UpstreamServerError(joined) {
+						m.addUpstreamFailure(e.UUID, joined)
+					} else {
+						m.resetUpstreamStreak()
+					}
+					return
+				}
+			}
 			m.clearTurnError()
 			m.turnWorked, m.resumesSaid = true, true
+			m.resetUpstreamStreak()
 		}
 		return
 	}
@@ -87,6 +112,67 @@ func (m *Meta) claudeReply(e *entry, blocks []block, shown bool) {
 	}
 	m.TurnError, m.TurnErrorKind, m.TurnErrorResetsAt = text, kind, reset
 	m.TurnErrorAfterWork, m.turnErrorLine = m.turnWorked, e.UUID
+	m.noteUpstreamTurnError(text, kind, e.UUID)
+}
+
+// noteUpstreamTurnError updates UpstreamErrorStreak and marks TurnErrorUpstreamUnavailable when a turn failed on an
+// exhausted upstream account pool or across >= 2 consecutive no-work upstream 5xx turns (#13372).
+func (m *Meta) noteUpstreamTurnError(text, kind, lineID string) {
+	if !m.turnWorked && kind != proto.TurnErrorUsageLimit && kind != proto.TurnErrorUnrecoverable &&
+		m.TurnErrorCode == "" && proto.UnrecoverableTurnErrorCode(text) == "" && modelretry.UpstreamServerError(text) {
+		m.addUpstreamFailure(lineID, text)
+	} else {
+		m.resetUpstreamStreak()
+	}
+	if m.TurnErrorCode == "" && (modelretry.AccountExhausted(text) || m.UpstreamErrorStreak >= 2) {
+		m.TurnErrorCode = proto.TurnErrorUpstreamUnavailable
+	}
+}
+
+func (m *Meta) addUpstreamFailure(lineID, text string) {
+	if m.turnErrorCounted {
+		return
+	}
+	anchor := lineID
+	if anchor == "" {
+		anchor = m.Updated.UTC().Format(time.RFC3339Nano) + "|" + text
+	}
+	m.UpstreamErrorStreak++
+	m.turnErrorCounted = true
+	m.upstreamErrorLines = append(m.upstreamErrorLines, anchor)
+}
+
+func (m *Meta) resetUpstreamStreak() {
+	m.UpstreamErrorStreak = 0
+	m.upstreamStreakReset = true
+	if len(m.upstreamErrorLines) > 0 {
+		m.upstreamErrorLines = m.upstreamErrorLines[:0]
+	}
+}
+
+// LastUpstreamLine returns the dedupe anchor of the latest counted upstream failure across Claude Code, legacy cut-off,
+// and Codex rollout formats.
+func (m *Meta) LastUpstreamLine() string {
+	if n := len(m.upstreamErrorLines); n > 0 {
+		return m.upstreamErrorLines[n-1]
+	}
+	return m.turnErrorLine
+}
+
+// ResolveUpstreamStreak combines this tail scan's consecutive upstream error count with the previous read's count when
+// a large line pushed earlier failed turns before off without any intervening reset.
+func (m *Meta) ResolveUpstreamStreak(off int64, prevStreak int, prevLine string) int {
+	if prevStreak > 0 && prevLine != "" {
+		for i := len(m.upstreamErrorLines) - 1; i >= 0; i-- {
+			if m.upstreamErrorLines[i] == prevLine {
+				return prevStreak + (len(m.upstreamErrorLines) - 1 - i)
+			}
+		}
+	}
+	if off > 0 && !m.upstreamStreakReset && prevStreak > 0 {
+		return prevStreak + m.UpstreamErrorStreak
+	}
+	return m.UpstreamErrorStreak
 }
 
 // A 404 alone can be an endpoint error. Without the runtime's model_not_found code, require the error to name the

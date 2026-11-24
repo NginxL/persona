@@ -14,9 +14,6 @@ final class SentNavigationUITests: XCTestCase {
         let pair = "persona://pair?url=" + address.addingPercentEncoding(withAllowedCharacters: .alphanumerics)! + "&token=mock"
         let app = XCUIApplication()
         app.launchArguments = ["-pairURL", pair, "-tab", "settings", "-dev.openChat", "", legacy ? "-openSentAsYou" : "-openConnectors", "YES"]
-        #if os(macOS)
-        app.launchArguments += ["-macWindowSize", "1440x1000", "-macSnapshot", "/tmp/persona-sent-ui-unused.png", "-macSnapshotDelay", "3600"]
-        #endif
         app.launchPinned()
         return app
     }
@@ -33,11 +30,7 @@ final class SentNavigationUITests: XCTestCase {
     }
 
     @MainActor private func back(_ app: XCUIApplication) {
-        #if os(macOS)
-        let button = app.buttons["mac.detail.back"]
-        #else
         let button = app.navigationBars.buttons.element(boundBy: 0)
-        #endif
         XCTAssertTrue(button.waitForExistence(timeout: 10), "a secondary page needs Back")
         button.tap()
     }

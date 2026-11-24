@@ -90,6 +90,7 @@ func checkRedirectHeaders(req *http.Request, via []*http.Request, headers map[st
 		}
 		req.Header.Set("User-Agent", modelhttp.UserAgent())
 		modelhttp.ClearOpenCodeSession(req.Header)
+		modelhttp.ClearSource(req.Header)
 	}
 	if !sameOrigin(origin, req.URL) {
 		clearPrivate()
@@ -338,6 +339,7 @@ func (c *Client) setCustomHeaders(req *http.Request) {
 	for name, value := range c.cfg.Headers {
 		req.Header.Set(name, value)
 	}
+	modelhttp.Source{Role: "background"}.ApplyForURL(req.Header, req.URL.String())
 }
 
 // setUserAgent gives an explicit connection value precedence over Persona's default.

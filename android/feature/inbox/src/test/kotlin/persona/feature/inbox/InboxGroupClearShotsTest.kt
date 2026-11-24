@@ -55,6 +55,7 @@ import persona.core.designsystem.PersonaTheme
 import persona.core.domain.inbox.InboxItem
 import persona.core.navigation.AppTab
 import persona.core.navigation.Navigator
+import persona.core.inbox.*
 
 /**
  * Robolectric native-graphics coverage for #10425: both changed group titles and their two-choice menus in Glass, Brief
@@ -146,7 +147,7 @@ class InboxGroupClearShotsTest {
     private fun renderedLayout(text: String): TextLayoutResult {
         val node = rule.onNodeWithText(text, useUnmergedTree = true).fetchSemanticsNode()
         val layouts = mutableListOf<TextLayoutResult>()
-        node.config[SemanticsActions.GetTextLayoutResult].action!!(layouts)
+        val _ = node.config[SemanticsActions.GetTextLayoutResult].action!!(layouts)
         return layouts.single()
     }
 

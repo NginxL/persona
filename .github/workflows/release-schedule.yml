@@ -21,7 +21,10 @@ permissions:
 
 concurrency:
   group: release-schedule-${{ inputs.channel || 'automatic' }}
-  cancel-in-progress: false
+  # A stale scheduled environment wait must not hold the automatic group forever: each later schedule cancels its
+  # predecessor, and the newest run selects current main only after approval. Manual stable/beta dispatches stay
+  # independent and never cancel a different channel. This only replaces unstarted planning, never merge/publication.
+  cancel-in-progress: ${{ github.event_name == 'schedule' }}
 
 jobs:
   channel:
@@ -72,6 +75,15 @@ jobs:
           set -euo pipefail
           test -n "$GH_TOKEN" || { echo 'persona-release is missing RELEASE_PR_TOKEN; no release PR or branch was created' >&2; exit 1; }
           test "$CHANNEL" = release || test "$CHANNEL" = beta
+          gh api "repos/$REPOSITORY/pulls?state=open&base=main&per_page=100" > release-open-prs.json
+          # An active candidate already owns its fixed source and verification. Do not displace it with another -rN
+          # PR merely because main advanced. A real repair explicitly supersedes the old PR before the next selection.
+          python3 scripts/operations/release_candidate.py --repository "$REPOSITORY" --channel "$CHANNEL" --pulls release-open-prs.json > release-active-candidate.txt
+          if [[ -s release-active-candidate.txt ]]; then
+            echo 'An open release PR already owns this channel; inspect its fixed-source verification instead of duplicating it:'
+            cat release-active-candidate.txt
+            exit 0
+          fi
           # The environment approval may be hours after the scheduled checkout. Select the source only now, rather
           # than publishing the old main SHA that happened to trigger this run. A PR pins the selected source next.
           git fetch --no-tags origin main

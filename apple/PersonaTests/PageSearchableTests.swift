@@ -10,7 +10,7 @@ struct PageSearchableTests {
     @Test func pagesUsePageSearchable() {
         var found: [String] = []
         var scanned = 0
-        for dir in ["Persona", "Mac"] {
+        for dir in ["Persona", "Modules", "Mac"] {
             let files = (FileManager.default.enumerator(at: Self.apple.appending(path: dir), includingPropertiesForKeys: nil)?
                 .compactMap { $0 as? URL } ?? []).filter { $0.pathExtension == "swift" && $0.lastPathComponent != "TabActivity.swift" }
             for file in files {

@@ -111,4 +111,69 @@ class HttpHierarchyTest {
             catch (failure: HubFailure) { assertEquals(HubError.Protocol, failure.kind) }
         }
     }
+
+    @Test fun crossMachineHierarchyAddsFlagOnRootsAndQueriesParentMachineId() = runBlocking {
+        MockWebServer().use { server ->
+            val client = OkHttpClient()
+            var cross = false
+            val transport = HubChatTransport(
+                send = { path, method, body, _ ->
+                    client.newCall(Request.Builder().url(server.url(path)).method(method, body).build()).execute()
+                },
+                hierarchy = { true },
+                crossMachineHierarchy = { cross },
+            )
+            server.enqueue(MockResponse().setBody(page))
+            transport.sessionPage(SessionListFilter(roots = true))
+            val legacyUrl = server.takeRequest().requestUrl!!
+            assertEquals("1", legacyUrl.queryParameter("roots"))
+            assertNull(legacyUrl.queryParameter("cross_machine_hierarchy"))
+
+            cross = true
+            server.enqueue(MockResponse().setBody(page))
+            transport.sessionPage(SessionListFilter(roots = true))
+            val modernUrl = server.takeRequest().requestUrl!!
+            assertEquals("1", modernUrl.queryParameter("roots"))
+            assertEquals("1", modernUrl.queryParameter("cross_machine_hierarchy"))
+
+            server.enqueue(MockResponse().setBody(page))
+            transport.sessionPage(SessionListFilter(parentMachineId = "box-a", parentSessionId = "p1"))
+            val childFilterUrl = server.takeRequest().requestUrl!!
+            assertNull(childFilterUrl.queryParameter("roots"))
+            assertEquals("box-a", childFilterUrl.queryParameter("parent_machine_id"))
+            assertEquals("p1", childFilterUrl.queryParameter("parent_session_id"))
+
+            val actions = HttpChatActions(
+                slowRequest = null,
+                request = { path, method, body ->
+                    client.newCall(Request.Builder().url(server.url(path)).method(method, body).build()).execute()
+                },
+                slowRequestWithHeaders = null,
+                crossMachineHierarchy = { true },
+            )
+            server.enqueue(
+                MockResponse().setBody(
+                    """{"sessions":[
+                        {"machine_id":"box-a","session_id":"local-kid","folded_under":"p1","state":"working"},
+                        {"machine_id":"box-b","session_id":"remote-kid","is_subagent":true,"parent_machine_id":"box-a","parent_session_id":"p1","folded_under":"p1","folded_under_machine_id":"box-a","a2a_task_id":"t-1","subagent_origin":"a2a","state":"needs_you"},
+                        {"machine_id":"box-c","session_id":"orphan-kid","is_subagent":true,"parent_machine_id":"box-a","parent_session_id":"p1","subagent_origin":"a2a","state":"idle"}
+                    ],"has_more":false,"total":3,"revision":"r-cross"}""",
+                ),
+            )
+            val result = actions.childPage(Session("box-a", "p1"))
+            val reqUrl = server.takeRequest().requestUrl!!
+            assertEquals("box-a", reqUrl.queryParameter("parent_machine_id"))
+            assertEquals("p1", reqUrl.queryParameter("parent_session_id"))
+            assertNull(reqUrl.queryParameter("machine_id"))
+            assertEquals(3, result.sessions.size)
+            val byId = result.sessions.associateBy { it.sessionId }
+            assertEquals("box-a", byId.getValue("local-kid").machineId)
+            assertEquals("box-b", byId.getValue("remote-kid").machineId)
+            assertEquals("box-a", byId.getValue("remote-kid").foldedUnderMachineId)
+            assertEquals("t-1", byId.getValue("remote-kid").a2aTaskId)
+            assertEquals("a2a", byId.getValue("remote-kid").subagentOrigin)
+            assertEquals("box-c", byId.getValue("orphan-kid").machineId)
+            assertEquals("box-a", byId.getValue("orphan-kid").parentMachineId)
+        }
+    }
 }

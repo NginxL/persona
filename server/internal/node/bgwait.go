@@ -34,6 +34,11 @@ const (
 	bgBusyCPU = 0.02
 	// bgOutputQuiet: a process nothing here knows waits only when no background command wrote output for this long.
 	bgOutputQuiet = 2 * time.Minute
+	// bgStallAfter: a known worker (a build, tests, a download) that used no CPU at any look for this long, while no
+	// background command wrote output, looks stalled (a test hung on a lock, an esbuild service nobody talks to any more,
+	// #13744). The Agent stays Working (a running tool is work), but Session.BackgroundStalledSince says so. A build
+	// waiting on the network or a test on a database for a few minutes is not reported.
+	bgStallAfter = 10 * time.Minute
 )
 
 type bgVerdict int
@@ -59,19 +64,64 @@ type bgWatch struct {
 	now, prev map[int]psRow
 	window    time.Duration        // between prev and now
 	claudes   map[string]int       // session id → its claude's pid
+	busyAt    map[string]time.Time // session id → the latest look its background commands used CPU at, or first seen
 	ps        func() map[int]psRow // a variable for tests
 }
 
-// backgroundWaits says whether s, whose turn has ended, only waits on its background commands.
-func (n *Node) backgroundWaits(s *proto.Session) bool {
+// setBackgroundWait says whether s, whose turn has ended, only waits on its background commands, and since when its
+// background work looks stalled (BackgroundWaiting, BackgroundStalledSince).
+func (n *Node) setBackgroundWait(s *proto.Session) {
+	s.BackgroundWaiting, s.BackgroundStalledSince = false, 0
 	if s.Status == proto.StatusWorking || s.Status == proto.StatusBlocked || !waitableTasks(s.Background) {
-		return false
+		return
 	}
-	now, prev, window, pid := n.bgWait.look(s.SessionID, n.liveClaudes)
+	waiting, since := n.bgWait.judge(s.SessionID, s.Background, n.liveClaudes)
+	s.BackgroundWaiting = waiting
+	s.BackgroundStalledSince = proto.UnixTime32Of(since)
+}
+
+// judge looks at a session's background commands (claudes: the live claudes, for a new look): whether they only wait,
+// and, when a known worker runs there that used no CPU at any look and wrote no output for bgStallAfter, the time of
+// the last sign of life (zero when it is not stalled).
+func (w *bgWatch) judge(session string, tasks []proto.BackgroundTask, claudes func() []claudeProc) (waiting bool, stalledSince time.Time) {
+	now, prev, window, pid := w.look(session, claudes)
 	if pid == 0 || prev == nil {
-		return false
+		return false, time.Time{}
 	}
-	return judgeBackground(pid, now, prev, window, outputQuiet(s.Background, time.Now())) == bgWaiting
+	tree := scanBgTree(pid, now, prev, window)
+	idle := w.idleFor(session, tree.cpu > 0)
+	quiet := outputQuiet(tasks, w.at)
+	if tree.verdict(window, quiet) == bgWaiting {
+		return true, time.Time{}
+	}
+	if !tree.worker || idle < bgStallAfter {
+		return false, time.Time{}
+	}
+	last := w.at.Add(-idle)
+	if out := lastOutput(tasks); out.After(last) {
+		last = out
+	}
+	if w.at.Sub(last) < bgStallAfter {
+		return false, time.Time{}
+	}
+	return false, last
+}
+
+// idleFor is how long the session's background commands have used no CPU at any look, as of the current look: busy
+// says whether they used some since the previous one. The first time a session is asked about counts as busy, so a
+// stall is only ever judged on what this node saw.
+func (w *bgWatch) idleFor(session string, busy bool) time.Duration {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.busyAt == nil {
+		w.busyAt = map[string]time.Time{}
+	}
+	last, seen := w.busyAt[session]
+	if busy || !seen || last.After(w.at) {
+		w.busyAt[session] = w.at
+		return 0
+	}
+	return w.at.Sub(last)
 }
 
 // waitableTasks: background commands or Monitors, the kinds that are processes here (agents and workflows are work).
@@ -98,6 +148,11 @@ func (w *bgWatch) look(session string, claudes func() []claudeProc) (now, prev m
 		for _, c := range claudes() {
 			if c.SessionID != "" {
 				w.claudes[c.SessionID] = c.pid
+			}
+		}
+		for id := range w.busyAt { // a claude that is gone takes its history with it
+			if _, ok := w.claudes[id]; !ok {
+				delete(w.busyAt, id)
 			}
 		}
 	}
@@ -159,6 +214,18 @@ func psDuration(s string) time.Duration {
 // there waits (or is a shell or a filter in their pipes) and they used next to no CPU between the two looks; working
 // when one is a known worker, or they used CPU, or one nothing here knows runs while their output still grows.
 func judgeBackground(claude int, now, prev map[int]psRow, window time.Duration, quiet bool) bgVerdict {
+	return scanBgTree(claude, now, prev, window).verdict(window, quiet)
+}
+
+// bgTree is what one look found under a claude's background commands.
+type bgTree struct {
+	found   bool          // at least one background command's shell
+	cpu     time.Duration // the CPU they used between the two looks
+	worker  bool          // a known worker runs there (a build, tests, a download)
+	unknown bool          // a process nothing here knows runs there
+}
+
+func scanBgTree(claude int, now, prev map[int]psRow, window time.Duration) bgTree {
 	kids := map[int][]int{}
 	for pid, r := range now {
 		kids[r.ppid] = append(kids[r.ppid], pid)
@@ -170,30 +237,36 @@ func judgeBackground(claude int, now, prev map[int]psRow, window time.Duration, 
 		}
 	}
 	if len(shells) == 0 || window <= 0 {
-		return bgUnknown
+		return bgTree{}
 	}
-	var cpu time.Duration
-	unknown := false
+	tree := bgTree{found: true}
 	for queue := shells; len(queue) > 0; {
 		pid := queue[0]
 		queue = append(queue[1:], kids[pid]...)
 		r := now[pid]
 		if p, ok := prev[pid]; ok && r.age >= p.age && r.cpu >= p.cpu {
-			cpu += r.cpu - p.cpu
+			tree.cpu += r.cpu - p.cpu
 		} else if r.age <= window {
-			cpu += r.cpu // started since the last look
+			tree.cpu += r.cpu // started since the last look
 		}
 		if r.age < bgProbeAge || slices.Contains(shells, pid) {
 			continue
 		}
 		switch processKind(r.args) {
 		case procWorker:
-			return bgWorking
+			tree.worker = true
 		case procOther:
-			unknown = true
+			tree.unknown = true
 		}
 	}
-	if float64(cpu) > bgBusyCPU*float64(window) || unknown && !quiet {
+	return tree
+}
+
+func (t bgTree) verdict(window time.Duration, quiet bool) bgVerdict {
+	switch {
+	case !t.found:
+		return bgUnknown
+	case float64(t.cpu) > bgBusyCPU*float64(window), t.worker, t.unknown && !quiet:
 		return bgWorking
 	}
 	return bgWaiting
@@ -268,13 +341,19 @@ func processKind(args string) procKind {
 
 // outputQuiet: no background command wrote output for bgOutputQuiet (the files it writes to; true when none is known).
 func outputQuiet(tasks []proto.BackgroundTask, now time.Time) bool {
+	return now.Sub(lastOutput(tasks)) >= bgOutputQuiet
+}
+
+// lastOutput is when a background command last wrote to its output file (zero when none is known).
+func lastOutput(tasks []proto.BackgroundTask) time.Time {
+	var last time.Time
 	for _, t := range tasks {
 		if t.OutputFile == "" {
 			continue
 		}
-		if st, err := os.Stat(t.OutputFile); err == nil && now.Sub(st.ModTime()) < bgOutputQuiet {
-			return false
+		if st, err := os.Stat(t.OutputFile); err == nil && st.ModTime().After(last) {
+			last = st.ModTime()
 		}
 	}
-	return true
+	return last
 }

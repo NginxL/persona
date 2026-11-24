@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/nwverse/persona/server/internal/botcard"
 	"github.com/nwverse/persona/server/internal/channel"
-	"github.com/nwverse/persona/server/internal/feishubot"
 	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/prompts"
 	"github.com/nwverse/persona/server/internal/proto"
@@ -95,9 +95,9 @@ func TestGoldenChannelPromptDeliveries(t *testing.T) {
 						"body":   map[string]any{"content": `{"ja_jp":{"title":"日本語版","content":[[{"tag":"text","text":"引用"}]]},"en_us":{"title":"English edition","content":[]},"zh_cn":{"title":"原始標題","content":[[{"tag":"text","text":"原始引文"}]]}}`}}}}, nil
 				})
 				f.answerApp(AppFeishu, FeishuUserName, func(json.RawMessage) (any, error) { return map[string]any{"name": "Original Sender"}, nil })
-				ev := &feishubot.MessageEvent{}
+				ev := &botcard.MessageEvent{}
 				ev.Message.MessageID, ev.Message.ParentID, ev.Message.ChatType, ev.Message.MessageType = "owner_42", "quoted_42", "p2p", "text"
-				content := feishubot.Content{Text: "Respuesta en español, por favor."}
+				content := botcard.Content{Text: "Respuesta en español, por favor."}
 				target := botTarget{Kind: targetPersona, MachineID: "server", SessionID: "m1", TodoID: todo.ID}
 				if err := bot.botSend(ctx, ev, content, target); err != nil {
 					t.Fatal(err)
@@ -191,7 +191,7 @@ func TestChannelOwnerAndAudienceAcrossLocales(t *testing.T) {
 			ev := topicEvent("topic_42", "Buenos días.")
 			ev.Message.ParentID = "other_42"
 			target := botTarget{Kind: targetPersona, MachineID: "server", SessionID: "m1", TodoID: "private_42"}
-			if err := s.botSendIn(ctx, &ev, feishubot.Content{Text: "Buenos días.", Forward: true}, target, &feishuTopic{Chat: testChat, Thread: testThread}); err != nil {
+			if err := s.botSendIn(ctx, &ev, botcard.Content{Text: "Buenos días.", Forward: true}, target, &feishuTopic{Chat: testChat, Thread: testThread}); err != nil {
 				t.Fatal(err)
 			}
 			text := sendOnceText(f)
@@ -215,7 +215,7 @@ func TestChannelOwnerAndAudienceAcrossLocales(t *testing.T) {
 				}}, nil
 			})
 			ev.Message.MessageID, ev.Message.ParentID = "forward_42", ""
-			if err := s.botSend(ctx, &ev, feishubot.Content{Forward: true}, botTarget{Kind: targetMain}); err != nil {
+			if err := s.botSend(ctx, &ev, botcard.Content{Forward: true}, botTarget{Kind: targetMain}); err != nil {
 				t.Fatal(err)
 			}
 			text = sendOnceText(f)

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useSyncExternalStore } from "react";
 import { api, credentialOwner, onCredentialChange, subscribeCredentialOwner } from "./api";
 import { shownManager, MANAGER_HEADER, onManagerChoice, useShownManager } from "./manager-choice";
 import { sameValue } from "./stable-lines";
+import { directoryKey } from "./workspace-directory";
 import type { WorkspaceTarget as RuntimeWorkspaceTarget } from "./workspace-target";
 
 /** The host inventory, independent of board settings and of the Agents currently running. */
@@ -42,8 +43,11 @@ export interface WorkspaceCatalogList { workspaces: HostWorkspace[]; errors?: { 
 export function workspaceCatalogOwner(): WorkspaceCatalogOwner {
   return { owner: credentialOwner(), manager: shownManager() };
 }
-export function workspaceKey(w: Pick<HostWorkspace, "machine_id" | "source" | "source_id">, owner: string, manager: string): string {
-  return JSON.stringify([owner, manager, w.machine_id, w.source, w.source_id]);
+export function workspaceKey(w: Pick<HostWorkspace, "machine_id" | "source" | "source_id" | "cwd">, owner: string, manager: string): string {
+  const identity = [owner, manager, w.machine_id, w.source, w.source_id];
+  // A desktop project or saved environment can contain several roots under one source-local id.
+  if (["codex_app", "claude_desktop"].includes(w.source)) identity.push(directoryKey(w.cwd) ?? w.cwd);
+  return JSON.stringify(identity);
 }
 export function workspaceTarget(w: HostWorkspace, owner: string, manager: string): WorkspaceTarget {
   return { owner, manager, machineId: w.machine_id, host: w.source, workspaceId: w.source_id, cwd: w.cwd, label: w.title || w.branch || w.cwd };

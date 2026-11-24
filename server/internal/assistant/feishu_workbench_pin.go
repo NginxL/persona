@@ -7,7 +7,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/nwverse/persona/server/internal/feishubot"
+	"github.com/nwverse/persona/server/internal/botcard"
 	"github.com/nwverse/persona/server/internal/proto"
 )
 
@@ -55,7 +55,7 @@ func (s *Service) workbenchLoop() {
 }
 
 // standingCard is what the standing board shows: the home card with the workbench on, the waiting list without.
-func (s *Service) standingCard(ctx context.Context) (card *feishubot.Card, fallback, said string) {
+func (s *Service) standingCard(ctx context.Context) (card *botcard.Card, fallback, said string) {
 	if f, ready := s.feishuFeatures(ctx); s.workbenchOn(f, ready) {
 		return s.homeCard(ctx, f)
 	}
@@ -66,7 +66,7 @@ func (s *Service) standingCard(ctx context.Context) (card *feishubot.Card, fallb
 // bring up the latest workbench. It is a small text button, in the card's row of links or as a line of its own at its
 // end, never beside its actions (#5317); not on a card that has a way back already (the workbench's own cards) or is
 // near its size.
-func (s *Service) workbenchStamp(ctx context.Context, c *feishubot.Card) *feishubot.Card {
+func (s *Service) workbenchStamp(ctx context.Context, c *botcard.Card) *botcard.Card {
 	if c == nil || !s.workbench.on.Load() {
 		return c
 	}
@@ -74,7 +74,7 @@ func (s *Service) workbenchStamp(ctx context.Context, c *feishubot.Card) *feishu
 	if strings.Contains(js, `"a":"nav"`) || len(js) > workbenchStampMost {
 		return c
 	}
-	return c.AppendToLinks(feishubot.TextBtn(wbT(s.botLang(ctx), "stamp_home"), map[string]any{"a": "nav", "to": "home"}))
+	return c.AppendToLinks(botcard.TextBtn(wbT(s.botLang(ctx), "stamp_home"), map[string]any{"a": "nav", "to": "home"}))
 }
 
 // summonWorkbench posts a fresh workbench at the bottom of the chat, pins it as the only pin of the bot's, and
@@ -116,7 +116,7 @@ func (s *Service) workbenchRetire(ctx context.Context, mid string) {
 		return
 	}
 	l := s.botLang(ctx)
-	stub := feishubot.NewCard(wbT(l, "desk_moved_title"), feishubot.Grey, wbT(l, "desk_moved_title")).Markdown(wbT(l, "desk_moved"))
+	stub := botcard.NewCard(wbT(l, "desk_moved_title"), botcard.Grey, wbT(l, "desk_moved_title")).Markdown(wbT(l, "desk_moved"))
 	if err := s.botUpdateCard(ctx, mid, stub); err != nil {
 		s.logf("bots: workbench retire: %v", err)
 	}

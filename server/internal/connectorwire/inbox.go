@@ -42,6 +42,8 @@ type InboxThing struct {
 	At   time.Time `json:"at,omitempty"`
 	Last string    `json:"last,omitempty"`
 	URL  string    `json:"url,omitempty"` // the thread on the web, opened in the app
+	// ThreadState is the observed lifecycle of a GitHub pull request: open, closed or merged.
+	ThreadState string `json:"thread_state,omitempty"`
 	// OpenURL is a link the system opens instead (sms:…: "Reply in Messages"), kept apart from URL.
 	OpenURL string `json:"open_url,omitempty"`
 	// ReplyTo says where a reply goes and who sees it ("Comment on example-org/example-repo#12 (anyone who can see the repo)");

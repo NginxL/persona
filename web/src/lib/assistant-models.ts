@@ -99,13 +99,17 @@ export function assistantSetup(c: AssistantChat, info: AssistantLaunchers | unde
   const s = c.session;
   const pick = assistantPick(c);
   const fast = s?.service_tier === "priority" || (!s && pickedFast());
-  if (pick) return { provider: pick.launcher, model: pick.model, effort: pick.effort ?? s?.effort, ...(fast ? { fast: true } : {}), source: "pick" };
+  // An Antigravity variant pick carries its effort in the new model ID.
+  const sessionEffort = (model?: string) => s?.agent === "agy" && model && model !== s.model ? undefined : s?.effort;
+  if (pick) return { provider: pick.launcher, model: pick.model, effort: pick.effort ?? sessionEffort(pick.model), ...(fast ? { fast: true } : {}), source: "pick" };
   const mismatch = mainChatAgentMismatch(c, info);
   if (s && mismatch) return { provider: mismatch.actualLauncher, model: s.model, effort: s.effort, ...(fast ? { fast: true } : {}), source: "own" };
   const def = c.def === undefined ? info?.def : c.def;
   if (!s || (c.followsDefault ?? c.isMain)) {
     const provider = def?.provider || c.config || s?.launcher || "claude";
-    return { provider, model: def?.model || (s?.launcher === provider ? s.model : undefined), effort: c.isMain ? def?.effort || s?.effort : s?.effort ?? (def?.effort || undefined), ...(fast ? { fast: true } : {}), source: "default" };
+    const model = def?.model || (s?.launcher === provider ? s.model : undefined);
+    const effort = sessionEffort(model);
+    return { provider, model, effort: c.isMain ? def?.effort || effort : effort ?? (def?.effort || undefined), ...(fast ? { fast: true } : {}), source: "default" };
   }
   // a launcher the list no longer offers is not what the next message runs on: the hub moves the chat to the assistant's
   const own = launcherOffered(info?.launchers ?? null, s.launcher) ? s.launcher : undefined;
@@ -116,16 +120,16 @@ export function assistantSetup(c: AssistantChat, info: AssistantLaunchers | unde
  *  else the model it is configured with), the effort, Fast. */
 export function assistantPillView(c: AssistantChat, setup: AssistantSetup, info: AssistantLaunchers | undefined, e: ModelList): PillView {
   const launcher = info?.launchers.find((l) => l.name === setup.provider);
-  const row = currentModelRow(e.list?.models ?? [], setup.model);
   const id = setup.model || explicitLauncherModel(launcher?.model);
+  const models = e.list?.models ?? [];
+  const row = currentModelRow(models, setup.model) ?? (id !== setup.model ? currentModelRow(models, id) : undefined);
   const out: PillView = {
+    ...pillModel(row, setup.model, id),
     engine: agentId(launcher?.agent_type || launcher?.agent || c.session?.agent),
     provider: launcher ? providerTitle(launcher) : setup.provider,
     loading: e.list === undefined && Boolean(e.loading),
     failed: e.list === undefined && Boolean(e.error),
   };
-  const model = pillModel(e.list?.models ?? [], setup.model, id);
-  if (model) out.model = model;
   if (setup.effort) out.effort = setup.effort;
   if (setup.fast && (c.session || modelSupportsFast(row))) out.fast = true;
   return out;

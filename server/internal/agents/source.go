@@ -1,5 +1,5 @@
-// Package agents is Persona' single view of the agents it can reach. The hub has no Source of its own: every one is
-// a running plugin's agent_sources contribution (extmgr/extension_agents.go), such as the Lark plugin's.
+// Package agents is Persona's single view of the agents it can reach. Sources are running plugins' agent_sources
+// contributions (extmgr/extension_agents.go) and the manager's explicitly registered bot endpoints (bot.go).
 // A session's public id is "<source>:<sessionKey>" (the Lark gateway's own keys already start with "agent:").
 package agents
 

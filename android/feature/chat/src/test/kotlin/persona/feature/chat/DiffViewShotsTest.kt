@@ -32,13 +32,14 @@ import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
 import persona.core.contracts.Item
 import persona.core.designsystem.AppStyle
+import persona.core.designsystem.InterfaceFontScaleCap
 import persona.core.designsystem.PersonaTheme
 import persona.core.designsystem.Tokens
 import java.io.File
 
 /**
- * A diff's sign column as on iOS (#4209): `Tokens.Size.dotXL` wide, growing with the font, then `Tokens.Space.sm` before the
- * code. Glass, light and dark, at the default and the largest font scale. PNGs in `build/diff-shots/`.
+ * A diff's sign column as on iOS (#4209): `Tokens.Size.dotXL` wide, growing to the interface cap, then `Tokens.Space.sm` before the
+ * code. Glass, light and dark, at the default and the 2.0 system maximum. PNGs in `build/diff-shots/`.
  */
 @RunWith(AndroidJUnit4::class)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
@@ -57,7 +58,7 @@ class DiffViewShotsTest {
 
     private fun out(): File = File(System.getProperty("persona.shots") ?: "build/diff-shots").also { it.mkdirs() }
 
-    @Test fun signColumnGrowsWithTheFont() {
+    @Test fun signColumnFollowsTheInterfaceCap() {
         var dark by mutableStateOf(false)
         var fontScale by mutableStateOf(1f)
         rule.setContent {
@@ -73,9 +74,9 @@ class DiffViewShotsTest {
         for (scale in listOf(1f, 2f)) for (d in listOf(false, true)) {
             fontScale = scale; dark = d
             rule.waitForIdle()
-            // The sign's column is dotXL and grows with the font (the sm after it is padding outside the text's bounds).
+            // The sign's interface column grows only to the cap; the sm after it is padding outside the text's bounds.
             val column = rule.onAllNodesWithText("+")[0].getBoundsInRoot().width
-            assertEquals((Tokens.Size.dotXL * scale).value, column.value, 0.5f)
+            assertEquals((Tokens.Size.dotXL * minOf(scale, InterfaceFontScaleCap)).value, column.value, 0.5f)
             val bitmap = rule.onNodeWithTag("shot").captureToImage().asAndroidBitmap()
             File(out(), "diff-glass-${if (d) "dark" else "light"}-x${scale.toInt()}.png").outputStream()
                 .use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }

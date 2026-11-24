@@ -150,9 +150,10 @@ func (n *Node) assistantSegment(ctx context.Context, method string, raw json.Raw
 	}
 	n.segmentStarts.seen[operation] = true
 	n.segmentStarts.mu.Unlock()
-	// The preparation API accepts no input and no caller-supplied policy. Policy is
-	// supplied by the manager with the first actual input after epoch activation.
-	for _, key := range []string{"text", "prompt", "images", "supervision_instructions", "session_id", "new_session_id", "client_msg_id"} {
+	// The preparation API accepts no input. The manager's role policy (supervision_instructions) is kept: the first
+	// input after epoch activation carries the same policy, so the prepared process needs no restart, which for a
+	// Codex thread with no turn yet would start another thread under a new id.
+	for _, key := range []string{"text", "prompt", "images", "session_id", "new_session_id", "client_msg_id"} {
 		delete(p, key)
 	}
 	delete(p, "operation_id")

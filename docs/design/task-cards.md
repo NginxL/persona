@@ -192,8 +192,10 @@ P7 已定，Web 一侧已删（§7）。**更正**：`OutcomeReceipt`、`Receipt
 | --- | --- | --- | --- |
 | Done | ✓ 实心，`positive` | `positive` 12% | PR、View |
 | Stopped（没做完） | 时钟，secondary | `Fill.well` / `--field` | PR、View |
-| Failed to start | ✕ 实心，`danger` | `danger` 12%（Web `--danger-wash`） | Retry |
+| Failed to start | ✕ 实心，`danger` | `danger` 12%（Web `--danger-wash`） | Use <launcher> instead (when offered), Retry |
 | Interrupted | ✕ 实心，`danger` | `danger` 12%（Web `--danger-wash`） | Continue、View |
+
+Failed-start remedies (#10452): the alternative launcher comes first only with `task_retry_launcher` and plan-task `retry_with`, on its own measured full-width row so its complete label never squeezes Retry / Remove; the ordinary Retry / Remove row keeps its old layout and Retry needs no `plan_id`. A `shell_waiting` question appears above those actions only with `todo_start_answer` and a live `kept_until`, using the shared choice-card pattern in `DESIGN_SYSTEM.md` 3.3. The task answer restarts the task on the hub and never resends chat messages.
 
 ### 3.4 要你拍板
 

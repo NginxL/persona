@@ -41,6 +41,7 @@
   "link_invalid": "Use an issue or pull request link from this repository.",
   "issue": "Issue",
   "pull_request": "Pull request",
+  "pr_conflict": "Conflict",
   "remove_link": "Remove {link}",
   "options": "Options for {name}",
   "no_links": "No repositories linked",

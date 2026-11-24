@@ -498,7 +498,7 @@ func (s *Service) confirmHandedAgent(ctx context.Context, it *InboxItem, g *Inbo
 	}
 	args, _ := json.Marshal(map[string]string{"machine": machine, "cwd": cwd, "prompt": text})
 	hs := &handoffStart{item: it.ID}
-	_, err := s.runTool(context.WithValue(ctx, handoffStartKey{}, hs), s.settings(ctx).MachineID, to.SessionID, "agent_start", args)
+	_, err := s.runTool(ownerConfirmed(context.WithValue(ctx, handoffStartKey{}, hs)), s.settings(ctx).MachineID, to.SessionID, "agent_start", args)
 	b := &s.inbox
 	b.mu.Lock()
 	l, now := b.userLang(), time.Now().UTC()

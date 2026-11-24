@@ -4,12 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/nwverse/persona/server/internal/herdr"
 	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/proto"
 	"github.com/nwverse/persona/server/internal/rpc"
+	"github.com/nwverse/persona/server/internal/textfmt"
 )
 
 // Branch lookup is inspection only. General worktree creation still refuses duplicate checkouts. A checkout it hands
@@ -18,8 +20,9 @@ import (
 // its code (proto.CodeCheckout*) and the branch and path, so the hub tells them apart (#10365). A refused checkout of
 // this repository's branch gets portable links too: the refusal names its path for a workspace {existing}, where an
 // Agent's terminal then needs git to work.
-func (n *Node) worktreePrepareBranch(ctx context.Context, kind, workspace, cwd, branch string) (proto.WorktreePrepare, error) {
-	prep, err := n.worktreePrepare(ctx, kind, workspace, cwd)
+func (n *Node) worktreePrepareBranch(ctx context.Context, in worktreePrepareParams) (proto.WorktreePrepare, error) {
+	prep, err := n.worktreePrepare(ctx, in.Kind, in.WorkspaceID, in.Cwd)
+	branch := in.Branch
 	if err != nil || branch == "" {
 		return prep, err
 	}
@@ -79,16 +82,36 @@ func (n *Node) worktreePrepareBranch(ctx context.Context, kind, workspace, cwd, 
 	if owner != "" {
 		return prep, checkoutRefusal(ctx, proto.CodeCheckoutInUse, i18n.Args{"branch": branch, "path": shown, "owner": owner})
 	}
-	out, err := git(ctx, at, "status", "--porcelain", "--untracked-files=normal", "--ignore-submodules=none")
+	inCheckouts := prep.Path != "" && within(realPath(at), realPath(prep.Path))
+	untracked, submodules := "normal", "none"
+	if in.AllowUntracked && inCheckouts && strings.HasPrefix(branch, "task/") {
+		untracked, submodules = "no", "untracked"
+	}
+	out, err := git(ctx, at, "status", "--porcelain=v1", "-z", "--no-renames", "--untracked-files="+untracked, "--ignore-submodules="+submodules)
 	if err != nil {
 		return prep, unverified(err)
 	}
-	if strings.TrimSpace(out) != "" {
-		return prep, checkoutRefusal(ctx, proto.CodeCheckoutDirty, i18n.Args{"branch": branch, "path": shown})
+	if out != "" {
+		return prep, checkoutRefusal(ctx, proto.CodeCheckoutDirty, i18n.Args{"branch": branch, "path": shown, "files": checkoutStatusFiles(out)})
 	}
-	prep.Existing = &proto.WorktreeCheckout{Path: shown, Branch: branch,
-		InCheckouts: prep.Path != "" && within(realPath(at), realPath(prep.Path))}
+	prep.Existing = &proto.WorktreeCheckout{Path: shown, Branch: branch, InCheckouts: inCheckouts}
 	return prep, nil
+}
+
+// Porcelain v1 with -z and no rename detection gives one "XY path" per NUL-delimited entry.
+func checkoutStatusFiles(status string) string {
+	var files []string
+	for entry := range strings.SplitSeq(status, "\x00") {
+		if len(entry) < 4 {
+			continue
+		}
+		if len(files) == 3 {
+			break
+		}
+		name := strconv.Quote(entry[3:])
+		files = append(files, textfmt.Clip(name[:len(name)-1], 72)+`"`)
+	}
+	return strings.Join(files, ", ")
 }
 
 // checkoutRefusal is worktree.prepare's refusal of a branch's checkout: code, in the request's language

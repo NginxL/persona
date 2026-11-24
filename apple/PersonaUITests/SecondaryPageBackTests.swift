@@ -178,6 +178,7 @@ final class SecondaryPageBackTests: XCTestCase {
             .allElementsBoundByIndex.first { $0.exists && $0.isHittable }
         XCTAssertNotNil(more, "no ⋯ on the Agent's chat:\n\(app.debugDescription)")
         more?.tap()
+        app.openAgentMenuMore() // Files is More's (#13396)
         XCTAssertTrue(app.buttons["文件"].firstMatch.waitForExistence(timeout: 5), "no Files in ⋯:\n\(app.debugDescription)")
         app.buttons["文件"].firstMatch.tap()
         let files = app.descendants(matching: .any)["files.pane"].firstMatch

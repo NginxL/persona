@@ -11,6 +11,8 @@ import (
 func TestTaskInstructionsCodexStartAndRestore(t *testing.T) {
 	withCodexLaunchers(t, map[string][]string{"codex": {"codex"}})
 	n, _, cwd, _ := codexStartHerdr(t, 0)
+	// The start probe must see the node's temporary Codex home, not a host override.
+	t.Setenv("CODEX_HOME", n.codexHome())
 	const rules = "Use one closeout.\nKeep the task's scope."
 	res, err := request(t, n, "session.start", map[string]any{"cwd": cwd, "launcher": "codex", "prompt": "Summarize the failed checks", "task_instructions": rules, "task_attachments": "<attached_images>\n/image.png\n</attached_images>"})
 	if err != nil {
@@ -39,6 +41,8 @@ func TestTaskInstructionsCodexStartAndRestore(t *testing.T) {
 
 func TestTaskInstructionsPreserveCodexConfiguration(t *testing.T) {
 	n, _, home := herdrNode(t)
+	// The launcher probe inherits this shell value; keep it on the same temporary home as the node.
+	t.Setenv("CODEX_HOME", n.codexHome())
 	cwd := mkdir(t, filepath.Join(home, "proj"))
 	if !n.taskCodexChannel(t.Context(), "codex", cwd, []string{"codex"}) {
 		t.Fatal("clean native start lost its channel")

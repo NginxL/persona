@@ -5,7 +5,6 @@ apple/Persona/App/AppModel.swift	docs/operations/hub-update.md	App 里
 apple/Persona/App/AppModel.swift	docs/operations/hub-update.md	兼容
 apple/Persona/Persona/Persona.swift	docs/apple/persona.md	App 图标
 apple/Persona/Views/Chat/ChatView.swift	docs/assistant/unified-entry.md	指向谁
-apple/Persona/Views/Chat/ChatView.swift	docs/integrations/codex.md	守护进程上的会话
 apple/Persona/Views/Mail/MailOutlookViews.swift	docs/extensions/mail.md	Outlook Connection
 apple/Persona/Views/Settings/AppearanceSettingsView.swift	docs/apple/ios.md	设计语言
 apple/Persona/Views/Settings/ExtensionsModel.swift	docs/extensions/extensions.md	自动升级
@@ -29,7 +28,6 @@ docs/operations/release.md	docs/operations/hub-update.md	Preventing rollback
 docs/operations/release.md	docs/operations/link.md	Installing the node service
 docs/operations/testing.md	docs/protocol/protocol.md	Item continuity
 docs/operations/testing.md	docs/protocol/protocol.md	Sending video
-docs/protocol/protocol.md	channels.md	6. Endpoints
 docs/protocol/protocol.md	computer-use.md	Approving per app
 docs/protocol/protocol.md	docs/apple/ios.md	Reasoning effort and permission mode
 docs/protocol/protocol.md	docs/assistant/todos.md	Record the conclusion when done
@@ -41,14 +39,13 @@ docs/protocol/protocol.md	docs/operations/runtime-cli.md	Connecting to a real de
 docs/protocol/protocol.md	docs/server/machines.md	Self-check
 docs/protocol/protocol.md	engines.md	When herdr isn't running
 docs/protocol/protocol.md	launcher-health.md	Endpoints for the board
-docs/protocol/protocol.md	todos.md	Auto-complete
 docs/web/web.md	docs/assistant/inbox.md	Mute
 docs/web/web.md	docs/protocol/protocol.md	Messages Persona injects
 server/internal/assistant/inbox_connectors.go	docs/plans/plan-connectors.md	1 · 5. Inbox
 server/internal/extension/registry.go	docs/extensions/extensions.md	Contribution switches
 server/internal/extmgr/extension_routes.go	docs/extensions/extensions.md	Contribution switches
 server/internal/extmgr/extension_routes.go	docs/extensions/extensions.md	Programs that run on computers
-server/internal/mail/microsoft.go	docs/extensions/mail.md	Outlook 接入方式
+server/internal/modules/mail/microsoft.go	docs/extensions/mail.md	Outlook 接入方式
 server/internal/proto/proto.go	docs/assistant/assistant.md	Push when done
 server/internal/proto/proto.go	docs/protocol/protocol.md	Origin of assistant conversations
 server/internal/proto/usagewindows.go	docs/server/usage-windows.md	Account pool gateways

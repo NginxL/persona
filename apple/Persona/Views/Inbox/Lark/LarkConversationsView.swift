@@ -1,6 +1,5 @@
 import SwiftUI
 
-#if os(iOS) || os(visionOS)
 /// One extra entry, not a second messaging implementation: destinations are the inbox's native chat.
 struct LarkConversationsView: View {
     @Environment(AppModel.self) private var model
@@ -405,4 +404,3 @@ private struct LarkConversationsPage: View {
         .modifier(ShellBarAtRest(page: 2)) // ShellMovingBar stands in while the strip slides
     }
 }
-#endif

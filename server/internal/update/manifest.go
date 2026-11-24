@@ -203,7 +203,8 @@ func BuildManifest(dir string, m Manifest) (*Manifest, error) {
 			if m.Helpers[p] == nil {
 				m.Helpers[p] = map[string]File{}
 			}
-			m.Helpers[p][strings.TrimSuffix(strings.TrimPrefix(filepath.Base(gz), p+"-"), ".gz")] = f
+			platform := strings.TrimSuffix(strings.TrimSuffix(strings.TrimPrefix(filepath.Base(gz), p+"-"), ".gz"), ".exe")
+			m.Helpers[p][platform] = f
 		}
 	}
 	links, err := filepath.Glob(filepath.Join(dir, "persona-link-*-*.gz"))

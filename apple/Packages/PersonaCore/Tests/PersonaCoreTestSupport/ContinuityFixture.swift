@@ -143,7 +143,7 @@ public struct ContinuityCase: Sendable {
     public let expected: [ContinuityJSON]
     public var events: [ContinuityJSON] { input["events"]?.array ?? [] }
 
-    public static func all(in directory: URL) throws -> [ContinuityCase] {
+    @concurrent public static func all(in directory: URL) async throws -> [ContinuityCase] {
         let files = try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
             .filter { $0.pathExtension == "json" }.sorted { $0.lastPathComponent < $1.lastPathComponent }
         guard !files.isEmpty else { throw ContinuityFixtureError.invalidFixture("no JSON files in \(directory.path)") }

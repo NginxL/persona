@@ -5,9 +5,9 @@
 这条请求在话题里，thread_id：omt_example
 
 1. 用 lark-cli 以用户身份读这个群（读取不会标记已读）。请求里没说范围时，读最近 40 条，包括其他成员和机器人的发言（先只列消息，不下载）：
-   mkdir -p ~/.persona/lark-read/om_example && cd ~/.persona/lark-read/om_example && lark-cli im +chat-messages-list --chat-id oc_example --page-size 40 --no-reactions
-   话题里的回复也要读：cd ~/.persona/lark-read/om_example && lark-cli im +threads-messages-list --thread omt_example --page-size 50 --no-reactions
-   请求里说了范围（近两天、完整读取、只看某人等）就换成对应的参数（--start / --end 用 ISO 8601 时间、--order asc、--page-all --page-limit 等），但最多读 500 条；超了就读到 500 条为止，并在回答里说明读了多少条、从什么时候开始。不要加 --download-resources：它不看大小把所有图片和附件都下载下来。读完回到原来的目录（cd -）。
+   mkdir -p ~/.persona/lark-read/om_example && cd ~/.persona/lark-read/om_example && lark-cli im +chat-messages-list --chat-id oc_example --order desc --page-size 40 --no-reactions
+   话题里的回复也要读：cd ~/.persona/lark-read/om_example && lark-cli im +threads-messages-list --thread omt_example --order desc --page-size 50 --no-reactions
+   这些命令取最新一页，选出的消息按时间从早到晚阅读。请求指定范围时（近两天、完整读取、只看某人等），改为遵循该范围：群消息支持 --start / --end（ISO 8601 时间）；话题回复按消息时间筛选。按范围需要，在 has_more 为 true 时用 --page-token 继续取页，两个列表、所有页面合计最多读 500 条，最后一页缩小到剩余额度。范围已覆盖或达到上限就停止。若因上限、页面失败或缺少游标导致读取不完整，在回答里说明，并写明读了多少条、从什么时候开始。不要加 --download-resources：它不看大小把所有图片和附件都下载下来。读完回到原来的目录（cd -）。
 2. 图片和附件在列表里显示为 [Image: img_…] 和 <file key="file_…" name="…"/>（只有 [Image]、没有 key 的取不到，跳过并在回答里说明）。只下载需要的，存到 ~/.persona/lark-read/om_example，一次一个、不要用循环：cd ~/.persona/lark-read/om_example && lark-cli im +messages-resources-download --message-id <message_id> --file-key <key> --type image|file --output lark-im-resources/<key>（--output 一定写成 lark-im-resources/ 里的文件名，写到别处要确认）。不要用子 shell「( … )」。列表里没有文件大小，大小看每次下载结果里的 data.size_bytes（文件在 data.saved_path）：单个超过 50 MB 的马上删掉、不读；加上这一个累计超过 200 MB 时也删掉它，并停止下载。在回答里列出没下载和删掉的。
 3. 图片用你能看图的工具直接看（最多 20 张，先看和请求最相关、最新的）；附件按类型读（文本和日志直接读，表格和 PDF 读内容，压缩包先列目录）。
 4. lark-cli 不可用、没登录或缺权限时，至少用 larkcli_messages 工具读文字，并在回答里说明图片和附件没读到、原因是什么。

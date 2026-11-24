@@ -60,13 +60,15 @@
 	<key>NSFaceIDUsageDescription</key>
 	<string>Persona asks for Face ID before it types a Mac's remembered password on that Mac's lock screen, when you tap One-Tap Unlock on the Mac's page.</string>
 	<key>NSHealthShareUsageDescription</key>
-	<string>Persona lets Claude read health summaries when you ask, for example how many steps you walked this week or how long you slept last night. With rolling recording on, Persona also checks heart rate, HRV, steps, workouts and the moods you log, on your iPhone only, to keep the minutes around them.</string>
+	<string>Persona lets Claude read health summaries when you ask, for example how many steps you walked this week or how long you slept last night. With rolling recording on, Persona also checks heart rate, HRV, steps, workouts and the moods you log, on your iPhone only, to keep the minutes around them. The Health home and widgets show Activity rings, steps and sleep.</string>
 	<key>NSHealthUpdateUsageDescription</key>
-	<string>Persona saves health data only after you approve it on your iPhone, one entry at a time, for example a weight or last night's sleep you told Claude about.</string>
+	<string>Persona saves individual health samples after you confirm them on your iPhone. When you turn on sync, Persona also automatically writes your water and protein records to Apple Health on this iPhone.</string>
 	<key>NSHomeKitUsageDescription</key>
 	<string>Persona controls your Home accessories and scenes only when you ask and approve each change on your iPhone, for example to turn off the living room light.</string>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>Persona connects straight to your computer when it's on the same Wi-Fi, to show its screen faster.</string>
+	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+	<string>Persona reads your location only when the assistant needs it to answer you, for example when you ask “How far am I from home?” while Persona isn't open. When you move a long way, iOS may wake Persona in the background, but it doesn't record where you go.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>Persona shares your current location with Claude only when you ask, for example to find what time it is where you are or which office you are in.</string>
 	<key>NSMicrophoneUsageDescription</key>

@@ -101,6 +101,12 @@ export function sidesAmong(rows: readonly Session[]): Session[] {
   return rows.filter(isSide).sort(sideOrder);
 }
 
+/** The side sessions among a parent's folded rows that keep it Unread (#13299 showed why a row must say so): the unread
+ *  ones, the most recent first. The sidebar names the first on the parent's row and opens it in one click. */
+export function unreadSides(rows: readonly Session[]): Session[] {
+  return rows.filter((s) => isSide(s) && stateOf(s) === "unread").sort((a, b) => at(b) - at(a) || (a.session_id < b.session_id ? -1 : a.session_id > b.session_id ? 1 : 0));
+}
+
 /** The chat a card is answered in: the side session it belongs to (`folded_side`, or its own session when that is a
  *  side), else the row it shows under (spec/fixtures/side-fold, "chat"). In the parent's page a side's card is also in
  *  the parent's dock while another side is shown (DESIGN_SYSTEM 4.8). */

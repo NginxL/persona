@@ -132,7 +132,7 @@ func (h *Hub) historySessions(w http.ResponseWriter, r *http.Request, named stri
 	states := make([][]sessionhistory.SourceState, len(machines))
 	var wg sync.WaitGroup
 	for i, m := range machines {
-		wg.Go(func() { parts[i], states[i] = h.machineHistory(r.Context(), m, q, after, restrictedAgentData(r)) })
+		wg.Go(func() { parts[i], states[i] = h.machineHistory(r.Context(), m, q, after, h.spacesHidden(r)) })
 	}
 	wg.Wait()
 	resp := historyResponse{Sessions: []sessionhistory.Row{}, History: historyMeta{
@@ -148,7 +148,7 @@ func (h *Hub) historySessions(w http.ResponseWriter, r *http.Request, named stri
 	restricted, now := restrictedAgentData(r), time.Now()
 	for _, it := range page {
 		resp.Sessions = append(resp.Sessions, it.V)
-		if restricted { // health-space rows never reach here (machineHistory)
+		if restricted { // space rows never reach here (machineHistory)
 			h.historyReads.remember(it.V.Session.MachineID, it.V.Session.SessionID, now)
 		}
 	}
@@ -159,9 +159,9 @@ func (h *Hub) historySessions(w http.ResponseWriter, r *http.Request, named stri
 }
 
 // machineHistory reads one machine's rows for the page, keyed by the machine before the node's own key, and how its
-// sources answered. Sessions the user deleted in Persona are in no history; archived ones are. noHealth: the caller
-// is an extension or scoped client, which never sees the health space's conversations (extension_private.go).
-func (h *Hub) machineHistory(ctx context.Context, m *Machine, q sessionhistory.Query, after *sessionhistory.Key, noHealth bool) (sessionhistory.Part[sessionhistory.Row], []sessionhistory.SourceState) {
+// sources answered. Sessions the user deleted in Persona are in no history; archived ones are. noSpaces: the caller
+// is an extension or scoped client, which never sees a space's conversations (extension_private.go).
+func (h *Hub) machineHistory(ctx context.Context, m *Machine, q sessionhistory.Query, after *sessionhistory.Key, noSpaces bool) (sessionhistory.Part[sessionhistory.Row], []sessionhistory.SourceState) {
 	id, manager := m.cfg.ID, h.machineOwner(m.cfg.ID)
 	deleted := h.deletedAt(id)
 	var sources []sessionhistory.SourceState
@@ -182,7 +182,7 @@ func (h *Hub) machineHistory(ctx context.Context, m *Machine, q sessionhistory.Q
 			page.Reached = &sessionhistory.Key{T: k.T, K: id + "\x00" + k.K}
 		}
 		for _, r := range ans.Rows {
-			if r.Session.IsDeleted() || sessionHiddenByDeletion(r.Session, deleted) || noHealth && healthSession(&r.Session) {
+			if r.Session.IsDeleted() || sessionHiddenByDeletion(r.Session, deleted) || noSpaces && spaceSession(&r.Session) {
 				continue
 			}
 			key := sessionhistory.KeyOf(r.At(), id+"\x00"+r.NodeKey())

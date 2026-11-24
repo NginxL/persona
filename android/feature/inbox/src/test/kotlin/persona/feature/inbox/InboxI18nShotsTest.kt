@@ -40,6 +40,7 @@ import persona.core.domain.inbox.InboxItem
 import persona.core.navigation.AppTab
 import persona.core.navigation.Navigator
 import java.io.File
+import persona.core.inbox.*
 
 /**
  * The inbox's pages in each of the app's languages (docs/protocol/i18n.md): the list with demo items, a document's item page,

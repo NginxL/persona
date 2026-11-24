@@ -52,11 +52,14 @@ func (h *Hub) runtimeSearchContext(r *http.Request, query string) (*sessionlist.
 		}
 	}
 	for _, ix := range h.pendingInteractions() {
-		sid := ix.SessionID
+		mid, sid := ix.MachineID, ix.SessionID
 		if ix.FoldedUnder != "" {
 			sid = ix.FoldedUnder
+			if ix.FoldedUnderMachineID != "" {
+				mid = ix.FoldedUnderMachineID
+			}
 		}
-		ctx.Errors[runtimeListID(ix.MachineID, sid)] = true
+		ctx.Errors[runtimeListID(mid, sid)] = true
 	}
 	return ctx, nil
 }

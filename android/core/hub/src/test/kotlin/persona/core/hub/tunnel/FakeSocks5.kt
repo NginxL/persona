@@ -27,10 +27,10 @@ internal class FakeSocks5(
     val carried = AtomicInteger()
 
     init {
-        thread(isDaemon = true, name = "Fake SOCKS5") {
+        val _ = thread(isDaemon = true, name = "Fake SOCKS5") {
             while (!server.isClosed) {
                 val client = try { server.accept() } catch (_: IOException) { break }
-                thread(isDaemon = true) { runCatching { serve(client) }; runCatching { client.close() } }
+                val _ = thread(isDaemon = true) { val _ = runCatching { serve(client) }; val _ = runCatching { client.close() } }
             }
         }
     }
@@ -78,8 +78,8 @@ internal class FakeSocks5(
         output.write(byteArrayOf(5, 0, 0, 3, 9) + "localhost".toByteArray() + byteArrayOf(0, 80))
         output.flush()
         upstream.use {
-            val up = thread(isDaemon = true) { runCatching { input.copyTo(upstream.getOutputStream()); upstream.shutdownOutput() } }
-            runCatching { upstream.getInputStream().copyTo(output) }
+            val up = thread(isDaemon = true) { val _ = runCatching { input.copyTo(upstream.getOutputStream()); upstream.shutdownOutput() } }
+            val _ = runCatching { upstream.getInputStream().copyTo(output) }
             up.join(1000)
         }
     }

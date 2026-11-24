@@ -16,6 +16,7 @@
   "offline": "这台电脑不在线。请确认它已开机、已联网，并且 Persona Link 正在运行，然后再试。",
   "nothing_queued": "已经没有排队的消息了。",
   "send_now_unsupported": "这个 Agent 不能立即发送排队的消息，它们会按顺序发出。",
+  "queue_edit_unsupported": "这个 Agent 排队的消息不能在这里修改，它们会按顺序发出。",
   "send_now_unrecognized": "认不出这个版本 Claude Code 的立即发送提示，所以没有按任何键。排队的消息仍会按顺序发出；要立即发送，请在终端里操作。",
   "not_a_repository": "这个文件夹不在 Git 仓库里。",
   "not_our_worktree": "这个文件夹不是 Persona 建的 worktree。",
@@ -106,5 +107,8 @@
   "codex_writer_busy": "这个 Codex 会话正由电脑上的另一个进程写入，这次没有发送：请在原 Codex 窗口或终端里继续；如果那边已退出，等它断开后刷新再试。",
   "turn_over_background": "这一轮已经结束了，没有中断任何内容。后台任务还在运行，要结束它请到那台电脑的终端里操作。",
   "omp_stopped": "这个 omp 会话已停止，没有这个操作：发一条消息会在电脑上接着它运行。",
-  "conversation_retired": "此会话已不再运行该对话。"
+  "conversation_retired": "此会话已不再运行该对话。",
+  "agent_assistant_workspace": "不能在助手工作区派出 Agent。请选择项目目录或独立的 worktree；尚未启动 Agent。",
+  "codex_writable_symlink": "无法以 workspace-write 模式启动 Codex：可写根目录下的 {name} 是符号链接，沙箱无法保护该只读路径。请改用项目目录作为 cwd，或选择只读模式。尚未启动，也未修改符号链接。",
+  "agy_in_terminal": "这个 Antigravity 对话正在那台电脑的终端里由 agy 打开，Persona 连不到那个终端，所以没有发送。请在终端里回复，或者先在那边退出 agy 再试。"
 }

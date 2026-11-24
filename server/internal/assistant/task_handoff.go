@@ -27,8 +27,22 @@ func (s *Service) taskEntry(ctx context.Context, machine string, fit startAgent)
 		terminal = false // managed agy starts on its runtime (node/runtimes_start.go), not a pane
 	}
 	mcp := terminal && fit.agent == "claude" || source == proto.EnginePaseo && (fit.agent == "claude" || fit.agent == "codex")
+	return s.taskEntryFor(ctx, machine, fit.agent, mcp, terminal)
+}
+
+// adoptedTaskEntry uses the running session's provenance. A Codex app-server thread
+// can identify its caller through CODEX_THREAD_ID even when it has no terminal pane.
+func (s *Service) adoptedTaskEntry(ctx context.Context, machine string, c proto.Session) prompts.TaskHandoff {
+	paseo := c.Host == proto.EnginePaseo
+	terminal := !paseo && (c.SourceKind == "" || c.SourceKind == proto.SourceClaudeTerminal ||
+		c.Agent == "codex" && c.SourceThreadID != "" && (c.SourceKind == "codex_app_server" || c.SourceKind == "codex_history"))
+	mcp := terminal && c.Agent == "claude" || paseo && (c.Agent == "claude" || c.Agent == "codex")
+	return s.taskEntryFor(ctx, machine, c.Agent, mcp, terminal)
+}
+
+func (s *Service) taskEntryFor(ctx context.Context, machine, agent string, mcp, terminal bool) prompts.TaskHandoff {
 	h := prompts.TaskHandoff{Language: answerLanguage(s.hello(ctx).Locale), MCP: mcp}
-	if terminal && (fit.agent == "codex" || proto.IsWorkAgentType(fit.agent) || proto.IsNoModeAgentType(fit.agent)) {
+	if terminal && (agent == "codex" || proto.IsWorkAgentType(agent) || proto.IsNoModeAgentType(agent)) {
 		cctx, cancel := context.WithTimeout(ctx, min(agentStartListTimeout, time.Second))
 		defer cancel()
 		var info proto.NodeInfo

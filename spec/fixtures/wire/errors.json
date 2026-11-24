@@ -103,5 +103,40 @@
         "/error": "请先处理示例终端状态。"
       }
     }
+  },
+  {
+    "name": "images_over_limit",
+    "description": "A message with more pictures than a message holds: the limits and the count as numbers beside the error, flat like the other fields (#12973).",
+    "source": [
+      "server/internal/apierr/images.go: ImagesOverLimit",
+      "docs/protocol/protocol.md: Pictures in a message"
+    ],
+    "derived": true,
+    "decoder": "error",
+    "http_status": 413,
+    "input": {
+      "code": "images_over_limit",
+      "delivered": "none",
+      "error": "这条消息有 21 张图，一条最多 20 张。",
+      "got": {
+        "images": 21
+      },
+      "limit": {
+        "request_bytes": 33554432,
+        "image_bytes": 3750000,
+        "max_side": 1600,
+        "per_message": 20
+      },
+      "retryable": false
+    },
+    "expected": {
+      "accepted": true,
+      "fields": {
+        "/code": "images_over_limit",
+        "/delivered": "none",
+        "/got/images": 21,
+        "/limit/per_message": 20
+      }
+    }
   }
 ]

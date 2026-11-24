@@ -53,3 +53,16 @@ func RenderSettingUnanswered() string { return render("agents/setting_unanswered
 func RenderQuestionReleased(q QuestionAskedLater) string {
 	return render("agents/question_released", q)
 }
+
+// OutboundUnanswered is what a tool says when the confirmation card it raised before handing something out of the
+// conversation (an Agent's words, a new Agent, a to-do change, a write) ended without the user's own allow or
+// decline: Outcome (proto.Resolution.Outcome) says how it ended (expired, withdrawn, cleared, answered by someone else,
+// closed), Nothing what did not happen ("nothing was sent to that agent"). Never that the user declined.
+type OutboundUnanswered struct {
+	Outcome string
+	Nothing string
+}
+
+func RenderOutboundUnanswered(o OutboundUnanswered) string {
+	return render("agents/outbound_unanswered", o)
+}

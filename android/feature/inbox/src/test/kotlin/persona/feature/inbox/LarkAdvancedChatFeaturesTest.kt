@@ -9,6 +9,7 @@ import org.junit.Assert.*
 import org.junit.Test
 import persona.core.contracts.LarkReaction
 import persona.core.contracts.api.InboxAssistantTransport
+import persona.core.inbox.*
 
 @RunWith(AndroidJUnit4::class)
 @Config(sdk = [35])

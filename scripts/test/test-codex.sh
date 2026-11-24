@@ -94,10 +94,10 @@ for bin in ${PERSONA_CODEX_DAEMON_BINS:-}; do
 done
 if [[ $tests == *" start "* ]]; then
   for bin in ${PERSONA_CODEX_DAEMON_BINS:-}; do
-    run TestLiveCodexStart "$bin" "" PERSONA_CODEX_START=daemon
-    run TestLiveCodexStart "$bin" "" PERSONA_CODEX_START=config
+    run TestLiveCodexStart "$bin" "" PERSONA_CODEX_START_VARIANT=daemon
+    run TestLiveCodexStart "$bin" "" PERSONA_CODEX_START_VARIANT=config
   done
-  [ -n "$first_bin" ] && run TestLiveCodexStart "$first_bin" "" PERSONA_CODEX_START=plain
+  [ -n "$first_bin" ] && run TestLiveCodexStart "$first_bin" "" PERSONA_CODEX_START_VARIANT=plain
 fi
 echo "RESULT all: $([ $failed -eq 0 ] && echo passed || echo FAILED)"
 exit $failed

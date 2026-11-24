@@ -37,18 +37,24 @@ import persona.core.contracts.generated.ExtensionViewAction
 import persona.core.contracts.generated.ExtensionViewActionInput
 import persona.core.contracts.generated.ExtensionViewChangedError
 
+private const val START_ANSWER_READ_TIMEOUT_SECONDS = 30L
+
 /** The unified entry's routes on the active pairing (docs/protocol/protocol.md "Tasks and the chat feed"). */
 class HttpTasksApi internal constructor(
     private val request: suspend (path: String, method: String, body: JsonElement?) -> Response,
     override val features: kotlinx.coroutines.flow.StateFlow<Set<String>>? = null,
+    private val slowRequest: (suspend (path: String, method: String, body: JsonElement?) -> Response)? = null,
 ) : TasksApi {
     /** On [connection], whose hello's features say what its cards may do. */
     constructor(connection: OkHttpHubConnection) : this({ path, method, body ->
         connection.request(path, method, body?.toString()?.toRequestBody("application/json".toMediaType()))
-    }, connection.serverFeatures)
+    }, connection.serverFeatures, { path, method, body ->
+        connection.request(path, method, body?.toString()?.toRequestBody("application/json".toMediaType()),
+            readTimeoutSeconds = START_ANSWER_READ_TIMEOUT_SECONDS)
+    })
 
-    private suspend fun call(path: String, method: String = "GET", body: JsonElement? = null): JsonObject =
-        request(path, method, body).use {
+    private suspend fun call(path: String, method: String = "GET", body: JsonElement? = null, slow: Boolean = false): JsonObject =
+        (if (slow) slowRequest ?: request else request)(path, method, body).use {
             if (!it.isSuccessful) throw HubFailure.from(it)
             val text = it.body?.string().orEmpty()
             if (text.isBlank()) JsonObject(emptyMap()) else JsonCodec.parseToJsonElement(text).jsonObject
@@ -212,6 +218,16 @@ class HttpTasksApi internal constructor(
     override suspend fun retryTask(todoId: String): Todo =
         stamped(JsonCodec.decodeFromJsonElement(call(path("todos", todoId, "retry"), "POST", JsonObject(emptyMap()))["todo"]
             ?: error("no todo in the answer")))
+
+    override suspend fun retryTaskOnLauncher(todoId: String, launcher: String): Todo =
+        stamped(JsonCodec.decodeFromJsonElement(call(path("todos", todoId, "retry"), "POST", buildJsonObject {
+            put("launcher", launcher)
+        })["todo"] ?: error("no todo in the answer")))
+
+    override suspend fun answerTaskStart(todoId: String, choice: String): Todo =
+        stamped(JsonCodec.decodeFromJsonElement(call(path("todos", todoId, "start", "answer"), "POST", buildJsonObject {
+            put("choice", choice)
+        }, slow = true)["todo"] ?: error("no todo in the answer")))
 
     override suspend fun acceptTask(todoId: String, askedAt: String) {
         call(path("todos", todoId, "accept"), "POST", buildJsonObject { put("asked_at", askedAt) })

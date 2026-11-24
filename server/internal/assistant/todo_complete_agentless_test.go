@@ -78,6 +78,7 @@ func TestTodoCompleteAgentlessSupervisor(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			e := newTodoEnv(t, nil)
 			e.f.hello.Assistant.CompleteAgentlessTodos = true
+			e.f.hello.Assistant.AutoApproveReversibleSettings = true
 			if tc.health {
 				e.f.setSessions("server", proto.Session{SessionID: "conv1", MachineID: "server", Assistant: true, Space: SpaceHealth})
 			}

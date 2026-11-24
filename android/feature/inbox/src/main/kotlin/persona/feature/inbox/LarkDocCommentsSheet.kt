@@ -23,6 +23,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import persona.core.designsystem.*
 import persona.core.designsystem.icons.PhIcons
+import persona.core.inbox.*
 
 /**
  * Every comment thread of a document: the quoted text and its replies; open threads on one tab, resolved ones on the

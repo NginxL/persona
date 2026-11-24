@@ -41,6 +41,7 @@ final class DemoHub {
     /// Settings › Knowledge Selection: what was saved in the demo (nil: the hub's defaults).
     private var kbSelection: JSONValue?
     private var memory: [JSONValue] = []
+    private var intakeEntries: [String: JSONValue] = [:]
     private var prefs: JSONValue = .object([:])
     private var pins: JSONValue = .object([:])
     private var mutes: JSONValue = .object(["spaces": .array([]), "sessions": .array([]), "allowed": .array([])])
@@ -93,6 +94,9 @@ final class DemoHub {
         lark = (all["lark"]?.object ?? [:]).compactMapValues(\.array)
         tasks = all["tasks"]?.array ?? []
         memory = all["memory"]?.array ?? []
+        let intake = all["health_intake"]
+        let entries = (intake?["water"]?["entries"]?.array ?? []) + (intake?["protein"]?["entries"]?.array ?? [])
+        intakeEntries = Dictionary(uniqueKeysWithValues: entries.compactMap { e in e["id"]?.string.map { ($0, e) } })
         prefs = all["prefs"] ?? .object([:])
         pins = all["pins"] ?? .object([:])
         tokens = all["tokens"]?.array ?? []
@@ -177,12 +181,86 @@ final class DemoHub {
         let p = req.path.split(separator: "/", omittingEmptySubsequences: true).map(String.init)
         guard p.count >= 3, p[0] == "api", p[1] == "v1" else { throw notFound() }
         let rest = Array(p.dropFirst(2))
+        if rest.starts(with: ["assistant", "health", "intake"]) { return try intakeAnswer(req, rest) }
         do {
             return req.method == "GET" ? try get(rest, req.query) : try change(req.method, rest, body(req))
         } catch let e as APIError where e.status == 404 {
             if req.path != "/api/v1/fleet" { logMiss(req) } // no Live Activity in the demo: nothing there on purpose
             throw e
         }
+    }
+
+    private func intakeAnswer(_ req: LocalRequest, _ path: [String]) throws -> JSONValue {
+        guard req.query["space"] == Session.healthSpace else { throw notFound() }
+        if req.method == "POST", path == ["assistant", "health", "intake", "ui"] {
+            let request = body(req)
+            let state = request["state"]?.string.flatMap { try? JSON.decoder.decode(JSONValue.self, from: Data($0.utf8)) }
+            let kind = state?["kind"]?.string == "protein" ? "protein" : "water"
+            let edit = state?["edit"]?.bool == true || request["action"]?.string == "settings"
+            let locale = request["context"]?["locale"]?.string?.hasPrefix("zh") == true ? "zh-Hans" : "en"
+            let version = (request["context"]?["ui_version"]?.int ?? 4) >= 9 ? 10 : 4
+            let key = "\(locale).\(version).\(kind)" + (edit ? "-settings" : "")
+            guard case .object(var result) = data["health_intake_ui"]?[key] else { throw notFound() }
+            if let action = request["action"]?.string, action != "settings" {
+                result["toast"] = .string(DemoText.notSent)
+            }
+            return .object(result)
+        }
+        let today = String(Self.iso(.now).prefix(10))
+        func snapshot() -> JSONValue {
+            let active = intakeEntries.values.filter { $0["deleted_at"] == nil }
+            func total(_ kind: String, _ day: String) -> Double {
+                active.filter { $0["kind"]?.string == kind && $0["at"]?.string?.hasPrefix(day) == true }
+                    .reduce(0) { $0 + ($1["amount"]?.double ?? 0) }
+            }
+            func portion(_ kind: String, goal: Int) -> JSONValue {
+                let entries = active.filter { $0["kind"]?.string == kind && $0["at"]?.string?.hasPrefix(today) == true }.sorted {
+                    let left = $0["at"]?.string ?? "", right = $1["at"]?.string ?? ""
+                    return left == right ? ($0["id"]?.string ?? "") < ($1["id"]?.string ?? "") : left > right
+                }
+                return ["today": .number(total(kind, today)),
+                        "goal": .number(Double(goal)), "entries": .array(entries)]
+            }
+            let days = min(max(Int(req.query["days"] ?? "") ?? 7, 1), 366)
+            let history: [JSONValue] = (0..<days).reversed().map { offset in
+                let day = String(Self.iso(Date.now.addingTimeInterval(-Double(offset) * 86400)).prefix(10))
+                return ["date": .string(day), "water": .number(total("water", day)), "protein": .number(total("protein", day))]
+            }
+            return ["water": portion("water", goal: 2000), "protein": portion("protein", goal: 60),
+                    "days": .array(history), "zone": "UTC"]
+        }
+        if req.method == "GET", path.count == 3 { return snapshot() }
+        var entry: JSONValue?
+        if req.method == "POST", path.count == 3 {
+            let draft = body(req)
+            guard let raw = draft["id"]?.string, let uuid = UUID(uuidString: raw),
+                  let kind = draft["kind"]?.string, ["water", "protein"].contains(kind),
+                  let amount = draft["amount"]?.double ?? (kind == "water" ? 250 : nil), amount.isFinite,
+                  amount >= (kind == "water" ? 1 : 0.1), amount <= (kind == "water" ? 3000 : 200),
+                  abs(amount * 10 - (amount * 10).rounded()) < 0.000_001 else {
+                throw APIError(status: 400, message: String(localized: "Enter a valid intake amount"))
+            }
+            let id = uuid.uuidString.lowercased()
+            let new: JSONValue = ["id": .string(id), "kind": .string(kind), "amount": .number(amount),
+                "at": draft["at"] ?? .string(Self.iso(.now)), "note": draft["note"] ?? "",
+                "created_at": .string(Self.iso(.now)), "seq": .number(Double((intakeEntries.values.compactMap { $0["seq"]?.int }.max() ?? 0) + 1))]
+            entry = intakeEntries[id] ?? new
+            intakeEntries[id] = entry
+        } else if req.method == "DELETE", path.count == 4, let uuid = UUID(uuidString: path[3]) {
+            let id = uuid.uuidString.lowercased()
+            guard let saved = intakeEntries[id], case .object(var value) = saved else { throw notFound() }
+            if value["deleted_at"] == nil {
+                value["deleted_at"] = .string(Self.iso(.now))
+                value["seq"] = .number(Double((intakeEntries.values.compactMap { $0["seq"]?.int }.max() ?? 0) + 1))
+            }
+            intakeEntries[id] = .object(value)
+        } else { throw notFound() }
+        let value = snapshot()
+        var response: [String: JSONValue] = ["today": ["water": value["water"]?["today"] ?? 0,
+            "protein": value["protein"]?["today"] ?? 0], "zone": "UTC"]
+        if let entry { response["entry"] = entry }
+        broadcast(["type": "health_intake"])
+        return .object(response)
     }
 
     private func get(_ p: [String], _ q: [String: String]) throws -> JSONValue {
@@ -211,6 +289,7 @@ final class DemoHub {
         case ["mutes"]: return mutes
         case ["assistant"]:
             var a = data["assistant"]?.object ?? [:]
+            a["default_permission_mode"] = a["default_permission_mode"] ?? "default"
             // ?space=health lists the health space's own (docs/assistant/health.md); the plain list never holds them.
             let space = q["space"] ?? ""
             a["conversations"] = .array(sessions.filter { $0["assistant"]?.bool == true && ($0["space"]?.string ?? "") == space })
@@ -263,22 +342,10 @@ final class DemoHub {
             case "claude-settings", "codex-settings", "agy-settings": return ["settings": .array([])]
             case "claude-dirs": return claudeDirsState(id)
             case "claude-live-replies": return ["on": .bool(liveReplies[id] ?? true)]
-            #if os(macOS)
-            case "file": // the Mac's file viewer (and its ⌘F find): one made-up source file, whatever is asked for
-                let path = q["path"] ?? "Sources/Forecast.swift"
-                let text = Self.demoFile
-                return ["path": .string(path), "name": .string((path as NSString).lastPathComponent), "size": .number(Double(text.utf8.count)),
-                        "mime": "text/plain; charset=utf-8", "text": .string(text), "truncated": false, "is_dir": false, "offset": 0, "next": 0]
-            #endif
             default: throw notFound()
             }
         case ("machines", 4) where p[2] == "agent-dirs" && p[3] == "hidden":
             return ["rules": .array(hiddenAgentDirs[p[1]] ?? [])]
-        #if os(macOS)
-        case ("machines", 4) where p[2] == "fs" && p[3] == "find": // ⌘K's Files: a made-up checkout
-            return ["cwd": .string(q["cwd"] ?? ""), "truncated": false, "source": "git",
-                    "files": .array(Self.demoFiles.map { .string($0) })]
-        #endif
         case ("machines", 4) where p[2] == "git" && p[3] == "status": // no repositories in the demo: the chat shows no git card
             return ["is_repo": false, "ahead": 0, "behind": 0, "files": .array([]), "stashes": 0, "commits": .array([])]
         case ("devices", 3) where p[2] == "prefs": return prefs
@@ -364,11 +431,18 @@ final class DemoHub {
             guard let purpose = catalog["purposes"]?.array?.first(where: { $0["id"]?.string == id }) else { throw notFound() }
             guard body["revision"]?.int == purpose["revision"]?.int else { throw APIError(status: 409, message: String(localized: "The settings changed. Reload and try again.")) }
             var binding = purpose["override"]?.object ?? [:]
-            for field in ["provider", "model", "effort", "runtime"] {
+            for field in ["provider", "model", "effort", "runtime", "permission_mode"] {
                 guard let value = body[field] else { continue }
                 if value == .null { binding.removeValue(forKey: field) } else { binding[field] = value }
             }
             modelBindings[id] = ["override": .object(binding), "revision": .number(Double((purpose["revision"]?.int ?? 0) + 1))]
+            return try get(p, [:])
+        }
+        if p == ["assistant"], method == "PUT", body.object?.count == 1,
+           let mode = body["default_permission_mode"]?.string {
+            var assistant = data["assistant"]?.object ?? [:]
+            assistant["default_permission_mode"] = .string(mode)
+            data["assistant"] = .object(assistant)
             return try get(p, [:])
         }
         if let answer = try providers.change(method, p, body) { return answer }
@@ -679,7 +753,7 @@ final class DemoHub {
         sockets.removeAll { $0.socket == nil }
         sockets.append(WeakSocket(socket: s))
         s.send(["type": "hello", "server_version": "demo", "client_id": "demo",
-                "features": ["file_upload", "terminal_stream", "task_push", "task_inbox", .string(ProviderScopeForm.feature)]])
+                "features": ["file_upload", "terminal_stream", "task_push", "task_inbox", "health_intake", .string(ProviderScopeForm.feature)]])
         s.send(["type": "machines", "machines": .array(machines)])
         for m in Set(sessions.compactMap { $0["machine_id"]?.string }).sorted() {
             s.send(["type": "sessions", "machine_id": .string(m), "sessions": .array(sessions.filter { $0["machine_id"]?.string == m })])
@@ -770,57 +844,6 @@ final class DemoHub {
         }
         return out
     }
-
-    #if os(macOS)
-    /// ⌘K's Files in the demo (Mac): the files of a small app, whatever directory is asked for.
-    static let demoFiles = [
-        "README.md", "Package.swift", "Sources/Forecast.swift", "Sources/App/WeatherApp.swift",
-        "Sources/App/Views/ForecastView.swift", "Sources/App/Views/SettingsView.swift", "Sources/App/Models/Forecast.swift",
-        "Sources/App/Models/Location.swift", "Tests/ForecastTests.swift", "docs/design.md",
-    ]
-    /// The one file the Mac's demo file viewer shows (made up, like the rest of the demo).
-    private static let demoFile = """
-        import Foundation
-
-        /// Tomorrow's forecast for a city, from the weather service.
-        struct Forecast: Codable, Equatable {
-            var city: String
-            var high: Double
-            var low: Double
-            var summary: String
-        }
-
-        enum ForecastError: Error {
-            case badCity(String)
-            case offline
-        }
-
-        final class ForecastClient {
-            private let session: URLSession
-            private var cache: [String: Forecast] = [:]
-
-            init(session: URLSession = .shared) {
-                self.session = session
-            }
-
-            /// The forecast for `city`, from the cache when it is there.
-            func forecast(for city: String) async throws -> Forecast {
-                if let cached = cache[city] { return cached }
-                guard !city.isEmpty else { throw ForecastError.badCity(city) }
-                let url = URL(string: "https://weather.example.com/v1/forecast?city=\\(city)")!
-                let (data, _) = try await session.data(from: url)
-                let forecast = try JSONDecoder().decode(Forecast.self, from: data)
-                cache[city] = forecast
-                return forecast
-            }
-
-            func clearCache() {
-                cache = [:]
-            }
-        }
-
-        """
-    #endif
 
     // MARK: Metrics (mock_hub.metric_at: made-up but smooth curves)
 

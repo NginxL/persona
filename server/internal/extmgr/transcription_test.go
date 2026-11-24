@@ -19,7 +19,6 @@ import (
 	"github.com/nwverse/persona/server/internal/extension"
 	"github.com/nwverse/persona/server/internal/extension/host"
 	"github.com/nwverse/persona/server/internal/extwire"
-	"github.com/nwverse/persona/server/internal/voice"
 )
 
 // serveTranscriptionExtensionForTest is a transcription contribution's program (PERSONA_TEST_PLUGIN=transcription):
@@ -85,6 +84,7 @@ func serveTranscriptionExtensionForTest() {
 // transcribe.
 func transcriptionHub(t *testing.T) *Manager {
 	t.Helper()
+	voice := needsVoiceModule(t)
 	self, _ := os.Executable()
 	builtin := voiceEntry("talk")
 	builtin.Env = map[string]string{"PERSONA_TEST_PLUGIN": "transcription", "TRANSCRIPTION_CIDS": voice.TranscriptionContribution}
@@ -328,10 +328,11 @@ func TestTranscriptionNotForwardedToApps(t *testing.T) {
 
 // The built-in voice extension contributes gpt-live to transcription beside its voice, and stays of kind voice.
 func TestVoiceManifestTranscribes(t *testing.T) {
+	voice := needsVoiceModule(t)
 	h := newTestManager(t)
 	h.version = "1.2.3"
 	for _, id := range []string{"voice", "talk"} {
-		raw, _ := json.Marshal(voiceManifest(h, id, ""))
+		raw, _ := json.Marshal(voiceManifest(h, voice, id, ""))
 		m, err := extension.Parse(raw)
 		if err != nil {
 			t.Fatal(err)

@@ -24,7 +24,7 @@ internal fun spaceCompanions(session: Session?, sessions: List<Session>): List<S
     return sessions.filter { other ->
         other.machineId == session.machineId && other.key != session.key && !other.assistant &&
             other.spaceId?.takeIf(String::isNotBlank) == space &&
-            other.foldedUnder?.takeIf(String::isNotBlank)?.let { SessionKey(other.machineId, it) in listed } != true
+            other.foldedUnderKey?.let { it in listed } != true
     // tab by tab, a tab's agents together by their place in it (#2515, as the web's tab groups): the launcher first
     }.sortedWith(compareBy<Session> { it.slotIndex ?: Int.MAX_VALUE }.thenBy { it.slotId.orEmpty() }.then(PaneOrder))
 }

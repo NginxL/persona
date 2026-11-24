@@ -49,6 +49,22 @@ struct DictatePersonaControl: ControlWidget {
     }
 }
 
+/// Control: call Persona on the main conversation, as the Call Persona App Shortcut does (#13241).
+struct CallPersonaControl: ControlWidget {
+    var body: some ControlWidgetConfiguration { Self.configuration(kind: "persona.control.call") }
+
+    static func configuration(kind: String) -> some ControlWidgetConfiguration {
+        StaticControlConfiguration(kind: kind) {
+            ControlWidgetButton(action: OpenPersonaCallIntent()) {
+                // Theme.Icon.callPersona; the extension keeps its own symbol names, like the neighbouring controls.
+                Label("Call Persona", systemImage: "phone.arrow.up.right")
+            }
+        }
+        .displayName("Call Persona")
+        .description("Opens Persona and calls it on your main chat.")
+    }
+}
+
 /// Also retain kinds saved by interim canonical-identity builds, with the same drawing and action.
 struct CompatibleAssistantControl: ControlWidget {
     var body: some ControlWidgetConfiguration { AskPersonaControl.configuration(kind: "persona.control.ask") }

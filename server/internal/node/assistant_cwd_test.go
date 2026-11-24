@@ -440,14 +440,14 @@ func TestHealthChecksCountItsSubfolders(t *testing.T) {
 	home := t.TempDir()
 	health := filepath.Join(home, ".persona", "health")
 	reports := filepath.Join(health, "reports")
-	if !runtimeHealth(&runtimeConn{}, proto.Interaction{SessionID: "r1", Cwd: reports}) {
+	if !runtimeInSpace(&runtimeConn{}, proto.Interaction{SessionID: "r1", Cwd: reports}) {
 		t.Error("a runtime card from the health space's reports")
 	}
 	h := &runtimeConn{sessions: []proto.Session{{SessionID: "r1", Cwd: reports}, {SessionID: "r2", Cwd: filepath.Join(home, ".persona", "assistant", "health")}}}
-	if !runtimeHealth(h, proto.Interaction{SessionID: "r1", Cwd: "/tmp/x"}) {
+	if !runtimeInSpace(h, proto.Interaction{SessionID: "r1", Cwd: "/tmp/x"}) {
 		t.Error("a runtime row in the health space's reports")
 	}
-	if runtimeHealth(h, proto.Interaction{SessionID: "r2", Cwd: "/tmp/x"}) {
+	if runtimeInSpace(h, proto.Interaction{SessionID: "r2", Cwd: "/tmp/x"}) {
 		t.Error("a folder named health elsewhere is not the space")
 	}
 	if healthReportRules(reports) != nil || healthReportRules(health) == nil {

@@ -12,6 +12,7 @@ import persona.core.designsystem.JNotice
 import persona.core.designsystem.Status
 import persona.core.designsystem.Tokens
 import persona.core.navigation.InboxItemUiRoute
+import persona.core.inbox.*
 
 // An inbox item's page drawn by an extension (docs/extensions/extensions.md "UI slots" `inbox_item`, #1683): an extension's connector (the
 // Feishu extension's `lark`) may draw items it brings in. Chats keep the native conversation and reply composer by default.

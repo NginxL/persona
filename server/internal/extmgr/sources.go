@@ -7,7 +7,7 @@ import (
 
 	"github.com/nwverse/persona/server/internal/bus"
 	"github.com/nwverse/persona/server/internal/extwire"
-	"github.com/nwverse/persona/server/internal/mail"
+	"github.com/nwverse/persona/server/internal/mailwire"
 	"github.com/nwverse/persona/server/internal/rpc"
 )
 
@@ -38,7 +38,7 @@ func (h *Manager) sourceCall(method string, params json.RawMessage) (any, error)
 		}
 		if method == extwire.MethodSourceExport {
 			data, err := h.mail.ExportAccount(id)
-			if errors.Is(err, mail.ErrNoAccount) {
+			if errors.Is(err, mailwire.ErrNoAccount) {
 				return nil, noSource(r.Source)
 			}
 			if err != nil {
@@ -65,7 +65,7 @@ func (h *Manager) importSource(b extwire.SourceBundle) (any, error) {
 		return nil, &rpc.Error{Code: extwire.CodeNoSource, Message: "mail is not set up on this manager"}
 	}
 	a, err := h.mail.ImportAccount(b.Data)
-	if errors.Is(err, mail.ErrAccountExists) {
+	if errors.Is(err, mailwire.ErrAccountExists) {
 		return nil, &rpc.Error{Code: extwire.CodeSourceExists, Message: "this manager has " + b.Source + " already"}
 	}
 	if err != nil {

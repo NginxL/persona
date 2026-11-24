@@ -30,6 +30,7 @@ type assistantNode struct {
 	handoff    map[string]any
 	compacts   []string
 	compactErr error
+	sendErr    func(map[string]any) error
 }
 
 func newAssistantNode(t *testing.T, h *Hub) *assistantNode {
@@ -82,6 +83,11 @@ func newAssistantNode(t *testing.T, h *Hub) *assistantNode {
 			return map[string]any{"ok": true}, nil
 		case "session.send":
 			n.sends = append(n.sends, p)
+			if n.sendErr != nil {
+				if err := n.sendErr(p); err != nil {
+					return nil, err
+				}
+			}
 			return map[string]any{}, nil
 		case "session.interrupt":
 			n.sends = append(n.sends, map[string]any{"interrupt": p["session_id"]})

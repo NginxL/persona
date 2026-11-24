@@ -8,20 +8,12 @@ import PersonaWire
     typealias Raw = ExtensionStreamJSON
     static let feature = "extension_ui_stream_v1"
     // These are renderer implementations, not every component declared in the generated vocabulary.
-    #if os(macOS)
-    // The frozen Mac app keeps what it reported before #827 (`ExtensionUIContext.pageVersion`).
-    static let uiVersion = 5
-    static let components: Set<String> = ["text", "metric", "progress", "row", "button", "link", "field", "divider",
-        "chart", "stat_grid", "segmented", "markdown", "table", "empty", "loading", "header", "breadcrumb",
-        "file_tree", "code", "diff", "comment_thread", "composer"]
-    #else
     // The page's own version (`ExtensionUIContext.pageVersion`): 7's section keys are the tree's, and 8's section links
     // resolve to their section's key like any other control of it (`ExtensionStreamTree.slots`).
     static let uiVersion = 8
     static let components: Set<String> = ["text", "metric", "progress", "row", "button", "link", "field", "divider",
         "chart", "stat_grid", "segmented", "markdown", "table", "empty", "loading", "header", "breadcrumb",
         "file_tree", "code", "diff", "comment_thread", "composer", "image", "grid", "carousel"]
-    #endif
 
     private(set) var tree: ExtensionStreamTree?
     private(set) var ready = false
@@ -91,36 +83,6 @@ import PersonaWire
         tree = nil; receipts = [:]; effects = []
         if let observer { connection.removeExtensionStreamObserver(observer); self.observer = nil }
     }
-
-    #if DEBUG && os(macOS)
-    private enum CaptureCloseFailure: Error { case timeout, rejected }
-
-    func closeForCapture() async throws {
-        guard let tree else { close(); return }
-        let requestID = UUID().uuidString
-        let session = tree.session
-        let owner = manager
-        var acknowledged = false
-        var rejected = false
-        let handle = connection.observeExtensionStream { signal in
-            if case .disconnected = signal { rejected = true; return }
-            guard case .frame(let data) = signal, let raw = try? Raw.parse(data),
-                  raw["request_id"]?.string == requestID,
-                  (try? ExtensionStreamSchema.check(raw, definition: "UIStreamServerEnvelope")) != nil,
-                  raw["manager"]?.string == nil || raw["manager"]?.string == owner else { return }
-            if raw["kind"]?.string == "closed", raw["session"]?.string == session { acknowledged = true }
-            else if raw["kind"]?.string == "error" { rejected = true }
-        }
-        defer { connection.removeExtensionStreamObserver(handle) }
-        close(requestID: requestID)
-        let deadline = ContinuousClock.now.advanced(by: .seconds(5))
-        while !acknowledged, !rejected, ContinuousClock.now < deadline {
-            try await Task.sleep(for: .milliseconds(100))
-        }
-        if rejected { throw CaptureCloseFailure.rejected }
-        guard acknowledged else { throw CaptureCloseFailure.timeout }
-    }
-    #endif
 
     func refresh() { guard visible, supported == true else { return }; requestSnapshot() }
 
@@ -244,18 +206,12 @@ import PersonaWire
                 hasMountedNative = true
                 tree = staged; ready = true; snapshotRequest = nil; snapshotRetries = 0; recoveryIssue = nil
                 onView?(native)
-                #if DEBUG && os(macOS)
-                MacExtensionSnapshotBatch.observeNativeCommit(owner: owner, contribution: contribution, version: staged.version, stream: self)
-                #endif
                 drainReceipts()
             case .delta:
                 guard visible, ready, var staged = tree else { return }
                 try staged.apply(raw["delta"]!)
                 let native = try staged.nativeView
                 tree = staged; onView?(native)
-                #if DEBUG && os(macOS)
-                MacExtensionSnapshotBatch.observeNativeCommit(owner: owner, contribution: contribution, version: staged.version, stream: self)
-                #endif
                 drainReceipts()
             case .receipt(let frame):
                 let receipt = frame.receipt
@@ -270,9 +226,6 @@ import PersonaWire
                 drainReceipts()
             case .error(let frame):
                 guard correlated else { return }
-                #if DEBUG && os(macOS)
-                MacExtensionSnapshotBatch.observeNativeFailure(owner: owner, contribution: contribution, code: frame.error.code)
-                #endif
                 if let correlation, let event = requests.removeValue(forKey: correlation) {
                     events.removeValue(forKey: event)?.continuation.resume(throwing: Raw.Failure.version)
                 }

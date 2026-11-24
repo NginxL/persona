@@ -28,8 +28,9 @@ func init() {
 }
 
 type extensionNotice struct {
-	topic   string
-	payload map[string]any
+	entryPersonal bool // internal ledger routing metadata, never delivered as payload
+	topic         string
+	payload       map[string]any
 	// changed is the typed todo.changed behind payload, for merging (todo_events.go); nil for any other.
 	changed *assistantwire.TodoChangedEvent
 }
@@ -98,6 +99,10 @@ func (ps *extensions) sendEvents(q *extensionEvents) {
 		n := q.pending[0]
 		q.pending = q.pending[1:]
 		q.mu.Unlock()
-		ps.emit(n.topic, n.payload)
+		if n.entryPersonal {
+			ps.emitPersonalEntries(n.payload)
+		} else {
+			ps.emit(n.topic, n.payload)
+		}
 	}
 }

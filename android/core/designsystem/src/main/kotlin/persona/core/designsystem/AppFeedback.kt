@@ -22,5 +22,7 @@ interface AppFeedback {
     fun notice(message: String, style: FeedbackStyle): Boolean = notice(message)
     /** A notice with a button ("Undo" after a bulk action), shown for a few seconds; false when the shell cannot show one. */
     fun notice(message: String, action: FeedbackAction): Boolean = false
+    /** A styled notice with a button (e.g. Error with Retry); falls back to [notice] with [action]. */
+    fun notice(message: String, action: FeedbackAction, style: FeedbackStyle): Boolean = notice(message, action)
 }
 val LocalAppFeedback = staticCompositionLocalOf<AppFeedback?> { null }

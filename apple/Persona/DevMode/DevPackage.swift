@@ -23,7 +23,7 @@ nonisolated enum DevPackage {
         var model = ErrorReports.deviceModel
         var appVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? ""
         var build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? ""
-        var commit = Bundle.main.object(forInfoDictionaryKey: "PersonaCommit") as? String ?? ""
+        var commit = BuildInfo.current.commitLabel ?? ""
         var utcOffsetMinutes = TimeZone.current.secondsFromGMT() / 60
     }
 

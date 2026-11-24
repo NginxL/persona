@@ -103,6 +103,7 @@ func TestAgentSwitchMovesAUsageLimitedAgent(t *testing.T) {
 	if p["switch_now"] != true || p["apply_switch"] != true || !strings.Contains(p["text"].(string), prompts.RenderAgentLimitContinue("")) {
 		t.Errorf("send: %v", p)
 	}
+	requireAutoContinueSource(t, p)
 }
 
 // The node's refusal (a busy agent: switch_busy) comes back as it is, nothing sent; the pick is taken back in case the
@@ -203,6 +204,9 @@ func TestAgentSwitchBackOntoTheLauncherAnAgentRunsOff(t *testing.T) {
 	}
 	if p := callParams(t, calls[0]); p["launcher"] != "kimi" || p["from"] != "kimi" {
 		t.Errorf("pick: %v", p)
+	}
+	if p := callParams(t, calls[1]); p["message_source"] != nil {
+		t.Errorf("custom switch text was mislabeled as automatic: %v", p["message_source"])
 	}
 
 	ft.f.mu.Lock()

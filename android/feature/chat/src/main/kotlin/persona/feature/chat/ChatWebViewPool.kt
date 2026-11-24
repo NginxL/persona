@@ -5,6 +5,7 @@ import androidx.annotation.VisibleForTesting
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Rect
+import android.os.Build
 import android.os.Message
 import android.view.ActionMode
 import android.view.Menu
@@ -36,6 +37,7 @@ internal fun interface ChatWebFeatures {
 internal class ChatWebViewPool(
     private val context: Context,
     private val features: ChatWebFeatures = ChatWebFeatures.Platform,
+    private val setAlgorithmicDarkening: (WebSettings, Boolean) -> Unit = ::applyPlatformAlgorithmicDarkening,
     private val viewFactory: (Context) -> ChatSelectionWebView = { ChatSelectionWebView(it) },
 ) {
     /** Steady state: the page on screen and up to three preloaded links. A pending acquisition can add one while it commits. */
@@ -238,16 +240,28 @@ internal class ChatWebViewPool(
         settings.domStorageEnabled = true
         settings.allowFileAccess = false
         settings.allowContentAccess = false
-        settings.mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
+        // Match Chrome for arbitrary web links: allow passive mixed content (images, QR codes, media) on HTTPS pages
+        // while still blocking active mixed content (HTTP scripts, stylesheets, iframes).
+        settings.mixedContentMode = WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
         // Honor standard HTTP Cache-Control / ETag semantics so cacheable assets stay fast while no-store / no-cache
         // pages and HTML5 <video> byte-range requests are never served stale from disk.
         settings.cacheMode = WebSettings.LOAD_DEFAULT
+        // Match Chrome viewport and pinch-zoom behavior so responsive and desktop-width pages fit phone width cleanly.
+        settings.useWideViewPort = true
+        settings.loadWithOverviewMode = true
+        settings.setSupportZoom(true)
+        settings.builtInZoomControls = true
+        settings.displayZoomControls = false
         settings.setSupportMultipleWindows(true)
         settings.javaScriptCanOpenWindowsAutomatically = false
-        if (features.supported(WebViewFeature.ALGORITHMIC_DARKENING) &&
-            WebViewFeature.isFeatureSupported(WebViewFeature.ALGORITHMIC_DARKENING)) {
-            // Optional appearance only: a framework / WebView version mismatch must not make the link card unusable.
-            try { WebSettingsCompat.setAlgorithmicDarkeningAllowed(settings, true) } catch (_: UnsupportedOperationException) {}
+        // Do not heuristically invert pages (or their images and QR codes) in dark mode; let each page's own
+        // prefers-color-scheme / color-scheme decide, matching Chrome.
+        isForceDarkAllowed = false
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            settings.isAlgorithmicDarkeningAllowed = false
+        }
+        if (features.supported(WebViewFeature.ALGORITHMIC_DARKENING)) {
+            setAlgorithmicDarkening(settings, false)
         }
         // Logins embedded in a page (a sign-in frame from another site) need its cookies; every page shares the store.
         CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
@@ -292,7 +306,7 @@ internal class ChatWebViewPool(
             override fun getDefaultVideoPoster(): Bitmap = Bitmap.createBitmap(1, 1, Bitmap.Config.ARGB_8888)
             override fun onShowCustomView(view: View?, callback: CustomViewCallback?) {
                 if (view == null || closed || page.gone || active !== page) {
-                    runCatching { callback?.onCustomViewHidden() }
+                    val _ = runCatching { callback?.onCustomViewHidden() }
                     return
                 }
                 page.showCustomView(view, callback)
@@ -369,6 +383,13 @@ internal class ChatWebViewPool(
 /** The hosts that mean this phone itself (the same set as `PortLinks`, which also needs a port). */
 private val loopbackHosts = setOf("localhost", "127.0.0.1", "0.0.0.0", "::1", "::", "[::1]", "[::]")
 
+private fun applyPlatformAlgorithmicDarkening(settings: WebSettings, allowed: Boolean) {
+    if (WebViewFeature.isFeatureSupported(WebViewFeature.ALGORITHMIC_DARKENING)) {
+        // Optional appearance only: a framework / WebView version mismatch must not make the link card unusable.
+        try { WebSettingsCompat.setAlgorithmicDarkeningAllowed(settings, allowed) } catch (_: UnsupportedOperationException) {}
+    }
+}
+
 /** Direct audio/video file extensions skipped by background preloading so they load only in an active, visible WebView. */
 private val directMediaExtensions = setOf("mp4", "m4v", "mov", "webm", "mkv", "ogv", "m3u8", "mpd", "mp3", "m4a", "ogg", "wav", "flac")
 
@@ -440,7 +461,7 @@ internal open class ChatSelectionWebView(context: Context) : WebView(context) {
         customView = null
         customViewCallback = null
         (current?.parent as? ViewGroup)?.removeView(current)
-        runCatching { callback?.onCustomViewHidden() }
+        val _ = runCatching { callback?.onCustomViewHidden() }
         return true
     }
 

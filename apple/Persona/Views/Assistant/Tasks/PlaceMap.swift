@@ -222,15 +222,10 @@ nonisolated final class PlaceMapSnapshot: @unchecked Sendable {
         let options = MKMapSnapshotter.Options()
         options.region = result.region()
         options.size = size
-        #if os(macOS)
-        // The Mac's snapshot options have no trait collection: light or dark is an appearance there (#5662).
-        options.appearance = NSAppearance(named: dark ? .darkAqua : .aqua)
-        #else
         options.traitCollection = UITraitCollection { traits in
             traits.userInterfaceStyle = dark ? .dark : .light
             traits.displayScale = scale
         }
-        #endif
         options.pointOfInterestFilter = .excludingAll
         guard let shot = try? await MKMapSnapshotter(options: options).start() else { return nil }
         func spot(_ coordinate: CLLocationCoordinate2D) -> CGPoint {

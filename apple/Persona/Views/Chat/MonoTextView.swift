@@ -1,9 +1,6 @@
 import SwiftUI
-#if canImport(UIKit)
 import UIKit
-#endif
 
-#if os(iOS) || os(visionOS)
 /// Monospaced, unwrapped text that scrolls both ways — files, diffs, the terminal — or wrapped at its width (`wraps`:
 /// the full-text sheet). A UIScrollView around a
 /// non-scrolling UITextView sized to the longest line: SwiftUI's horizontal ScrollView around a LazyVStack cannot size
@@ -111,8 +108,6 @@ final class MonoScrollView: UIScrollView, UIScrollViewDelegate {
         if contentSize != size { contentSize = size }
     }
 }
-
-#endif
 
 enum MonoText {
     static func font(_ size: CGFloat = 12) -> UIFont { .monospacedSystemFont(ofSize: size, weight: .regular) }

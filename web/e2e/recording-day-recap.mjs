@@ -107,7 +107,8 @@ const deadline = setTimeout(() => { console.error("FAIL recording day recap time
 let screenshots = 0, runs = 0;
 
 async function run(theme, lang, width, shoot, twoParts = false) {
-  const s = JSON.parse(await readFile(new URL(`../src/i18n/locales/${lang}/knowledge-kbdetail.json`, import.meta.url), "utf8"));
+  // the knowledge page's strings and the recording module's (src/modules/recording, #13407)
+  const s = Object.assign(...await Promise.all(["knowledge-kbdetail", "recording"].map(async (ns) => JSON.parse(await readFile(new URL(`../src/i18n/locales/${lang}/${ns}.json`, import.meta.url), "utf8")))));
   const context = await browser.newContext({ viewport: { width, height: width < 600 ? 2400 : 2000 }, colorScheme: theme, timezoneId: "Europe/London", deviceScaleFactor: width < 600 ? 2 : 1, reducedMotion: "reduce" });
   await context.addInitScript(({ theme, lang }) => {
     localStorage.setItem("persona.token", "fixture-token");

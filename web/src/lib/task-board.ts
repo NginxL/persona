@@ -1,11 +1,11 @@
 // The task board (iOS TaskBoardSheet): one conversation's tasks and the agents its dock shows, by where they are —
 // Needs you / Awaiting review / Failed to start / Working / Finished / Stopped / Done, what the user must act on first (#4896). Pure, so the dock's
 // All N and the board count the same things.
-import { awaitsReview, type DockAgent, type Todo, type TodoStatus } from "./todos";
+import { awaitsReview, isCancelled, shownStatus, type DockAgent, type Todo, type TodoStatus } from "./todos";
 import { byTime } from "./times";
 import { compareWaitAge } from "./task-wait";
 
-export type BoardSectionKey = "waiting" | "review" | "failed" | "working" | "parked" | "unread" | "stopped" | "done";
+export type BoardSectionKey = "waiting" | "review" | "failed" | "working" | "parked" | "unread" | "stopped" | "done" | "cancelled";
 
 export interface BoardRow {
   todo: Todo;
@@ -23,9 +23,10 @@ export interface BoardSection {
 /** Which section a task is in: by its status, but a supervised one awaiting the user's review in Awaiting review, not with the
  *  stopped or finished-unseen ones (#4896). The web keeps Interrupted (interrupted) apart; it waits for the user like Needs you. */
 export function boardSectionOf({ todo, status, parked }: BoardRow): BoardSectionKey {
+  if (isCancelled(todo)) return "cancelled";
   if (parked) return "parked";
   if (awaitsReview(todo, status)) return "review";
-  switch (status) {
+  switch (shownStatus(todo, status)) {
     case "needs_you":
     case "interrupted":
     case "usage_limit":
@@ -45,7 +46,7 @@ export function boardSectionOf({ todo, status, parked }: BoardRow): BoardSection
   }
 }
 
-export const BOARD_ORDER: BoardSectionKey[] = ["waiting", "review", "failed", "working", "parked", "unread", "stopped", "done"];
+export const BOARD_ORDER: BoardSectionKey[] = ["waiting", "review", "failed", "working", "parked", "unread", "stopped", "done", "cancelled"];
 
 /** The board's sections that have something, in order; tasks newest first, agents waiting ones under "Needs you", the rest
  *  under "Working" (as the dock orders them). */

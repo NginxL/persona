@@ -171,6 +171,29 @@ func testSnapshotIsStripped(t *testing.T, tag string) {
 	}
 }
 
+// Resource labels are Antigravity export syntax, not generic user-message markup.
+func TestOtherEnginesPreserveContextResourceLabels(t *testing.T) {
+	const text = "Content of persona-context:///snapshot.txt:\nPlease reply OK."
+	quoted, err := json.Marshal(text)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name, line string
+		codex      bool
+	}{
+		{"Claude", `{"type":"user","uuid":"u1","message":{"role":"user","content":` + string(quoted) + `}}`, false},
+		{"Codex", `{"type":"event_msg","payload":{"type":"item_completed","item":{"type":"UserMessage","id":"u1","content":[{"type":"text","text":` + string(quoted) + `}]}}}`, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			it := only(t, ParseLine(1, []byte(tc.line), &Meta{Codex: tc.codex}))
+			if it.Role != "user" || it.Text != text {
+				t.Fatalf("got %+v, want literal user text %q", it, text)
+			}
+		})
+	}
+}
+
 // /compact (typed, or sent by Persona to an idle assistant conversation) is a notice, not a message: it must not count
 // as activity either, or a compacted conversation would turn up unread.
 func TestCompactCommandIsANotice(t *testing.T) {

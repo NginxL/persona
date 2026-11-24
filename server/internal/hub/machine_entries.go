@@ -26,14 +26,13 @@ import (
 // machineEntriesKey is the hub's own (hub_settings).
 const machineEntriesKey = "hub.machine_entries"
 
-const (
-	// machineEntriesDelay gathers a burst of reports into one write.
-	machineEntriesDelay = time.Second
-	// machineEntriesSeenEvery: while reports come, when the machines were last seen is written at least this often;
-	// every change of an entry is written within machineEntriesDelay, and a machine connected as a write goes is seen
-	// then (the hub's stop writes last). A hub that crashed shows them last seen as of the last write.
-	machineEntriesSeenEvery = 10 * time.Minute
-)
+// machineEntriesDelay gathers a burst of reports into one write (var for tests).
+var machineEntriesDelay = time.Second
+
+// machineEntriesSeenEvery: while reports come, when the machines were last seen is written at least this often;
+// every change of an entry is written within machineEntriesDelay, and a machine connected as a write goes is seen
+// then (the hub's stop writes last). A hub that crashed shows them last seen as of the last write.
+const machineEntriesSeenEvery = 10 * time.Minute
 
 // reportedMachines is what is kept: by manager, by machine.
 type reportedMachines map[string]map[string]reportedEntry
@@ -445,6 +444,14 @@ func (h *Hub) saveMachineEntries(ctx context.Context) {
 // writeMachineEntries is saveMachineEntries with d.reportedSave held.
 func (h *Hub) writeMachineEntries(ctx context.Context) {
 	d := &h.devices
+	if !h.quiesce.beginOrDefer(func() {
+		d.mu.Lock()
+		d.reportedDeferred = true
+		d.mu.Unlock()
+	}) {
+		return
+	}
+	defer h.quiesce.end()
 	d.mu.Lock()
 	if !d.keptRead {
 		// An entries read with the kept list unknown filtered those machines out. Never write that partial map back;
@@ -509,4 +516,27 @@ func (h *Hub) writeMachineEntries(ctx context.Context) {
 	d.mu.Lock()
 	d.reportedSaved = time.Now()
 	d.mu.Unlock()
+}
+
+// resumeMachineEntries writes machine entries whose save was deferred by a
+// snapshot's pause (quiesce.go).
+func (h *Hub) resumeMachineEntries() {
+	if h.store == nil {
+		return
+	}
+	d := &h.devices
+	d.mu.Lock()
+	deferred := d.reportedDeferred
+	d.reportedDeferred = false
+	d.mu.Unlock()
+	if !deferred {
+		return
+	}
+	h.nodeWorkers.Add(1)
+	go func() {
+		defer h.nodeWorkers.Done()
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		h.saveMachineEntries(ctx)
+	}()
 }

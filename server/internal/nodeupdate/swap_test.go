@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -204,26 +205,214 @@ func TestRenameStillSwapsOnlyTheFileItChecked(t *testing.T) {
 	})
 }
 
-// A resident that recorded its executable's identity at startup still refuses
-// to commit over a file renamed into place meanwhile (an in-place rewrite is
-// the hub's call to supersede: the commit re-hashes what is there).
-func TestCommitRefusesWhenExecutableIdentityChanged(t *testing.T) {
-	m, data, _ := testManager(t)
+func installExternally(t *testing.T, m *Manager, data []byte) os.FileInfo {
+	t.Helper()
 	st, err := os.Stat(m.exe)
 	if err != nil {
 		t.Fatal(err)
 	}
 	m.identity = st
-	id := receive(t, m, data, spec(data, "next"))
-	replaceExternally(t, m.exe, []byte("independent deployment"))
-	if _, err := m.Commit(context.Background(), id, nil); err == nil {
-		t.Fatal("commit installed over a replaced executable")
+	replaceExternally(t, m.exe, data)
+	installed, err := os.Stat(m.exe)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if got, _ := os.ReadFile(m.exe); string(got) != "independent deployment" {
-		t.Fatalf("commit overwrote an unstaged file: %q", got)
+	if os.SameFile(st, installed) {
+		t.Fatal("external deployment did not replace the executable identity")
+	}
+	return installed
+}
+
+func assertInstalledUntouched(t *testing.T, exe string, installed os.FileInfo, wantHash string) {
+	t.Helper()
+	current, err := os.Stat(exe)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !os.SameFile(installed, current) || installed.Mode() != current.Mode() || hash(t, exe) != wantHash {
+		t.Fatal("update changed the externally installed executable")
+	}
+}
+
+func refuseWatch(t *testing.T, m *Manager) {
+	t.Helper()
+	m.startWatch = func(string, string, string) error {
+		t.Error("external installation started a rollback watchdog")
+		return errors.New("unexpected watchdog")
+	}
+}
+
+func TestCommitAdoptsExternallyInstalledTarget(t *testing.T) {
+	m, data, restarts := testManager(t)
+	refuseWatch(t, m)
+	target := spec(data, "next")
+	id := receive(t, m, data, target)
+	installed := installExternally(t, m, data)
+
+	busy := errors.New("node is busy")
+	if _, err := m.Commit(t.Context(), id, func() error { return busy }); !errors.Is(err, busy) {
+		t.Fatalf("busy adoption: got %v, want %v", err, busy)
+	}
+	if left := stages(t, m); len(left) != 1 || hash(t, left[0]) != target.SHA256 {
+		t.Fatalf("busy adoption did not preserve its upload for retry: %v", left)
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	if _, err := m.Commit(ctx, id, func() error { cancel(); return nil }); !errors.Is(err, context.Canceled) {
+		t.Fatalf("canceled adoption: %v", err)
+	}
+	accepted, err := m.Commit(t.Context(), id, nil)
+	if err != nil || !accepted.Accepted || accepted.ID != id {
+		t.Fatalf("commit = %+v, %v", accepted, err)
+	}
+	if again, err := m.Commit(t.Context(), id, nil); err != nil || again != accepted {
+		t.Fatalf("retry = %+v, %v", again, err)
+	}
+	if restarts.Load() != 0 {
+		t.Fatal("node restarted before writing the commit reply")
+	}
+	m.ResponseWritten(id)
+	m.ResponseWritten(id)
+	if restarts.Load() != 1 {
+		t.Fatal("accepted adoption did not restart exactly once")
+	}
+	if left := stages(t, m); len(left) != 0 {
+		t.Fatalf("adoption left staged files: %v", left)
+	}
+	if _, err := os.Stat(backupPath(m.exe, id)); !os.IsNotExist(err) {
+		t.Fatalf("adoption backed up the external executable: %v", err)
+	}
+
+	fresh := &Manager{exe: m.exe, version: "next", startWatch: m.startWatch}
+	if err := fresh.recover(); err != nil || fresh.RestartRequired() {
+		t.Fatalf("adopted target should recover without another restart: %v", err)
+	}
+	if err := m.Confirm("next"); err == nil {
+		t.Fatal("old running process confirmed the adopted version")
+	}
+	if err := fresh.Confirm("next"); err != nil {
+		t.Fatal(err)
 	}
 	if _, err := os.Stat(markerPath(m.exe)); !os.IsNotExist(err) {
-		t.Fatal("refused commit left a pending marker")
+		t.Fatalf("confirmation left a pending marker: %v", err)
+	}
+	assertInstalledUntouched(t, m.exe, installed, target.SHA256)
+}
+
+func TestCommitRefusesDifferentOrUnusableExternalExecutable(t *testing.T) {
+	for _, name := range []string{"different hash", "no execute permission", "replaced during idle check"} {
+		t.Run(name, func(t *testing.T) {
+			if name == "no execute permission" && runtime.GOOS == "windows" {
+				t.Skip("Windows does not use POSIX execute bits")
+			}
+			m, data, restarts := testManager(t)
+			refuseWatch(t, m)
+			id := receive(t, m, data, spec(data, "next"))
+			external := data
+			if name == "different hash" {
+				external = []byte("independent deployment")
+			}
+			installed := installExternally(t, m, external)
+			if name == "no execute permission" {
+				if err := os.Chmod(m.exe, 0o644); err != nil {
+					t.Fatal(err)
+				}
+				var err error
+				installed, err = os.Stat(m.exe)
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+			idle := func() error {
+				if name == "replaced during idle check" {
+					external = []byte("independent deployment")
+					replaceExternally(t, m.exe, external)
+					var err error
+					installed, err = os.Stat(m.exe)
+					if err != nil {
+						t.Fatal(err)
+					}
+				}
+				return nil
+			}
+			if _, err := m.Commit(t.Context(), id, idle); !errors.Is(err, errSuperseded) {
+				t.Fatalf("expected errSuperseded, got %v", err)
+			}
+			m.ResponseWritten(id)
+			if restarts.Load() != 0 {
+				t.Fatal("refused commit restarted the node")
+			}
+			for _, path := range []string{markerPath(m.exe), backupPath(m.exe, id)} {
+				if _, err := os.Stat(path); !os.IsNotExist(err) {
+					t.Fatalf("refused commit left %s: %v", filepath.Base(path), err)
+				}
+			}
+			assertInstalledUntouched(t, m.exe, installed, spec(external, "").SHA256)
+		})
+	}
+}
+
+func TestAdoptionRecoveryNeverRestoresExternalExecutable(t *testing.T) {
+	m, data, _ := testManager(t)
+	refuseWatch(t, m)
+	installed := installExternally(t, m, data)
+	p := commitAccepted(t, m, data)
+	p.Deadline = time.Now().Add(-time.Second)
+	if err := savePending(p); err != nil {
+		t.Fatal(err)
+	}
+	// Even if a backup happens to be present, this transaction never owned it.
+	old, _ := fixtures(t)
+	backup := backupPath(m.exe, p.ID)
+	if err := copyFile(old, backup); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+	defer cancel()
+	if err := Watch(ctx, markerPath(m.exe), p.ID, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := restore(p); !errors.Is(err, errSuperseded) {
+		t.Fatalf("direct restore of adopted executable: %v", err)
+	}
+	fresh := &Manager{exe: m.exe, version: "next", startWatch: m.startWatch}
+	if err := fresh.recover(); err != nil || fresh.RestartRequired() {
+		t.Fatalf("unconfirmed adoption triggered rollback: %v", err)
+	}
+	if err := fresh.Confirm("next"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(backup); err != nil {
+		t.Fatalf("adoption disturbed an unrelated backup: %v", err)
+	}
+	assertInstalledUntouched(t, m.exe, installed, spec(data, "next").SHA256)
+}
+
+func TestAdoptionCanBeSuperseded(t *testing.T) {
+	m, data, _ := testManager(t)
+	refuseWatch(t, m)
+	installExternally(t, m, data)
+	p := commitAccepted(t, m, data)
+	// A lost reply or failed restart leaves the old resident running. A later
+	// deploy can retry the adoption after the first attempt's deadline.
+	m.upload.AdoptionDeadline = time.Now().Add(-time.Second)
+	if again := commitAccepted(t, m, data); again.ID == p.ID {
+		t.Fatal("adoption retry reused the expired transaction")
+	}
+	other := []byte("newer external deployment")
+	replaceExternally(t, m.exe, other)
+	fresh := &Manager{exe: m.exe, version: "next", startWatch: m.startWatch}
+	if err := fresh.Confirm("next"); err == nil {
+		t.Fatal("confirmation accepted different bytes on disk")
+	}
+	if err := fresh.recover(); err != nil || fresh.RestartRequired() {
+		t.Fatalf("recover after a later deployment: %v", err)
+	}
+	if _, err := os.Stat(markerPath(m.exe)); !os.IsNotExist(err) {
+		t.Fatalf("superseded adoption left a marker: %v", err)
+	}
+	if got := hash(t, m.exe); got != spec(other, "").SHA256 {
+		t.Fatal("recovery overwrote a later external deployment")
 	}
 }
 

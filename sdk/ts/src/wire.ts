@@ -343,6 +343,7 @@ export interface Contributes {
   auth_relay?: AuthRelayItem[];
   secret_providers?: SecretProviderItem[];
   repository_providers?: RepositoryProviderItem[];
+  memory_sources?: MemorySourceItem[];
   messaging?: MessagingItem[];
   /** Extra keys are opaque JSON; declared properties keep their own types. */
   [key: string]: unknown;
@@ -581,6 +582,19 @@ export interface RepositoryProviderItem {
    * (repo.pr_status). Without it the manager reads repo.describe's state. Each at most once.
    */
   capabilities?: RepositoryCapability[];
+}
+
+/**
+ * The extension's memory, read by the manager one entry at a time (memory.entries; memory.schema.json) so the hub
+ * decides which entries reach which scene (a conversation's standing context, a recall, a dispatched task, the
+ * Inbox's helper). Needs the program to speak the protocol; one per extension. Once declared, the hub stops
+ * delivering the extension's own text outlets (its assistant instructions, project context, Inbox context and its
+ * connectors' read tools in the assistant's conversations) directly.
+ */
+export interface MemorySourceItem {
+  id: string;
+  /** What settings call the source (My memory). Not only spaces, no control characters. */
+  name: string;
 }
 
 /**
@@ -830,6 +844,11 @@ export interface ChannelCapabilities {
   max_text?: number;
   asks?: string;
   push?: boolean;
+  /**
+   * It only replies to incoming messages or triggers and cannot send unsolicited proactive messages without reply_to;
+   * testing checks connectivity instead of calling channel.send.
+   */
+  reply_only?: boolean;
   typing?: boolean;
   progress?: boolean;
   threads?: boolean;
@@ -1471,6 +1490,51 @@ export interface SecretsResolveParams {
  */
 export interface SecretsResolveResult {
   value: string;
+}
+
+/**
+ * A public field name/type; never a value or source path.
+ */
+export interface SecretStoreField {
+  name: string;
+  type: string;
+}
+
+/**
+ * The canonical public target approved on the secret storage card.
+ */
+export interface SecretStoreTarget {
+  operation: string;
+  vault: string;
+  item?: string;
+  title?: string;
+  category?: string;
+  fields: SecretStoreField[];
+}
+
+/**
+ * secrets.store: describe metadata, prepare an expiring node HPKE key after explicit approval, commit one encrypted
+ * payload.
+ */
+export interface SecretStoreParams {
+  contribution?: string;
+  phase: string;
+  target: SecretStoreTarget;
+  machine: string;
+  session: string;
+  key_id?: string;
+  sealed?: string;
+}
+
+/**
+ * Metadata and a recipient key, or references of written fields. Never values.
+ */
+export interface SecretStoreResult {
+  target: SecretStoreTarget;
+  vault_name?: string;
+  key?: string;
+  key_id?: string;
+  references?: Record<string, string>;
 }
 
 /**
@@ -2187,7 +2251,10 @@ export const SCENE_SHAPE_KINDS = ["box", "cylinder", "prism"] as const;
 
 /**
  * A box (UI version 11): at yaw 0, size[0] along +x and size[1] along +y. round rounds its corners seen from above
- * (at most half the smaller size); the app bevels its upright edges no more than half its height.
+ * (at most half the smaller size); the app bevels its upright edges no more than half its height. wall says the box
+ * is a wall, for an app's cutaway (#13036): the outer walls between the camera and the rooms are drawn low (a wall
+ * with a floor on the camera's side, between two rooms, keeps its height), what stands in one is cut to that height,
+ * and what stands tall in front of one is drawn see-through; an app without a cutaway draws it as any box.
  */
 export interface SceneBox {
   kind: "box";
@@ -2199,6 +2266,7 @@ export interface SceneBox {
   top: number;
   color?: string;
   material?: SceneMaterial;
+  wall?: boolean;
 }
 
 /**
@@ -3652,7 +3720,7 @@ export interface ConnectorCatalogCallParams {
 
 /**
  * items: new items, each kept once; snapshot: the answer as one state, kept when it changes; things: the answer lists
- * Inbox rows ready-made (ConnectorInboxThing), kept and handed to the Inbox as they are.
+ * Inbox rows ready-made (ConnectorInboxThing), and the Inbox gets the latest answer's rows as they are, in its order.
  */
 export type ConnectorSubscriptionMode = "items" | "snapshot" | "things" | (string & {});
 export const CONNECTOR_SUBSCRIPTION_MODES = ["items", "snapshot", "things"] as const;
@@ -3899,6 +3967,18 @@ export interface ConnectorCallParams {
   contribution: string;
   name: string;
   args?: unknown;
+  /**
+   * The calling conversation's track (#13246): its slug, main for the main track; absent when the hub cannot tell.
+   */
+  track?: string;
+  /** The track's kind; absent when not known (the main track). */
+  track_kind?: string;
+  /**
+   * The calling conversation's information categories (health, finance, relationships, emotion, legal_id); empty is
+   * general. Absent means not known (an older hub, a turn not tagged yet): take it for sensitive. Whether the phone
+   * confirms a write stays the hub's decision.
+   */
+  categories?: string[];
 }
 
 /**
@@ -3963,6 +4043,18 @@ export interface ConnectorDoParams {
   name: string;
   args?: unknown;
   request_id: string;
+  /**
+   * The calling conversation's track (#13246): its slug, main for the main track; absent when the hub cannot tell.
+   */
+  track?: string;
+  /** The track's kind; absent when not known (the main track). */
+  track_kind?: string;
+  /**
+   * The calling conversation's information categories (health, finance, relationships, emotion, legal_id); empty is
+   * general. Absent means not known (an older hub, a turn not tagged yet): take it for sensitive. Whether the phone
+   * confirms a write stays the hub's decision.
+   */
+  categories?: string[];
 }
 
 /**
@@ -4228,6 +4320,8 @@ export interface ConnectorInboxThing {
   /** Marks the newest move: a different last adds to the open item. */
   last?: string;
   url?: string;
+  /** The observed lifecycle of a GitHub pull request: open, closed or merged. */
+  thread_state?: string;
   /** A link the system opens instead (sms:…). */
   open_url?: string;
   /** Where a reply goes and who sees it. */
@@ -5636,16 +5730,28 @@ export interface TodoEventThread {
 }
 
 /**
+ * An external responsible party on a to-do that is not a Persona-started agent: a long-running session or a person,
+ * with optional machine_id and session_id hints.
+ */
+export interface TodoEventResponsible {
+  kind: string;
+  name: string;
+  machine_id?: string;
+  session_id?: string;
+}
+
+/**
  * event.todo.changed: a to-do was created or deleted, or its title, whether it is done (or failed to start), its
- * supervisor, or the thread it is bound to changed. Changes within about a second of each other are told once, as the
- * to-do is at the end of them. title, thread and done are as after the change (the last ones for a deleted to-do);
- * thread is left out when the to-do has none, done unless the to-do is done (closed, or its task failed to start).
- * supervisor is the conversation that supervises it (the main conversation or a leader, see leaders.schema.json),
- * left out when none does; a change of supervisor (the task moved to another leader) sends it too. kind is concern
- * for something the owner raised in the main conversation and wants an answer to; such a to-do is done only once its
- * outcome was reported to the owner (an event.todo.decision of source reported comes with it), never on its own; kind
- * is left out for a to-do or a task and never changes. Notes, agents and decisions changing do not send it (decisions
- * have event.todo.decision). Read the to-do again if it matters.
+ * supervisor, the thread it is bound to, or its external responsible party changed. Changes within about a second of
+ * each other are told once, as the to-do is at the end of them. title, thread, done and responsible are as after the
+ * change (the last ones for a deleted to-do); thread and responsible are left out when the to-do has none, done
+ * unless the to-do is done (closed, or its task failed to start). supervisor is the conversation that supervises it
+ * (the main conversation or a leader, see leaders.schema.json), left out when none does; a change of supervisor (the
+ * task moved to another leader) sends it too. kind is concern for something the owner raised in the main conversation
+ * and wants an answer to; such a to-do is done only once its outcome was reported to the owner (an
+ * event.todo.decision of source reported comes with it), never on its own; kind is left out for a to-do or a task and
+ * never changes. Notes, agents and decisions changing do not send it (decisions have event.todo.decision). Read the
+ * to-do again if it matters.
  */
 export interface TodoChangedEvent {
   id: string;
@@ -5654,6 +5760,7 @@ export interface TodoChangedEvent {
   done?: boolean;
   supervisor?: string;
   kind?: string;
+  responsible?: TodoEventResponsible;
   what: string;
 }
 
@@ -5687,13 +5794,13 @@ export interface TodoDecisionEvent {
 }
 
 /**
- * event.leader.changed: a leader conversation was made (a side conversation added to assistant.leaders), its title
- * changed, it was filed under another knowledge-base project, it ended (it left assistant.leaders; nothing is
- * deleted) or it was made a leader again. id is the leader conversation's session id, the key a work-log record
- * keeps; title its title as the apps show it; name what the direction is called, to show it by (the name the owner or
- * the secretary gave it, else its knowledge-base project's name, else the title without its "MMDD | kind | " prefix;
- * always sent by a hub that has it, #3679); project the knowledge-base project's slug, left out while it has none;
- * ended true once it is no longer a leader, left out while it is.
+ * event.leader.changed: a direction was made (an id added to assistant.leaders), its title changed, it was filed
+ * under another knowledge-base project, it ended (it left assistant.leaders; nothing is deleted) or it was made
+ * current again. id is the stable direction id, the key a work-log record keeps; it is a conversation session id only
+ * for a conversation-backed direction. title is its conversation title, or its explicit name when no Persona
+ * conversation exists; name is what the direction is called (an explicit name, else its knowledge-base project's
+ * name, else the title without its "MMDD | kind | " prefix); project is the knowledge-base project's slug, left out
+ * while it has none; ended is true once it is no longer current, left out while it is.
  */
 export interface LeaderChangedEvent {
   id: string;
@@ -5704,16 +5811,17 @@ export interface LeaderChangedEvent {
 }
 
 /**
- * event.leader.report: one of a leader's tasks reached its goal (reached: its review accepted it), needs the owner's
- * decision (decision: its review says needs_user, or a plan of the leader's waits for the owner's Start), or is stuck
- * (stuck: in Waiting on you or stopped unfinished for 24 hours, told at most once per 24 hours); those are written by
- * the hub from the task's ledger, never by a model. progress (#3679) is the leader's own summary of its direction at
- * the goal level, sent with its leader_progress tool: reached, doing (and where it is stuck), needs_you (what the
- * owner has to do) and links (evidence; link is the first), text the three put together, todo "". id names the report
- * (never sent twice; key on it to be safe), leader the leader conversation's id, todo the task's to-do id (GET
- * /api/v1/todos with todos.read reads it; "" for a plan, which has no to-do until it starts), plan the waiting plan's
- * id (only on a decision about a plan), text at most 300 characters in the owner's language, link the task's PR or
- * delivery link when it has one, at when what it reports happened.
+ * event.leader.report: one of a direction's tasks reached its goal (reached: its review accepted it), needs the
+ * owner's decision (decision: its review says needs_user, or a plan of the direction's waits for the owner's Start),
+ * or is stuck (stuck: in Waiting on you or stopped unfinished for 24 hours, told at most once per 24 hours); those
+ * are written by the hub from the task's ledger, never by a model. progress (#3679, #8236) is the direction's own
+ * summary at the goal level, sent with leader_progress or an authorized leaders.write HTTP / node CLI report:
+ * reached, doing (and where it is stuck), needs_you (what the owner has to do) and links (evidence; link is the
+ * first), text the three put together, todo "". id names the report (never sent twice; key on it to be safe), leader
+ * the stable direction id, todo the task's to-do id (GET /api/v1/todos with todos.read reads it; "" for a plan, which
+ * has no to-do until it starts), plan the waiting plan's id (only on a decision about a plan), text at most 300
+ * characters in the owner's language, link the task's PR or delivery link when it has one, at when what it reports
+ * happened.
  */
 export interface LeaderReportEvent {
   id: string;
@@ -5883,9 +5991,10 @@ export interface ModelRefusal {
 
 /**
  * error.code of the assistant calls besides permission_denied (data {scope: "assistant.read"}, or
- * "assistant.memory.read" for assistant.memory): invalid_params; not_found (assistant.messages: no such conversation
- * in the assistant's own space); assistant_offline (the manager is away: try again); machine_offline (the assistant's
- * computer is not connected or not set up: try again).
+ * "assistant.memory.read" for assistant.memory, or "assistant.entries.read" for assistant.entries.list):
+ * invalid_params; not_found (assistant.messages: no such conversation in the assistant's own space);
+ * assistant_offline (the manager is away: try again); machine_offline (the assistant's computer is not connected or
+ * not set up: try again).
  */
 export type AssistantErrorCode = "invalid_params" | "not_found" | "assistant_offline" | "machine_offline" | (string & {});
 export const ASSISTANT_ERROR_CODES = ["invalid_params", "not_found", "assistant_offline", "machine_offline"] as const;
@@ -5981,6 +6090,11 @@ export interface AssistantMemoryEntry {
   content?: string;
   /** content was cut or left out for its size. */
   truncated?: boolean;
+  /**
+   * The track whose memory it is; absent for the main track's. Another track's is shown only to an extension that may
+   * read what comes from it: the user's own, or one granted every default category of the track.
+   */
+  track?: string;
 }
 
 /**
@@ -5996,6 +6110,91 @@ export interface AssistantMemoryResult {
 export interface AssistantMessagesResult {
   messages: AssistantMessage[];
   next_seq?: number;
+}
+
+/**
+ * An RFC 3339 expiry timestamp, or null when absent.
+ */
+export type AssistantEntryNullableTime = unknown;
+
+/**
+ * Whether the choice is reversible; null means unknown.
+ */
+export type AssistantEntryNullableBool = unknown;
+
+export interface AssistantEntrySource {
+  machine: string;
+  session: string;
+  msg_uuid?: string;
+  card_id?: string;
+  file?: string;
+  line?: number;
+}
+
+export interface AssistantEntryScope {
+  executor: string;
+  machine: string[];
+  project: string[];
+  personal: boolean;
+}
+
+export interface AssistantEntryScopeFilter {
+  executor?: string;
+  machine?: string[];
+  project?: string[];
+  personal?: boolean;
+}
+
+export interface AssistantEntryDecision {
+  options: string[];
+  selected: string[];
+  rejected: string[];
+  reason: string;
+  reversible: unknown;
+}
+
+export interface AssistantLedgerEntry {
+  id: string;
+  type: string;
+  text: string;
+  quote: string;
+  source: AssistantEntrySource;
+  relayed_via: string[];
+  scope: AssistantEntryScope;
+  at: string;
+  expires_at: unknown;
+  supersedes: string;
+  trust: string;
+  status: string;
+  by: string;
+  tag: string[];
+  decision?: AssistantEntryDecision;
+  ext_id?: string;
+  origin_space: string;
+  category: string[];
+}
+
+export interface AssistantEntriesParams {
+  after?: string;
+  limit?: number;
+  by?: string;
+  trust?: string;
+  status?: string;
+  scope?: AssistantEntryScopeFilter;
+  tag?: string;
+  type?: string;
+}
+
+export interface AssistantEntriesResult {
+  entries: AssistantLedgerEntry[];
+  after: string;
+  has_more: boolean;
+}
+
+export interface AssistantEntriesChangedEvent {
+  id: string;
+  record_id: string;
+  status: "wrong";
 }
 
 /**
@@ -6069,6 +6268,109 @@ export interface AssistantDataItem {
 
 export interface AssistantDataStatusResult {
   items: AssistantDataItem[];
+}
+
+/**
+ * machines.pair_link (machines.pair): request a one-time persona://link?... pairing link for a pending link computer.
+ */
+export interface MachinesPairLinkParams {
+  /**
+   * Optional computer id: re-issues a pairing link when an existing pending link machine matches (with name/os/icon
+   * omitted), or creates a new pending link machine with this id (defaulting name to machine_id when name is
+   * omitted).
+   */
+  machine_id?: string;
+  /**
+   * Display name for a newly added computer (defaults to machine_id when machine_id is given; required when
+   * machine_id is omitted).
+   */
+  name?: string;
+  /** Target OS hint for install commands. */
+  os?: string;
+  /** Optional icon for the computer. */
+  icon?: string;
+}
+
+export interface MachinesPairLinkResult {
+  /** The hub machine id assigned to the computer. */
+  machine_id: string;
+  /** The display name of the computer. */
+  name: string;
+  /** The one-time persona://link?... pairing URL. */
+  link: string;
+  /** When the pairing link expires. */
+  expires_at: string;
+  /** Whether the computer is waiting for the owner's confirmation. */
+  pending: boolean;
+  /** Optional one-line Linux install-and-pair command when the hub knows its publication site. */
+  install_linux?: string;
+}
+
+/**
+ * machines.status (machines.read or machines.pair): read one computer's current connection and confirmation state.
+ */
+export interface MachinesStatusParams {
+  /** The computer's hub machine id. */
+  machine_id: string;
+}
+
+export interface MachinesStatusResult {
+  machine_id: string;
+  name?: string;
+  exists: boolean;
+  /** Whether the computer's link/connection is currently up. */
+  online: boolean;
+  /** Whether the resident node is connected and responding. */
+  node_online: boolean;
+  /** Whether the computer is waiting for the owner's confirmation. */
+  pending: boolean;
+  /** When the computer was last seen online, if ever. */
+  last_seen?: string;
+  /** Last connection error, if any. */
+  error?: string;
+}
+
+/**
+ * browser.machines (browser.run): list computers that have a browser backend enabled.
+ */
+export interface BrowserMachinesParams {
+  /** Optional backend filter (e.g. ego, cdp). Empty returns all backends. */
+  backend?: string;
+}
+
+export interface BrowserMachine {
+  machine_id: string;
+  name: string;
+  /** Browser backend identifier (e.g. ego, cdp). */
+  backend: string;
+  online: boolean;
+  ready: boolean;
+}
+
+export interface BrowserMachinesResult {
+  machines: BrowserMachine[];
+}
+
+/**
+ * browser.run (browser.run): run a script inside an extension-isolated browser task space on machine_id.
+ */
+export interface BrowserRunParams {
+  machine_id: string;
+  /** Browser backend to use (default: ego). */
+  backend?: string;
+  /** Logical slot name scoped to this extension (e.g. pac-muse). */
+  slot: string;
+  /** Async JS script body executed inside the isolated task space. */
+  script: string;
+  timeout_ms?: number;
+}
+
+export interface BrowserRunResult {
+  backend: string;
+  /** Raw output / JSON payload returned by the browser backend. */
+  output: string;
+  /** Script error message, if any. */
+  error?: string;
 }
 
 export interface StorageEmptyParams {
@@ -6807,6 +7109,92 @@ export interface RepoPRStatusResult {
   viewer_is_author?: boolean;
 }
 
+/**
+ * error.code a memory source answers besides the base ErrorCode: not_ready (its entries are not loaded yet; the
+ * manager uses none of them this time and asks again at the next assembly), failed (anything else, say why in
+ * message).
+ */
+export type MemoryErrorCode = "not_ready" | "failed" | (string & {});
+export const MEMORY_ERROR_CODES = ["not_ready", "failed"] as const;
+
+/**
+ * memory.entries: one page of the contribution's entries, most important first (standing ones first, then by rank,
+ * then newest). Read-only: answering changes nothing in the program's state.
+ */
+export interface MemoryEntriesParams {
+  /** The memory_sources item's id. */
+  contribution: string;
+  /**
+   * At most this many entries on the page (the manager asks 200). Only a cap: the program ends a page early, with
+   * has_more and after, so the answer stays within 1 MB.
+   */
+  limit: number;
+  /** The previous page's after, to read on; empty for the first page. */
+  after?: string;
+}
+
+/**
+ * One page of entries. tagged is the program's promise for the whole page: it writes origin_space and categories on
+ * every entry and leaves them out only when empty, so a missing origin_space means the main space and missing
+ * categories mean general. A program that cannot promise that answers tagged false, and the manager then takes none
+ * of its entries for its own track (each is in no track, not known, so the strictest rule holds).
+ */
+export interface MemoryEntriesResult {
+  entries: MemoryEntry[];
+  tagged: boolean;
+  /**
+   * Another page follows; ask again with after. When true, after must be set: true with an empty after counts as the
+   * end of the entries.
+   */
+  has_more: boolean;
+  /** Opaque: what to send as after for the next page; required in practice whenever has_more is true. */
+  after?: string;
+}
+
+/**
+ * One entry as the program keeps it. Only an active entry is carried; the others may be answered (so a page's order
+ * stays the program's) and are skipped. An entry that breaks a rule here is dropped alone, never the page.
+ */
+export interface MemoryEntry {
+  /**
+   * Stable across pages and answers: a to-do's brief names the entries it carried by it (prefixed memory-extension:).
+   */
+  id: string;
+  /** What the entry says, as the program would render it, on one or a few lines. */
+  text: string;
+  /**
+   * The program's own grouping (preferences, workflow, people…). Informational: the hub neither filters nor orders by
+   * it.
+   */
+  facet?: string;
+  /**
+   * active: the program would use it today, whatever it calls that state itself (a program with its own stable or
+   * shifting states answers active for both); candidate: not borne out yet; dormant: not seen lately; retired: no
+   * longer true. Only active entries are carried; an entry with any other value is dropped.
+   */
+  status: string;
+  /** The slug of the space the entry was first said in; left out for the main space. */
+  origin_space?: string;
+  /**
+   * Its information categories (health, finance, relationships, emotion, legal_id); left out for a general entry. A
+   * category the hub does not know makes the entry not known.
+   */
+  categories?: string[];
+  /**
+   * The program kept it in every conversation (always in context). Only a standing entry goes to a standing channel
+   * (usage still decides); the others come in only by relevance (their subjects or text) in a recall, a hand-off or
+   * the Inbox.
+   */
+  standing?: boolean;
+  /** The program's order among entries alike in standing: higher first. Left out: 0. */
+  rank?: number;
+  /**
+   * The names whose mention brings the entry in (a person, a project, a place): what a task's or a message's words
+   * are matched with, besides its text.
+   */
+  subjects?: string[];
+}
+
 /** One call or event of an extension point's protocol: who sends it, and the definitions its params and
  * its answer hold to (no result: any JSON; an event has no answer). */
 export interface Call {
@@ -6885,7 +7273,13 @@ export const CALLS: Record<string, Call> = {
   "assistant.conversations": { from: "program", params: "AssistantConversationsParams", result: "AssistantConversationsResult" },
   "assistant.messages": { from: "program", params: "AssistantMessagesParams", result: "AssistantMessagesResult" },
   "assistant.memory": { from: "program", params: "AssistantMemoryParams", result: "AssistantMemoryResult" },
+  "assistant.entries.list": { from: "program", params: "AssistantEntriesParams", result: "AssistantEntriesResult" },
+  "event.assistant.entries.changed": { from: "hub", params: "AssistantEntriesChangedEvent", event: true },
   "assistant.data_status": { from: "program", params: "AssistantDataStatusParams", result: "AssistantDataStatusResult" },
+  "machines.pair_link": { from: "program", params: "MachinesPairLinkParams", result: "MachinesPairLinkResult" },
+  "machines.status": { from: "program", params: "MachinesStatusParams", result: "MachinesStatusResult" },
+  "browser.machines": { from: "program", params: "BrowserMachinesParams", result: "BrowserMachinesResult" },
+  "browser.run": { from: "program", params: "BrowserRunParams", result: "BrowserRunResult" },
   "storage.request": { from: "program", params: "StorageEmptyParams", result: "StorageRequestResult" },
   "storage.get": { from: "program", params: "StorageKeyParams", result: "StorageEntry" },
   "storage.list": { from: "program", params: "StorageListParams", result: "StorageListResult" },
@@ -6911,4 +7305,5 @@ export const CALLS: Record<string, Call> = {
   "repo.link": { from: "hub", params: "RepoLinkParams", result: "RepoLinkResult" },
   "repo.describe": { from: "hub", params: "RepoDescribeParams", result: "RepoDescribeResult" },
   "repo.pr_status": { from: "hub", params: "RepoPRStatusParams", result: "RepoPRStatusResult" },
+  "memory.entries": { from: "hub", params: "MemoryEntriesParams", result: "MemoryEntriesResult" },
 };

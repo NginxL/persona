@@ -198,11 +198,6 @@ struct TodoDecisionsSection: View {
                     .padding(.horizontal, Theme.Space.xs)
                     .contentShape(.rect)
             }
-            #if os(macOS)
-            .menuStyle(.button)
-            .buttonStyle(.borderless)
-            .menuIndicator(.hidden)
-            #endif
             .fixedSize()
             .accessibilityLabel("More")
             .accessibilityIdentifier("todo.decision.more." + d.id)
@@ -281,9 +276,6 @@ struct TodoDecisionSheet: View {
         }
         .presentationDetents([.medium, .large])
         .interactiveDismissDisabled(saving)
-        #if os(macOS)
-        .macSheet()
-        #endif
     }
 
     private func submit() async {

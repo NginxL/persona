@@ -1,0 +1,23 @@
+# Feature modules that live in a directory of their own (apple/Modules/<Name>, docs/apple/ios.md "Modules", #13432):
+# their sources and the compilation condition the module list (Persona/App/Modules.swift) names them under. Merged into
+# project.yml by its `include:` before every include that adds sources of its own, so modules-core-only.yml, right
+# after it, can replace exactly these.
+targets:
+  Persona:
+    sources:
+      - path: Modules/ScreenShare
+        excludes: ["**/*.md"]
+      - path: Modules/Health
+        excludes: ["**/*.md"]
+    settings:
+      base:
+        SWIFT_ACTIVE_COMPILATION_CONDITIONS: "$(inherited) PERSONA_MODULE_SCREEN_SHARE PERSONA_MODULE_HEALTH"
+  PersonaVision:
+    sources:
+      - path: Modules/ScreenShare
+        excludes: ["**/*.md"]
+      - path: Modules/Health
+        excludes: ["**/*.md"]
+    settings:
+      base:
+        SWIFT_ACTIVE_COMPILATION_CONDITIONS: "$(inherited) PERSONA_MODULE_SCREEN_SHARE PERSONA_MODULE_HEALTH"

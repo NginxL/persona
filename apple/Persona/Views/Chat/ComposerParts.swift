@@ -15,8 +15,6 @@ struct ComposerRow<MenuItems: View>: View {
     var send: () -> Void
     /// What goes with the message, quoted over the field inside its box (#986).
     var quotes: Binding<[ContextRef]>? = nil
-    /// The conversation whose sent messages ↑ / ↓ and ⌃R bring back (the Mac, `MacSendHistory`); nil: none.
-    var history: String? = nil
     /// The main conversation cannot answer yet: send says what to do first and goes there, the draft stays.
     var gate: SendGate? = nil
     @ViewBuilder var menu: () -> MenuItems
@@ -29,16 +27,8 @@ struct ComposerRow<MenuItems: View>: View {
             Menu { menu() } label: {
                 ThemedIcon(Theme.Icon.add).font(Theme.Font.heading).frame(width: Self.glyph, height: Self.glyph)
             }
-            #if os(macOS)
-            // A Mac menu draws as a pull-down button with its arrow beside the label: clipped to the circle, the +
-            // was cut in half (2026-11-02). As a plain button with no arrow, in a round glass of its own.
-            .menuStyle(.button)
-            .menuIndicator(.hidden)
-            .macRoundButton()
-            #else
             .themedButton()
             .clipShape(.circle)
-            #endif
 
             VStack(alignment: .leading, spacing: 0) {
                 if let quotes, !quotes.wrappedValue.isEmpty {
@@ -50,11 +40,6 @@ struct ComposerRow<MenuItems: View>: View {
                 TextField(placeholder, text: $text, selection: $selection, axis: .vertical)
                     .readingContent() // what is typed grows past the interface's cap, as in Messages
                     .lineLimit(1...6)
-                    #if os(macOS)
-                    .textFieldStyle(.plain) // the surface below is the field's box; the Mac's own bezel drew a second one inside
-                    .macComposerKeys(focused: focused.wrappedValue, canSend: canSend, // ⏎ sends, ⇧⏎ a new line
-                                     history: history.map { MacComposerHistory(key: $0, text: $text, focus: { focused.wrappedValue = true }) }, send: send)
-                    #endif
                     .focused(focused)
                     #if os(iOS)
                     .returnSends(text: $text, canSend: canSend, gate: gate?.action, send: sendTyped) // #8178
@@ -71,24 +56,16 @@ struct ComposerRow<MenuItems: View>: View {
                 Button(action: stop) {
                     ThemedIcon(Theme.Icon.interrupt).font(Theme.Font.heading).frame(width: Self.glyph, height: Self.glyph)
                 }
-                #if os(macOS)
-                .macRoundButton(prominent: true)
-                #else
                 .themedButton(prominent: true)
                 .clipShape(.circle)
-                #endif
                 .tint(Theme.danger)
                 .accessibilityLabel("Interrupt [Composer Buttons f9d193]")
             } else {
                 Button(action: sendTyped) {
                     ThemedIcon(Theme.Icon.send).font(Theme.Font.heading).frame(width: Self.glyph, height: Self.glyph)
                 }
-                #if os(macOS)
-                .macRoundButton(prominent: true)
-                #else
                 .themedButton(prominent: true)
                 .clipShape(.circle)
-                #endif
                 .disabled(!canSend)
                 .keyboardShortcut(.return, modifiers: .command)
                 .accessibilityLabel("Send")
@@ -112,12 +89,7 @@ struct ComposerRow<MenuItems: View>: View {
 extension ComposerRow {
     /// Sends what the field shows: the keyboard's composition confirmed into the draft first (`TypedText`, #2203).
     fileprivate func sendTyped() {
-        #if os(iOS) || os(visionOS)
         if focused.wrappedValue { TypedText.commitFocused(into: $text) }
-        #endif
-        #if os(macOS)
-        if let history { MacSendHistory.shared.record(history, text) }
-        #endif
         send()
     }
 
@@ -175,10 +147,10 @@ final class ComposerAttachments {
         edited.append(kept)
     }
 
-    /// An edited picture after the photos (at most `MessagePhotos.limit`, a toast says so).
-    func add(_ edit: EditedImage, model: AppModel) {
+    /// An edited picture after the photos while they fit `limits`; past them it goes through `spill` (`MessagePhotos.add`).
+    func add(_ edit: EditedImage, model: AppModel, limits: ImageLimits, spill: ((UIImage) -> Bool)?) {
         let before = images.count
-        MessagePhotos.add(edit.result, to: &images, model: model)
+        MessagePhotos.add(edit.result, to: &images, model: model, limits: limits, spill: spill)
         guard images.count > before, let added = images.last?.0 else { return }
         var kept = edit
         kept.result = added
@@ -218,11 +190,12 @@ final class StarterDraft {
     }
 }
 
-/// The composer's Take Photo and Glasses Photo, in a conversation and a new one alike: the system camera over the page,
-/// the glasses' viewfinder in a sheet (iOS); each picture taken goes to `add`.
+/// The composer's Take Photo and the modules' composer actions (Glasses Photo), in a conversation and a new one alike: the
+/// system camera over the page, a module's sheet (the glasses' viewfinder); each picture taken goes to `add`.
 struct ComposerCaptureSheets: ViewModifier {
     @Binding var camera: Bool
-    @Binding var glasses: Bool
+    /// The module composer action whose sheet is up (`Modules.registry.composerActions`).
+    @Binding var module: ModuleComposerAction?
     /// Scan Document (#3720) and what to do with its pages (`DocumentScanner.deliver`).
     @Binding var scan: Bool
     var pages: ([UIImage]) -> Void
@@ -237,10 +210,10 @@ struct ComposerCaptureSheets: ViewModifier {
             .fullScreenCover(isPresented: $scan) {
                 DocumentScanner { pages($0) }.ignoresSafeArea()
             }
-            .sheet(isPresented: $glasses) {
-                GlassesCaptureSheet { img in add(img) }
-            }
             #endif
+            .sheet(item: $module) { action in
+                action.sheet { img in add(img) }
+            }
     }
 }
 
@@ -257,10 +230,6 @@ struct ComposerImages: View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack {
                 ForEach(Array(images.enumerated()), id: \.offset) { idx, pair in
-                    #if os(macOS)
-                    MacComposerThumb(image: pair.0, index: idx, editable: edit != nil,
-                                     edit: { edit?(idx) }, remove: { images.remove(at: idx) })
-                    #else
                     Image(uiImage: pair.0).resizable().scaledToFill().scaledFrame(width: Theme.Size.box56, height: Theme.Size.box56)
                         .clipShape(.rect(cornerRadius: Theme.Radius.control, style: .continuous))
                         .overlay(alignment: .bottomLeading) {
@@ -277,9 +246,8 @@ struct ComposerImages: View {
                                     .foregroundStyle(.white, .black.opacity(0.6))
                             }
                             .offset(x: 5, y: -5)
-                            .accessibilityLabel("Remove Image \(idx + 1)") // same key as the Mac thumbnail
+                            .accessibilityLabel("Remove Image \(idx + 1)")
                         }
-                    #endif
                 }
             }
             .padding(.top, Theme.Space.sm)

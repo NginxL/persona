@@ -49,7 +49,8 @@ fun EntryProviderScope<NavKey>.settingsDetailEntries(navigator: Navigator, servi
             launchers = services.providers.takeUnless { demo }?.let { p -> { p.launchers() } },
             onUpgrade = { market, id -> navigator.navigate(ExtensionCatalogRoute(market, id, manager = manager)) },
             connectors = services.connectors.takeUnless { demo }, onConnector = { navigator.navigate(ConnectorRoute(it, manager)) },
-            onSubscriptions = { navigator.navigate(subscriptionsRoute(subscriptionsTitle, extension = route.extensionId)) })
+            onSubscriptions = { navigator.navigate(subscriptionsRoute(subscriptionsTitle, extension = route.extensionId)) },
+            trust = services.extensionTrust.takeUnless { demo })
     }
     entry<ConnectorRoute> { route ->
         val subscriptionsTitle = stringResource(R.string.settings_subscriptions_title)

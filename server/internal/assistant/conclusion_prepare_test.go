@@ -14,6 +14,7 @@ import (
 // Preparing the durable conclusion must not release the in-memory claim: another save retains it, while a sweep or
 // duplicate initial conclusion cannot send it until the original call ends (#10393).
 func TestConclusionPreparedBeforeProviderCall(t *testing.T) {
+	needsLarkLayer(t)
 	st := conclusionDatabase(t)
 	s, f, todo, _, _ := conclusionServiceOn(t, st, true)
 	calls := 0
@@ -82,6 +83,7 @@ func (s *conclusionFailStore) PutSetting(ctx context.Context, key string, value 
 // A failed preparation releases the claim for retry but must never reach the provider from memory alone. The retry
 // must also save successfully before sending; when storage recovers it uses the original key once.
 func TestConclusionSaveFailureWaitsBeforeSending(t *testing.T) {
+	needsLarkLayer(t)
 	st := &conclusionFailStore{Store: conclusionDatabase(t)}
 	s, f, todo, _, _ := conclusionServiceOn(t, st, true)
 	lark := newCardLark(f, "结论：")

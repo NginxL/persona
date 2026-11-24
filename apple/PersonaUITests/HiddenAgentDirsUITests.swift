@@ -204,9 +204,9 @@ final class HiddenAgentDirsUITests: XCTestCase {
     @MainActor private func openHiddenFoldersPage() {
         app.terminate()
         launch(["-tab", "settings"])
-        let agent = app.buttons["settings-agents"].firstMatch
-        XCTAssertTrue(agent.waitForExistence(timeout: 20), "no Settings › Agent:\n\(app.debugDescription)")
-        bringIntoView(agent)
+        XCTAssertTrue(app.openSettingsAdvancedPage(), "no Settings › Advanced:\n\(app.debugDescription)")
+        let agent = app.settingsAdvancedRow("settings-agents")
+        XCTAssertTrue(agent.waitForExistence(timeout: 20), "no Settings › Advanced › Agent:\n\(app.debugDescription)")
         agent.tap()
         let page = app.buttons["Agent Folders"].firstMatch
         XCTAssertTrue(page.waitForExistence(timeout: 10), "no Agent Folders row:\n\(app.debugDescription)")

@@ -117,5 +117,5 @@ internal fun leftDrops(
 /** Delete only one of this app's own drop copies, off the main thread; never sweep cache/chat-drops. */
 internal fun deleteDrop(context: Context, uri: String) {
     if (!isDropUri(uri, context.packageName)) return
-    runCatching { context.contentResolver.delete(Uri.parse(uri), null, null) }
+    val _ = runCatching { context.contentResolver.delete(Uri.parse(uri), null, null) }
 }

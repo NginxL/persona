@@ -6,6 +6,7 @@ import (
 	"context"
 	"io"
 	"net"
+	"os"
 	"path/filepath"
 	"time"
 )
@@ -17,6 +18,12 @@ const peerAuthRequired = false
 // peerPathUsable: on macOS and Linux an inbox is a unix socket, an absolute path ending in .sock.
 func peerPathUsable(socket string) bool {
 	return filepath.IsAbs(socket) && filepath.Ext(socket) == ".sock" && !peerPipeRe.MatchString(socket)
+}
+
+// peerInboxExists waits for the socket created by a newly opened desktop session without connecting to it.
+func peerInboxExists(socket string) bool {
+	st, err := os.Stat(socket)
+	return err == nil && st.Mode()&os.ModeSocket != 0
 }
 
 // dialPeer connects to the inbox's unix socket.

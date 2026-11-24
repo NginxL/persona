@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 
 	"github.com/nwverse/persona/server/internal/assistantwire"
 	"github.com/nwverse/persona/server/internal/devicewire"
@@ -106,6 +107,33 @@ func (s *Service) nodeEvent(machine, event string, params json.RawMessage) bool 
 
 // NodeRequest answers what of a node's requests is the manager's (devices.Options.Answer, with NodeAnswer's).
 func (s *Service) nodeRequest(ctx context.Context, machine, method string, params json.RawMessage) (any, bool, error) {
+	// These ids name a direction and its optional coding Agent, not a Persona conversation on the calling node; do not
+	// run conversation-tombstone validation over them.
+	switch method {
+	case "direction.create":
+		if !s.fleetOn() {
+			return nil, false, nil
+		}
+		var in directionCreateInput
+		if err := json.Unmarshal(params, &in); err != nil {
+			return directionNodeReply(nil, directionInvalidf("arguments: %v", err)), true, nil
+		}
+		view, err := s.createOutsideDirection(ctx, in)
+		return directionNodeReply(view, err), true, nil
+	case "direction.progress":
+		if !s.fleetOn() {
+			return nil, false, nil
+		}
+		var in struct {
+			ID string `json:"id"`
+			directionProgressInput
+		}
+		if err := json.Unmarshal(params, &in); err != nil {
+			return directionNodeReply(nil, directionInvalidf("arguments: %v", err)), true, nil
+		}
+		view, err := s.writeDirectionProgress(ctx, strings.TrimSpace(in.ID), in.directionProgressInput)
+		return directionNodeReply(view, err), true, nil
+	}
 	if err := s.conversationParamsAvailable(ctx, machine, params); err != nil {
 		return nil, true, err
 	}
@@ -167,6 +195,15 @@ func (s *Service) nodeRequest(ctx context.Context, machine, method string, param
 			return nil, true, errors.New("lark.sent: no extensions, there is no ledger")
 		}
 		out, err := s.ext.RecordNodeSent(ctx, machine, params)
+		return out, true, err
+	case proto.MethodGateRelay: // a relayed command gate's call, for the extension's socket here (#12904)
+		r, ok := s.ext.(interface {
+			RelayGate(ctx context.Context, machine string, params json.RawMessage) (any, error)
+		})
+		if !ok {
+			return nil, true, errors.New("gate.relay: no extensions here to relay to")
+		}
+		out, err := r.RelayGate(ctx, machine, params)
 		return out, true, err
 	case proto.MethodMailAttachment: // mail_save_attachment's bytes for the node that saves them (fleet_tools.go)
 		var p proto.MailAttachmentRequest

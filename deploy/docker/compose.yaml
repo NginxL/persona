@@ -10,6 +10,11 @@ services:
     image: ${PERSONA_IMAGE-${JARVIS_IMAGE:-}}
     restart: unless-stopped
     init: true
+    # Non-root bubblewrap uses a nested user namespace, not host CAP_SYS_ADMIN.
+    # See docs/operations/docker.md "Extension sandboxes" for host kernel requirements.
+    security_opt:
+      - no-new-privileges:true
+      - seccomp=./extension-seccomp.json
     depends_on:
       postgres:
         condition: service_healthy

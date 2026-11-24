@@ -45,30 +45,75 @@ func Split(cmd string) (segs []Segment, ok bool) {
 		start = at
 	}
 	// skipGroup copies $( … ) / `…` / <( … ) into the word, nesting and quotes respected; false when it never closes.
-	skipGroup := func(i int, open, close rune) (int, bool) {
+	var skipGroup func(i int, open, close rune) (int, bool)
+	skipGroup = func(i int, open, close rune) (int, bool) {
 		depth := 0
 		begin := i + 1
+		inGroupWord := false
 		for ; i < len(r); i++ {
 			word.WriteRune(r[i])
 			switch {
 			case r[i] == '\\' && i+1 < len(r):
 				i++
 				word.WriteRune(r[i])
+				inGroupWord = r[i] != '\n'
 			case r[i] == '\'' && open != '`':
+				inGroupWord = true
 				for i++; i < len(r) && r[i] != '\''; i++ {
 					word.WriteRune(r[i])
 				}
-				if i < len(r) {
+				if i >= len(r) {
+					return i, false
+				}
+				word.WriteRune(r[i])
+			case r[i] == '"' && open != '`':
+				inGroupWord = true
+				for i++; i < len(r) && r[i] != '"'; i++ {
+					switch {
+					case r[i] == '\\' && i+1 < len(r) && strings.ContainsRune("\"\\$`\n", r[i+1]):
+						word.WriteRune(r[i])
+						i++
+						word.WriteRune(r[i])
+					case r[i] == '$' && i+1 < len(r) && r[i+1] == '(', r[i] == '`':
+						subOpen, subClose := rune('`'), rune('`')
+						at := i
+						if r[i] == '$' {
+							word.WriteRune('$')
+							at++
+							subOpen, subClose = '(', ')'
+						}
+						end, closed := skipGroup(at, subOpen, subClose)
+						if !closed {
+							return end, false
+						}
+						i = end
+					default:
+						word.WriteRune(r[i])
+					}
+				}
+				if i >= len(r) {
+					return i, false
+				}
+				word.WriteRune(r[i])
+			case r[i] == '#' && open == '(' && !inGroupWord && depth > 0:
+				for i+1 < len(r) && r[i+1] != '\n' {
+					i++
 					word.WriteRune(r[i])
 				}
 			case r[i] == open && (open != close || depth == 0):
 				depth++
+				inGroupWord = false
 			case r[i] == close:
 				depth--
 				if depth == 0 {
 					seg.Nested = append(seg.Nested, string(r[begin:i]))
 					return i, true
 				}
+				inGroupWord = false
+			case strings.ContainsRune(" \t\n;|&<>", r[i]):
+				inGroupWord = false
+			default:
+				inGroupWord = true
 			}
 		}
 		return i, false

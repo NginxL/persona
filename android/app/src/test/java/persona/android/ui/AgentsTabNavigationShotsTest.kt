@@ -46,15 +46,17 @@ import persona.core.navigation.*
 import persona.feature.agents.*
 import persona.feature.chat.ChatScreen
 import java.io.File
+import java.time.Duration
+import java.time.Instant
 
-/** Native JVM captures: production home chrome, NavDisplay, Agents entries and chat, with local fixture data. */
+/** Native JVM captures at the default, interface cap and 2.0 scales: home chrome, Agents and chat, with local data. */
 @RunWith(AndroidJUnit4::class)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 @Config(application = Application::class, sdk = [35], qualifiers = "en-w400dp-h800dp-xhdpi")
 class AgentsTabNavigationShotsTest {
     @get:Rule val rule = createEmptyComposeRule()
     private val agent = Session("computer", "agent", title = "Plan a weekend trip", state = "working",
-        cwd = "/example/travel", updatedAt = "2026-11-12T09:00:00Z")
+        cwd = "/example/travel", updatedAt = Instant.now().minus(Duration.ofDays(7)).toString())
     private val route = ChatRoute(agent.machineId, agent.sessionId, ConversationKind.Agent)
     private val repositories = object : SessionsRepository {
         override val machines = MutableStateFlow(listOf(Machine("computer", "Computer A", online = true)))
@@ -98,7 +100,7 @@ class AgentsTabNavigationShotsTest {
         }
         return AgentsPreferences(store, hub)
     }
-    private fun scene(style: AppStyle, dark: Boolean, large: Boolean = false) {
+    private fun scene(style: AppStyle, dark: Boolean, fontScale: Float = 1f) {
         val app = ApplicationProvider.getApplicationContext<Application>()
         Shadows.shadowOf(app.packageManager).addActivityIfNotPresent(ComponentName(app, ComponentActivity::class.java))
         val prefs = preferences()
@@ -116,7 +118,7 @@ class AgentsTabNavigationShotsTest {
         rule.mainClock.autoAdvance = false
         ActivityScenario.launch(ComponentActivity::class.java).use { scenario ->
             scenario.onActivity { activity -> activity.setContent {
-                CompositionLocalProvider(LocalDensity provides Density(LocalDensity.current.density, if (large) 2f else 1f)) {
+                CompositionLocalProvider(LocalDensity provides Density(LocalDensity.current.density, fontScale)) {
                     PersonaTheme(style = style, darkTheme = dark, reduceMotion = true) {
                         Box(Modifier.fillMaxSize().testTag("shot")) {
                             val rootKeys = remember { listOf<NavKey>(AssistantRoute, AgentsRoute).map { NavEntry(it) {}.contentKey }.toSet() }
@@ -153,26 +155,26 @@ class AgentsTabNavigationShotsTest {
                 }
             } }
             awaitText("Agents")
-            capture("assistant", style, dark, large)
+            capture("assistant", style, dark, fontScale)
             // A task/card's targeted entry opens a chat; returning through the top-level assistant destination leaves
             // that chat on the Agents stack, exactly as a prior session link or saved navigation state does.
             rule.runOnIdle { navigator.navigate(route) }
             awaitText("The trip outline is ready.")
             rule.runOnIdle { assertEquals(route, stacks.getValue(selected).last()) }
-            capture("direct-detail", style, dark, large)
+            capture("direct-detail", style, dark, fontScale)
             rule.runOnIdle { navigator.selectTab(AppTab.Persona) }
             awaitText("Agents")
             rule.onAllNodesWithText("Agents", useUnmergedTree = true)
                 .filter(SemanticsMatcher("placed in the top bar") { it.boundsInRoot.top > 0f })
                 .onFirst().performClick()
             frames()
-            capture("after-tab", style, dark, large)
+            capture("after-tab", style, dark, fontScale)
             rule.runOnIdle {
                 assertEquals(AppTab.Agents, selected)
                 assertEquals(listOf(AgentsRoute), stacks.getValue(selected).toList())
             }
             awaitText(agent.displayTitle)
-            capture("list", style, dark, large)
+            capture("list", style, dark, fontScale)
             rule.onNodeWithText(agent.displayTitle, useUnmergedTree = true).performClick()
             awaitText("The trip outline is ready.")
             rule.runOnIdle { assertTrue(stacks.getValue(selected).last() is ChatRoute) }
@@ -195,11 +197,16 @@ class AgentsTabNavigationShotsTest {
         } while (System.nanoTime() < deadline)
         error("Navigation fixture did not show its destination within 30 seconds: ${rule.onRoot().printToString()}")
     }
-    private fun capture(stage: String, style: AppStyle, dark: Boolean, large: Boolean) {
+    private fun capture(stage: String, style: AppStyle, dark: Boolean, fontScale: Float) {
         frames()
         val bitmap = rule.onNodeWithTag("shot").captureToImage().asAndroidBitmap()
-        val output = File("build/agents-tab-navigation-shots").also { it.mkdirs() }
-        File(output, "$stage-${style.name.lowercase()}-${if (dark) "dark" else "light"}${if (large) "-large" else ""}.png")
+        val output = File(System.getProperty("persona.shots") ?: "build/agents-tab-navigation-shots").also { it.mkdirs() }
+        val size = when (fontScale) {
+            1f -> ""
+            InterfaceFontScaleCap -> "-cap"
+            else -> "-large"
+        }
+        File(output, "$stage-${style.name.lowercase()}-${if (dark) "dark" else "light"}$size.png")
             .outputStream().use { assertTrue(bitmap.compress(Bitmap.CompressFormat.PNG, 100, it)) }
     }
     @Test fun glassLight() = scene(AppStyle.Glass, false)
@@ -208,10 +215,16 @@ class AgentsTabNavigationShotsTest {
     @Test fun briefDark() = scene(AppStyle.Brief, true)
     @Test fun boardLight() = scene(AppStyle.Board, false)
     @Test fun boardDark() = scene(AppStyle.Board, true)
-    @Test fun glassLightLarge() = scene(AppStyle.Glass, false, true)
-    @Test fun glassDarkLarge() = scene(AppStyle.Glass, true, true)
-    @Test fun briefLightLarge() = scene(AppStyle.Brief, false, true)
-    @Test fun briefDarkLarge() = scene(AppStyle.Brief, true, true)
-    @Test fun boardLightLarge() = scene(AppStyle.Board, false, true)
-    @Test fun boardDarkLarge() = scene(AppStyle.Board, true, true)
+    @Test fun glassLightCap() = scene(AppStyle.Glass, false, InterfaceFontScaleCap)
+    @Test fun glassDarkCap() = scene(AppStyle.Glass, true, InterfaceFontScaleCap)
+    @Test fun briefLightCap() = scene(AppStyle.Brief, false, InterfaceFontScaleCap)
+    @Test fun briefDarkCap() = scene(AppStyle.Brief, true, InterfaceFontScaleCap)
+    @Test fun boardLightCap() = scene(AppStyle.Board, false, InterfaceFontScaleCap)
+    @Test fun boardDarkCap() = scene(AppStyle.Board, true, InterfaceFontScaleCap)
+    @Test fun glassLightLarge() = scene(AppStyle.Glass, false, 2f)
+    @Test fun glassDarkLarge() = scene(AppStyle.Glass, true, 2f)
+    @Test fun briefLightLarge() = scene(AppStyle.Brief, false, 2f)
+    @Test fun briefDarkLarge() = scene(AppStyle.Brief, true, 2f)
+    @Test fun boardLightLarge() = scene(AppStyle.Board, false, 2f)
+    @Test fun boardDarkLarge() = scene(AppStyle.Board, true, 2f)
 }

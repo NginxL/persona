@@ -39,6 +39,17 @@ func (n *Node) doctorOptions() DoctorOptions {
 	return opts
 }
 
+// node.doctor is the machine page's "What this computer can do": node doctor's report, read-only unless {"fix":true};
+// node.doctor.fix takes the same path as `node doctor --fix`, on Persona's own generated files only.
+func init() {
+	nodeRPC("node.doctor", func(n *Node, ctx context.Context, params json.RawMessage) (any, error) {
+		return n.doctor(ctx, params, false)
+	})
+	nodeRPC("node.doctor.fix", func(n *Node, ctx context.Context, params json.RawMessage) (any, error) {
+		return n.doctor(ctx, params, true)
+	})
+}
+
 // doctor is node.doctor ({"fix": bool, "preflight": bool, "locale": string}) and node.doctor.fix (always fix). The
 // report is DoctorReport as it is. Missing locale keeps the legacy zh-Hans wording for old hubs and machine readers.
 // "preflight": false leaves the path-access check out: the assistant's readiness only wants Claude Code's version,

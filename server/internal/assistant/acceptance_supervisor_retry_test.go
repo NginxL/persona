@@ -36,6 +36,7 @@ func supervisorConclusion(t *testing.T, s *Service, todo string) *acceptAsk {
 // the round's key, saying the supervisor checked it, and keeps its message id. A later sweep posts nothing more, and
 // the card is not redrawn: it said so as it went out.
 func TestSupervisorCheckedConclusionRetriedAfterAFailedSend(t *testing.T) {
+	needsLarkLayer(t)
 	s, f, todo, _, _ := conclusionService(t, true)
 	updated := updatedCards(f)
 	lark := newCardLark(f, "结论：", acceptSend{err: errLarkDown})
@@ -64,6 +65,7 @@ func TestSupervisorCheckedConclusionRetriedAfterAFailedSend(t *testing.T) {
 
 // A conclusion whose card went out at once is not sent again by any sweep.
 func TestSupervisorCheckedConclusionSentOnceIsNotSentAgain(t *testing.T) {
+	needsLarkLayer(t)
 	s, f, todo, _, _ := conclusionService(t, true)
 	lark := newCardLark(f, "结论：")
 	reviewTask(t, s, todo.ID, map[string]any{"verdict": "accepted", "outcome": "done", "reason": "Review complete",
@@ -86,6 +88,7 @@ func TestSupervisorCheckedConclusionSentOnceIsNotSentAgain(t *testing.T) {
 // conclusion's first send is under way the sweep sends nothing, and once that send fails the next sweep posts the card,
 // once; a new round claimed while a sweep looks at the passed one is neither posted as it nor given up.
 func TestSupervisorCheckedConclusionNotRetriedWhileAClaimIsInFlight(t *testing.T) {
+	needsLarkLayer(t)
 	t.Run("its first send under way", func(t *testing.T) {
 		s, f, todo, _, _ := conclusionService(t, true)
 		checks := completeReviewChecks(todoNow(s, todo.ID))
@@ -186,6 +189,7 @@ func TestSupervisorCheckedConclusionNotRetriedWhileAClaimIsInFlight(t *testing.T
 // Every retry is bounded by acceptPostWindow from the ask, as a "Please verify" card's is: past it nothing is sent and
 // the conclusion stays card-less (NoCard).
 func TestSupervisorCheckedConclusionRetryIsBounded(t *testing.T) {
+	needsLarkLayer(t)
 	s, f, todo, _, _ := conclusionService(t, true)
 	lark := newCardLark(f, "结论：", acceptSend{err: errLarkDown}, acceptSend{err: errLarkDown}, acceptSend{err: errLarkDown})
 	a := supervisorConclusion(t, s, todo.ID)
@@ -211,6 +215,7 @@ func TestSupervisorCheckedConclusionRetryIsBounded(t *testing.T) {
 // supervisor's pass that no longer stands, the review cancelled or the task reopened since (dropped, as a reminder
 // drops an ended round).
 func TestSupervisorCheckedConclusionRetryExclusions(t *testing.T) {
+	needsLarkLayer(t)
 	ctx := context.Background()
 	reportsOff := FeishuStatus{Ready: true, Enabled: true, Owner: "ou_me", PublicURL: "https://hub.example.com",
 		Features: FeishuFeatures{Main: true, Cards: true}}
@@ -303,6 +308,7 @@ func TestSupervisorCheckedConclusionRetryExclusions(t *testing.T) {
 // the next tick the same, saying the supervisor checked it; one passed while its retried card was going out is redrawn
 // to say so, once.
 func TestSupervisorPassedPleaseVerifyRetried(t *testing.T) {
+	needsLarkLayer(t)
 	t.Run("passed before the retry", func(t *testing.T) {
 		s, f, todo, _, _ := conclusionService(t, false)
 		updated := updatedCards(f)

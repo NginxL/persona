@@ -247,10 +247,20 @@ function StepLine({ step, machine }: { step: LineageStep; machine: string }) {
   return <span className="text-[12px] text-ink-3">{[who, when].filter(Boolean).join(t("assistant-taskbrief.separator"))}</span>;
 }
 
+/** One direction of the hand-off, linked to its card when the detail page supplied navigation (#5732). */
+function LineageLink({ id, label, onOpenTodo }: { id: string; label: string; onOpenTodo?: (id: string) => void }) {
+  if (!onOpenTodo) return <span className="text-xs text-ink-2">{label}</span>;
+  return (
+    <button type="button" data-open-todo={id} onClick={() => onOpenTodo(id)} className="w-fit whitespace-nowrap text-left text-xs text-accent-ink hover:underline">
+      {label}
+    </button>
+  );
+}
+
 /** Under the task's criteria: the scope changes (what changed, why, what it added and dropped) and who worked on it
  *  (each to-do of the brief's lineage: where, from when to when, why it stopped). Nothing for a task whose scope
  *  never changed and that nobody took over. */
-export function TaskBriefHistory({ todo }: { todo: Todo }) {
+export function TaskBriefHistory({ todo, onOpenTodo }: { todo: Todo; onOpenTodo?: (id: string) => void }) {
   const machines = useStore((s) => s.machines);
   const changes = scopeChanges(todo.brief);
   const lineage = lineageTells(todo.lineage) ? todo.lineage : [];
@@ -293,10 +303,22 @@ export function TaskBriefHistory({ todo }: { todo: Todo }) {
                 <span aria-hidden className="mt-px flex size-[18px] shrink-0 items-center justify-center rounded-full bg-field text-[11px] font-bold text-ink-2 tabular-nums">{i + 1}</span>
                 <div className="flex min-w-0 flex-1 flex-col gap-0.5 select-text [overflow-wrap:anywhere]">
                   <span className="flex min-w-0 flex-wrap items-baseline gap-x-2">
-                    <span className={cx("min-w-0", step.current ? "font-semibold text-ink" : "text-ink")}>{step.title || t("assistant-taskbrief.lineage_untitled")}</span>
+                    {!step.current && onOpenTodo ? (
+                      <button type="button" data-open-todo={step.todo_id} onClick={() => onOpenTodo(step.todo_id)} className="min-w-0 truncate text-left text-accent-ink hover:underline">
+                        {step.title || t("assistant-taskbrief.lineage_untitled")}
+                      </button>
+                    ) : (
+                      <span className={cx("min-w-0", step.current ? "font-semibold text-ink" : "text-ink")}>{step.title || t("assistant-taskbrief.lineage_untitled")}</span>
+                    )}
                     {step.current && <span className="shrink-0 whitespace-nowrap text-[12px] text-ink-3">{t("assistant-taskbrief.lineage_current")}</span>}
                   </span>
                   <StepLine step={step} machine={machines.find((m) => m.id === step.machine)?.name ?? ""} />
+                  {step.continues && (
+                    <LineageLink id={step.continues} label={t("assistant-taskbrief.lineage_continues", { title: lineage.find((s) => s.todo_id === step.continues)?.title || step.continues })} onOpenTodo={onOpenTodo} />
+                  )}
+                  {step.superseded_by && (
+                    <LineageLink id={step.superseded_by} label={t("assistant-taskbrief.lineage_superseded", { title: lineage.find((s) => s.todo_id === step.superseded_by)?.title || step.superseded_by })} onOpenTodo={onOpenTodo} />
+                  )}
                   {step.why ? (
                     <span className="text-[12.5px] text-ink-2">{t("assistant-taskbrief.lineage_stopped", { why: step.why })}</span>
                   ) : !step.ended && !step.superseded_by ? (

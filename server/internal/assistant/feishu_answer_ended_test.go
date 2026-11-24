@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/nwverse/persona/server/internal/assistantwire"
-	"github.com/nwverse/persona/server/internal/feishubot"
+	"github.com/nwverse/persona/server/internal/botcard"
 	"github.com/nwverse/persona/server/internal/proto"
 )
 
@@ -39,8 +39,8 @@ func heldAnswer(t *testing.T) (hold, let func()) {
 }
 
 // ixPress is a press of option v on the first question of card id.
-func ixPress(id, v string) *feishubot.CardAction {
-	var a feishubot.CardAction
+func ixPress(id, v string) *botcard.CardAction {
+	var a botcard.CardAction
 	a.Action.Value = map[string]any{"a": "ix", "id": id, "q": "0", "v": v}
 	a.Context.MessageID = "om_" + id
 	return &a

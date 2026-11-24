@@ -206,15 +206,6 @@ struct MachineDetailView: View {
             async let sections: Void = plugins.load(ref, app: model, redraw: true)
             _ = await (refreshed, metrics, launchersLoaded, sections)
         }
-        #if os(macOS)
-        .macRefreshes(id: machineID) {
-            async let refreshed: Void = model.refresh()
-            async let metrics: Void = load()
-            async let launchersLoaded: Void = loadLaunchers(refresh: true)
-            async let sections: Void = plugins.load(ref, app: model, redraw: true)
-            _ = await (refreshed, metrics, launchersLoaded, sections)
-        }
-        #endif
         .tabActiveTask(id: Poll(range: range, active: phase == .active)) { // stops in the background and in another tab
             guard phase == .active else { return }
             while !Task.isCancelled {

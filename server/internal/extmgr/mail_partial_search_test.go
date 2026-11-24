@@ -14,7 +14,6 @@ import (
 	"github.com/emersion/go-imap/v2/imapserver"
 	"github.com/emersion/go-imap/v2/imapserver/imapmemserver"
 	"github.com/nwverse/persona/server/internal/connector"
-	"github.com/nwverse/persona/server/internal/mail"
 	"github.com/nwverse/persona/server/internal/subscriptions"
 )
 
@@ -92,7 +91,7 @@ func subscriptionIMAP(t *testing.T, subject string) int {
 	return port
 }
 
-func importSubscriptionAccount(t *testing.T, s *mail.Service, id string, port int, password string) {
+func importSubscriptionAccount(t *testing.T, s Mail, id string, port int, password string) {
 	t.Helper()
 	data, err := json.Marshal(map[string]any{"id": id, "name": id, "email": id + "@example.com", "provider": "imap",
 		"auth": "password", "username": "me@example.com", "password": password, "imap_host": "127.0.0.1",

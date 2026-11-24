@@ -36,6 +36,16 @@ func TestConversationSpaces(t *testing.T) {
 	if got, err := d.ConversationSpaces(ctx, []string{"plain"}); err != nil || !maps.Equal(got, map[string]string{"plain": ""}) {
 		t.Fatalf("plain = %v, %v", got, err)
 	}
+	// Any space other than the assistant's own stays once noted, and one noted in the assistant's own moves to it; in
+	// one call the first such space named wins (the manager puts the strictest first).
+	note(ConversationSpace{"server", "spaced", ""}, ConversationSpace{"server", "two", "qa-private"}, ConversationSpace{"server", "two", "qa-open"},
+		ConversationSpace{"server", "two", ""})
+	note(ConversationSpace{"server", "spaced", "qa-open"})
+	note(ConversationSpace{"server", "spaced", "health"}, ConversationSpace{"server", "two", ""})
+	if got, err := d.ConversationSpaces(ctx, []string{"spaced", "two"}); err != nil ||
+		!maps.Equal(got, map[string]string{"spaced": "qa-open", "two": "qa-private"}) {
+		t.Fatalf("other spaces = %v, %v", got, err)
+	}
 	if got, err := d.ConversationSpaces(ctx, nil); err != nil || len(got) != 0 {
 		t.Fatalf("none asked = %v, %v", got, err)
 	}
@@ -65,5 +75,27 @@ func TestConversationSpaces(t *testing.T) {
 		if err != nil || !found || string(one) != string(raw) {
 			t.Errorf("%s: batch %s, one by one %s (%v, %v)", id, raw, one, found, err)
 		}
+	}
+}
+
+// The registry (#13104): empty on a new database (the manager supplies the built-in health space), and a row reads
+// back with its kind and default categories; kinds, templates and categories are the manager's to check.
+func TestTracksRegistry(t *testing.T) {
+	d, ctx := open(t), context.Background()
+	if list, err := d.Tracks(ctx); err != nil || len(list) != 0 {
+		t.Fatalf("a new registry = %+v, %v; want empty", list, err)
+	}
+	if _, err := d.pool.Exec(ctx, `INSERT INTO assistant_tracks (slug, title, default_categories) VALUES ('qa-finance', 'QA', '{finance}'),
+		('qa-later', '', '{someday}')`); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _, _ = d.pool.Exec(context.Background(), `DELETE FROM assistant_tracks`) })
+	list, err := d.Tracks(ctx)
+	if err != nil || len(list) != 2 {
+		t.Fatalf("tracks = %+v, %v", list, err)
+	}
+	if s := list[0]; s.Slug != "qa-finance" || s.Kind != "space" || s.Title != "QA" || s.Template != "space" || s.DirName != "" ||
+		s.Builtin || s.ArchivedAt != nil || len(s.DefaultCategories) != 1 || s.DefaultCategories[0] != "finance" {
+		t.Fatalf("qa-finance = %+v", s)
 	}
 }

@@ -13,20 +13,15 @@ import (
 )
 
 func (n *Node) dirs(path string) (*proto.DirList, error) {
-	if path == "" || path == "~" {
+	if path == "" {
 		path = n.home
-	} else if strings.HasPrefix(path, "~/") {
-		path = filepath.Join(n.home, path[2:])
 	}
-	path = filepath.Clean(path)
+	path = filepath.Clean(proto.ExpandHome(path, n.home))
 	ents, err := os.ReadDir(path)
 	if err != nil {
 		return nil, err
 	}
-	res := &proto.DirList{Path: path, Parent: filepath.Dir(path), Entries: []proto.DirEntry{}, Recent: n.recentDirs()}
-	if path == "/" {
-		res.Parent = ""
-	}
+	res := &proto.DirList{Path: path, Parent: directoryParent(path), Entries: []proto.DirEntry{}, Recent: n.recentDirs()}
 	for _, e := range ents {
 		name := e.Name()
 		if strings.HasPrefix(name, ".") {
@@ -51,6 +46,16 @@ func (n *Node) dirs(path string) (*proto.DirList, error) {
 		return strings.ToLower(res.Entries[i].Name) < strings.ToLower(res.Entries[j].Name)
 	})
 	return res, nil
+}
+
+// directoryParent stops browsing at a filesystem root, including Windows drives and UNC shares.
+func directoryParent(path string) string {
+	path = filepath.Clean(path)
+	parent := filepath.Dir(path)
+	if parent == path {
+		return ""
+	}
+	return parent
 }
 
 // dirsByUse is every working directory a session on this node is known to have run in, with when it was last used

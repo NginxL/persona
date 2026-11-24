@@ -304,6 +304,7 @@ func (b *previewBrowser) newTab(ctx context.Context, n *Node, vp previewViewport
 		out    any
 	}{
 		{"Page.enable", nil, nil},
+		{"Page.setLifecycleEventsEnabled", map[string]any{"enabled": true}, nil},
 		{"Inspector.enable", nil, nil},
 		{"Page.getFrameTree", nil, &tree},
 		{"Runtime.enable", nil, nil},

@@ -2,9 +2,15 @@
   "environment": "実行環境",
   "worktree": "ワークツリー",
   "subagents": "サブエージェント",
+  "group_running": "実行中 · {count}",
+  "group_ended": "終了 · {count}",
   "running_count": "{count} 件が実行中",
   "ended": "終了",
   "ended_count": "{count} 件が終了",
+  "status_needs_you": "確認待ち",
+  "status_failed": "失敗",
   "finished_count": "{count} 件が終了",
-  "show_in_chat": "チャットで表示"
+  "show_in_chat": "呼び出し元へ",
+  "open_as_page": "ページで開く",
+  "stop": "停止"
 }

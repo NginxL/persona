@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/nwverse/persona/server/internal/assistantwire"
-	"github.com/nwverse/persona/server/internal/feishubot"
+	"github.com/nwverse/persona/server/internal/botcard"
 	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/proto"
 )
@@ -335,14 +335,14 @@ func TestCardSentLogLine(t *testing.T) {
 	e := newSupervisedEnv(t, true)
 	ctx := context.Background()
 	e.f.answerApp(AppFeishu, FeishuPost, func(json.RawMessage) (any, error) { return nil, errors.New("feishu down") })
-	if _, err := e.s.botPost(ctx, "", feishubot.NewCard("", "", "测试"), ""); err == nil {
+	if _, err := e.s.botPost(ctx, "", botcard.NewCard("", "", "测试"), ""); err == nil {
 		t.Fatal("the post did not fail")
 	}
 	if got := e.logged("bots: card sent"); len(got) != 0 {
 		t.Fatalf("logged a card that did not land: %q", got)
 	}
 	e.f.answerApp(AppFeishu, FeishuPost, func(json.RawMessage) (any, error) { return map[string]any{"message_id": "om_x"}, nil })
-	if _, err := e.s.botPost(ctx, "", feishubot.NewCard("", "", "测试"), ""); err != nil {
+	if _, err := e.s.botPost(ctx, "", botcard.NewCard("", "", "测试"), ""); err != nil {
 		t.Fatal(err)
 	}
 	if got := e.logged("bots: card sent: kind=other machine=- session=- message=om_x"); len(got) != 1 {

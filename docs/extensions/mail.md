@@ -1,6 +1,6 @@
 # Mail
 
-`server/internal/mail`: lets both Claude and the App send and receive the user's email. It uses standard IMAP + SMTP with no third-party relay service.
+`server/internal/modules/mail` (a feature module: `persona_without_mail` builds the manager without it; `docs/architecture/core-and-modules.md` "Provider seams"): lets both Claude and the App send and receive the user's email. It uses standard IMAP + SMTP with no third-party relay service.
 Gmail uses "Sign In with Google" (OAuth2 + XOAUTH2) and additionally supports searching with Gmail search syntax (`X-GM-RAW`). Credentials are encrypted and stored in the hub's `dataDir` (default `~/.persona`).
 
 ## Capabilities
@@ -133,7 +133,7 @@ the system browser opens Microsoft sign-in and authorization → back to the App
   "Sent" itself, so the hub doesn't append another copy.
 - **Refresh tokens rotate**: Microsoft issues a new one on every refresh (and the old one becomes invalid), so the hub encrypts and stores it back into `oauth_enc` right away (Google doesn't rotate).
 - Credentials: `{provider: "microsoft", client_id, refresh_token}` encrypted in `mail_accounts.oauth_enc`, same as Gmail.
-- Code: `server/internal/mail/microsoft.go`; App: `apple/Persona/Views/Mail/MailOutlookViews.swift`.
+- Code: `server/internal/modules/mail/microsoft.go`; App: `apple/Persona/Views/Mail/MailOutlookViews.swift`.
 - API: `GET` / `PUT /api/v1/mail/oauth/microsoft/config` (`{configured, client_id, source: app|config, redirect_uri}`; PUT `{client_id}`, an empty string clears it),
   `POST …/microsoft/start` (`{login_hint?}` → `{auth_url, callback_scheme, state}`), `POST …/microsoft/finish` (the callback's `{state, code}` or
   `{state, error, error_description}` → `{account}`). A callback carrying an error is still passed to the hub: it turns Microsoft's error code into what to do (see below).
@@ -248,9 +248,14 @@ the managers never put it in logs or error messages.
 - Each account caches one logged-in IMAP connection, closed after 10 minutes unused (swept every 30 s). That is longer than both the Inbox mail round (3 minutes) and the knowledge base mail round (6 minutes),
   so the next round reuses the previous round's login instead of redoing TCP + TLS + LOGIN every round (before #2627 it was 2 minutes, and the connection was always already closed when a round started); RFC 3501 servers' idle auto-logout is no shorter than 30 minutes.
 - A connection idle for more than 1 minute is sent `NOOP` before reuse; with no reply in 5 s it is closed and reconnected, so an idle connection silently forgotten by NAT or a firewall doesn't make the round hang the full 20 s before timing out.
+  A cached connection that already ended (the server hung up, or go-imap's reader stopped on a reply it couldn't read) is replaced without a `NOOP`, and the log says why it had ended.
 - Commands on one connection are serialized per account (IMAP's `SELECT` state is per connection; concurrent use would clash).
   Waiting in the queue uses the caller's ctx: on cancel or timeout it leaves the queue and reports `ctx.Err()`, without running or touching the connection (before #2344, abandoned requests still waited their turn, then closed the account's connection on the way out, forcing every live request behind them to reconnect). The operation's own 20 s only starts once it gets its turn, so a slow mailbox ahead doesn't eat into its time.
-- Network operations time out after 20 s; on transport-level errors (not the service's NO/BAD) the connection is dropped and retried once, to survive servers that disconnect on their own.
+- Network operations time out after 20 s. An operation logs in at most twice (#12808): when connecting fails with anything but the server's answer, or the connection ends under a step (the server hung up, a read or write failed, a reply couldn't be parsed), the connection is dropped and the operation runs once more on a new login, inside the same 20 s.
+  A timeout, a caller that gave up, a NO / BAD, or any other error on a connection that is still up is not retried.
+  go-imap completes a command as soon as its tagged answer arrives, so a server that hangs up right after answering (QQ Mail does after a keyword `UID SEARCH`) makes the *next* command fail: over TLS the bare `use of closed network connection`. A search therefore keeps the UIDs it found, and its retry only runs `SELECT` and the fetch (when `UIDVALIDITY` is unchanged); searching again would end the new connection too.
+  Every failed try writes one line: `mail: <account id>: <operation> failed at <step> (try N of 2, reconnecting | giving up): <raw error>`, plus `; the connection had ended (<why>)` when it had (go-imap's read error, or none: the server closed it). A refused login is logged when it starts or its answer changes, not on every round.
+  When the last try couldn't reach the server either, the caller gets `UnreachableError` (code `mail_unreachable`, HTTP 502, localized `mail-errors.unreachable`: the mailbox couldn't be reached even after reconnecting once, try again later), never the raw transport error; `mail_search` and `mail_read` answer it in the caller's language.
 - Account `status` (#4722): a rejected login (wrong password / authorization code, Google or Microsoft authorization revoked or expired, XOAUTH2 answered with NO) is recorded as `error`, with `error` holding the reason (truncated to 300 characters, no password); the next successful login (or signing in again to add the same mailbox) sets it back to `ok`.
   Temporary errors such as timeouts, connection failures, DNS, server busy (`UNAVAILABLE`), or token endpoint 5xx don't change the status; a NO on some command after login (folder doesn't exist) doesn't count either. It is kept in memory only, not in the database: after a hub restart it shows `ok` first, and is flagged again if the next read round (at most 3 minutes) fails.
 - All the work for a page has to fit in those 20 s (`withConnAt` hands the deadline to `listOne`, unchanged across retries): local header matching runs at most until 6 s after the operation starts, and summaries are fetched 50 per batch, with no further batch once less than 6 s remain before the deadline. A page that hits the limit ends early with `next_before_uid` instead of timing out.

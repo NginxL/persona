@@ -4,6 +4,8 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+// the feature modules (the health page is one: docs/web/web.md "Modules")
+import { MODULES } from "../modules";
 vi.hoisted(() => {
   globalThis.ResizeObserver ??= class { observe() {} unobserve() {} disconnect() {} } as unknown as typeof ResizeObserver;
   window.matchMedia ??= ((query: string) => ({ matches: false, media: query, onchange: null, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {}, dispatchEvent: () => false })) as typeof window.matchMedia;
@@ -12,6 +14,8 @@ import { setSidebarCollapsed } from "../lib/layout";
 import { addPageGroup, resetSidebarPrefs, setPageGroup } from "../lib/sidebar-pages";
 import { reset } from "../lib/store";
 import { Sidebar } from "./Sidebar";
+// the health module, when this run has it (the core-only lane, #13932, runs with no module)
+const HEALTH = MODULES.some((m) => m.id === "health");
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -51,7 +55,7 @@ describe("sidebar groups", () => {
     expect(headings().filter((h) => h === "页面" || h === "生活")).toEqual(["页面"]);
   });
 
-  it("draws the user's group after Pages, with the pages moved to it", async () => {
+  it.skipIf(!HEALTH)("draws the user's group after Pages, with the pages moved to it", async () => {
     const life = addPageGroup([""], "生活");
     setPageGroup("health", life);
     setPageGroup("routines", life);

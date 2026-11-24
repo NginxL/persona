@@ -87,6 +87,15 @@ func (t *previewTab) event(method string, params json.RawMessage) bool {
 			}
 			t.pushPage(true)
 		}
+	case "Page.lifecycleEvent":
+		var e struct {
+			Name    string
+			FrameID string
+		}
+		// Attach the screencast to the new document once its surface has been painted.
+		if json.Unmarshal(params, &e) == nil && e.FrameID == t.frame && e.Name == "firstPaint" {
+			t.applyViewport(true)
+		}
 	case "Page.navigatedWithinDocument":
 		var f struct {
 			FrameID string `json:"frameId"`

@@ -20,6 +20,10 @@ XCODE_RUNNER="${PERSONA_XCODE_RUNNER:-$HOME/.local/bin/xcode-slot}"
 if [ -x "$XCODE_RUNNER" ] && [ "${PERSONA_XCODE_SLOT_HELD:-}" != 1 ]; then
   exec env PERSONA_XCODE_SLOT_HELD=1 "$XCODE_RUNNER" bash "$PWD/scripts/release/release.sh" "$@"
 fi
+if [ -n "${PERSONA_RELEASE_SOURCE:-}" ]; then
+  echo "Using the staged Apple release source and its Meta-specific resolved package input: $PERSONA_RELEASE_SOURCE"
+  cd "$PERSONA_RELEASE_SOURCE"
+fi
 _env=$(python3 scripts/persona_config.py env) || exit $?
 eval "$_env"; unset _env
 python3 scripts/persona_config.py xcconfig

@@ -7,6 +7,11 @@ final class RecordingTranscription {
     static let shared = RecordingTranscription()
     private(set) var current: UUID?
     private(set) var errors: [UUID: String] = [:]
+    /// Why this iPhone can't transcribe a recording at all (#13385): no model for its language, an older iOS, a model
+    /// that didn't download (`RecordingSpeechError.isEntryLevel`). Kept where the hub's transcript covers the segment too
+    /// (#9491 lets such a segment go without the phone's text, and without an error), so the meeting page can say why
+    /// the phone shows no lines once the hub's are gone. Cleared when a segment transcribes or the language changes.
+    private(set) var cannot: [UUID: RecordingSpeechError] = [:]
     /// The wall-clock range each rolling recording was pulled for; only that part is transcribed.
     private(set) var pulls: [UUID: ClosedRange<Date>] = [:]
     @ObservationIgnored private let library: RecordingLibrary
@@ -60,12 +65,18 @@ final class RecordingTranscription {
         if current == id { worker?.cancel() }
     }
 
+    #if DEBUG
+    /// Screenshots (`-showMeetingSample room-hub-phone-cannot|room-phone-cannot`): this iPhone can't transcribe `id`.
+    func showSampleCannot(_ id: UUID, _ error: RecordingSpeechError) { cannot[id] = error }
+    #endif
+
     func setLocale(_ id: UUID, _ locale: String) {
         if library.entry(id)?.isDay == true {
             RecordingDayTranscriber.shared.setLocale(id, locale)
             return
         }
         guard current != id else { return }
+        cannot[id] = nil
         library.change(id) { entry in
             entry.locale = locale
             for index in entry.segments.indices { entry.segments[index].sentences = nil }
@@ -156,8 +167,10 @@ final class RecordingTranscription {
                     RecordingSentence(start: segment.start + $0.start, end: segment.start + $0.end, text: $0.text)
                 }
                 try library.save(saved)
+                if cannot[id] != nil { cannot[id] = nil }
             } catch is CancellationError { return }
             catch {
+                if let speech = error as? RecordingSpeechError, speech.isEntryLevel, cannot[id] != speech { cannot[id] = speech }
                 // A hub-transcribed segment (#9491): the hub's final pass transcribes its own copy of the audio, so the
                 // phone's failure (no model for the language, a format it can't read) leaves the segment with no text of
                 // its own rather than holding the recording's `complete: true`, and with it the minutes, for 12 hours.

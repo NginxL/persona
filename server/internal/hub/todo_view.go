@@ -23,6 +23,8 @@ const (
 	// featureTodoView: every row of GET /api/v1/todos carries `view`, the list `counts`, and GET /api/v1/todos/{id}
 	// answers one row so (docs/protocol/protocol.md, the to-dos rows).
 	featureTodoView = assistantwire.CapabilityTodoView
+	// featureTodoRevision: GET /api/v1/todos/revision answers the pushed read's cheap merged validator.
+	featureTodoRevision = assistantwire.CapabilityTodoRevision
 	// featureTodoPlaces: GET /api/v1/todos/places answers the To-dos sidebar's places with the counts.
 	featureTodoPlaces = assistantwire.CapabilityTodoPlaces
 	// featureTodoAsks: POST /api/v1/todos/{id}/asks/{ask}/answer answers a to-do's own asks by their view's ids
@@ -34,6 +36,8 @@ const (
 	// featureTodoImages: POST /api/v1/todos persists images and serves their private bytes (#11084). A hub-wide flag
 	// cannot promise image creation for only some managers, so an older or offline one hides the picker.
 	featureTodoImages = assistantwire.CapabilityTodoImages
+	// todoRevisionRoute is the pushed read's cheap validator, answered by every manager and merged (mergeTodoRevision).
+	todoRevisionRoute = "GET /api/v1/todos/revision"
 	// todoPlacesRoute is answered by every manager the to-dos list merges, joined (mergeTodoPlaces).
 	todoPlacesRoute = "GET /api/v1/todos/places"
 )
@@ -58,6 +62,19 @@ func (h *Hub) todoViewFeatures() []string {
 		return []string{featureTodoPlaces}
 	}
 	return nil
+}
+
+// todoRevisionFeatures promises the cheap merged read only when every manager has it. Otherwise the web sends no extra
+// probe at all and keeps the original full-list refresh throughout a rolling upgrade.
+func (h *Hub) todoRevisionFeatures() []string {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	for _, id := range h.listManagers(ctx) {
+		if h.archiveManagerHas(id, assistantwire.CapabilityTodoRevision) != http.StatusOK {
+			return nil
+		}
+	}
+	return []string{featureTodoRevision}
 }
 
 // todoAsksFeatures is todo_asks while every manager whose to-dos the list merges is connected and names it, as

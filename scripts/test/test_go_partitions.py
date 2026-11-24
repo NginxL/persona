@@ -1,10 +1,13 @@
 """go_partitions: internal/node's and internal/assistant's tests split into exact, disjoint -run patterns (CI shards,
 release build, test-server.sh)."""
+from pathlib import Path
 import re
 import unittest
 from unittest import mock
 
 import go_partitions as gp
+
+SERVER = Path(__file__).resolve().parents[2] / "server"
 
 LISTING = """TestAlpha
 TestBeta
@@ -61,7 +64,7 @@ class PartitionTests(unittest.TestCase):
                                 module + "/internal/node", module + "/internal/node/sub", "./internal/assistant"])
         self.assertEqual(rest, [module + "/cmd/personad", module + "/internal/node/sub"])
         self.assertEqual(parts, ["./internal/assistant", "./internal/node"])
-        self.assertEqual(gp.split(["./internal/hub"]), (["./internal/hub"], []))
+        self.assertEqual(gp.split(["./internal/kb"]), (["./internal/kb"], []))
 
     def test_each_package_is_split_into_its_own_number_of_partitions(self):
         listing = "\n".join("Test%03d" % i for i in range(10)) + "\nok  \texample\t0.1s\n"
@@ -71,6 +74,40 @@ class PartitionTests(unittest.TestCase):
             self.assertEqual(listed.call_args.args[0], ["go", "test", "-list", ".*", package])
             self.assertEqual(listed.call_args.kwargs["cwd"], "/server")
 
+    def test_a_package_that_splits_itself_is_partitioned_and_still_has_its_own_split(self):
+        # go_test_partitioned.py leaves these to their own TestMain under a <dir>/... argument: a package that lost its
+        # split would then run serially there, so the claim is checked against the package's tests.
+        self.assertTrue(gp.SPLITS_ITSELF)
+        for package in gp.SPLITS_ITSELF:
+            with self.subTest(package=package):
+                self.assertIn(package, gp.PACKAGES)
+                sources = [path.read_text() for path in sorted((SERVER / package).glob("*_test.go"))]
+                self.assertTrue(any("func runPartitioned(" in source for source in sources))
+                self.assertTrue(calls_from_test_main(sources, "runPartitioned"), package)
+
+    def test_only_a_call_inside_test_main_counts_as_its_split(self):
+        # The helper's own definition, a later function's call and a comment are not TestMain's call (#12765): a match
+        # that ran on past TestMain's end once let a TestMain without the split pass.
+        test_main = "func TestMain(m *testing.M) {\n%s\tos.Exit(m.Run())\n}\n"
+        helper = "func runPartitioned() (code int, ran bool) {\n\treturn 0, false\n}\n"
+        split = test_main % "\tif code, ran := runPartitioned(); ran {\n\t\tos.Exit(code)\n\t}\n"
+        for sources, calls in (([split, helper], True), ([helper, split], True), ([test_main % "", helper], False),
+                               ([test_main % "\t// runPartitioned() splits the run\n", helper], False),
+                               ([test_main % "", "func later() {\n\trunPartitioned()\n}\n"], False),
+                               ([helper], False)):
+            with self.subTest(sources=sources):
+                self.assertEqual(calls_from_test_main(sources, "runPartitioned"), calls)
+
+
+def calls_from_test_main(sources, function):
+    """Whether the gofmt-formatted TestMain among sources (one string per file) calls function(): its body ends at the
+    first closing brace in column one, and line comments do not count."""
+    for source in sources:
+        match = re.search(r"(?ms)^func TestMain\(.*?^}$", source)
+        if match:
+            body = re.sub(r"//.*", "", match.group(0))
+            return re.search(r"\b%s\(\)" % re.escape(function), body) is not None
+    return False
 
 if __name__ == "__main__":
     unittest.main()

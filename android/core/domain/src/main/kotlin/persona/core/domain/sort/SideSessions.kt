@@ -84,7 +84,7 @@ fun sideSearchHits(rows: List<AgentSession>, listed: List<AgentSession>, setting
     val shown = listed.mapTo(HashSet()) { it.session.key }
     return rows.mapNotNull { row ->
         val s = row.session
-        val parent = s.foldedUnder?.takeIf { s.sideHome != null && it.isNotBlank() }?.let { SessionKey(s.machineId, it) }
+        val parent = s.foldedUnderKey?.takeIf { s.sideHome != null }
         parent?.takeIf { it in shown && settings.admits(s, machineNames = machineNames) }?.path
     }.toSet()
 }

@@ -144,6 +144,15 @@ type pushPolicy struct {
 	title      string
 	body       string
 	manager    string
+	// What an attention mode reads (push_attention.go): how long the owner needs for it (assistantwire.DepthDeep),
+	// the track it comes from, whether it is a finished turn, and whether it is the hub's own alert.
+	depth  string
+	track  string
+	done   bool
+	system bool
+	// cardID: the card the push stands for (assistantwire.Notification.CardID): put in the payload as interaction_id
+	// and remembered per device, so the card's end withdraws the push.
+	cardID string
 }
 
 func (p pushPolicy) levelOr(level string) pushPolicy {
@@ -246,8 +255,10 @@ func (p *Pusher) applyPushGrading(policy pushPolicy) (allow bool, reason string)
 		level = assistantwire.LevelP1
 	}
 	now := p.now()
-	if !p.pushGradingOn() {
-		// The switch is off: every push goes out as before, and the delivery counts still remember it.
+	attn := p.attentionNow()
+	if !attn.Active() && !p.pushGradingOn() {
+		// The switch is off and no attention mode is in force: every push goes out as before, and the delivery counts
+		// still remember it.
 		p.recordSent(policy, level, now)
 		return true, ""
 	}
@@ -261,6 +272,12 @@ func (p *Pusher) applyPushGrading(policy pushPolicy) (allow bool, reason string)
 		in.MachineID, in.SessionID = "", ""
 	}
 	p.gradingMu.Lock()
+	if attn.Active() {
+		// An attention mode reinterprets the levels whatever hub.ln_mode says (push_attention.go).
+		allow, reason = p.applyAttentionLocked(attn, policy, level, in)
+		p.gradingMu.Unlock()
+		return allow, reason
+	}
 	if level == assistantwire.LevelP0 {
 		// P0 is what the owner must do or decide themself: it always interrupts, before and whatever the 12-hour check
 		// says, so no earlier push with the same key can swallow it. Its key then keeps lower levels quiet for the window.
@@ -311,9 +328,8 @@ func (p *Pusher) noteKeyPushedLocked(key string, now time.Time) {
 // URL form. Opaque keys all have an empty destination and do not split the existing same-minute conclusion merge.
 func relatedDestination(key string) string {
 	key = strings.TrimSpace(key)
-	if id, ok := strings.CutPrefix(key, "todo:"); ok {
-		id, _, _ = strings.Cut(id, "@")
-		if id = strings.TrimSpace(id); id != "" {
+	if strings.HasPrefix(key, "todo:") { // todo:<id>, the legacy todo:<id>@<round> and todo:<id>:<reason>
+		if id := assistantwire.RelatedTodoID(key); id != "" {
 			return "todo:" + id
 		}
 	}
@@ -461,6 +477,22 @@ func (p *Pusher) saveIntercepts() {
 			p.sentPrunedAt = now // a failed sweep waits for the next one
 		}
 		p.gradingMu.Unlock()
+		if !p.quiesce.beginOrDefer(func() {
+			p.gradingMu.Lock()
+			if saveIntercepts {
+				p.heldDirty = true
+			}
+			if len(sent) > 0 {
+				p.sentPending = append(sent, p.sentPending...)
+				if len(p.sentPending) > pushSentMax {
+					p.sentPending = slices.Clone(p.sentPending[len(p.sentPending)-pushSentMax:])
+				}
+			}
+			p.gradingWriting = false
+			p.gradingMu.Unlock()
+		}) {
+			return
+		}
 		ctx, cancel := context.WithTimeout(context.Background(), p.storeTimeout)
 		failedIntercepts, failedSent := false, false
 		if saveIntercepts {
@@ -480,6 +512,7 @@ func (p *Pusher) saveIntercepts() {
 			}
 		}
 		cancel()
+		p.quiesce.end()
 		if !failedIntercepts && !failedSent {
 			continue
 		}
@@ -638,6 +671,16 @@ func (p *Pusher) loadSent() {
 func (p *Pusher) mirrorSent(ctx context.Context) error {
 	if p == nil || p.store == nil {
 		return nil
+	}
+	if !quiesceHeld(ctx) {
+		if !p.quiesce.beginOrDefer(func() {
+			p.mu.Lock()
+			p.maintenanceDeferred = true
+			p.mu.Unlock()
+		}) {
+			return nil
+		}
+		defer p.quiesce.end()
 	}
 	// One write at a time, so a list taken earlier never lands over a later one.
 	p.sentMirrorMu.Lock()

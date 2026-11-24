@@ -72,4 +72,8 @@
     <string name="settings_group_device">这台设备</string>
     <string name="settings_group_hub">Hub</string>
     <string name="settings_group_hub_footer">这两组和当前是哪个助手无关。</string>
+    <string name="settings_switcher_assistants_on">%1$s 上的助手</string>
+    <string name="settings_switcher_hub_current">%1$s，当前</string>
+    <string name="settings_switcher_hub_connecting">正在连接…</string>
+    <string name="settings_switcher_hub_switch_failed">切换 hub 失败。</string>
 </resources>

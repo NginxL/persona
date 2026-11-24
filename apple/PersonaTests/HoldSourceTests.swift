@@ -52,7 +52,7 @@ struct HoldSourceTests {
 
     @Test func scrollPhasesAreReportedNotWaitedOut() {
         var found: [String] = []
-        for (name, text) in Self.sources(["Persona"]) {
+        for (name, text) in Self.sources(["Persona", "Modules"]) {
             for b in Self.blocks(text, starting: ".onScrollPhaseChange") where Self.waits(b.body) {
                 found.append("\(name):\(b.line)")
             }

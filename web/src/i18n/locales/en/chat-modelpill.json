@@ -7,7 +7,6 @@
   "loading": "Loading model…",
   "failed": "Model loading failed",
   "default_model": "Default model",
-  "effort_xhigh_short": "Extra",
   "header_default": "Following the default · {setup}",
   "header_own": "Same as when this chat started · {setup}",
   "header_picked": "Picked for this chat · {setup}",

@@ -53,6 +53,60 @@
       }
     },
     {
+      "name": "failed_start_supervised",
+      "description": "A supervised task's failed start is its supervisor's to retry, remedy or give up on: Working, said as Persona's, with the stored error on line 2 and no retry ask for the owner; 48 hours after the failure it moves on as any failed start.",
+      "source": [
+        "docs/design/proposals/todos-redesign.md 6.3 row 1",
+        "cards-four-layers rule 2 (only the supervisor's needs_user reaches the owner)"
+      ],
+      "input": {
+        "now": "2026-11-10T12:00:00Z",
+        "todo": {
+          "id": "todo_a9",
+          "title": "Book the train to Kyoto",
+          "notes": "",
+          "done_at": "2026-11-10T09:00:00Z",
+          "created_at": "2026-11-10T08:55:00Z",
+          "updated_at": "2026-11-10T09:00:00Z",
+          "origin": "conv_main",
+          "start_error": "Desk Mac is offline",
+          "spaces": [],
+          "agents": [],
+          "quiet": false,
+          "project": "kyoto-trip",
+          "supervision": {
+            "supervisor": "conv_lead",
+            "supervisor_source": "plan",
+            "done_when": [
+              "The train is booked"
+            ],
+            "criteria": [],
+            "state": "",
+            "round": 0,
+            "reviews": [],
+            "updated_at": "2026-11-10T08:55:00Z"
+          }
+        },
+        "sessions": []
+      },
+      "expected": {
+        "view": {
+          "phase": "working",
+          "section": "working",
+          "reason": "persona_working",
+          "line": {
+            "key": "failed_start",
+            "args": {
+              "error": "Desk Mac is offline"
+            }
+          },
+          "since": "2026-11-10T09:00:00Z",
+          "next_change_at": "2026-11-12T09:00:00Z",
+          "rank": 0
+        }
+      }
+    },
+    {
       "name": "failed_start_after_two_days",
       "description": "48 hours after a start failed, with nothing done to the to-do since, it is a To do with the Inactive mark, never Done, though done_at is stored.",
       "source": [
@@ -231,6 +285,96 @@
               "lockscreen": "open_only"
             }
           ]
+        }
+      }
+    },
+    {
+      "name": "agent_asks_held_by_supervisor",
+      "description": "A run's card went to the conversation supervising its task (delegating): Persona works on it until that conversation passes it up, so Working, said as Persona's, with what the run last said; no ask for the owner.",
+      "source": [
+        "docs/design/proposals/todos-redesign.md 6.3 rows 2, 5",
+        "cards-four-layers rule 2 (a card the supervisor holds is not the owner's)"
+      ],
+      "input": {
+        "now": "2026-11-10T12:00:00Z",
+        "todo": {
+          "id": "todo_b9",
+          "title": "Plan the Kyoto trip",
+          "notes": "",
+          "done_at": null,
+          "created_at": "2026-11-09T08:00:00Z",
+          "updated_at": "2026-11-10T10:00:00Z",
+          "origin": "conv_main",
+          "spaces": [],
+          "agents": [
+            {
+              "machine_id": "m1",
+              "session_id": "s-ryokan",
+              "linked_at": "2026-11-09T08:01:00Z",
+              "title": "Ryokan research",
+              "cwd": "/home/user/project",
+              "agent": "claude",
+              "source": "manual"
+            }
+          ],
+          "quiet": false,
+          "project": "kyoto-trip"
+        },
+        "sessions": [
+          {
+            "machine_id": "m1",
+            "session_id": "s-ryokan",
+            "title": "Ryokan research",
+            "status": "blocked",
+            "state": "needs_you",
+            "state_since": "2026-11-10T11:30:00Z",
+            "updated_at": "2026-11-10T11:30:00Z",
+            "pending_interactions": 1,
+            "asks": "Which ryokan should I book?",
+            "last_text": "Which ryokan should I book?"
+          }
+        ],
+        "interactions": [
+          {
+            "id": "ix_ryokan_held",
+            "machine_id": "m1",
+            "session_id": "s-ryokan",
+            "kind": "question",
+            "created_at": "2026-11-10T11:30:00Z",
+            "tool_name": "AskUserQuestion",
+            "delegating": true,
+            "questions": [
+              {
+                "question": "Which ryokan should I book?",
+                "multi_select": false,
+                "options": [
+                  {
+                    "label": "Ryokan Hanami",
+                    "description": "Dinner included"
+                  },
+                  {
+                    "label": "Kiyomizu Inn",
+                    "description": "A short walk to the temple"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "expected": {
+        "view": {
+          "phase": "working",
+          "section": "working",
+          "reason": "persona_working",
+          "line": {
+            "key": "persona_working",
+            "args": {
+              "text": "Which ryokan should I book?"
+            }
+          },
+          "since": "2026-11-10T11:30:00Z",
+          "rank": 0
         }
       }
     },

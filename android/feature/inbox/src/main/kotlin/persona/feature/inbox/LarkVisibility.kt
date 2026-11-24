@@ -1,6 +1,7 @@
 package persona.feature.inbox
 
 import androidx.compose.ui.geometry.Rect
+import persona.core.inbox.*
 
 /** Keep the gate independent of LazyColumn so the shared list can supply the same inputs. */
 internal fun larkReadAllowed(resumed: Boolean, focused: Boolean, positioned: Boolean, occluded: Boolean,

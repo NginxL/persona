@@ -510,7 +510,18 @@ func TestCodexStartHelper(t *testing.T) {
 	if os.Getenv("PERSONA_CODEX_START_HELPER") == "1" {
 		var args []string
 		_ = json.Unmarshal([]byte(os.Getenv("PERSONA_CODEX_START_ARGS")), &args)
-		err := CodexStart(args)
+		start := CodexStart
+		if i := slices.Index(os.Args, "--"); i >= 0 {
+			switch os.Args[i+1] {
+			case "codex-start":
+			case "tab-start":
+				start = TabStart
+			default:
+				t.Fatalf("unexpected helper command %q", os.Args[i+1])
+			}
+			args = os.Args[i+2:]
+		}
+		err := start(args)
 		fmt.Println(err)
 		os.Exit(3)
 	}
@@ -969,9 +980,9 @@ func TestCodexStartReplacesAnInheritedHerdrAgent(t *testing.T) {
 	if err != nil {
 		t.Skip("no env(1)")
 	}
-	for _, tc := range []struct{ name, agent, want string }{
-		{"codex", "codex", "HERDR_AGENT=codex"},
-		{"tab-start", "", "HERDR_AGENT=inherited"},
+	for _, tc := range []struct{ name, agent, want, marker string }{
+		{"codex-start", "codex", "HERDR_AGENT=codex", codexStartMarker},
+		{"tab-start", "", "HERDR_AGENT=inherited", "PERSONA_CODEX_START=inherited"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			file := filepath.Join(t.TempDir(), "start.json")
@@ -979,20 +990,25 @@ func TestCodexStartReplacesAnInheritedHerdrAgent(t *testing.T) {
 			if err := os.WriteFile(file, b, 0o600); err != nil {
 				t.Fatal(err)
 			}
-			args, _ := json.Marshal([]string{file})
-			cmd := exec.Command(os.Args[0], "-test.run=^TestCodexStartHelper$")
-			cmd.Env = append(os.Environ(), "HERDR_AGENT=inherited", "PERSONA_CODEX_START_HELPER=1", "PERSONA_CODEX_START_ARGS="+string(args))
+			cmd := exec.Command(os.Args[0], "-test.run=^TestCodexStartHelper$", "--", tc.name, file)
+			cmd.Env = append(os.Environ(), "HERDR_AGENT=inherited", "PERSONA_CODEX_START=inherited", "PERSONA_CODEX_START_HELPER=1")
 			out, err := cmd.Output()
 			if err != nil {
 				t.Fatalf("%v: %s", err, out)
 			}
-			var agents []string
+			var agents, markers []string
 			mark := false
 			for _, kv := range strings.Split(string(out), "\n") {
 				if strings.HasPrefix(kv, "HERDR_AGENT=") {
 					agents = append(agents, kv)
 				}
+				if strings.HasPrefix(kv, "PERSONA_CODEX_START=") {
+					markers = append(markers, kv)
+				}
 				mark = mark || kv == "CODEX_MARK=launcher"
+			}
+			if !slices.Equal(markers, []string{tc.marker}) {
+				t.Errorf("start markers %q, want %q", markers, tc.marker)
 			}
 			if !slices.Equal(agents, []string{tc.want}) || !mark {
 				t.Errorf("environment has %q (launcher's variable: %v), want %s", agents, mark, tc.want)

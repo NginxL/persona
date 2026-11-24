@@ -64,7 +64,7 @@ func TestComputerAppRevocationPreservesDisabledApprovalPolicy(t *testing.T) {
 	if !h.cua().On || h.cua().approval() {
 		t.Fatal("revocation changed the enabled extension or its disabled app approval policy")
 	}
-	if asked, allowed := h.approveApps(ctx, m, asker{}, "computer_run", []string{"Example Editor"}, true, nil, nil); asked || !allowed {
+	if asked, allowed, _ := h.approveAppsOutcome(ctx, m, asker{}, "computer_run", []string{"Example Editor"}, true, nil, nil); asked || !allowed {
 		t.Fatalf("disabled policy must still allow without asking: asked=%v allowed=%v", asked, allowed)
 	}
 }

@@ -6,6 +6,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 import persona.core.domain.inbox.InboxGroup
 import persona.core.domain.inbox.InboxRowType
+import persona.core.inbox.*
 
 internal class InboxSectionReader(
     val busy: Boolean,

@@ -35,6 +35,7 @@ final class DemoModeTests: XCTestCase {
         if let dir = ProcessInfo.processInfo.environment["PERSONA_SHOTS"] {
             let style = ProcessInfo.processInfo.environment["PERSONA_STYLE"].map { "-" + $0 } ?? ""
             try? s.pngRepresentation.write(to: URL(fileURLWithPath: dir).appendingPathComponent("demo-" + name + style + ".png"))
+            try? app.debugDescription.write(to: URL(fileURLWithPath: dir).appendingPathComponent("demo-" + name + style + ".ax.txt"), atomically: true, encoding: .utf8)
         }
     }
 
@@ -313,6 +314,42 @@ final class DemoModeTests: XCTestCase {
         app.launchArguments = ["-dev.openChat", "", "-probes", "YES"]
         app.launchPinned()
         see(app.buttons["welcome.demo"], "the pairing page after a relaunch", timeout: 15)
+    }
+
+    /// Demo Mode offers the same Health home, without a network hub.
+    @MainActor func testHealthTodayIsAvailableInDemoMode() throws {
+        app = XCUIApplication()
+        app.launchArguments = ["-openWelcome", "YES", "-openShellPage", "health", "-ui.scheme", "light", "-probes", "YES"]
+        app.launchPinned()
+        see(app.buttons["welcome.demo"], "demo entry", timeout: 15).tap()
+        see(text(Self.firstAgent), "the demo's initial Agents page", timeout: 15)
+        tab("Persona")
+        see(app.descendants(matching: .any)["health-today"], "today's intake in demo mode", timeout: 20)
+        XCTAssertFalse(app.buttons["health-intake-sync-link"].exists, "fictional demo records never offer HealthKit sync")
+        XCTAssertTrue(app.buttons["health-water-ring"].exists)
+        XCTAssertTrue(app.buttons["health-log-water"].exists)
+        XCTAssertFalse(app.staticTexts["health-update-hub"].exists)
+        noErrors("Health")
+        shot("health-today")
+        app.terminate()
+    }
+
+    @MainActor func testHealthDetailOpensInDemoMode() throws {
+        app = XCUIApplication()
+        app.launchArguments = ["-openWelcome", "YES", "-openShellPage", "health", "-ui.scheme", "light", "-probes", "YES"]
+        app.launchPinned()
+        see(app.buttons["welcome.demo"], "demo entry", timeout: 15).tap()
+        see(text(Self.firstAgent), "the demo's initial Agents page", timeout: 15)
+        tab("Persona")
+        see(app.descendants(matching: .any)["health-today"], "today's intake in demo mode", timeout: 20)
+        XCTAssertTrue(app.buttons["health-water-ring"].exists, app.debugDescription)
+        see(app.buttons["health-water-ring"], "the demo's water ring", timeout: 20).tap()
+        see(app.descendants(matching: .any)["extension-ui-ready"], "the demo's intake detail", timeout: 20)
+        XCTAssertTrue(app.navigationBars["喝水"].waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertTrue(app.staticTexts["今天的记录"].exists)
+        noErrors("Intake details")
+        shot("health-detail")
+        app.terminate()
     }
 
     /// Demo Mode is remembered: a relaunch opens the demo again, not the pairing page.

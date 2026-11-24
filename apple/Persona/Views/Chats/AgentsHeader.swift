@@ -1,10 +1,8 @@
 import SwiftUI
-#if os(iOS) || os(visionOS)
 import UIKit
-#endif
 
 /// Search visibility is a pure decision so a retained query and an empty field cannot share a fold by accident (#7332).
-/// The new retained state is iOS-only; visionOS and Mac keep their existing presentation.
+/// The new retained state is iOS-only; visionOS keeps its existing presentation.
 nonisolated enum AgentsSearchVisibility {
     static func retained(query: String) -> Bool {
         #if os(iOS)
@@ -21,7 +19,6 @@ nonisolated enum AgentsSearchVisibility {
     }
 }
 
-#if os(iOS) || os(visionOS)
 /// The top of the Agents page on a phone (#2478): the search field, the room over the list for the shell's top bar and
 /// the list's first row (the quick filters), laid out here from whether the page is searching
 /// (`ChatsView.searching`), whether a query is retained, and how far the list is scrolled past its top (`scrolled`).
@@ -713,9 +710,6 @@ struct SystemCloseButton: UIViewRepresentable {
     }
 }
 
-#endif
-
-#if os(iOS) || os(visionOS)
 /// The shell's bar over the Agents list: reports where it is drawn to the header and fades as the field rises, reading
 /// the header itself. `ChatsView`'s body read `up`, `bar` and `listTop` for this; the bar is put back each time the
 /// strip comes to rest on Agents and reports its place again, so the page's body, and with it the list's over every row,
@@ -736,7 +730,6 @@ struct AgentsTopBarPlace: ViewModifier {
                                        gone: AgentsTopBarFade.gone(bar: header.bar, field: header.listTop + AgentsHeader.room(shell: true))))
     }
 }
-#endif
 
 /// The shell's top bar while the field comes up into its row: gone before the field gets to it, back only once the
 /// field has gone below it. `progress` is the same animated value as the field's (`AgentsSearchOverlay`).

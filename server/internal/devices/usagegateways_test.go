@@ -515,3 +515,48 @@ func TestExtensionSourceConfigRoundTrip(t *testing.T) {
 		t.Fatal("same fingerprint")
 	}
 }
+
+// A usage extension's protection line per window reaches GET /api/v1/usage/windows as protect_percent, different per
+// account, and is absent where the extension did not say.
+func TestUsageWindowsRouteCarriesAnExtensionsProtectionLines(t *testing.T) {
+	now := time.Now().Truncate(time.Second)
+	h := newTestDevices(t)
+	h.usageGW.fetchExtension = func(context.Context, string, string) (json.RawMessage, error) {
+		return json.RawMessage(`{"accounts": [
+			{"provider": "claude", "name": "Seat A", "windows": [{"label": "5h", "used_percent": 40, "protect_percent": 98}, {"label": "7d", "used_percent": 10, "protect_percent": 99}]},
+			{"provider": "claude", "name": "Seat B", "windows": [{"label": "5h", "used_percent": 5, "protect_percent": 90}, {"label": "7d", "used_percent": 20}]}]}`), nil
+	}
+	h.usageGW.init(UsageConfig{Sources: []UsageSourceConfig{{ID: "s1", Name: "Pool", Type: "extension", Extension: "example-usage", Launcher: "pool"}}}, h.usageWin.invalidate, h.logf)
+	h.usageGW.pollDue(context.Background(), now)
+	mux := h.Handler(http.NotFoundHandler())
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, httptest.NewRequest("GET", "/api/v1/usage/windows", nil))
+	var out struct {
+		Accounts []struct {
+			Name    string `json:"name"`
+			Windows []struct {
+				Label          string   `json:"label"`
+				ProtectPercent *float64 `json:"protect_percent"`
+			} `json:"windows"`
+		} `json:"accounts"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &out); err != nil || len(out.Accounts) != 2 {
+		t.Fatalf("%v %s", err, w.Body.String())
+	}
+	want := map[string]*float64{"Seat A 5h": f64(98), "Seat A 7d": f64(99), "Seat B 5h": f64(90), "Seat B 7d": nil}
+	for _, a := range out.Accounts {
+		for _, win := range a.Windows {
+			k := a.Name + " " + win.Label
+			exp := want[k]
+			if (exp == nil) != (win.ProtectPercent == nil) || (exp != nil && *exp != *win.ProtectPercent) {
+				t.Errorf("%s: protect_percent %v, want %v", k, win.ProtectPercent, exp)
+			}
+			delete(want, k)
+		}
+	}
+	if len(want) != 0 {
+		t.Errorf("windows missing from the answer: %v", want)
+	}
+}
+
+func f64(v float64) *float64 { return &v }

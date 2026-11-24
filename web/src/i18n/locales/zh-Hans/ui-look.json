@@ -39,5 +39,7 @@
   "font_custom_label": "{kind}：自定义字体",
   "font_invalid": "请输入一个字体名称，不包含逗号或 CSS 标点。",
   "font_unavailable": "此字体可能不可用。选择会保留，并继续使用后备字体。",
-  "font_local": "使用此电脑已安装的一个字体，不会下载字体。"
+  "font_local": "使用此电脑已安装的一个字体，不会下载字体。",
+  "sidebar_usage": "侧栏启动器额度",
+  "sidebar_usage_hint": "在侧栏底部显示各启动器剩余额度的卡片。仅保存在此浏览器。"
 }

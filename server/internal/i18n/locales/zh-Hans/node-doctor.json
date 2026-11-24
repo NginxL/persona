@@ -158,5 +158,11 @@
   "socket_missing": "不存在",
   "socket_stale_hint": "可能是旧 node 退出后留下的文件；重启这台电脑上的 node",
   "summary": "共 {total} 项：{ok} 正常，{warn} 注意，{fail} 有问题",
-  "title": "node 自检（{dir}）"
+  "title": "node 自检（{dir}）",
+  "agy_hooks_installed": "Persona 的 Antigravity CLI 钩子已安装",
+  "agy_hooks_missing": "Persona 的 Antigravity CLI 钩子没装",
+  "agy_hooks_stale": "Persona 的 Antigravity CLI 钩子指向别的程序",
+  "agy_hooks_hint": "运行 personad node doctor --fix（之后各引擎里的 agy 窗格都能读到对话）",
+  "agy_hooks_off": "Persona 的 Antigravity CLI 钩子是特意卸掉的（personad node agy-hooks install 装回）",
+  "agy_hooks_unreadable": "读不了 Antigravity CLI 的钩子文件（{error}）"
 }

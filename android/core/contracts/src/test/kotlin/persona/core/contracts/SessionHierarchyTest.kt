@@ -59,4 +59,33 @@ class SessionHierarchyTest {
         assertNull(old.parentAgentId)
         assertEquals(0, old.children?.sidesUnread)
     }
+
+    @Test fun crossMachineHierarchyFieldsDecodeAndResolveParentHomesWithDefaults() {
+        val childJson = """{"machine_id":"box-b","session_id":"sub-1","state":"working","is_subagent":true,"parent_session_id":"p1","parent_machine_id":"box-a","folded_under":"p1","folded_under_machine_id":"box-a","a2a_task_id":"task-42","subagent_origin":"a2a"}"""
+        val child = JsonCodec.decodeFromString(Session.serializer(), childJson)
+        assertEquals("box-a", child.parentMachineId)
+        assertEquals("box-a", child.foldedUnderMachineId)
+        assertEquals("task-42", child.a2aTaskId)
+        assertEquals("a2a", child.subagentOrigin)
+        assertEquals(SessionKey("box-a", "p1"), child.foldedUnderKey)
+        assertEquals(SessionKey("box-a", "p1"), child.parentKey)
+
+        val cardJson = """{"id":"q-remote","machine_id":"box-b","session_id":"sub-1","folded_under":"p1","folded_under_machine_id":"box-a","kind":"permission"}"""
+        val card = JsonCodec.decodeFromString(Interaction.serializer(), cardJson)
+        assertEquals("box-a", card.foldedUnderMachineId)
+        assertEquals(SessionKey("box-a", "p1"), card.homeKey)
+        assertEquals(SessionKey("box-b", "sub-1"), card.sessionKey)
+
+        // Fault-tolerant defaults when omitted on older hubs.
+        val legacy = JsonCodec.decodeFromString(Session.serializer(), """{"machine_id":"m","session_id":"s","folded_under":"p"}""")
+        assertNull(legacy.parentMachineId)
+        assertNull(legacy.foldedUnderMachineId)
+        assertNull(legacy.a2aTaskId)
+        assertNull(legacy.subagentOrigin)
+        assertEquals(SessionKey("m", "p"), legacy.foldedUnderKey)
+
+        // Interaction without folded_under ignores folded_under_machine_id for homeKey.
+        val unfoldedCard = JsonCodec.decodeFromString(Interaction.serializer(), """{"id":"q-own","machine_id":"box-b","session_id":"sub-1","folded_under_machine_id":"box-a"}""")
+        assertEquals(SessionKey("box-b", "sub-1"), unfoldedCard.homeKey)
+    }
 }

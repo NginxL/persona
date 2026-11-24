@@ -2,8 +2,10 @@
 // The catalogs and the code agree (docs/web/web.md "Internationalization"): the three languages have the same namespaces, keys and
 // placeholders; every t("literal") key exists and gets a value for each placeholder its text uses; every key is used; and no interface text is written into the code in Chinese. That last
 // one is a ratchet while the strings move into catalogs: a file may only lose hard-coded strings, never gain them
-// (hardcoded-baseline.json; a file that reaches zero leaves it). Comments and tests don't count; a line that has to
-// keep CJK text (it matches what someone else writes, like a hub's output) says `i18n-ignore` in a comment.
+// (hardcoded-baseline.json; a file that reaches zero leaves it). Only a gain fails: a file under its record is noted,
+// and lowering the record is tidying anyone can do (docs/operations/testing.md, "Count ratchets"). Comments and tests
+// don't count; a line that has to keep CJK text (it matches what someone else writes, like a hub's output) says
+// `i18n-ignore` in a comment.
 import { readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { join, relative } from "node:path";
 import ts from "typescript";
@@ -350,16 +352,25 @@ describe("code", () => {
   it("writes no more interface text in Chinese than before", () => {
     const counts: Record<string, number> = {};
     for (const [f, s] of scans) if (s.hardcoded.length) counts[f] = s.hardcoded.length;
-    if (process.env.UPDATE_I18N_BASELINE) {
-      writeFileSync(BASELINE, JSON.stringify(counts, null, 2) + "\n");
-      return;
-    }
     const baseline: Record<string, number> = JSON.parse(readFileSync(BASELINE, "utf8"));
+    if (process.env.UPDATE_I18N_BASELINE) {
+      // Only lower: a file above its record (or new) keeps what the record allows, and still fails below.
+      const lowered = Object.fromEntries(
+        Object.entries(baseline)
+          .map(([f, n]) => [f, Math.min(n, counts[f] ?? 0)] as const)
+          .filter(([, n]) => n > 0),
+      );
+      writeFileSync(BASELINE, JSON.stringify(lowered, null, 2) + "\n");
+    }
     const grew = Object.entries(counts)
       .filter(([f, n]) => n > (baseline[f] ?? 0))
       .map(([f, n]) => `${f}: ${n} (baseline ${baseline[f] ?? 0})\n` + scans.get(f)!.hardcoded.map((h) => `  ${f}:${h.line} ${h.text}`).join("\n"));
     expect(grew, "move these into src/i18n/locales (or mark data with i18n-ignore)").toEqual([]);
     const stale = Object.entries(baseline).filter(([f, n]) => (counts[f] ?? 0) < n).map(([f]) => f);
-    expect(stale, "fewer hard-coded strings now: run UPDATE_I18N_BASELINE=1 npx vitest run src/i18n/catalog.test.ts").toEqual([]);
+    if (stale.length && !process.env.UPDATE_I18N_BASELINE)
+      console.info(
+        `fewer hard-coded strings now in ${stale.join(", ")}; lowering the baseline is tidying anyone can do: ` +
+          "python3 scripts/ci/lower_baselines.py, or UPDATE_I18N_BASELINE=1 npx vitest run src/i18n/catalog.test.ts",
+      );
   });
 });

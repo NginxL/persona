@@ -1,0 +1,11 @@
+{
+  "push_title": "クイックメモ",
+  "filed": "{title} → {track}",
+  "count_one": "クイックメモ {count}件",
+  "count_other": "クイックメモ {count}件",
+  "heading": "クイックメモ",
+  "waiting_one": "振り分け待ち {count}件",
+  "waiting_other": "振り分け待ち {count}件",
+  "more_one": "ほかに {count}件を振り分け済み",
+  "more_other": "ほかに {count}件を振り分け済み"
+}

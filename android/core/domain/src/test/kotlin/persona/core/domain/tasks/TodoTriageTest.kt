@@ -6,6 +6,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import persona.core.contracts.DecisionReview
 import persona.core.contracts.ReviewCheck
 import persona.core.contracts.Session
 import persona.core.contracts.SessionKey
@@ -16,6 +17,9 @@ import persona.core.contracts.Todo
 import persona.core.contracts.TodoAgent
 import persona.core.contracts.TodoAsk
 import persona.core.contracts.TodoDelivery
+import persona.core.contracts.TodoPRStatus
+import persona.core.contracts.TodoState
+import persona.core.contracts.WorkState
 
 // The same cases as web/src/lib/todo-triage.test.ts (docs/assistant/todo-status-sop.md, decision table), so the clients
 // cannot drift apart.
@@ -32,11 +36,11 @@ class TodoTriageTest {
     private fun todo(
         id: String, title: String = id, updated: Int = 1, doneAt: String? = null, agents: List<TodoAgent> = emptyList(),
         origin: String? = "conv", supervision: Supervision? = null, ask: TodoAsk? = null, delivery: TodoDelivery? = null,
-        prUrl: String? = null, reopenedAt: String? = null, dueDate: String? = null, startError: String? = null, quiet: Boolean = false,
+        prUrl: String? = null, prStatus: TodoPRStatus? = null, reopenedAt: String? = null, dueDate: String? = null, startError: String? = null, quiet: Boolean = false,
         planId: String? = null,
     ) = Todo(
         id = id, title = title, createdAt = hoursAgo(300), updatedAt = hoursAgo(updated), doneAt = doneAt, agents = agents,
-        origin = origin, supervision = supervision, ask = ask, delivery = delivery, prUrl = prUrl, reopenedAt = reopenedAt,
+        origin = origin, supervision = supervision, ask = ask, delivery = delivery, prUrl = prUrl, prStatus = prStatus, reopenedAt = reopenedAt,
         dueDate = dueDate, startError = startError, quiet = quiet, planId = planId,
     )
 
@@ -68,6 +72,16 @@ class TodoTriageTest {
 
     private fun atShared(td: Todo, vararg sessions: Session) = td.triage(lookupOf(*sessions), now, zone = zone)
 
+    @Test fun interruptedAgentDoesNotHideAnotherAgentsBackgroundWait() {
+        val cut = session("cut", "idle").copy(turnError = "stopped")
+        val blocked = session("blocked", "idle").copy(work = WorkState(phase = "blocked", on = "external"))
+        val td = todo("t", agents = listOf(agent("cut"), agent("blocked")))
+        assertEquals(TriageStatus.Waiting, atShared(td, cut, blocked).let { td.triageStatus(lookupOf(cut, blocked), now) })
+        assertEquals(TriageSection.Working, atShared(td, cut, blocked).section)
+    }
+
+    private fun openPr(url: String) = TodoPRStatus(url = url, state = "open", checkedAt = Instant.ofEpochMilli(now).toString())
+
     private fun sharedTodo(
         id: String,
         title: String,
@@ -80,13 +94,14 @@ class TodoTriageTest {
         supervision: Supervision? = null,
         delivery: TodoDelivery? = null,
         prUrl: String? = null,
+        prStatus: TodoPRStatus? = null,
         stage: String? = null,
         seenAt: String? = null,
         startError: String? = null,
         planId: String? = null,
     ) = Todo(
         id = id, title = title, kind = kind, createdAt = createdAt, updatedAt = updatedAt, doneAt = doneAt, doneBy = doneBy,
-        agents = agents, origin = "main", supervision = supervision, delivery = delivery, prUrl = prUrl, stage = stage,
+        agents = agents, origin = "main", supervision = supervision, delivery = delivery, prUrl = prUrl, prStatus = prStatus, stage = stage,
         seenAt = seenAt, startError = startError, planId = planId,
     )
 
@@ -138,10 +153,37 @@ class TodoTriageTest {
     }
 
     @Test
+    fun liveConcernDoesNotUseOrdinaryDeliveryStatusOrAcceptance() {
+        val live = todo("live", delivery = TodoDelivery(state = "live", at = hoursAgo(2))).withKind("concern")
+        assertFalse(live.deliveredAwaitingReview(lookup))
+        assertEquals(TodoState.NotStarted, live.shownState(lookup))
+
+        val seen = todo("seen-live", agents = listOf(agent("unseen")), delivery = TodoDelivery(state = "live", at = hoursAgo(2)))
+            .copy(seenAt = minutesAgo(30)).withKind("concern")
+        assertEquals(TriageSection.Other to TriageRule.Rest, at(seen).let { it.section to it.rule })
+        assertTrue(seen.seenCanFile)
+        assertFalse(seen.deliveredAwaitingReview(lookup))
+    }
+
+    @Test
+    fun pendingReviewAndSupervisedConcernsStillRequireAcceptance() {
+        val pending = todo("pending", supervision = Supervision(supervisor = "main", state = "pending_review"))
+            .copy(seenAt = Instant.ofEpochMilli(now).toString()).withKind("concern")
+        assertTrue(pending.deliveredAwaitingReview(lookup))
+        assertFalse(pending.seenCanFile)
+        assertEquals(TriageSection.JustDone to TriageRule.FinishedUnseen, at(pending).let { it.section to it.rule })
+
+        val supervised = todo("supervised", agents = listOf(agent("unseen")), supervision = Supervision(supervisor = "main", state = "reviewing"))
+            .copy(seenAt = Instant.ofEpochMilli(now).toString()).withKind("concern")
+        assertFalse(supervised.seenCanFile)
+        assertEquals(TriageSection.JustDone to TriageRule.FinishedUnseen, at(supervised).let { it.section to it.rule })
+    }
+
+    @Test
     fun r4ConcernKeepsFinishedUnseenAndOpenPrRules() {
         val unseen = at(todo("unseen", agents = listOf(agent("unseen"))).withKind("concern"))
         assertEquals(TriageSection.JustDone to TriageRule.FinishedUnseen, unseen.section to unseen.rule)
-        val pr = at(todo("pr", updated = 300, agents = listOf(agent("old")), delivery = TodoDelivery(state = "pr")).withKind("concern"))
+        val pr = at(todo("pr", updated = 300, agents = listOf(agent("old")), delivery = TodoDelivery(state = "pr"), prUrl = "https://example.com/pull/1", prStatus = openPr("https://example.com/pull/1")).withKind("concern"))
         assertEquals(TriageSection.Pr to TriageRule.PrOpen, pr.section to pr.rule)
     }
 
@@ -279,7 +321,7 @@ class TodoTriageTest {
     @Test fun concernPrOpenSharedCase() {
         val t = atShared(sharedTodo(
             "concern-pr", "Answer the merge question", "2026-11-01T00:00:00.000Z", "2026-11-04T10:00:00.000Z",
-            prUrl = "https://example.com/pull/7", stage = "review",
+            prUrl = "https://example.com/pull/7", prStatus = openPr("https://example.com/pull/7"), stage = "review",
         ))
         assertEquals(TriageSection.Pr to TriageRule.PrOpen, t.section to t.rule)
     }
@@ -447,8 +489,8 @@ class TodoTriageTest {
     }
 
     @Test
-    fun aClosedTodoIsJustFinishedForADayThenDone() {
-        assertEquals(TriageSection.JustDone, at(todo("t", doneAt = hoursAgo(3))).section)
+    fun aClosedTodoIsImmediatelyDone() {
+        assertEquals(TriageSection.Done, at(todo("t", doneAt = hoursAgo(3))).section)
         assertEquals(TriageSection.Done, at(todo("t", doneAt = hoursAgo(30), updated = 30)).section)
     }
 
@@ -456,10 +498,82 @@ class TodoTriageTest {
     fun anAcceptedTaskReopenedByMoreWorkIsFinishedNotFollowUp() {
         val td = todo("t", agents = listOf(agent("idle")), reopenedAt = hoursAgo(4), supervision = acceptedReopened())
         val t = at(td)
-        assertEquals(TriageSection.JustDone, t.section)
+        assertEquals(TriageSection.Done, t.section)
         assertEquals(TriageRule.Accepted, t.rule)
         assertTrue(td.acceptedAtRest(lookup))
         assertEquals(ReviewStage.Accepted, td.reviewStage)
+    }
+
+    @Test
+    fun anOwnerDecisionOutranksAcceptedAtRest() {
+        val accepted = todo("t", agents = listOf(agent("idle")), reopenedAt = hoursAgo(4), supervision = acceptedReopened())
+        assertTrue(accepted.acceptedAtRest(lookup, now))
+        assertEquals(TodoState.Done, accepted.shownState(lookup, now))
+        for (outcome in listOf("decide", "cannot")) {
+            val waiting = accepted.copy(ask = TodoAsk(outcome = outcome, verdict = "needs_user", askedAt = hoursAgo(1)))
+            assertTrue(waiting.waitsForOwner())
+            assertEquals(TriageRule.OwnerDecides, at(waiting).rule)
+            assertFalse("accepted must not hide an owner decision ($outcome)", waiting.acceptedAtRest(lookup, now))
+            assertEquals(TodoState.NeedsYou, waiting.shownState(lookup, now))
+        }
+    }
+
+    @Test
+    fun aDismissedOwnerDecisionDoesNotProjectNeedsYou() {
+        val reviewed = Supervision(supervisor = "c", state = "needs_user",
+            reviews = listOf(TaskReview(at = hoursAgo(1), verdict = "needs_user")))
+        val waiting = todo("t", agents = listOf(agent("idle")), supervision = reviewed,
+            prUrl = "https://example.com/pull/1", prStatus = openPr("https://example.com/pull/1"))
+        val dismissed = waiting.copy(decisionReview = DecisionReview(reviewAt = hoursAgo(1), dismissalId = "dismiss-current"))
+        assertTrue(dismissed.decisionDismissed())
+        assertFalse(dismissed.waitsForOwner())
+        assertEquals(TriageRule.PrOpen, at(dismissed).rule)
+        assertEquals(TodoState.FollowUp, dismissed.shownState(lookup, now))
+        val working = dismissed.copy(agents = listOf(agent("run")))
+        assertFalse(working.waitsForOwner())
+        assertEquals(TodoState.Working, working.shownState(lookup, now))
+
+        assertTrue(waiting.waitsForOwner())
+        assertEquals(TodoState.NeedsYou, waiting.shownState(lookup, now))
+        val newer = dismissed.copy(supervision = reviewed.copy(reviews = listOf(TaskReview(at = hoursAgo(0), verdict = "needs_user"))))
+        assertFalse(newer.decisionDismissed())
+        assertTrue(newer.waitsForOwner())
+        assertEquals(TodoState.NeedsYou, newer.shownState(lookup, now))
+    }
+
+    @Test
+    fun aDismissedReviewDecisionKeepsIndependentDeliveryApproval() {
+        val reviewed = Supervision(supervisor = "c", state = "needs_user",
+            reviews = listOf(TaskReview(at = hoursAgo(1), verdict = "needs_user")))
+        val dismissed = todo("t", agents = listOf(agent("idle")), supervision = reviewed,
+            delivery = TodoDelivery(state = "pr", gate = "owner", unblock = "user"))
+            .copy(decisionReview = DecisionReview(reviewAt = hoursAgo(1), dismissalId = "dismiss-current"))
+        assertTrue(dismissed.decisionDismissed())
+        assertEquals(HoldUnblock.User, dismissed.hold?.unblock)
+        assertEquals(TriageSection.Waiting to TriageRule.OwnerDecides, at(dismissed).let { it.section to it.rule })
+        assertEquals("dismissal-only control", TriageRule.Rest, at(dismissed.copy(delivery = null)).rule)
+    }
+
+    @Test
+    fun aDismissedOwnerDecisionRestoresAcceptedAtRest() {
+        val accepted = todo("t", agents = listOf(agent("idle")), reopenedAt = hoursAgo(4), supervision = acceptedReopened())
+        val waiting = listOf("decide", "cannot").map { outcome ->
+            accepted.copy(ask = TodoAsk(outcome = outcome, verdict = "needs_user", askedAt = hoursAgo(1)))
+        }
+        val dismissed = waiting.map {
+            it.copy(decisionReview = DecisionReview(
+                reviewAt = accepted.supervision!!.latestReview!!.at, dismissalId = "dismiss-current-round",
+            ))
+        }
+        assertEquals(listOf(false, false), dismissed.map { it.waitsForOwner() })
+        assertEquals(listOf(true, true), dismissed.map { it.decisionDismissed() })
+        assertEquals(listOf(TriageRule.Accepted, TriageRule.Accepted), dismissed.map { at(it).rule })
+        assertEquals("dismissed decide/cannot restore accepted at rest", listOf(true, true),
+            dismissed.map { it.acceptedAtRest(lookup, now) })
+        assertEquals(listOf(TodoState.Done, TodoState.Done), dismissed.map { it.shownState(lookup, now) })
+        assertEquals("genuinely open decide/cannot still suppress accepted", listOf(false, false),
+            waiting.map { it.acceptedAtRest(lookup, now) })
+        assertEquals(listOf(TodoState.NeedsYou, TodoState.NeedsYou), waiting.map { it.shownState(lookup, now) })
     }
 
     @Test
@@ -470,8 +584,33 @@ class TodoTriageTest {
     }
 
     @Test
-    fun aDeployedDeliveryIsFinished() {
-        assertEquals(TriageRule.Deployed, at(todo("t", delivery = TodoDelivery(state = "live", at = hoursAgo(2)))).rule)
+    fun anAcceptedTaskAtUsageLimitStaysAcceptedAtRest() {
+        val limitedSession = session("limited", "unread").copy(
+            turnError = "usage limit reached", turnErrorKind = "usage_limit",
+            turnErrorResetsAt = Instant.now().plusSeconds(300).toString(),
+        )
+        val limitedLookup = lookupOf(limitedSession)
+        val td = todo("t", agents = listOf(agent("limited")), reopenedAt = hoursAgo(4), supervision = acceptedReopened())
+        assertEquals(TriageStatus.UsageLimit, td.triageStatus(limitedLookup, now))
+        assertTrue(td.acceptedAtRest(limitedLookup))
+        assertEquals(TodoState.Done, td.shownState(limitedLookup, now))
+        assertFalse("working is not at rest", td.copy(agents = listOf(agent("run"))).acceptedAtRest(lookup))
+        assertFalse("needs-you is not at rest", td.copy(agents = listOf(agent("ask"))).acceptedAtRest(lookup))
+        val expiredLookup = lookupOf(limitedSession.copy(turnErrorResetsAt = Instant.ofEpochMilli(now - 11 * 60_000L).toString()))
+        assertEquals(TriageStatus.Interrupted, td.triageStatus(expiredLookup, now))
+        assertFalse("an expired reset is interrupted, not accepted at rest", td.acceptedAtRest(expiredLookup))
+    }
+
+    @Test
+    fun aLiveDeliveryWaitsForReviewUntilAccepted() {
+        val recent = todo("t", delivery = TodoDelivery(state = "live", at = hoursAgo(2)))
+        assertEquals(TriageSection.JustDone, at(recent).section)
+        assertEquals(TriageRule.FinishedUnseen, at(recent).rule)
+        assertTrue(recent.countsAsOpen(at(recent)))
+        val old = todo("t", updated = 300, delivery = TodoDelivery(state = "live", at = hoursAgo(300)))
+        assertEquals(TriageSection.JustDone, at(old).section)
+        assertEquals(TriageRule.FinishedUnseen, at(old).rule)
+        assertTrue(old.countsAsOpen(at(old)))
     }
 
     @Test
@@ -484,9 +623,26 @@ class TodoTriageTest {
     @Test
     fun anOpenPRIsPrToMergeHoweverOldAMergedOneIsNot() {
         val old = listOf(agent("old"))
-        assertEquals(TriageSection.Pr, at(todo("t", updated = 300, agents = old, delivery = TodoDelivery(state = "pr"))).section)
-        assertEquals(TriageSection.Pr, at(todo("t", updated = 300, agents = old, prUrl = "https://example.com/pull/1")).section)
+        assertEquals(TriageSection.Pr, at(todo("t", updated = 300, agents = old, delivery = TodoDelivery(state = "pr"), prUrl = "https://example.com/pull/1", prStatus = openPr("https://example.com/pull/1"))).section)
+        assertEquals(TriageSection.Pr, at(todo("t", updated = 300, agents = old, prUrl = "https://example.com/pull/1", prStatus = openPr("https://example.com/pull/1"))).section)
         assertEquals(TriageSection.Shelved, at(todo("t", updated = 300, agents = old, prUrl = "https://example.com/pull/1", delivery = TodoDelivery(state = "merged"))).section)
+    }
+
+    @Test
+    fun prFactsMustBePresentFreshOpenMatchingAndNonDraft() {
+        val url = "https://example.com/pull/1"
+        val old = listOf(agent("old"))
+        fun section(facts: TodoPRStatus?) = at(todo("t", updated = 300, agents = old, delivery = TodoDelivery(state = "pr"), prUrl = url, prStatus = facts)).section
+        assertEquals(TriageSection.Pr, section(openPr(url)))
+        assertEquals(TriageSection.Shelved, section(null))
+        for (facts in listOf(
+            openPr(url).copy(state = "merged"),
+            openPr(url).copy(draft = true),
+            openPr(url).copy(checkedAt = hoursAgo(1)),
+            openPr("https://example.com/pull/2"),
+        )) {
+            assertEquals(TriageSection.Shelved, section(facts))
+        }
     }
 
     @Test
@@ -513,6 +669,38 @@ class TodoTriageTest {
         val header = triageTodos(all, lookup, now, zone = zone)
         assertEquals(header.open, all.count { it.bucket(lookup, now) == TodoBucket.Open })
         assertEquals(header.shelved, all.count { it.bucket(lookup, now) == TodoBucket.Shelved })
+    }
+
+    @Test
+    fun cancelledIsNeitherOpenNorFinished() {
+        val cancelled = todo("cancelled").copy(cancelledAt = hoursAgo(1))
+        val alone = triageTodos(listOf(cancelled), groupLookup, now, zone = zone)
+        assertEquals(0, alone.open)
+        assertEquals(1, alone.cancelled)
+        assertEquals(0, alone.finished)
+        val controls = triageTodos(listOf(cancelled, todo("open"), todo("done", doneAt = hoursAgo(2))), groupLookup, now, zone = zone)
+        assertEquals(1, controls.open)
+        assertEquals(1, controls.cancelled)
+        assertEquals(1, controls.finished)
+    }
+
+    @Test
+    fun mainTriageUsesTheCurrentTimeForTheUsageLimitGrace() {
+        val limited = todo("limited", agents = listOf(agent("limited")))
+        val expiredSession = session("limited", "unread").copy(
+            turnError = "usage limit reached", turnErrorKind = "usage_limit",
+            turnErrorResetsAt = Instant.ofEpochMilli(now - 11 * 60_000L).toString(),
+        )
+        val expiredLookup = lookupOf(expiredSession)
+        assertEquals(TriageStatus.Interrupted, limited.triageStatus(expiredLookup, now))
+        assertEquals(TriageSection.Waiting, limited.triage(expiredLookup, now, zone = zone).section)
+
+        val recentLookup = lookupOf(expiredSession.copy(turnErrorResetsAt = Instant.ofEpochMilli(now - 5 * 60_000L).toString()))
+        assertEquals(TriageStatus.UsageLimit, limited.triageStatus(recentLookup, now))
+
+        val defaultExpired = expiredSession.copy(turnErrorResetsAt = Instant.now().minusSeconds(11 * 60).toString())
+        assertEquals("the default is real current time, not epoch zero", TriageStatus.Interrupted,
+            limited.triageStatus(lookupOf(defaultExpired)))
     }
 
     @Test
@@ -556,8 +744,8 @@ class TodoTriageTest {
         val list = listOf(
             todo("fix", title = "Fix #412 lost pushes", agents = listOf(agent("run"))),
             todo("test", title = "#412 lost pushes: regression test", updated = 100, agents = listOf(agent("old"))),
-            todo("pr-a", title = "A", prUrl = "https://example.com/pull/9", agents = listOf(agent("old2")), updated = 120),
-            todo("pr-b", title = "B", prUrl = "https://example.com/pull/9/", agents = listOf(agent("old2")), updated = 121),
+            todo("pr-a", title = "A", prUrl = "https://example.com/pull/9", prStatus = openPr("https://example.com/pull/9"), agents = listOf(agent("old2")), updated = 120),
+            todo("pr-b", title = "B", prUrl = "https://example.com/pull/9/", prStatus = openPr("https://example.com/pull/9/"), agents = listOf(agent("old2")), updated = 121),
             todo("lone", title = "Something else", updated = 1),
         )
         val r = triageTodos(list, groupLookup, now, zone = zone)
@@ -576,7 +764,8 @@ class TodoTriageTest {
     fun neverMergesAClosedTodoIntoAnOpenOnesRow() {
         val r = triageTodos(listOf(todo("a", title = "Same title"), todo("b", title = "Same title", doneAt = hoursAgo(1))), groupLookup, now, zone = zone)
         assertEquals(1, r.rows(TriageSection.Other).size)
-        assertEquals(1, r.rows(TriageSection.JustDone).size)
+        assertEquals(0, r.rows(TriageSection.JustDone).size)
+        assertEquals(1, r.rows(TriageSection.Done).size)
     }
 
     @Test
@@ -596,14 +785,15 @@ class TodoTriageTest {
         val list = listOf(failed, done, other, twin)
         assertEquals(setOf("f1"), supersededFailedStarts(list))
         val r = triageTodos(list, groupLookup, now, zone = zone)
-        assertEquals(listOf(listOf("done1", "f1")), r.rows(TriageSection.JustDone).map { g -> g.members.map { it.id } })
+        assertEquals(0, r.rows(TriageSection.JustDone).size)
+        assertEquals(listOf(listOf("done1", "f1")), r.rows(TriageSection.Done).map { g -> g.members.map { it.id } })
         assertEquals(listOf(listOf("f2", "f3")), r.rows(TriageSection.Waiting).map { g -> g.members.map { it.id } })
         assertEquals(2, r.open)
         assertEquals(TodoBucket.Closed, failed.bucket(groupLookup, now, superseded = true))
         assertEquals(TodoBucket.Open, failed.bucket(groupLookup, now))
         // the checkbox: open while it waits on the owner, done once superseded
         assertEquals(true, other.checksAsOpen(r.rows(TriageSection.Waiting)[0].triage["f2"]))
-        assertEquals(false, failed.checksAsOpen(r.rows(TriageSection.JustDone)[0].triage["f1"]))
+        assertEquals(false, failed.checksAsOpen(r.rows(TriageSection.Done)[0].triage["f1"]))
     }
 
     @Test
@@ -636,20 +826,36 @@ class TodoTriageTest {
         )
     }
 
-    // #5707: seen (Got it, or opening it) at or after the moment that put it in Just finished, it is Done at once
+    // #5707 + #5732: Seen files ordinary turns, never closure, acceptance or an unaccepted delivery
     private fun minutesAgo(m: Int) = Instant.ofEpochMilli(now - m * 60_000L).toString()
 
     @Test
-    fun aSeenToDoGoesToDoneAtOnceOneSeenBeforeItGotThereStays() {
+    fun seenFilesOrdinaryTurnsButNotAcceptanceOrAnUnacceptedDelivery() {
         val closed = { seenMinutesAgo: Int -> at(todo("t", doneAt = hoursAgo(3)).copy(seenAt = minutesAgo(seenMinutesAgo))) }
         assertEquals(TriageSection.Done, closed(120).section)
         assertEquals(TriageRule.Closed, closed(120).rule)
         assertEquals(TriageSection.Done, closed(180).section)
-        assertEquals(TriageSection.JustDone, closed(240).section)
+        assertEquals(TriageSection.Done, closed(240).section)
         val accepted = at(todo("t", supervision = acceptedReopened(), agents = listOf(agent("idle"))).copy(seenAt = hoursAgo(4)))
         assertEquals(TriageSection.Done to TriageRule.Accepted, accepted.section to accepted.rule)
         val deployed = at(todo("t", delivery = TodoDelivery(state = "live", at = hoursAgo(2))).copy(seenAt = hoursAgo(1)))
-        assertEquals(TriageSection.Done to TriageRule.Deployed, deployed.section to deployed.rule)
+        assertEquals(TriageSection.JustDone to TriageRule.FinishedUnseen, deployed.section to deployed.rule)
+        val supervised = at(todo("t", agents = listOf(agent("unseen")), supervision = Supervision(supervisor = "main")).copy(seenAt = minutesAgo(30)))
+        assertEquals(TriageSection.JustDone to TriageRule.FinishedUnseen, supervised.section to supervised.rule)
+        assertTrue(todo("ordinary", agents = listOf(agent("unseen"))).seenCanFile)
+        assertFalse(todo("supervised", agents = listOf(agent("unseen")), supervision = Supervision(supervisor = "main")).seenCanFile)
+        assertFalse(todo("live", delivery = TodoDelivery(state = "live", at = hoursAgo(2))).seenCanFile)
+    }
+
+    @Test
+    fun seenAwaitingReviewStaysOpenButIsNotNewInFinished() {
+        val unseen = todo("live", delivery = TodoDelivery(state = "live", at = hoursAgo(2)))
+        assertTrue(unseen.showsJustFinished(at(unseen), now))
+
+        val seen = unseen.copy(seenAt = hoursAgo(1))
+        val placed = at(seen)
+        assertEquals(TriageSection.JustDone to TriageRule.FinishedUnseen, placed.section to placed.rule)
+        assertFalse(seen.showsJustFinished(placed, now))
     }
 
     @Test
@@ -659,7 +865,7 @@ class TodoTriageTest {
         assertEquals(TriageSection.Done to TriageRule.Seen, seen.section to seen.rule)
         val movedSince = at(todo("t", agents = listOf(agent("unseen"))).copy(seenAt = hoursAgo(2)))
         assertEquals(TriageSection.JustDone to TriageRule.FinishedUnseen, movedSince.section to movedSince.rule)
-        val pr = at(todo("t", agents = listOf(agent("unseen")), prUrl = "https://example.com/pull/1").copy(seenAt = minutesAgo(30)))
+        val pr = at(todo("t", agents = listOf(agent("unseen")), prUrl = "https://example.com/pull/1", prStatus = openPr("https://example.com/pull/1")).copy(seenAt = minutesAgo(30)))
         assertEquals(TriageSection.Pr to TriageRule.PrOpen, pr.section to pr.rule)
         // seen, it is no longer open work
         assertEquals(TodoBucket.Closed, todo("t", agents = listOf(agent("unseen"))).copy(seenAt = minutesAgo(30)).bucket(lookup, now))
@@ -667,12 +873,28 @@ class TodoTriageTest {
     }
 
     @Test
+    fun parkedOpenPrIsNotAwaitingAcceptance() {
+        // A parked verdict is the supervisor's reading of the latest turn. An unread session left behind must not hide
+        // its fresh open PR behind the supervised acceptance rule; Apple and the web already exempt parked here.
+        val parked = at(
+            todo(
+                "t",
+                agents = listOf(agent("unseen")),
+                supervision = Supervision(supervisor = "main", state = "parked"),
+                prUrl = "https://example.com/pull/1",
+                prStatus = openPr("https://example.com/pull/1"),
+            ).copy(seenAt = minutesAgo(30)),
+        )
+        assertEquals(TriageSection.Pr to TriageRule.PrOpen, parked.section to parked.rule)
+    }
+
+    @Test
     fun unfinishedSectionsComeFirstAndOpenShelvedAndDoneFoldedDoneLast() {
         assertEquals(
-            listOf(TriageSection.Waiting, TriageSection.Working, TriageSection.Pr, TriageSection.Other, TriageSection.JustDone, TriageSection.Shelved, TriageSection.Done),
+            listOf(TriageSection.Waiting, TriageSection.Working, TriageSection.Pr, TriageSection.Other, TriageSection.JustDone, TriageSection.Shelved, TriageSection.Done, TriageSection.Cancelled),
             TriageSection.entries.toList(),
         )
-        assertEquals(listOf(TriageSection.Shelved, TriageSection.Done), TriageSection.entries.filter { it.folded })
+        assertEquals(listOf(TriageSection.Shelved, TriageSection.Done, TriageSection.Cancelled), TriageSection.entries.filter { it.folded })
     }
 
     @Test
@@ -689,8 +911,8 @@ class TodoTriageTest {
             look, now, zone = zone,
         )
         assertEquals(listOf(listOf("test", "fix")), r.rows(TriageSection.Other).map { g -> g.members.map { it.id } })
-        assertEquals(listOf("logs"), r.rows(TriageSection.JustDone).map { it.lead.id })
-        assertEquals(listOf("speed", "notes"), r.rows(TriageSection.Done).map { it.lead.id })
+        assertEquals(0, r.rows(TriageSection.JustDone).size)
+        assertEquals(listOf("speed", "logs", "notes"), r.rows(TriageSection.Done).map { it.lead.id })
         assertEquals(listOf(2, 0, 3), listOf(r.open, r.shelved, r.finished))
     }
 
@@ -698,5 +920,20 @@ class TodoTriageTest {
     fun aRestoreDropsOnesThatWouldHaveShelvedAgain() {
         val kept = withRestore(mapOf("old" to now - SHELVE_AFTER_MS - 1), "new", now)
         assertEquals(mapOf("new" to now), kept)
+    }
+
+    @Test
+    fun supersededFailedStartsEarlyExitsAndStripsUrlQueryOrFragment() {
+        // No failed starts or no completed non-failed todos -> empty set via early exit.
+        assertEquals(emptySet<String>(), supersededFailedStarts(listOf(todo("open", prUrl = "https://example.com/pull/42"))))
+        assertEquals(
+            emptySet<String>(),
+            supersededFailedStarts(listOf(todo("failed", startError = "boom", prUrl = "https://example.com/pull/42#discussion"))),
+        )
+        // Matching PR URL after stripping #fragment and ?query supersedes the closed failed start.
+        val failed = todo("failed", startError = "boom", doneAt = hoursAgo(3), prUrl = "https://example.com/pull/42#issuecomment-1")
+        val done = todo("done", doneAt = hoursAgo(2), prUrl = "https://example.com/pull/42?w=1")
+        val unrelated = todo("other-failed", startError = "boom", doneAt = hoursAgo(3), prUrl = "https://example.com/pull/99?tab=files")
+        assertEquals(setOf("failed"), supersededFailedStarts(listOf(failed, done, unrelated)))
     }
 }

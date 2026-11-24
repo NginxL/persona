@@ -416,6 +416,63 @@ func validate(method string, p map[string]any) string {
 	case "worktree.create":
 		return first(str("repo", true), str("name", false), str("branchNameOverride", false), str("baseBranch", false),
 			str("parentWorktree", false), boolean("activate"), boolean("nameWasGenerated"))
+	case "agentSession.history":
+		if r := str("sessionId", true); r != "" {
+			return r
+		}
+		direction, _ := p["direction"].(string)
+		if direction != "tail" && direction != "before" && direction != "after" {
+			return "direction must be tail, before or after"
+		}
+		if v, ok := p["limit"]; ok {
+			n, isNumber := v.(float64)
+			if !isNumber || n < 1 || n > 200 || n != float64(int(n)) {
+				return "limit must be an integer of 1–200"
+			}
+		}
+		if v, ok := p["cursor"]; ok {
+			cursor, isObject := v.(map[string]any)
+			epoch, epochOK := cursor["epoch"].(string)
+			sequence, sequenceOK := cursor["sequence"].(float64)
+			if !isObject || !epochOK || epoch == "" || !sequenceOK || sequence < 0 {
+				return "cursor must contain epoch and a non-negative sequence"
+			}
+		}
+		return ""
+	case "agentSession.send":
+		envelope, ok := p["envelope"].(map[string]any)
+		if !ok {
+			return "Missing envelope"
+		}
+		for _, field := range []string{"sessionId", "clientOperationId", "payloadFingerprint"} {
+			if value, _ := envelope[field].(string); value == "" {
+				return "Missing envelope." + field
+			}
+		}
+		fingerprint, _ := envelope["payloadFingerprint"].(string)
+		if len(fingerprint) != 64 {
+			return "payloadFingerprint must be a sha256 hex digest"
+		}
+		for _, r := range fingerprint {
+			if !(r >= '0' && r <= '9' || r >= 'a' && r <= 'f') {
+				return "payloadFingerprint must be lowercase hex"
+			}
+		}
+		if fence, ok := envelope["expectedRuntimeFence"].(float64); !ok || fence <= 0 {
+			return "expectedRuntimeFence must be positive"
+		}
+		body, ok := p["body"].(map[string]any)
+		if !ok || body["kind"] != "message" || body["role"] != "user" {
+			return "body must be a user message"
+		}
+		blocks, ok := body["blocks"].([]any)
+		if !ok || len(blocks) == 0 || len(blocks) > 64 {
+			return "body.blocks must contain 1–64 blocks"
+		}
+		if delivery, ok := p["delivery"]; ok && delivery != "queue-if-active" {
+			return "delivery must be queue-if-active"
+		}
+		return ""
 	case "terminal.create":
 		return first(str("worktree", true), str("title", true), str("shell", false))
 	case "terminal.send":

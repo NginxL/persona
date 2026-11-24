@@ -9,7 +9,7 @@ import (
 	"github.com/nwverse/persona/server/internal/proto"
 )
 
-func TestAgentListsFoldOnlyHelpersWithListedParents(t *testing.T) {
+func TestAgentListsExcludeFoldedAndOrphanSubagents(t *testing.T) {
 	for _, source := range []string{"codex_history", "codex_app_server"} {
 		for _, state := range []string{proto.StateWorking, proto.StateUnread, proto.StateNeedsYou, "done"} {
 			t.Run(source+"/"+state, func(t *testing.T) {
@@ -42,10 +42,10 @@ func TestAgentListsFoldOnlyHelpersWithListedParents(t *testing.T) {
 						continue
 					}
 					got := s.describeAgents(context.Background(), filter, "", "")
-					if strings.Contains(got, "session_id=helper ") || strings.Count(got, "session_id=") != 3 {
-						t.Fatalf("state=%s must list three roots, not the folded helper:\n%s", filter, got)
+					if strings.Contains(got, "session_id=helper ") || strings.Contains(got, "session_id=orphan ") || strings.Count(got, "session_id=") != 2 {
+						t.Fatalf("state=%s must list only two non-subagent roots (parent + unknown), not folded or orphan subagents:\n%s", filter, got)
 					}
-					for _, id := range []string{"parent", "orphan", "unknown"} {
+					for _, id := range []string{"parent", "unknown"} {
 						if !strings.Contains(got, "session_id="+id+" ") {
 							t.Errorf("state=%s lost root %s:\n%s", filter, id, got)
 						}
@@ -63,12 +63,12 @@ func TestAgentListsFoldOnlyHelpersWithListedParents(t *testing.T) {
 				case "done":
 					got = done
 				}
-				if len(got) != 3 || len(needs)+len(unread)+len(awaiting)+len(waiting)+len(done)+len(muted)+len(working) != 3 {
-					t.Fatalf("snapshot must count the same three roots: needs=%v unread=%v done=%v working=%v", needs, unread, done, working)
+				if len(got) != 2 || len(needs)+len(unread)+len(awaiting)+len(waiting)+len(done)+len(muted)+len(working) != 2 {
+					t.Fatalf("snapshot must count the same two roots: needs=%v unread=%v done=%v working=%v", needs, unread, done, working)
 				}
 				for _, row := range got {
-					if row.Label == "Known child" {
-						t.Errorf("folded helper leaked into the snapshot: %+v", row)
+					if row.Label == "Known child" || row.Label == "Missing parent" {
+						t.Errorf("subagent leaked into the snapshot: %+v", row)
 					}
 				}
 			})
@@ -94,5 +94,37 @@ func TestAgentsListKeepsFoldedHelperApprovalOnParent(t *testing.T) {
 	if strings.Count(got, "session_id=") != 1 || !strings.Contains(got, "session_id=parent ") ||
 		!strings.Contains(got, "interaction_id=child-approval") {
 		t.Fatalf("the parent must keep the child's answerable approval without a second row:\n%s", got)
+	}
+}
+
+func TestAgentsListKeepsCrossMachineFoldedApprovalOnParent(t *testing.T) {
+	f := newFakeHub()
+	parent := proto.Session{MachineID: "mac", SessionID: "parent", Title: "Mac lead", State: proto.StateIdle}
+	child := proto.Session{MachineID: "box", SessionID: "a2a-kid", Title: "Box worker", State: proto.StateNeedsYou,
+		IsSubagent: true, ParentSessionID: "parent"}
+	child.SetSubagentProvenance("mac", "task-1", proto.SubagentOriginA2A)
+	lists := map[string][]proto.Session{"mac": {parent}, "box": {child}}
+	folds := foldFleet(lists, nil)
+	folds["mac"].apply(lists["mac"])
+	folds["box"].apply(lists["box"])
+	f.setSessions("mac", lists["mac"]...)
+	f.setSessions("box", lists["box"]...)
+	f.hubCards = []proto.Interaction{{
+		ID: "cross-approval", MachineID: "box", SessionID: "a2a-kid",
+		FoldedUnder: "parent", FoldedUnderMachineID: "mac",
+		Kind: proto.IxPermission, ToolName: "shell", Summary: "Run tests on box",
+	}}
+	s := newStorelessService(t, f)
+
+	got := s.describeAgents(context.Background(), proto.StateNeedsYou, "", "")
+	if strings.Count(got, "session_id=") != 1 || !strings.Contains(got, "session_id=parent ") ||
+		!strings.Contains(got, "interaction_id=cross-approval") {
+		t.Fatalf("cross-machine folded child approval must attach to parent on mac without listing child:\n%s", got)
+	}
+	// Filtering by parent's machine ("mac") must STILL retain the cross-machine child's interaction_id.
+	byParentMachine := s.describeAgents(context.Background(), proto.StateNeedsYou, "mac", "")
+	if strings.Count(byParentMachine, "session_id=") != 1 || !strings.Contains(byParentMachine, "session_id=parent ") ||
+		!strings.Contains(byParentMachine, "interaction_id=cross-approval") {
+		t.Fatalf("agents_list(machine=mac) dropped cross-machine folded child approval:\n%s", byParentMachine)
 	}
 }

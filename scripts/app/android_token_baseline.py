@@ -9,7 +9,7 @@ ROOT = Path(__file__).resolve().parents[2]
 BASELINE = ROOT / 'android/core/designsystem/tools/token-baseline.json'
 CATEGORIES = ('color', 'font', 'dp', 'material3', 'icon')
 # Production Kotlin of every app module; build-logic holds Gradle plugins, not app code.
-MODULE_GROUPS = ('app', 'core', 'feature', 'platform')
+MODULE_GROUPS = ('app', 'core', 'feature', 'module', 'platform')
 DESIGN_SYSTEM = 'android/core/designsystem/'
 # Generated from spec/tokens, which scripts/assets/gen_tokens.py checks: its literals are the tokens themselves.
 GENERATED = {'android/core/designsystem/src/main/kotlin/persona/core/designsystem/Tokens.kt'}
@@ -194,6 +194,18 @@ def regressions(current, baseline):
     return failures
 
 
+def lowerable(current, baseline):
+    """Files under the baseline in some category: they pass, and lowering the baseline for them is tidying."""
+    lower = []
+    for path, limits in sorted(baseline['files'].items()):
+        counts = current['files'].get(path)
+        for category, limit in sorted(limits.items()):
+            actual = counts[category]['hardcoded'] if counts and category in counts else 0
+            if actual < limit:
+                lower.append(f'{path}: {actual} hard-coded {category}, baseline {limit}')
+    return lower
+
+
 def main():
     parser = argparse.ArgumentParser(description='Count Android design-token adoption and reject hard-coded values above the baseline')
     parser.add_argument('--root', type=Path, default=ROOT, help='repository root')
@@ -235,6 +247,11 @@ def main():
     if failures:
         print('\nAbove the baseline:\n' + '\n'.join(failures))
         return 1
+    lower = lowerable(current, baseline)
+    if lower:
+        # Only a rise fails (docs/operations/testing.md, "Count ratchets"); a count under its baseline is a notice.
+        print(f'\n{len(lower)} count(s) under the baseline; lowering it is tidying anyone can do, not this change\'s job: '
+              'python3 scripts/ci/lower_baselines.py')
     print('token baseline check passed')
     return 0
 

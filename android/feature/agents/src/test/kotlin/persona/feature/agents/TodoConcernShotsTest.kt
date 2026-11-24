@@ -89,7 +89,7 @@ class TodoConcernShotsTest {
     private fun textLayout(text: String): TextLayoutResult {
         val node = rule.onNodeWithText(text, useUnmergedTree = true).fetchSemanticsNode()
         val layouts = mutableListOf<TextLayoutResult>()
-        node.config[SemanticsActions.GetTextLayoutResult].action!!(layouts)
+        val _ = node.config[SemanticsActions.GetTextLayoutResult].action!!(layouts)
         return layouts.single()
     }
 
@@ -199,8 +199,10 @@ class TodoConcernShotsTest {
     }
 
     @Test fun closedConcernInExpandedRelatedRowIsLabelled() {
+        // Two reported concerns keep one in the related row; an ordinary completed task is directly Done (#5732).
         val list = listOf(
-            Todo("ordinary", title = "Morning work", createdAt = ago(500), updatedAt = ago(30), doneAt = ago(30), planId = "p1"),
+            Todo("ordinary", title = "Morning work", createdAt = ago(500), updatedAt = ago(30), doneAt = ago(30), planId = "p1")
+                .withKind("concern"),
             Todo("concern", title = "Morning answer", createdAt = ago(500), updatedAt = ago(60), doneAt = ago(60), doneBy = "reported", planId = "p1")
                 .withKind("concern"),
         )
@@ -215,11 +217,38 @@ class TodoConcernShotsTest {
         rule.onNodeWithText("1 related", useUnmergedTree = true).performClick()
         rule.waitForIdle()
         assertTrue(has("Morning answer"))
-        assertEquals(1, rule.onAllNodesWithContentDescription("Concern", useUnmergedTree = true).fetchSemanticsNodes().size)
-        assertEquals("the section heading and the related line's section tag", 2,
-            rule.onAllNodesWithText("Just finished", useUnmergedTree = true).fetchSemanticsNodes().size)
+        assertEquals("both reported concerns are labelled", 2,
+            rule.onAllNodesWithContentDescription("Concern", useUnmergedTree = true).fetchSemanticsNodes().size)
         val bitmap = rule.onNodeWithTag("shot").captureToImage().asAndroidBitmap()
         File(out(), "todos-concerns-related-glass-light-en.png").outputStream().use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
+        val labelCounts = listOf("Just finished", "Delivered · awaiting review").associateWith {
+            rule.onAllNodesWithText(it, useUnmergedTree = true).fetchSemanticsNodes().size
+        }
+        assertEquals("the section heading and the related line's section tag; labels=$labelCounts", 2,
+            rule.onAllNodesWithText("Just finished", useUnmergedTree = true).fetchSemanticsNodes().size)
+    }
+
+    @Config(qualifiers = "ja-w400dp-h1400dp-xhdpi")
+    @Test fun closedConcernJapaneseSectionAndRelatedRowStayJustFinished() {
+        val list = listOf(
+            Todo("ordinary", title = "Morning work", createdAt = ago(500), updatedAt = ago(30), doneAt = ago(30), planId = "p1")
+                .withKind("concern"),
+            Todo("concern", title = "Morning answer", createdAt = ago(500), updatedAt = ago(60), doneAt = ago(60), doneBy = "reported", planId = "p1")
+                .withKind("concern"),
+        )
+        rule.setContent {
+            PersonaTheme(darkTheme = false, reduceMotion = true, style = AppStyle.Glass) {
+                Box(Modifier.testTag("shot").width(400.dp).height(1400.dp).background(PersonaTheme.palette.background)) {
+                    TodosScreen(list, emptyList(), null, onBack = {}, onOpenTodo = {}, now = now)
+                }
+            }
+        }
+        rule.waitForIdle()
+        rule.onNodeWithText("関連 1 件", useUnmergedTree = true).performClick()
+        rule.waitForIdle()
+        assertEquals("Japanese section heading and related line", 2,
+            rule.onAllNodesWithText("完了したばかり", useUnmergedTree = true).fetchSemanticsNodes().size)
+        assertFalse("a reported concern is not awaiting review", has("交付済み・確認待ち"))
     }
 
     @Config(fontScale = 2f)

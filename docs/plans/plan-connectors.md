@@ -32,7 +32,7 @@ Out of scope: source-specific browsing pages (`docs/extensions/feishu.md` ("Pers
 
 ## I. `Connector` interface
 
-Code lives in `server/internal/connector` (interfaces, `Registry`, generic `gate` and status), with one subpackage per built-in `connector` (`connector/github`, `connector/imessage`).
+Code lives in `server/internal/connector` (interfaces, `Registry`, generic `gate` and status), and the SPI in `server/internal/connectorwire`; the built-in GitHub and iMessage connectors are modules (`modules/github`, `modules/imessage`).
 During migration, Lark, Moments and `mail` initially stay in `hub` behind adapters to avoid moving too much at once. `connector` depends on `kb` data types (`SourceChat`, `SourceMessage`, `Item`),
 not `hub`; hub owns the `Registry`.
 
@@ -246,7 +246,7 @@ remote plugins that only connect to the socket (`ssh -R`) still work. The plugin
 ### Third form: node as a local `connector` (data on Mac)
 
 Some data exists only on a computer (iMessage `chat.db`, future local notes, photos…), inaccessible to the hub. The node already connects to the hub over ssh with bidirectional RPC,
-so it reads local data while the hub registers a `connector` (`connector/imessage/remote.go`: an RPC-forwarding adapter).
+so it reads local data while the hub registers a `connector` (`modules/imessage/remote.go`: an RPC-forwarding adapter).
 
 New hub → node methods (old nodes return `unknown method`, treated as no local connectors):
 
@@ -362,7 +362,7 @@ It shares the `connector` `threads` capability with Telegram (`docs/extensions/c
   - `Reply`: bottom composer; long-press "Quote reply" turns a `comment` into a Markdown quote (no @, to avoid notifying its `author`).
     Sending uses `github_comment` (accepts both `{chat, text}` and the assistant's `{repo, number, body}`). User sends `comment` directly, without gate/card (#1190); assistant calls remain gated.
   - "AI draft reply" and "Hand to AI" stay in the `Inbox` top bar. CI-failure notifications that are not PRs/issues still show hub-collected text.
-- **Data** (`server/internal/connector/github/thread.go`):
+- **Data** (`server/internal/modules/github/thread.go`):
   - Each read fetches `issue`, comments, events; PRs additionally fetch PR, reviews, inline comments; `open` PRs additionally fetch head-commit check runs. Each list capped at 5 pages × 100 entries.
   - Merge chronologically, paginate in memory; cursor is the oldest entry's id from the previous page.
 - **Cache**:
@@ -424,12 +424,12 @@ and `repo` is sufficient, so users need not generate another token.
 
 Hand to AI (#528, user 2026-11-03: "iMessage text can be given to AI, like Lark"): node `connector.changes` returns new messages incrementally by `ROWID` (first fetch starts 30 days back), `connector.search` supports assistant search;
 by default, expose only conversations with a contact-book member or in which I have spoken (exclude unsaved short-code senders such as codes, banks and delivery services). Redact verification codes in AI text, not in App-only viewing.
-Hub side (`connector/imessage/persona.go`): with "Share with Persona" enabled (hub setting `imessage.ai`, on by default), implement `Archive` (knowledge-base conversations `imessage-<conversation hash>`, people `imessage-<number hash>`),
+Hub side (`modules/imessage/persona.go`): with "Share with Persona" enabled (hub setting `imessage.ai`, on by default), implement `Archive` (knowledge-base conversations `imessage-<conversation hash>`, people `imessage-<number hash>`),
 `Inbox` (check recent conversations every 2 minutes: unread enters `Inbox`, direct chats need you, groups are FYI; reading elsewhere or my reply completes it; "`Reply` in Messages" is an `sms:` link, Persona does not send),
 `ReadTools` (`imessage_chats` / `imessage_read` / `imessage_search`). Disabled means none are exposed; stored data is deleted separately: `DELETE /api/v1/imessage/data` (only while disabled) calls `kb.Engine.ForgetSource("imessage")`
 to remove conversations, people, project references and their timeline entries, cursors (projects marked for rewriting, summaries rebuilt from remaining data), then index rows and `Inbox` items. Deleted conversations under compression cannot be written back.
 
-Implemented (#449, `server/internal/connector/imessage`, node `connector.*` RPC in `docs/protocol/protocol.md`): merge conversations by person (multiple iMessage / SMS / RCS `chat`s for one number form one conversation; groups use `guid`),
+Implemented (#449, `server/internal/modules/imessage`, node `connector.*` RPC in `docs/protocol/protocol.md`): merge conversations by person (multiple iMessage / SMS / RCS `chat`s for one number form one conversation; groups use `guid`),
 with hashed ids; contact matching uses the last 10 phone digits, then last 7 if unique. On missing permission, `connector.list` gives guidance by node execution `model`: ssh requires "Remote Login › Allow full disk access for remote users";
 launchd-resident node (`scripts/deploy/node-launchd.sh`) requires permission for `personad` itself (deployment replaces the binary, possibly requiring reauthorization; the helper step fixes this).
 Fixtures are `testdata/home` (synthetic `chat.db` and contacts, macOS 26 schemas; generated by `blobs.swift` + `make.py` in `testdata/gen`); real data is read only by `TestRealMessagesCounts`, printing counts.
@@ -443,7 +443,7 @@ Fixtures are `testdata/home` (synthetic `chat.db` and contacts, macOS 26 schemas
   ("Existing behavior to watch" above). `date` cannot be the cursor: late old messages would be skipped. Phase one does not track edits/recalls (append-only archive, like Lark);
   later, if needed, inspect `changed` `date_edited` / `date_retracted` in the last 7 days each round.
 - **typedstream** (`attributedBody`): `NSArchiver` streamtyped format (starts `\x04\x0bstreamtyped`), containing `NSAttributedString`; its first `NSString` is the body.
-  Write a minimal decoder (`connector/imessage/typedstream.go`): read class chains and objects, extract first string (length prefix: one byte below 0x80;
+  Write a minimal decoder (`modules/imessage/typedstream.go`): read class chains and objects, extract first string (length prefix: one byte below 0x80;
   2 bytes after `0x81`, 4 after `0x82`, little-endian), plus `__kIMMentionConfirmedMention` (mentions) and links in attributes.
   Unparseable messages get one line `[无法解析的消息]` (unable to parse message) and a counter (shown in status); **never print or log raw data**.
 - Fixtures: a small Swift script on Mac (`NSArchiver` archiving `NSAttributedString`, synthetic body `示例消息` (example message)) generates blobs (plain text, long text, mentions, links, emoji),

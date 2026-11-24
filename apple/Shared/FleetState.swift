@@ -191,6 +191,11 @@ nonisolated struct FleetState: Codable, Hashable, Sendable {
     func tailored(island: IslandPrefs, details: Bool, look: FleetLook? = nil) -> FleetState {
         var s = self
         s.details = details
+        if !details {
+            // Without names a request reads "A permission request is waiting": no Allow / Deny for something nobody can
+            // tell apart, only a tap into the app (#12982, as the hub's forDevice).
+            for i in s.items.indices where s.items[i].kind == .permission || s.items[i].kind == .plan { s.items[i].interaction = nil }
+        }
         if let look { s.look = look }
         (s.left, s.right) = island.sides
         if var stats = s.stats, !stats.loads.isEmpty {

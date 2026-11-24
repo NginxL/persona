@@ -52,6 +52,15 @@ async function run(theme, narrow, edit) {
     assert.match(listed.leaders.find((l) => l.id === id).notes, /Back up the database/, "the hub kept the notes");
     assert.equal(await save.isDisabled(), true, "saved: nothing left to save");
   }
+  const permission = group.locator('[data-settings-row="direction-permissions"]');
+  await permission.waitFor();
+  assert.match(await permission.textContent(), /Direction and new-chat permissions/);
+  const permissionHint = permission.getByText(s.permissions_hint, { exact: true });
+  assert.ok(await permissionHint.evaluate((el) => el.scrollWidth <= el.clientWidth + 1), "the direction permission hint is not clipped");
+  await permission.click();
+  const defaultMode = page.locator('[data-settings-row="default-permissions"] select');
+  await defaultMode.waitFor();
+  assert.equal(await defaultMode.evaluate((el) => document.activeElement === el), true, "the direction link focuses the shared permission control");
   // The group from its title down, in the page as it is (the top bar and the settings around it), not cut out.
   await group.evaluate((el) => {
     el.scrollIntoView({ block: "start" });

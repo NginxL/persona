@@ -19,14 +19,14 @@ import (
 // Codex started from the phone (docs/integrations/codex.md "Starting from the phone"), the way session.start does it, against real Codex in the
 // isolated herdr: the launcher runs through codex-start with the first message in a file, the start answers with the
 // thread that message began, the pane lists as that one session, on the route its launcher implies. Env as
-// TestLiveCodexDaemon; PERSONA_CODEX_START=daemon (a 0.163 attached to the test's own app-server with --remote: the
+// TestLiveCodexDaemon; PERSONA_CODEX_START_VARIANT=daemon (a 0.163 attached to the test's own app-server with --remote: the
 // app-server route), plain (a Codex without the daemon: 0.153) or config (a 0.163 launcher with -c, in its own process:
 // the terminal route, and the note says why). The launchers all carry -c (no notify hook, no update check), so a plain
 // 0.163 — which would start or join the daemon of the Codex in use — is never run here.
 func TestLiveCodexStart(t *testing.T) {
-	bin, work, variant := os.Getenv("PERSONA_CODEX_BIN"), os.Getenv("PERSONA_CODEX_WORK"), os.Getenv("PERSONA_CODEX_START")
+	bin, work, variant := os.Getenv("PERSONA_CODEX_BIN"), os.Getenv("PERSONA_CODEX_WORK"), os.Getenv("PERSONA_CODEX_START_VARIANT")
 	if bin == "" || work == "" || variant == "" {
-		t.Skip("PERSONA_CODEX_BIN / PERSONA_CODEX_WORK / PERSONA_CODEX_START not set")
+		t.Skip("PERSONA_CODEX_BIN / PERSONA_CODEX_WORK / PERSONA_CODEX_START_VARIANT not set")
 	}
 	home, _ := os.UserHomeDir()
 	if variant == "plain" {
@@ -45,7 +45,7 @@ func TestLiveCodexStart(t *testing.T) {
 	case "plain", "config":
 		n = liveCodexNode(c)
 	default:
-		t.Fatalf("PERSONA_CODEX_START=%s", variant)
+		t.Fatalf("PERSONA_CODEX_START_VARIANT=%s", variant)
 	}
 	words = append(words, strings.Fields(os.Getenv("PERSONA_CODEX_ARGS"))...)
 	// What New gives a node and the start and the listing write to.

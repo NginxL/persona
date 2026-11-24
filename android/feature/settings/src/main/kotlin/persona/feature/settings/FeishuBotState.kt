@@ -59,15 +59,25 @@ internal data class FeishuBotState(
 internal class FeishuBotModel(private val api: FeishuBotSettings) {
     private val mutable = MutableStateFlow(FeishuBotState())
     val state = mutable.asStateFlow()
+    // Page-owned coroutines run on Main. Only the newest read outside a save may publish its result.
+    private var loadVersion = 0L
+    private var saveVersion = 0L
 
     suspend fun load() {
+        val request = ++loadVersion
+        val saved = saveVersion
+        val startedDuringSave = state.value.saving
+        fun current() = request == loadVersion && saved == saveVersion && !startedDuringSave
         mutable.update { it.copy(loading = true) }
         try {
             val status = api.status()
-            mutable.update { it.withStatus(status, form = it.status == null || !it.changed).copy(error = null) } // not what is being typed
+            if (current()) mutable.update { it.withStatus(status, form = it.status == null || !it.changed).copy(error = null) } // not what is being typed
         } catch (cancelled: CancellationException) { throw cancelled }
-        catch (error: Exception) { mutable.update { it.copy(error = ResText.of(R.string.settings_feishu_bot_read_failed, failureReasonText(error))) } }
-        finally { mutable.update { it.copy(loading = false) } }
+        catch (error: Exception) {
+            if (current()) mutable.update { it.copy(error = ResText.of(R.string.settings_feishu_bot_read_failed, failureReasonText(error))) }
+        } finally {
+            if (request == loadVersion) mutable.update { it.copy(loading = false) }
+        }
     }
 
     fun edit(appId: String? = null, appSecret: String? = null, domain: String? = null) = mutable.update {
@@ -86,6 +96,8 @@ internal class FeishuBotModel(private val api: FeishuBotSettings) {
 
     private suspend fun save(update: FeishuBotUpdate, form: Boolean): Boolean {
         if (state.value.saving) return false
+        // Invalidate earlier GETs even when this PUT fails; their snapshot cannot resolve an uncertain write.
+        ++saveVersion
         mutable.update { it.copy(saving = true, error = null) }
         return try {
             val status = api.update(update)

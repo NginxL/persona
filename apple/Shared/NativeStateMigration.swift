@@ -117,10 +117,6 @@ nonisolated enum NativeStateMigration {
     nonisolated(unsafe) private static var preparedPushScopes: Set<String> = []
 
     static func preparePushKeys(accessGroup: String?) -> Bool {
-        #if os(macOS) && DEBUG
-        if UserDefaults.standard.string(forKey: "macSnapshot") != nil
-            || ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil { return true }
-        #endif
         pushLock.lock()
         defer { pushLock.unlock() }
         let scope = accessGroup ?? ""
@@ -138,9 +134,6 @@ nonisolated enum NativeStateMigration {
             var query: [String: Any] = [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service]
             if let accessGroup { query[kSecAttrAccessGroup as String] = accessGroup }
             if let account { query[kSecAttrAccount as String] = account }
-            #if os(macOS)
-            query[kSecUseDataProtectionKeychain as String] = true
-            #endif
             return query
         }
         func copyMissing(from source: String, to destination: String) -> Bool {
@@ -272,6 +265,7 @@ struct CompatibleAssistantStatusIntent: AppIntent {
 extension OpenPersonaAssistantIntent { nonisolated static let persistentIdentifier = "OpenJarvisAssistantIntent" }
 extension OpenPersonaAgentsIntent { nonisolated static let persistentIdentifier = "OpenJarvisAgentsIntent" }
 extension OpenPersonaDictationIntent { nonisolated static let persistentIdentifier = "OpenPersonaDictationIntent" }
+extension OpenPersonaCallIntent { nonisolated static let persistentIdentifier = "OpenPersonaCallIntent" }
 
 #if !WIDGET_EXTENSION
 struct CompatibleOpenAssistantIntent: AppIntent {

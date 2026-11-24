@@ -171,6 +171,28 @@ export function placeSubmenu(
   return maxHeight === undefined ? { left, top, width } : { left, top, width, maxHeight };
 }
 
+/** Fits a picker's detail card beside its active row or within the picker when a dialog clips either side. */
+export function placePickerCard(
+  panel: HTMLElement,
+  list: HTMLElement | null,
+  row: HTMLElement | null,
+  card: HTMLElement | null,
+  { width, cardWidth, edge }: { width: number; cardWidth: number; edge: number },
+): { side: "left" | "right" | "inside"; top: number; height: number } {
+  const rect = panel.getBoundingClientRect();
+  const panelWidth = panel.offsetWidth || width;
+  const dialog = panel.closest('[role="dialog"]')?.getBoundingClientRect();
+  const left = Math.max(0, dialog?.left ?? 0);
+  const right = Math.min(innerWidth, dialog?.right ?? innerWidth);
+  const needed = cardWidth + 2 * edge;
+  const side = right - (rect.left + panelWidth) >= needed ? "right" : rect.left - left >= needed ? "left" : "inside";
+  const ceiling = edge - rect.top;
+  const height = Math.round(Math.max(1, Math.min(400, panel.offsetHeight - ceiling)));
+  const rowTop = (list?.offsetTop ?? 0) + (row?.offsetTop ?? 0) - (list?.scrollTop ?? 0);
+  const top = Math.round(Math.max(ceiling, Math.min(rowTop, panel.offsetHeight - Math.min(card?.scrollHeight ?? 0, height))));
+  return { side, top, height };
+}
+
 // Escape closes one overlay, the topmost. Each open overlay that closes on Escape has an entry here; one window listener
 // runs the onClose of the entry opened last and stops the event, so a zoomed diagram in a Dialog, or a Dialog over a
 // Dialog, closes alone and the one under it stays open for the next Escape.

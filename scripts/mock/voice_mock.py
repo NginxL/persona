@@ -246,7 +246,7 @@ def tone(seconds):
 
 
 def speak(h, body):
-    """POST …/speak as the built-in extension answers it (server/internal/voice/speak.go): the text logged, then the
+    """POST …/speak as the built-in extension answers it (server/internal/modules/voice/speak.go): the text logged, then the
     voice as it comes (chunked, 100 ms at a time), or an error before any audio."""
     try:
         req = json.loads(body or b"{}")

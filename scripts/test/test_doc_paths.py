@@ -3,20 +3,44 @@
 Files move often (the Persona rename, scripts split by purpose, Persona Link moving under apple/); a doc that still points
 at the old place sends the next reader, or Agent, looking for a file that is gone. This checks every `backticked` path that
 starts with a top-level directory of the repository, and Go paths written relative to server/ (internal/hub/...), in the
-top-level docs and in the tracked Markdown under the module directories (MODULE_DOC_DIRS). Dated
+top-level docs, in the tracked Markdown under the module directories (MODULE_DOC_DIRS) and in the tracked CLAUDE.md
+files below the root. Dated
 records under docs/archive/ and the redesign drafts keep the paths of their own time and are not checked; neither are the
 rename docs, which name the retired paths on purpose.
 
 Relative Markdown link targets in the same docs, [text](path) and [text](path#anchor), must exist too; only the file is
 checked, not the anchor. The section names quoted after a doc path are test_doc_sections.py's.
 
-Every top-level doc must also be listed in CLAUDE.md's Docs index, the place Agents look for the design docs, and every
-record under docs/archive/ in the table of docs/archive/README.md.
+Every top-level doc must also be listed in the Docs index, the place Agents look for the design docs, and every
+record under docs/archive/ in the table of docs/archive/README.md. The index is the "## Docs index" section of
+CLAUDE.md or of docs/README.md (INDEX_HOMES); a doc listed in either counts, so the index can move between them.
 
 The tables in the same docs must stay whole: a blank line ends a table, and the rows after it render as plain text unless
 they start a table of their own (#7424: half of the Docs index).
+
+Sections move out of the largest docs into domain docs one at a time (#10613, #12735). The doc that takes them says so
+on a line of its own, outside code blocks:
+
+    <!-- moved-from: docs/protocol/protocol.md -->
+    <!-- moved-from: docs/protocol/protocol.md "Extension install, upgrade and uninstall progress" -->
+
+The path is the old doc's, from the repository root. The second form names an H2 that moved whole. That H2 keeps its
+heading in the old doc, so the names quoted after the old doc still resolve, over a pointer of at most POINTER_LINES
+lines that links to the new doc (no table, heading or code block). test_doc_sections.py looks a name quoted after the
+old doc up in the docs that took sections out of it, and test_doc_wire.py reads their WebSocket tables and feature
+flags. This checks that every moved-from line names an existing doc, and that a named H2 is a heading in both docs. It
+also checks that no line of the moved section is back in the old doc. Such a line comes from a branch cut before the
+move that kept its copy when it resolved the conflict. A line is matched by its first FINGERPRINT characters with its
+spaces collapsed; shorter lines and table rules are too common to tell apart. Under the moved H2's pointer heading
+such a line can only be the old copy, and the message says to delete it. Under another heading it may instead be that
+section's own line starting like a moved one (some protocol.md sections repeat a line from a neighbour), which the
+test cannot tell apart, so the message names the matching line in the new doc and says to reword the start of one of
+them when both belong. Moved-from lines count in the current docs and in the tracked CLAUDE.md files below the root.
 """
+from collections import defaultdict, namedtuple
 from pathlib import Path
+import os
+import posixpath
 import re
 import subprocess
 import tempfile
@@ -100,17 +124,38 @@ SCHEME = re.compile(r"^[A-Za-z][A-Za-z0-9+.-]*:")
 # A table row, and the delimiter row under a table's header: | --- | :-: |, the outer pipes optional (GFM 4.10).
 TABLE_ROW = re.compile(r"^\s*\|")
 TABLE_DELIMITER = re.compile(r"^\s*\|?(?:\s*:?-+:?\s*\|)+(?:\s*:?-+:?)?\s*$")
+HEADING_LINE = re.compile(r"^(#{1,6})\s+(.*?)\s*#*\s*$")
+LIST_ITEM = re.compile(r"^\s*(?:[-*+]|\d+\.)\s")
 
-def current_docs():
+# The files whose "## Docs index" section is the index: CLAUDE.md now, docs/README.md once it moves (#10613).
+INDEX_HOMES = ("CLAUDE.md", "docs/README.md")
+
+# <!-- moved-from: <old doc> --> or <!-- moved-from: <old doc> "<H2 that moved whole>" -->, on a line of its own.
+MOVED_FROM = re.compile(r'^\s*<!--\s*moved-from:\s*(\S+?)(?:\s+"([^"\n]+)")?\s*-->\s*$')
+# The most non-blank lines a pointer under a moved H2 may have, and how many characters of a line its fingerprint is.
+POINTER_LINES = 4
+FINGERPRINT = 80
+
+
+def current_docs(root=None):
     """Discover every maintained module guide, but not point-in-time archives."""
-    return sorted((p for p in (ROOT / "docs").rglob("*.md")
-                   if "archive" not in p.relative_to(ROOT / "docs").parts), key=Path.as_posix)
+    docs = (ROOT if root is None else Path(root)) / "docs"
+    return sorted((p for p in docs.rglob("*.md") if "archive" not in p.relative_to(docs).parts), key=Path.as_posix)
+
+
+def nested_instructions(root=None):
+    """The tracked CLAUDE.md files below the repository root (apple/CLAUDE.md), as paths from the root."""
+    root = ROOT if root is None else Path(root)
+    listed = subprocess.run(["git", "ls-files", "-z", "--", "*/CLAUDE.md"], cwd=root, check=True,
+                            capture_output=True, text=True).stdout
+    return sorted(name for name in listed.split("\0") if name and (root / name).is_file())
 
 
 def doc_files():
     files = [ROOT / name for name in ("CLAUDE.md", "README.md", "README.zh-CN.md", "THIRD_PARTY_NOTICES.md", "scripts/README.md")]
     files += current_docs()
     files += module_docs()
+    files += [ROOT / name for name in nested_instructions() if ROOT / name not in files]
     return [f for f in files if f.exists() and f.relative_to(ROOT).as_posix() not in SKIP_FILES]
 
 
@@ -190,6 +235,267 @@ def split_tables(text):
             yield number
 
 
+def docs_index(root=None):
+    """{file: its index lines} for each of INDEX_HOMES with a "## Docs index" section: the table rows and list items
+    from that heading to the next H1 or H2, so area subheadings stay inside."""
+    root = ROOT if root is None else Path(root)
+    found = {}
+    for home in INDEX_HOMES:
+        path = root / home
+        lines = path.read_text(encoding="utf-8").splitlines() if path.is_file() else []
+        if "## Docs index" in lines:
+            found[home] = []
+            for line in lines[lines.index("## Docs index") + 1:]:
+                if re.match(r"#{1,2}\s", line):
+                    break
+                if TABLE_ROW.match(line) or LIST_ITEM.match(line):
+                    found[home].append(line)
+    return found
+
+
+def unindexed_docs(root=None):
+    """The current docs, lessons aside, that no Docs index names in backticks."""
+    root = ROOT if root is None else Path(root)
+    entries = "\n".join(line for lines in docs_index(root).values() for line in lines)
+    docs = [doc.relative_to(root).as_posix() for doc in current_docs(root)
+            if "lessons" not in doc.relative_to(root / "docs").parts]
+    return [doc for doc in docs if f"`{doc}`" not in entries]
+
+
+def strip_parenthetical(name):
+    """Drop trailing parentheticals, nested ones too: "Pairing (QR (v2))" becomes "Pairing"."""
+    name = name.rstrip()
+    while name.endswith((")", "）")):
+        depth = 0
+        for i in range(len(name) - 1, -1, -1):
+            if name[i] in ")）":
+                depth += 1
+            elif name[i] in "(（":
+                depth -= 1
+                if depth == 0:
+                    break
+        else:
+            return name
+        name = name[:i].rstrip()
+    return name
+
+
+def heading_key(text):
+    """A heading as a moved-from line may name it: backticks, emphasis, trailing parentheticals, case and extra spaces
+    left out ("Progress (`extension_operations`, #3277)" is "progress")."""
+    return " ".join(strip_parenthetical(re.sub(r"[`*]", "", text)).split()).casefold()
+
+
+def heading_sections(text, key, levels=range(1, 7)):
+    """[(line number, body)] of each heading at one of levels whose heading_key is key, outside code blocks. body is
+    [(line number, line)] up to the next heading of the same or a higher level, code blocks included."""
+    lines, found = text.splitlines(), []
+    heads = [(number, len(m[1]), m[2])
+             for number, line in outside_fences(text) for m in [HEADING_LINE.match(line)] if m]
+    for index, (number, level, name) in enumerate(heads):
+        if level in levels and heading_key(name) == key:
+            end = next((n for n, deeper, _ in heads[index + 1:] if deeper <= level), len(lines) + 1)
+            found.append((number, [(n, lines[n - 1]) for n in range(number + 1, end)]))
+    return found
+
+
+def fingerprint(line):
+    """The first FINGERPRINT characters of line with its spaces collapsed; None for a shorter line or a table rule."""
+    text = " ".join(line.split())
+    return text[:FINGERPRINT] if len(text) >= FINGERPRINT and not TABLE_DELIMITER.match(text) else None
+
+
+def _takes_sections(path):
+    """Whether a moved-from line counts in the doc at path (from the root): a current doc or a nested CLAUDE.md."""
+    parts = path.split("/")
+    return (parts[0] == "docs" and "archive" not in parts[1:]) or (len(parts) > 1 and parts[-1] == "CLAUDE.md")
+
+
+# A moved-from line: the doc it is in, its line number, the old doc it names, and the H2 it names (None for none).
+Move = namedtuple("Move", "doc line source heading")
+
+
+class DocMoves:
+    """Which docs took sections out of which, from the moved-from lines of the docs that took them.
+
+    Build one with DocMoves.read(). A line naming a doc that is not there, or its own doc, adds no move; problems()
+    reports it."""
+
+    def __init__(self, root, lines):
+        self._root, self._lines, self._texts = root, lines, {}
+        self._into, self._from = defaultdict(list), defaultdict(list)
+        for move in self._valid():
+            if move.doc not in self._into[move.source]:
+                self._into[move.source].append(move.doc)
+                self._from[move.doc].append(move.source)
+
+    @classmethod
+    def read(cls, root=None, docs=None):
+        """Read the moved-from lines of the docs at the paths docs, from root (ROOT when None); when docs is None, of
+        all the current docs and nested CLAUDE.md files. A line in any other file does not count."""
+        root = ROOT if root is None else Path(root)
+        if docs is None:
+            docs = [path.relative_to(root).as_posix() for path in current_docs(root)] + nested_instructions(root)
+        lines = []
+        for doc in sorted(set(filter(_takes_sections, docs))):
+            text = (root / doc).read_text(encoding="utf-8", errors="replace")
+            if "moved-from" in text:
+                lines += [Move(doc, number, *match.groups()) for number, line in outside_fences(text)
+                          for match in [MOVED_FROM.match(line)] if match]
+        return cls(root, lines)
+
+    def split_from(self, doc):
+        """The docs that took sections out of doc, then those that took sections out of them, and so on."""
+        return self._walk(doc, self._into)
+
+    def sources_of(self, doc):
+        """The docs doc took sections out of, then those they took sections out of, and so on."""
+        return self._walk(doc, self._from)
+
+    def problems(self):
+        """A message for each moved-from line that names a doc that is not there or its own doc, or an H2 that is not
+        an H2 of the old doc or a heading of its own doc."""
+        found = []
+        for move in self._lines:
+            where = f"{move.doc}:{move.line}"
+            if move.source == move.doc:
+                found.append(f"{where}: moved-from names this doc; name the doc its sections came from")
+            elif not (self._root / move.source).is_file():
+                found.append(f"{where}: moved-from names {move.source}, which is not a file; write the old doc's "
+                             "path from the repository root")
+            elif move.heading is not None:
+                if not self._pointers(move):
+                    found.append(f"{where}: {move.source} has no H2 \"{move.heading}\": keep the moved section's "
+                                 f"heading there, over a pointer to {move.doc}")
+                if self._moved(move) is None:
+                    found.append(f"{where}: no heading \"{move.heading}\" here: keep the heading the section had in "
+                                 f"{move.source}")
+        return found
+
+    def moved_back(self):
+        """A message for each place a moved H2's text is back in its old doc: more than a pointer under its heading
+        there, the heading a second time, or a line whose fingerprint is one of the moved section's.
+
+        Under the pointer heading, or under a copy of it, only the pointer belongs, so such a line is the old copy and
+        the message says to delete it. Under any other heading the line may be the old copy put back somewhere else,
+        or a line of that other section that starts like a moved one (protocol.md's image answers repeat themselves
+        from section to section). The test cannot tell which, so the message names both lines, says which section
+        each is in, and gives both remedies; rewording the start of either line clears it."""
+        found = []
+        for move in self._valid():
+            if move.heading is None:
+                continue
+            pointers, moved = self._pointers(move), self._moved(move)
+            if not pointers or moved is None:
+                continue  # problems() reports a named heading that is missing
+            remedy = f"diff the old copy against {move.doc}, port any difference there, then delete the old copy"
+            (heading, body), copies = pointers[0], [number for number, _ in pointers[1:]]
+            found += [f"{move.source}:{number}: \"{move.heading}\" moved to {move.doc}, and its pointer heading is "
+                      f"above already: {remedy}" for number in copies]
+            extra = self._beyond_pointer(body)
+            if extra is not None:
+                found.append(f"{move.source}:{extra}: \"{move.heading}\" moved to {move.doc}, so only a pointer to "
+                             f"it stays under its heading here (at most {POINTER_LINES} lines, no table, heading or "
+                             f"code block): {remedy}")
+            elif not self._links(move.source, body, move.doc):
+                found.append(f"{move.source}:{heading}: \"{move.heading}\" moved to {move.doc}: link to it under "
+                             "this heading")
+            prints = {}
+            for number, line in moved[1]:
+                if not MOVED_FROM.match(line):
+                    prints.setdefault(fingerprint(line), number)
+            prints.pop(None, None)
+            under = {number for start, lines in pointers for number in (start, *(n for n, _ in lines))}
+            text = self._text(move.source)
+            lines = text.splitlines()
+            hits = [number for number, line in enumerate(lines, 1)
+                    if number not in (heading, extra, *copies) and fingerprint(line) in prints]
+            for first, last in self._blocks([number for number in hits if number in under], lines):
+                which = "this line is" if first == last else f"lines {first}-{last} are"
+                found.append(f"{move.source}:{first}: {which} in \"{move.heading}\", which moved to {move.doc}: "
+                             f"{remedy}")
+            for first, last in self._blocks([number for number in hits if number not in under], lines):
+                match = f"{move.doc}:{prints[fingerprint(lines[first - 1])]}"
+                which, it = (("this line starts", "it is") if first == last else
+                             (f"lines {first}-{last} start", "they are"))
+                here = self._section_of(text, first)
+                place = f'"{here}"' if here else "no heading"
+                found.append(f"{move.source}:{first}: {which} like {match} in \"{move.heading}\", which moved there, "
+                             f"but {it} under {place} here: if {it} the moved text back, {remedy}; if both docs "
+                             f"need their line, reword the first {FINGERPRINT} characters of one of them")
+        return found
+
+    @staticmethod
+    def _section_of(text, number):
+        """The name of the nearest H1 or H2 above line number of text, outside code blocks, or None."""
+        name = None
+        for at, line in outside_fences(text):
+            if at >= number:
+                break
+            heading = HEADING_LINE.match(line)
+            if heading and len(heading[1]) <= 2:
+                name = heading[2]
+        return name
+
+    def _valid(self):
+        return [move for move in self._lines if move.source != move.doc and (self._root / move.source).is_file()]
+
+    def _text(self, path):
+        if path not in self._texts:
+            self._texts[path] = (self._root / path).read_text(encoding="utf-8", errors="replace")
+        return self._texts[path]
+
+    def _pointers(self, move):
+        """The H2s the move names in its old doc: one pointer, unless a resolved conflict brought back a copy."""
+        return heading_sections(self._text(move.source), heading_key(move.heading), levels=(2,))
+
+    def _moved(self, move):
+        """The first section the move names in its own doc, at any level, or None."""
+        return next(iter(heading_sections(self._text(move.doc), heading_key(move.heading))), None)
+
+    @staticmethod
+    def _beyond_pointer(body):
+        """The line number of the first line under a pointer's heading that is more than a pointer, or None."""
+        for count, (number, line) in enumerate(((n, line) for n, line in body if line.strip()), 1):
+            if count > POINTER_LINES or TABLE_ROW.match(line) or HEADING_LINE.match(line) or FENCE.match(line):
+                return number
+        return None
+
+    @staticmethod
+    def _links(source, body, doc):
+        """Whether a line of body links to doc (a Markdown link resolving to it from source) or names its path."""
+        for _, line in body:
+            for target in LINK.findall(INLINE_CODE.sub("", line)):
+                path = unquote(target.strip("<>").split("#", 1)[0])
+                if path and posixpath.normpath(
+                        path[1:] if path.startswith("/") else posixpath.join(posixpath.dirname(source), path)) == doc:
+                    return True
+            if any(token.split("#", 1)[0] == doc for token in QUOTED.findall(line)):
+                return True
+        return False
+
+    @staticmethod
+    def _blocks(hits, lines):
+        """(first, last) line numbers of each run of hits with only lines too short to tell between them."""
+        blocks = []
+        for number in hits:
+            if blocks and all(fingerprint(line) is None for line in lines[blocks[-1][1]:number - 1]):
+                blocks[-1][1] = number
+            else:
+                blocks.append([number, number])
+        return [tuple(block) for block in blocks]
+
+    @staticmethod
+    def _walk(doc, edges):
+        found, queue = [], list(edges.get(doc, ()))
+        while queue:
+            nearest = queue.pop(0)
+            if nearest != doc and nearest not in found:
+                found.append(nearest)
+                queue += edges.get(nearest, ())
+        return found
+
+
 def generated_screenshot(path):
     producer = GENERATED_SCREENSHOTS.get(path)
     if producer is None:
@@ -212,6 +518,22 @@ def exists(path):
     if path.split("/", 1)[0] in SERVER_RELATIVE:
         return (ROOT / "server" / path).exists()
     return (ROOT / path).exists() or (ROOT / "scripts" / path).exists()
+
+
+def write_tree(root, files):
+    """Write {path from root: text} under root, for the tests' fixtures."""
+    for name, text in files.items():
+        path = Path(root) / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+
+
+def git_repository(root):
+    """Make root a git repository with its files in the index, away from the user's git configuration."""
+    env = {key: value for key, value in os.environ.items() if not key.startswith("GIT_")}
+    env.update(GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_NOSYSTEM="1")
+    for command in (["git", "init", "-q"], ["git", "add", "-A"]):
+        subprocess.run(command, cwd=root, env=env, check=True, capture_output=True)
 
 
 class DocPathTests(unittest.TestCase):
@@ -369,12 +691,200 @@ class DocPathTests(unittest.TestCase):
                                  [p.relative_to(root).as_posix() for p in current_docs()])
 
     def test_current_docs_are_in_the_index(self):
-        index = (ROOT / "CLAUDE.md").read_text().split("\n## Docs index\n", 1)[1]
-        rows = "\n".join(line for line in index.splitlines() if line.startswith("|"))
-        docs = [doc.relative_to(ROOT).as_posix() for doc in current_docs()
-                if "lessons" not in doc.relative_to(ROOT / "docs").parts]
-        missing = [doc for doc in docs if f"`{doc}`" not in rows]
-        self.assertEqual([], missing, "add these docs to the Docs index in CLAUDE.md")
+        homes = docs_index()
+        self.assertTrue(homes, f"no \"## Docs index\" section in {' or '.join(INDEX_HOMES)}")
+        self.assertEqual([], unindexed_docs(), f"add these docs to the Docs index in {' or '.join(homes)}")
+
+    def test_docs_index_counts_in_claude_md_or_docs_readme(self):
+        with tempfile.TemporaryDirectory(prefix="doc-index-") as directory:
+            root = Path(directory)
+            write_tree(root, {
+                "docs/README.md": "# Documentation\n", "docs/a.md": "# A\n", "docs/b.md": "# B\n",
+                "docs/lessons/testing.md": "# Lessons\n", "docs/archive/old.md": "# Old\n",
+                "CLAUDE.md": "# Rules\n\n## Docs index\n\n| Area | Docs |\n| --- | --- |\n"
+                             "| Start | `docs/README.md` navigation · `docs/a.md` |\n",
+            })
+            self.assertEqual(["CLAUDE.md"], list(docs_index(root)))
+            self.assertEqual(["docs/b.md"], unindexed_docs(root))
+            # The index moved to docs/README.md: one doc per line under area subheadings, up to the next H2.
+            (root / "docs/README.md").write_text("# Documentation\n\n## Docs index\n\n### Start\n\n"
+                                                 "- `docs/README.md` navigation\n  - `docs/b.md` nested\n\n"
+                                                 "## Keeping this tree small\n\n- `docs/a.md` is not an entry here\n")
+            (root / "CLAUDE.md").write_text("# Rules\n\n## Docs index\n\nEvery doc is listed in `docs/README.md`.\n")
+            self.assertEqual({"CLAUDE.md": [], "docs/README.md": ["- `docs/README.md` navigation",
+                                                                 "  - `docs/b.md` nested"]}, docs_index(root))
+            self.assertEqual(["docs/a.md"], unindexed_docs(root))
+            (root / "CLAUDE.md").write_text("# Rules\n\n## Layout\n\n- `docs/a.md`\n")
+            self.assertEqual(["docs/README.md"], list(docs_index(root)))
+            (root / "docs/README.md").write_text("# Documentation\n")
+            self.assertEqual({}, docs_index(root))
+            self.assertEqual(["docs/README.md", "docs/a.md", "docs/b.md"], unindexed_docs(root))
+
+    def test_nested_claude_md_files_are_checked(self):
+        with tempfile.TemporaryDirectory(prefix="doc-nested-") as directory:
+            root = Path(directory)
+            write_tree(root, {"CLAUDE.md": "# Rules\n", "apple/CLAUDE.md": "# Apple\n",
+                              "android/CLAUDE.md": "# Android\n", "apple/notes.md": "# Notes\n"})
+            git_repository(root)
+            (root / "server").mkdir()
+            (root / "server/CLAUDE.md").write_text("# Untracked\n")
+            with patch(__name__ + ".ROOT", root):
+                self.assertEqual(["android/CLAUDE.md", "apple/CLAUDE.md"], nested_instructions())
+                checked = [doc.relative_to(root).as_posix() for doc in doc_files()]
+                # android/CLAUDE.md is a module doc as well and counts once; apple/notes.md is not a doc here.
+                self.assertEqual(["CLAUDE.md", "android/CLAUDE.md", "apple/CLAUDE.md"], checked)
+
+    def test_moved_from_lines_are_read_from_current_docs_and_nested_claude_md(self):
+        with tempfile.TemporaryDirectory(prefix="doc-moves-") as directory:
+            root = Path(directory)
+            write_tree(root, {
+                "CLAUDE.md": "# Rules\n",
+                "docs/big.md": "# Big\n",
+                "docs/part.md": "<!-- moved-from: docs/big.md -->\n# Part\n",
+                "docs/later.md": "# Later\n\n  <!--moved-from:docs/part.md-->\n",
+                "docs/prose.md": ("Write `<!-- moved-from: docs/big.md -->` on a line of its own:\n\n```md\n"
+                                  "<!-- moved-from: docs/big.md -->\n```\n"),
+                "docs/archive/old.md": "<!-- moved-from: docs/big.md -->\n",
+                "apple/CLAUDE.md": "<!-- moved-from: CLAUDE.md \"Design system (iOS)\" -->\n# Apple\n",
+                "apple/notes.md": "<!-- moved-from: CLAUDE.md -->\n",
+            })
+            git_repository(root)
+            (root / "server").mkdir()
+            (root / "server/CLAUDE.md").write_text("<!-- moved-from: CLAUDE.md -->\n")
+            moves = DocMoves.read(root)
+            # Prose, code blocks, archived records, other Markdown and untracked CLAUDE.md files take no sections.
+            self.assertEqual(["docs/part.md", "docs/later.md"], moves.split_from("docs/big.md"))
+            self.assertEqual(["docs/later.md"], moves.split_from("docs/part.md"))
+            self.assertEqual(["docs/part.md", "docs/big.md"], moves.sources_of("docs/later.md"))
+            self.assertEqual([], moves.split_from("docs/later.md"))
+            self.assertEqual(["apple/CLAUDE.md"], moves.split_from("CLAUDE.md"))
+            self.assertEqual(["docs/later.md"], DocMoves.read(root, ["docs/later.md", "docs/part.md"]).split_from(
+                "docs/part.md"))
+
+    def test_moved_from_lines_must_name_a_doc_and_its_heading(self):
+        with tempfile.TemporaryDirectory(prefix="doc-moves-") as directory:
+            root = Path(directory)
+            write_tree(root, {
+                "docs/big.md": "# Big\n\n## Kept\n\n### Endpoints\n\n## Moved part (`moved_part`, #1)\n\nMoved.\n",
+                "docs/part.md": "\n".join([
+                    "<!-- moved-from: docs/gone.md -->",
+                    "<!-- moved-from: docs/part.md -->",
+                    '<!-- moved-from: docs/big.md "Not there" -->',
+                    '<!-- moved-from: docs/big.md "Endpoints" -->',  # an H3 there: only a whole H2 leaves a pointer
+                    '<!-- moved-from: docs/big.md "Kept" -->',
+                    '<!-- moved-from: docs/big.md "Moved part" -->',
+                    "# Part", "", "## Moved part", "", "### Endpoints", "",
+                ]),
+            })
+            moves = DocMoves.read(root, ["docs/big.md", "docs/part.md"])
+            expected = [
+                "docs/part.md:1: moved-from names docs/gone.md, which is not a file;",
+                "docs/part.md:2: moved-from names this doc;",
+                "docs/part.md:3: docs/big.md has no H2 \"Not there\": keep",
+                "docs/part.md:3: no heading \"Not there\" here: keep",
+                "docs/part.md:4: docs/big.md has no H2 \"Endpoints\": keep",
+                "docs/part.md:5: no heading \"Kept\" here: keep",
+            ]
+            problems = moves.problems()
+            self.assertEqual(len(expected), len(problems), problems)
+            for prefix, problem in zip(expected, problems):
+                self.assertTrue(problem.startswith(prefix), (prefix, problem))
+            self.assertEqual(["docs/part.md"], moves.split_from("docs/big.md"))
+            self.assertEqual([], moves.split_from("docs/gone.md"))
+
+    def test_moved_section_text_coming_back_is_reported(self):
+        moved_line = "The first line of the moved section, long enough for a fingerprint: eighty characters or more."
+        moved_row = "| `moved_type` | a row that moved with the section, also long enough for a fingerprint: 80 |"
+        outside = "A line of the new doc outside the moved section, long enough for a fingerprint: eighty or more."
+        rule = "| --- " * 14 + "|"
+        big = ["# Big", "", "## Kept", "",
+               "A line that stays in the big doc and is long enough to have a fingerprint of its own: eighty or more.",
+               rule, "", "### Endpoints", "",
+               "## Moved part (`moved_part`, #1)", "", 'Moved to [part.md](part.md#moved-part) ("Moved part").', "",
+               "## After", "", "Short."]
+        part = ['<!-- moved-from: docs/big.md "Moved part" -->', "# Part", "", "## Moved part", "", moved_line,
+                moved_row, rule, "Short line.", "", "### Endpoints", "", "## Elsewhere in part", "", outside, ""]
+        pointer = big.index('Moved to [part.md](part.md#moved-part) ("Moved part").') + 1
+
+        def found(lines, marker=part[0], moved=part):
+            with tempfile.TemporaryDirectory(prefix="doc-moved-back-") as directory:
+                root = Path(directory)
+                write_tree(root, {"docs/big.md": "\n".join(lines) + "\n",
+                                  "docs/part.md": "\n".join([marker] + moved[1:])})
+                moves = DocMoves.read(root, ["docs/big.md", "docs/part.md"])
+                self.assertEqual([], moves.problems())
+                return moves.moved_back()
+
+        def at(lines, number, text):
+            return lines[:number - 1] + text + lines[number - 1:]
+
+        cases = [  # (case, the big doc, the lines reported)
+            ("the move as made", big, []),
+            ("a line of the new doc outside the moved section", big + [outside], []),
+            ("a moved line shorter than a fingerprint", big + ["Short line."], []),
+            ("a pointer naming the new doc's path", big[:pointer - 1] + ["Moved to `docs/part.md`."] + big[pointer:],
+             []),
+            # A branch from before the move kept its copy, with its edit after the first 80 characters.
+            ("the old copy back under the pointer",
+             at(big, pointer + 1, ["", moved_line[:-1] + ", edited by a branch from before the move.", moved_row,
+                                   rule, "Short line."]), [pointer + 3, pointer + 2]),
+            ("a row a branch added to the moved section", at(big, pointer + 1, ["| `added_type` | added |"]),
+             [pointer + 1]),
+            ("a pointer that no longer links the new doc", big[:pointer - 1] + ["Moved away."] + big[pointer:],
+             [pointer - 2]),
+            ("a pointer longer than a pointer", at(big, pointer + 1, ["One.", "Two.", "Three.", "Four."]),
+             [pointer + 4]),
+            ("a moved line back elsewhere in the old doc", big + [moved_row + " edited"], [len(big) + 1]),
+            # One report for a block of them, short lines between included.
+            ("moved lines back together", big + [moved_line, "", "Short line.", moved_row, "", outside, moved_row],
+             [len(big) + 1, len(big) + 7]),
+            ("the old section back after the pointer, heading and all",
+             at(big, pointer + 1, ["", "## Moved part (`moved_part`, #1)", "", "Short line."]), [pointer + 2]),
+        ]
+        for case, lines, numbers in cases:
+            with self.subTest(case=case):
+                reported = found(lines)
+                self.assertEqual([f"docs/big.md:{n}:" for n in numbers],
+                                 [":".join(finding.split(":", 2)[:2]) + ":" for finding in reported], reported)
+        remedy = "diff the old copy against docs/part.md, port any difference there, then delete the old copy"
+        # Under the pointer heading, or a copy of it, only the pointer belongs: the line is the old copy.
+        stale = next(lines for case, lines, _ in cases if case == "the old copy back under the pointer")
+        reported = found(stale)
+        self.assertTrue(reported[1].endswith(f'this line is in "Moved part", which moved to docs/part.md: {remedy}'),
+                        reported)
+        copy = at(big, pointer + 1, ["", "## Moved part (`moved_part`, #1)", "", moved_row])
+        self.assertEqual(f'docs/big.md:{pointer + 4}: this line is in "Moved part", which moved to docs/part.md: '
+                         f"{remedy}", found(copy)[1])
+        # Under another heading it may be the old copy put back there or that section's own line: the test cannot
+        # tell, so it names the line in the new doc and both remedies, and never says to delete without the choice.
+        elsewhere = next(lines for case, lines, _ in cases if case == "a moved line back elsewhere in the old doc")
+        self.assertEqual([f'docs/big.md:{len(big) + 1}: this line starts like docs/part.md:7 in "Moved part", which '
+                          f'moved there, but it is under "After" here: if it is the moved text back, {remedy}; if '
+                          "both docs need their line, reword the first 80 characters of one of them"], found(elsewhere))
+        together = next(lines for case, lines, _ in cases if case == "moved lines back together")
+        self.assertIn(f'docs/big.md:{len(big) + 1}: lines {len(big) + 1}-{len(big) + 4} start like docs/part.md:6 in '
+                      '"Moved part", which moved there, but they are under "After" here: if they are the moved text '
+                      "back,", found(together)[0])
+        self.assertIn("under no heading here", found(at(big, 1, [moved_row]))[0])
+        # A later edit to the moved section repeats the start of a line that stays in the old doc (protocol.md's
+        # image answers do so from section to section): the line that stayed is named, not called moved text.
+        kept = big[4]
+        later = part[:part.index(moved_row) + 1] + [kept] + part[part.index(moved_row) + 1:]
+        self.assertEqual([f'docs/big.md:5: this line starts like docs/part.md:8 in "Moved part", which moved there, '
+                          f'but it is under "Kept" here: if it is the moved text back, {remedy}; if both docs need '
+                          "their line, reword the first 80 characters of one of them"], found(big, moved=later))
+        self.assertEqual([], found(big, moved=later[:7] + [kept[:40] + " reworded" + kept[40:]] + later[8:]))
+        # Only an H2 a moved-from line names is guarded: a line without the name only redirects.
+        self.assertEqual([], found(stale, marker="<!-- moved-from: docs/big.md -->"))
+
+    def test_moved_from_lines_name_a_doc_and_its_heading(self):
+        self.maxDiff = None
+        self.assertEqual([], DocMoves.read().problems(), "fix these moved-from lines")
+
+    def test_moved_sections_stay_out_of_their_old_doc(self):
+        self.maxDiff = None
+        self.assertEqual([], DocMoves.read().moved_back(), "a branch from before a move kept the moved text when it "
+                                                           "resolved its conflict")
 
     def test_archive_records_are_in_the_archive_table(self):
         archive = ROOT / "docs/archive"

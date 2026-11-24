@@ -614,6 +614,9 @@ func (h *Manager) syncExtensionNode(ctx context.Context, p *extension.Extension,
 		return nil
 	}
 	st, prog := h.startExtensionNode(ctx, p, m)
+	// A state the machine reports after this answer but before this write (a program that stops right after it
+	// started) would be overwritten by the answer until the next sync or report. Not observed: of 557 traced sync
+	// writes none was such an answer (#13643); a sync asked after a report records a newer state, as it should.
 	ps.keepNodeState(id, p.Record.Version, m.cfg.ID, st)
 	return prog
 }

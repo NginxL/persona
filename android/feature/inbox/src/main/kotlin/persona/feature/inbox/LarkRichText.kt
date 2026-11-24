@@ -29,40 +29,7 @@ import kotlinx.serialization.json.JsonPrimitive
 import persona.core.designsystem.*
 import persona.core.designsystem.Tokens
 import persona.core.designsystem.icons.PhIcons
-
-object LarkEmojiHelper {
-    /** Each key's symbol and its name for accessibility. */
-    private val EMOJI_MAP: Map<String, Pair<String, Int>> = mapOf(
-        "thumbsup" to ("👍" to R.string.inbox_lark_emoji_thumbsup),
-        "ok" to ("👌" to R.string.inbox_lark_emoji_ok),
-        "done" to ("✅" to R.string.inbox_lark_emoji_done),
-        "heart" to ("❤️" to R.string.inbox_lark_emoji_heart),
-        "smile" to ("😄" to R.string.inbox_lark_emoji_smile),
-        "laugh" to ("😂" to R.string.inbox_lark_emoji_laugh),
-        "surprised" to ("😮" to R.string.inbox_lark_emoji_surprised),
-        "cry" to ("😭" to R.string.inbox_lark_emoji_cry),
-        "clap" to ("👏" to R.string.inbox_lark_emoji_clap),
-        "fire" to ("🔥" to R.string.inbox_lark_emoji_fire),
-        "party" to ("🎉" to R.string.inbox_lark_emoji_party),
-        "thinking" to ("🤔" to R.string.inbox_lark_emoji_thinking),
-        "muscle" to ("💪" to R.string.inbox_lark_emoji_muscle),
-        "sob" to ("😭" to R.string.inbox_lark_emoji_cry),
-        "wave" to ("👋" to R.string.inbox_lark_emoji_wave),
-        "jiayi" to ("+1" to R.string.inbox_lark_emoji_jiayi),
-        "fist" to ("👊" to R.string.inbox_lark_emoji_fist),
-        "shake" to ("🤝" to R.string.inbox_lark_emoji_shake),
-        "rose" to ("🌹" to R.string.inbox_lark_emoji_rose),
-        "beer" to ("🍺" to R.string.inbox_lark_emoji_beer),
-        "cake" to ("🎂" to R.string.inbox_lark_emoji_cake),
-        "coffee" to ("☕" to R.string.inbox_lark_emoji_coffee),
-    )
-
-    fun symbol(key: String): String = EMOJI_MAP[key.lowercase()]?.first ?: "[$key]"
-    fun label(res: Resources, key: String): String {
-        val entry = EMOJI_MAP[key.lowercase()] ?: return key
-        return res.getString(entry.second)
-    }
-}
+import persona.core.inbox.*
 
 /** Ancestor chain block descriptor from the Lark gateway's rich text metadata. */
 data class LarkRichBlock(
@@ -270,31 +237,33 @@ fun LarkCodeBlock(code: String, language: String, modifier: Modifier = Modifier)
             .border(RichTextTokens.codeBorder, palette.ink.copy(alpha = 0.1f), shape)
             .padding(Tokens.Space.m)
     ) {
-        Row(
-            Modifier.fillMaxWidth().padding(bottom = Tokens.Space.xs),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(
-                language.ifBlank { "code" },
-                style = PersonaTheme.type.micro,
-                color = palette.ink3,
-                maxLines = 1
-            )
+        InterfaceContent {
             Row(
-                Modifier.clickable { copy(code, null) },
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(Tokens.Space.xxs)
+                Modifier.fillMaxWidth().padding(bottom = Tokens.Space.xs),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                JIcon(PhIcons.Copy, modifier = Modifier.size(RichTextTokens.codeCopyIcon), tint = palette.accent)
                 Text(
-                    stringResource(R.string.inbox_lark_code_copy),
+                    language.ifBlank { "code" },
                     style = PersonaTheme.type.micro,
-                    color = palette.accent,
-                    maxLines = 1,
-                    softWrap = false,
-                    overflow = TextOverflow.Ellipsis
+                    color = palette.ink3,
+                    maxLines = 1
                 )
+                Row(
+                    Modifier.clickable { copy(code, null) },
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(Tokens.Space.xxs)
+                ) {
+                    JIcon(PhIcons.Copy, modifier = Modifier.size(RichTextTokens.codeCopyIcon), tint = palette.accent)
+                    Text(
+                        stringResource(R.string.inbox_lark_code_copy),
+                        style = PersonaTheme.type.micro,
+                        color = palette.accent,
+                        maxLines = 1,
+                        softWrap = false,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
             }
         }
         SelectionContainer {

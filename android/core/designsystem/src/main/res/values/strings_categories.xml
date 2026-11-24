@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The information categories (#13500), shared by the assistant and settings. -->
+<resources>
+    <string name="designsystem_info_category_health">Health</string>
+    <string name="designsystem_info_category_finance">Money</string>
+    <string name="designsystem_info_category_relationships">Relationships</string>
+    <string name="designsystem_info_category_emotion">Feelings</string>
+    <string name="designsystem_info_category_legal_id">IDs and legal</string>
+</resources>

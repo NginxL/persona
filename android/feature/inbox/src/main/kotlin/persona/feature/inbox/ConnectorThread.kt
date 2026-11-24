@@ -69,6 +69,7 @@ import persona.core.designsystem.icons.PhIcon
 import persona.core.designsystem.icons.PhIcons
 import persona.core.designsystem.text
 import persona.core.navigation.Navigator
+import persona.core.inbox.*
 
 /**
  * A hub connector's inbox item opened as its conversation (#2726): the thread page the connector reads (oldest first,

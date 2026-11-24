@@ -74,7 +74,7 @@ func interactionPayloadIn(l i18n.Lang, ix proto.Interaction, machine string) map
 		body += i18n.T(l, "push.delegate_recommend_suffix", i18n.Args{"answer": d.Recommend})
 	}
 	subtitle := transcript.Title(ix.SessionTitle)
-	if inHealth(ix.Cwd) { // a health conversation's card: the lock screen does not say what it is about (assistant.go)
+	if inSpace(ix.Cwd) { // a space conversation's card: the lock screen does not say what it is about (assistant.go)
 		subtitle, body = i18n.T(l, "push.health_title"), i18n.T(l, "push.health_body")
 	}
 	if ix.Private { // a Just me turn's card (proto.Interaction.Private): the room may see the phone
@@ -110,7 +110,7 @@ func interactionPayloadIn(l i18n.Lang, ix proto.Interaction, machine string) map
 // askQuestion selects cards a notification can answer without opening the app: the manager's view of a to-do lets
 // the same cards be answered from its row (proto.Interaction.OneTapQuestion).
 func askQuestion(ix proto.Interaction) (proto.Question, bool) {
-	if q, ok := ix.OneTapQuestion(); ok && !inHealth(ix.Cwd) {
+	if q, ok := ix.OneTapQuestion(); ok && !inSpace(ix.Cwd) {
 		return q, true
 	}
 	return proto.Question{}, false

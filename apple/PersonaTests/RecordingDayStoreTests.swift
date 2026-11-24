@@ -1194,7 +1194,6 @@ struct RecordingDayStoreTests {
     return true
 }
 
-#if os(iOS) || os(visionOS)
 /// What WatchConnectivity's queue runs for a chunk or an event: acknowledged only once stored, together where it can be.
 /// Nonisolated, like that queue.
 struct RecordingDayIntakeTests {
@@ -1406,4 +1405,3 @@ struct RecordingDayIntakeTests {
         #expect(deletes.count == 1)
     }
 }
-#endif

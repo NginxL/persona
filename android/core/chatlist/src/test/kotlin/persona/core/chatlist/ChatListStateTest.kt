@@ -32,7 +32,7 @@ class ChatListStateTest {
     }
 
     @Composable private fun Reads(read: () -> Any, counted: () -> Unit) {
-        read()
+        val _ = read()
         counted()
     }
 

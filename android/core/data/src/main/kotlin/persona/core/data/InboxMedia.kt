@@ -8,9 +8,9 @@ import android.os.ParcelFileDescriptor
 import androidx.core.content.FileProvider
 import persona.core.contracts.api.InboxAssistantTransport
 import persona.core.contracts.api.MailTransport
-import persona.feature.inbox.LarkContentSource
-import persona.feature.inbox.LarkPart
-import persona.feature.inbox.MailAttachmentTransport
+import persona.core.inbox.LarkContentSource
+import persona.core.inbox.LarkPart
+import persona.core.inbox.MailAttachmentTransport
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -43,7 +43,7 @@ class InboxFileProvider : FileProvider() {
 /** Used by inbox decorators that must share the pairing's file-erasure lock. */
 suspend fun <T> ScopedHubData.withInboxFiles(write: () -> T): T = writeFiles(write)
 
-class InboxReadingStorage(private val data: ScopedHubData) : persona.feature.inbox.InboxStateStorage {
+class InboxReadingStorage(private val data: ScopedHubData) : persona.core.inbox.InboxStateStorage {
     private val file = android.util.AtomicFile(File(data.noBackupDirectory, "lark-reading/positions.json"))
     override suspend fun read(): String? = withContext(Dispatchers.IO) { data.writeFiles {
         if (file.baseFile.exists()) file.readFully().decodeToString() else null

@@ -6,7 +6,7 @@
 // way a TCP sender waits on its buffer; bytes leave the queue one after another at Config.Rate; each can be read
 // Config.Delay after it left. The receiving end holds at most Config.Queue bytes that have arrived and not been read:
 // past that the bottleneck stops sending, so a reader that stops reading stops the writer too. Order is kept and
-// nothing is lost. A design like cmd/vncbench's shaped transport, around no real connection.
+// nothing is lost. A design like internal/modules/screen-share/vncbench's shaped transport, around no real connection.
 package netshape
 
 import (

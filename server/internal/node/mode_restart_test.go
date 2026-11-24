@@ -280,6 +280,14 @@ func TestAWaitingBypassRestartGoesWhenItsProcessExits(t *testing.T) {
 	if !rowOf(t, n, sidA).BypassPending {
 		t.Fatal("no restart waits")
 	}
+	// A try a listing started may still be under way; one being carried out is left alone (dropGoneRestart).
+	sh := n.switches()
+	waitFor(t, "no try under way", func() bool {
+		sh.mu.Lock()
+		defer sh.mu.Unlock()
+		r := sh.restarts[sidA]
+		return r == nil || !r.applying
+	})
 	run(4101, false)
 	if rowOf(t, n, sidA).BypassPending || n.switches().restartMode(sidA) != "" {
 		t.Error("the pick outlived the claude it was picked for")

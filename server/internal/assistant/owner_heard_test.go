@@ -17,6 +17,9 @@ type heardExt struct {
 	heard []string
 }
 
+// ConnectorTool: none of its tools is a connector's.
+func (e *heardExt) ConnectorTool(string) bool { return false }
+
 func (e *heardExt) OwnerSpoke(session string) {
 	e.mu.Lock()
 	defer e.mu.Unlock()

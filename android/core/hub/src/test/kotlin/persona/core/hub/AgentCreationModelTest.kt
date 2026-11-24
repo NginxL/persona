@@ -78,15 +78,18 @@ class AgentCreationModelTest {
                 {"id":"default","name":"Default (recommended)","description":"Use the default model","resolved":"claude-opus-5-5",
                  "default":true,"efforts":["low","medium","high","xhigh","max"]},
                 {"id":"haiku","name":"Haiku 5.5","resolved":"claude-haiku-5-5"},
+                {"id":"claude-opus-5-5","name":"Opus 5.5","aliases":["opus","fable","sonnet","haiku"]},
                 {"id":"gateway/glm-5.3","name":"glm-5.3","description":"From gateway","efforts":["low","medium","high"],"future":1}]}"""))
             val list = requireNotNull(service.launcherModels("machine/one", "my launcher"))
             assertEquals("claude", (list.agent).zhAny())
             assertNull(list.locked)
-            assertEquals(listOf("default", "haiku", "gateway/glm-5.3"), (list.models.map { it.id }).zhAny())
-            assertEquals(listOf(true, false, false), list.models.map { it.isDefault })
+            assertEquals(listOf("default", "haiku", "claude-opus-5-5", "gateway/glm-5.3"), (list.models.map { it.id }).zhAny())
+            assertEquals(listOf(true, false, false, false), list.models.map { it.isDefault })
             assertEquals("claude-opus-5-5", (list.models[0].resolved).zhAny())
             assertEquals(emptyList<String>(), (list.models[1].efforts).zhAny())
-            assertEquals(listOf("low", "medium", "high"), (list.models[2].efforts).zhAny())
+            assertEquals(listOf("low", "medium", "high"), (list.models[3].efforts).zhAny())
+            assertEquals(listOf("opus", "fable", "sonnet", "haiku"), list.models[2].aliases)
+            assertTrue("older rows keep the empty-alias default", list.models.take(2).all { it.aliases.isEmpty() })
             val first = server.takeRequest()
             assertEquals("/api/v1/machines/machine%2Fone/launchers/my%20launcher/models", (first.requestUrl?.encodedPath).zhAny())
             assertNull(first.requestUrl?.queryParameter("refresh"))

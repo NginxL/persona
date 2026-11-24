@@ -151,7 +151,7 @@
     },
     {
       "name": "supervisor_review_in_progress",
-      "description": "A task judged finished waits for its supervisor's review, not the owner's: while the review is younger than an hour (pending_since) it is in In progress and not in Needs you. One second short of the hour still is; so is one the owner already looked at (seen_at), which the To-dos page files as Done. The web lists the review rows under its Persona reviewing entry instead (web_review, #8678).",
+      "description": "A task judged finished waits for its supervisor's review, not the owner's: while the review is younger than an hour (pending_since) it is in In progress and not in Needs you. One second short of the hour still is; so is one the owner already looked at, because Seen neither accepts nor files supervised work (#5732). The web lists the review rows under its Persona reviewing entry instead (web_review, #8678).",
       "source": [
         "web/src/lib/assistant-entries.ts assistantEntries",
         "android/core/domain/src/main/kotlin/persona/core/domain/tasks/AssistantEntries.kt assistantEntries",
@@ -281,7 +281,7 @@
     },
     {
       "name": "supervisor_review_with_open_pr",
-      "description": "A task whose fresh, open PR waits for a maintainer (the web's Waiting for merge, #7614) and whose supervisor's review is under way: the review is Persona's own work, so it is in In progress saying its supervisor is reviewing it, not Waiting for merge, even after the owner looked at it (seen_at, which the To-dos page files as Waiting for merge). Once the review is overdue it is the owner's: Needs you wins over the PR. Clients without the Waiting for merge group read the same split. The web lists the review rows under its Persona reviewing entry instead (web_review, #8678).",
+      "description": "A task whose fresh, open PR waits for a maintainer (the web's Waiting for merge, #7614) and whose supervisor's review is under way: the review is Persona's own work, so it is in In progress saying its supervisor is reviewing it, not Waiting for merge, even after the owner looked at it; Seen neither accepts the work nor moves it to Waiting for merge (#5732). Once the review is overdue it is the owner's: Needs you wins over the PR. Clients without the Waiting for merge group read the same split. The web lists the review rows under its Persona reviewing entry instead (web_review, #8678).",
       "source": [
         "web/src/lib/assistant-entries.ts assistantEntries",
         "android/core/domain/src/main/kotlin/persona/core/domain/tasks/AssistantEntries.kt assistantEntries",
@@ -750,8 +750,8 @@
       "expected": {
         "needs_you": [
           "task:t-asks",
-          "task:t-verify",
-          "task:t-user"
+          "task:t-user",
+          "task:t-verify"
         ],
         "running": [
           "task:t-fresh"
@@ -3019,7 +3019,7 @@
     },
     {
       "name": "invalid_conversation_unfinished",
-      "description": "An account-sealed conversation is not a new owner interruption after replacement, parking, or closing.",
+      "description": "An account-sealed conversation remains an owner interruption even with stale transient retry work.",
       "source": [
         "issue #10399"
       ],
@@ -3055,7 +3055,12 @@
             "updated_at": "2026-11-18T09:00:00Z",
             "turn_error": "This conversation was compacted natively by <account>: the compaction is sealed (encrypted) to that account and can't go to it now",
             "turn_error_kind": "unrecoverable",
-            "turn_error_code": "compaction_sealed"
+            "turn_error_code": "compaction_sealed",
+            "work": {
+              "phase": "blocked",
+              "on": "transient",
+              "wait": "Stale retry"
+            }
           }
         ],
         "interactions": [],
@@ -3135,6 +3140,85 @@
           "task:t-invalid"
         ],
         "shelved": []
+      }
+    },
+    {
+      "name": "invalid_conversation_waiting_replacement",
+      "description": "A replacement waiting on transient work with its own recoverable turn_error keeps an old sealed interruption out of Needs you.",
+      "source": [
+        "issue #10399"
+      ],
+      "derived": true,
+      "input": {
+        "conversation": "main-chat",
+        "main": "main-chat",
+        "now": "2026-11-18T09:00:00Z",
+        "todos": [
+          {
+            "id": "t-invalid",
+            "title": "Fix the build",
+            "origin": "main-chat",
+            "created_at": "2026-11-18T08:00:00Z",
+            "updated_at": "2026-11-18T09:00:00Z",
+            "agents": [
+              {
+                "machine_id": "box",
+                "session_id": "old",
+                "linked_at": "2026-11-18T08:00:00Z"
+              },
+              {
+                "machine_id": "box",
+                "session_id": "new",
+                "linked_at": "2026-11-18T08:30:00Z"
+              }
+            ]
+          }
+        ],
+        "sessions": [
+          {
+            "machine_id": "box",
+            "session_id": "old",
+            "title": "Previous attempt",
+            "cwd": "/code/app",
+            "status": "done",
+            "state": "unread",
+            "updated_at": "2026-11-18T08:59:00Z",
+            "turn_error": "opaque account transition 7A99",
+            "turn_error_kind": "unrecoverable",
+            "turn_error_code": "compaction_sealed"
+          },
+          {
+            "machine_id": "box",
+            "session_id": "new",
+            "title": "Current attempt",
+            "cwd": "/code/app",
+            "status": "idle",
+            "state": "idle",
+            "updated_at": "2026-11-18T09:00:00Z",
+            "turn_error": "API Error: 503 Service Unavailable",
+            "turn_error_kind": "transient",
+            "waiting": true,
+            "background_tasks_count": 0,
+            "work": {
+              "phase": "blocked",
+              "on": "transient",
+              "wait": "Retrying after a transient failure"
+            }
+          }
+        ],
+        "interactions": [],
+        "plans": {},
+        "feed": []
+      },
+      "expected": {
+        "needs_you": [],
+        "running": [
+          "task:t-invalid"
+        ],
+        "shelved": [],
+        "activity": {
+          "task:t-invalid": null
+        }
       }
     },
     {
@@ -3333,6 +3417,120 @@
       }
     },
     {
+      "name": "supervised_delivery_hold_with_its_supervisor",
+      "description": "An Agent's closeout held a supervised task's delivery for the owner, but no review came since: the hub sends unblock supervisor (#13191). It is its supervisor's to turn into a real decision, park or send on, so it is in In progress with its supervisor reviewing, never in Needs you; the web lists it under Persona reviewing (web_review). Once the supervisor opens needs_user, the hold is unblock user again and the task is in Needs you. A client that does not know the value treats it as not the owner's.",
+      "source": [
+        "web/src/lib/assistant-entries.ts assistantEntries",
+        "android/core/domain/src/main/kotlin/persona/core/domain/tasks/AssistantEntries.kt assistantEntries",
+        "apple/Persona/Views/Assistant/Tasks/AssistantActionBar.swift AssistantEntries.split",
+        "server/internal/assistant/delivery.go currentDelivery",
+        "docs/assistant/agent-work.md"
+      ],
+      "derived": true,
+      "input": {
+        "conversation": "main-chat",
+        "main": "main-chat",
+        "now": "2026-11-10T09:00:00Z",
+        "todos": [
+          {
+            "id": "t-held",
+            "title": "Send the sample notice",
+            "origin": "main-chat",
+            "created_at": "2026-11-10T08:00:00Z",
+            "updated_at": "2026-11-10T08:40:00Z",
+            "agents": [
+              {
+                "machine_id": "mac",
+                "session_id": "w-held",
+                "linked_at": "2026-11-10T08:00:00Z"
+              }
+            ],
+            "supervision": {
+              "supervisor": "main-chat",
+              "state": ""
+            },
+            "delivery": {
+              "state": "pr",
+              "gate": "Approve the test send after the deploy",
+              "unblock": "supervisor",
+              "at": "2026-11-10T08:40:00Z"
+            }
+          },
+          {
+            "id": "t-decided",
+            "title": "Publish the sample page",
+            "origin": "main-chat",
+            "created_at": "2026-11-10T07:00:00Z",
+            "updated_at": "2026-11-10T08:40:00Z",
+            "agents": [
+              {
+                "machine_id": "mac",
+                "session_id": "w-decided",
+                "linked_at": "2026-11-10T07:00:00Z"
+              }
+            ],
+            "supervision": {
+              "supervisor": "main-chat",
+              "state": "needs_user",
+              "reviews": [
+                {
+                  "at": "2026-11-10T08:45:00Z",
+                  "verdict": "needs_user",
+                  "reason": "Approve the release"
+                }
+              ]
+            },
+            "delivery": {
+              "state": "pr",
+              "gate": "Approve the release",
+              "unblock": "user",
+              "at": "2026-11-10T08:40:00Z"
+            }
+          }
+        ],
+        "sessions": [
+          {
+            "machine_id": "mac",
+            "session_id": "w-held",
+            "title": "w-held",
+            "cwd": "/home/user/project",
+            "state": "idle",
+            "status": "idle",
+            "updated_at": "2026-11-10T08:40:00Z",
+            "state_since": "2026-11-10T08:40:00Z"
+          },
+          {
+            "machine_id": "mac",
+            "session_id": "w-decided",
+            "title": "w-decided",
+            "cwd": "/home/user/project",
+            "state": "idle",
+            "status": "idle",
+            "updated_at": "2026-11-10T08:40:00Z",
+            "state_since": "2026-11-10T08:40:00Z"
+          }
+        ],
+        "interactions": [],
+        "plans": {},
+        "feed": []
+      },
+      "expected": {
+        "needs_you": [
+          "task:t-decided"
+        ],
+        "running": [
+          "task:t-held"
+        ],
+        "shelved": [],
+        "supervisor_review": [
+          "task:t-held"
+        ],
+        "web_review": [
+          "task:t-held"
+        ]
+      }
+    },
+    {
       "name": "personal_verification_needs_you_before_ask",
       "description": "A personal-verification task has one owner-action home, not running, shelved or completed.",
       "source": [
@@ -3466,6 +3664,142 @@
         ],
         "running": [],
         "shelved": []
+      }
+    },
+    {
+      "name": "finished_tasks_with_leftover_asks_in_neither",
+      "description": "An ask makes a task the owner's only while the task is open, as the hub's To-dos triage has it (#12974). A task its supervisor's accepting review closed, whose \"please verify\" ask was left on it (t-verified), is under Finished like any other task that finished in the last day, not in Needs you; so is a closed task that still carries a decision or a cannot ask (t-old-decision is older than a day, t-cannot was made by hand: in no entry). Only the open task's decision (t-open-decision) waits on the owner. A withdrawn plan (p-withdrawn) is not a row; the open one (p-open) is. Every Needs you row is one the tray lists, so its count is these rows.",
+      "source": [
+        "web/src/lib/assistant-entries.ts taskAwaitsDecision",
+        "android/core/domain/src/main/kotlin/persona/core/domain/tasks/AssistantEntries.kt awaitsDecision",
+        "apple/Persona/Views/Assistant/Tasks/AssistantActionBar.swift AssistantEntries.awaitsDecision",
+        "server/internal/assistant/todo_triage.go ruleOwnerDecides",
+        "issue #12974"
+      ],
+      "derived": true,
+      "input": {
+        "conversation": "main-chat",
+        "main": "main-chat",
+        "now": "2026-11-10T12:00:00Z",
+        "todos": [
+          {
+            "id": "t-verified",
+            "title": "Ship the export fix",
+            "origin": "main-chat",
+            "created_at": "2026-11-09T08:00:00Z",
+            "updated_at": "2026-11-10T10:00:03Z",
+            "agents": [],
+            "done_at": "2026-11-10T10:00:00Z",
+            "done_by": "review",
+            "supervision": {
+              "supervisor": "main-chat",
+              "state": "accepted",
+              "reviews": [
+                {
+                  "verdict": "accepted",
+                  "note": "All criteria met",
+                  "at": "2026-11-10T10:00:00Z"
+                }
+              ]
+            },
+            "ask": {
+              "verdict": "Done: deployed, please verify",
+              "asked_at": "2026-11-10T10:00:03Z",
+              "risk": "safe"
+            }
+          },
+          {
+            "id": "t-old-decision",
+            "title": "Pick the backup window",
+            "origin": "main-chat",
+            "created_at": "2026-11-07T08:00:00Z",
+            "updated_at": "2026-11-08T08:00:00Z",
+            "agents": [],
+            "done_at": "2026-11-08T08:00:00Z",
+            "ask": {
+              "verdict": "Night or morning?",
+              "asked_at": "2026-11-07T09:00:00Z",
+              "outcome": "decide"
+            }
+          },
+          {
+            "id": "t-cannot",
+            "title": "Renew the certificate",
+            "created_at": "2026-11-10T07:00:00Z",
+            "updated_at": "2026-11-10T09:00:00Z",
+            "agents": [],
+            "done_at": "2026-11-10T09:00:00Z",
+            "ask": {
+              "verdict": "Cannot do it without the registrar login",
+              "asked_at": "2026-11-10T08:00:00Z",
+              "outcome": "cannot"
+            }
+          },
+          {
+            "id": "t-open-decision",
+            "title": "Choose the alert channel",
+            "origin": "main-chat",
+            "created_at": "2026-11-10T07:00:00Z",
+            "updated_at": "2026-11-10T11:00:00Z",
+            "agents": [],
+            "supervision": {
+              "supervisor": "main-chat",
+              "state": "needs_user"
+            },
+            "ask": {
+              "verdict": "Chat or mail?",
+              "asked_at": "2026-11-10T11:00:00Z",
+              "outcome": "decide"
+            }
+          }
+        ],
+        "sessions": [],
+        "interactions": [],
+        "plans": {
+          "p-open": {
+            "id": "p-open",
+            "conversation": "main-chat",
+            "state": "open",
+            "created_at": "2026-11-10T11:30:00Z",
+            "tasks": [
+              {
+                "title": "Rotate the logs",
+                "prompt": "Rotate them",
+                "cwd": "/home/user/project",
+                "machine": "mac"
+              }
+            ]
+          },
+          "p-withdrawn": {
+            "id": "p-withdrawn",
+            "conversation": "main-chat",
+            "state": "dismissed",
+            "created_at": "2026-11-10T09:30:00Z",
+            "tasks": [
+              {
+                "title": "Compare the two indexers",
+                "prompt": "Compare them",
+                "cwd": "/home/user/project",
+                "machine": "mac"
+              }
+            ]
+          }
+        },
+        "feed": []
+      },
+      "expected": {
+        "needs_you": [
+          "plan:p-open",
+          "task:t-open-decision"
+        ],
+        "running": [],
+        "shelved": [],
+        "finished": [
+          "task:t-verified"
+        ],
+        "finished_new": [
+          "task:t-verified"
+        ]
       }
     }
   ]

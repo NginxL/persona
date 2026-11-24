@@ -317,8 +317,9 @@ func TestForceArchiveCloseFailureClearsFenceDatabase(t *testing.T) {
 	if _, err := database.Setting(context.Background(), agentArchivesKey, &records); err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := records[runtimeListID("mac", row.SessionID)]; ok {
-		t.Fatal("failed close left a durable fence")
+	rec, ok := records[runtimeListID("mac", row.SessionID)]
+	if !ok || rec.Archived || !rec.ClosedAt.IsZero() {
+		t.Fatalf("failed close did not leave a restored generation without a fence: %+v present=%v", rec, ok)
 	}
 	if len(ft.s.pendingInteractions()) != 3 {
 		t.Fatal("failed close removed cards")

@@ -1,4 +1,3 @@
-#if os(iOS)
 import Foundation
 import Testing
 @testable import Persona
@@ -222,4 +221,3 @@ struct ShellStateTests {
         #expect(n.pill == nil)
     }
 }
-#endif

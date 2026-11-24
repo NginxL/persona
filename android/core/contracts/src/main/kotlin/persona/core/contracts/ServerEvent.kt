@@ -62,6 +62,8 @@ data class Hello(
     @SerialName("min_app_build") val minAppBuild: Int? = null,
     /** Dedicated hub-owned receipt protocol version; an extension's feature string cannot establish trust. */
     @SerialName("message_send_state") val messageSendState: Int? = null,
+    /** The pictures a message may carry; older hubs use the same documented defaults, not a four-picture cap. */
+    @SerialName("image_limits") val imageLimits: ImageLimitsTable? = null,
 ) : ServerEvent
 
 @KeepGeneratedSerializer
@@ -260,6 +262,10 @@ data class KnowledgeSelectionEvent(val manager: String? = null) : ServerEvent
 @Serializable
 data class SavedPromptsEvent(val manager: String? = null) : ServerEvent
 
+/** One assistant's starred messages changed. An absent manager names the hub's default assistant. */
+@Serializable
+data class StarredMessagesEvent(val manager: String? = null) : ServerEvent
+
 /**
  * An extension's install, upgrade or uninstall moved on (docs/protocol/protocol.md "Extension install, upgrade and uninstall progress"): only to a client
  * that says `extension_operations`, and not replayed after a reconnect (the page lists them again).
@@ -373,6 +379,7 @@ object ServerEventSerializer : KSerializer<ServerEvent> {
             "todos" -> input.json.decodeFromJsonElement<TodosEvent>(obj)
             "assistant_feed" -> input.json.decodeFromJsonElement<AssistantFeedEvent>(obj)
             "assistant_saved_prompts" -> input.json.decodeFromJsonElement<SavedPromptsEvent>(obj)
+            "assistant_starred" -> input.json.decodeFromJsonElement<StarredMessagesEvent>(obj)
             "directions" -> DirectionsEvent
             "task_plan" -> input.json.decodeFromJsonElement<TaskPlanEvent>(obj)
             "assistant_view" -> input.json.decodeFromJsonElement<AssistantViewEvent>(obj)
@@ -433,6 +440,7 @@ object ServerEventSerializer : KSerializer<ServerEvent> {
             is TodosEvent -> "todos" to output.json.encodeToJsonElement(value)
             is AssistantFeedEvent -> "assistant_feed" to output.json.encodeToJsonElement(value)
             is SavedPromptsEvent -> "assistant_saved_prompts" to output.json.encodeToJsonElement(value)
+            is StarredMessagesEvent -> "assistant_starred" to output.json.encodeToJsonElement(value)
             DirectionsEvent -> "directions" to JsonObject(emptyMap())
             is TaskPlanEvent -> "task_plan" to output.json.encodeToJsonElement(value)
             is AssistantViewEvent -> "assistant_view" to output.json.encodeToJsonElement(value)

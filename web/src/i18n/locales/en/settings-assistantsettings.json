@@ -139,6 +139,8 @@
   "close_ended_terminals_hint": "When an Agent Persona started is done, cancelled or quits, its terminal tab closes too. Busy Agents and terminals you opened yourself are never closed; the conversation is kept and can be resumed",
   "inbox_signals": "Tell supervisors about new messages",
   "inbox_signals_hint": "When the Inbox's AI twin links a new message from someone else to a task Persona follows up, the conversation supervising that task hears of it in its next supervision message. Needs the AI twin. Uses extra model calls",
+  "inbox_todo_forward": "Auto-forward PR/Issue events to bound to-do Agent",
+  "inbox_todo_forward_hint": "Off by default. Deterministically forward incoming Inbox items containing an exact GitHub PR or Issue URL bound to an open to-do straight to its Agent without LLM calls; unavailable Agents fall back to the supervisor",
   "archive_closed": "Archive closed sessions after",
   "archive_closed_hint": "A closed session with no open task leaves the lists after this many idle days and stays under Archived. 0 turns it off",
   "archive_closed_unit": "days",

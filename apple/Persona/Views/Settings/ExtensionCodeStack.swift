@@ -716,14 +716,15 @@ struct CodeTabsBar: View {
 
     var body: some View {
         // One row when it fits (no scroll view: the first one on a page under the navigation bar gets the bar's height
-        // as its inset and drew its row out of sight); a row that scrolls sideways when it does not.
+        // as its inset and drew its row out of sight); a row that scrolls sideways when it does not. That row stays
+        // clipped to its slot, as the breadcrumb's and `CapsuleFilterBar`'s do: unclipped, it was drawn a bar's height
+        // lower, under the page's list (#13010).
         ViewThatFits(in: .horizontal) {
             row
             ScrollView(.horizontal) { row }
                 .scrollIndicators(.hidden)
                 .scrollEdgeEffectHiddenWhenSupported(true, for: .all)
                 .contentMargins(.vertical, Theme.Space.flush, for: .scrollContent)
-                .scrollClipDisabled()
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .accessibilityElement(children: .contain)
@@ -878,11 +879,7 @@ struct CodeFileBlock: View {
     /// One line's height in the lines view (its own rule: the font's line height and a quarter).
     var lineHeight: CGFloat {
         let f = CodeMetrics.font
-        #if os(macOS)
-        return ceil((f.ascender - f.descender + f.leading) * 1.25) // NSFont has no lineHeight
-        #else
         return ceil(f.lineHeight * 1.25)
-        #endif
     }
 
     func line(_ i: Int) -> NSAttributedString {

@@ -9,7 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/nwverse/persona/server/internal/feishubot"
+	"github.com/nwverse/persona/server/internal/botcard"
+
 	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/prompts"
 	"github.com/nwverse/persona/server/internal/proto"
@@ -36,6 +37,15 @@ func newBriefRunEnv(t *testing.T, facts bool) *briefRunEnv { return newBriefRunE
 
 // newBriefRunEnvWith is newBriefRunEnv with more on the board when the run starts (its facts are worked out then).
 func newBriefRunEnvWith(t *testing.T, facts bool, more func(e *briefRunEnv)) *briefRunEnv {
+	t.Helper()
+	if facts {
+		needsBriefingModule(t)
+	}
+	return briefRunEnvWith(t, facts, more)
+}
+
+// briefRunEnvWith is newBriefRunEnvWith whether or not this build has the briefing module (modules_test.go).
+func briefRunEnvWith(t *testing.T, facts bool, more func(e *briefRunEnv)) *briefRunEnv {
 	t.Helper()
 	f := newFakeHub().withMachine()
 	e := &briefRunEnv{t: t, f: f}
@@ -248,8 +258,8 @@ func TestBriefAcceptButtonIsForItsRoundOnly(t *testing.T) {
 	if value == nil || value["id"] != "todo_v1" || value["asked_at"] == "" {
 		t.Fatalf("no Accept button with its round on the card: %v", value)
 	}
-	press := func(v map[string]any) *feishubot.CardAction {
-		var a feishubot.CardAction
+	press := func(v map[string]any) *botcard.CardAction {
+		var a botcard.CardAction
 		a.Action.Value = v
 		a.Context.MessageID = "om_brief_1"
 		return &a
@@ -290,6 +300,7 @@ func TestBriefCardReplacesThatDaysAcceptanceReminders(t *testing.T) {
 
 // If the briefing has not gone out an hour after its time, the reminders go as they did before.
 func TestBriefReminderComesWhenTheBriefingDoesNot(t *testing.T) {
+	needsLarkLayer(t)
 	e := newBriefRunEnv(t, true)
 	e.s.remindAcceptance(e.at(9, 30)) // the briefing's hour is not over
 	if e.reminded() != 0 {
@@ -369,6 +380,7 @@ func TestBriefCardIsForTheRunsOwnTurnOnly(t *testing.T) {
 // The reminders wait an hour for the briefing only when its card can go out: not with the Lark bot's pushes off, not on a
 // day the routine does not run, and never past midnight.
 func TestBriefReminderGraceOnlyWhenTheCardCanGoOut(t *testing.T) {
+	needsLarkLayer(t)
 	setMorning := func(e *briefRunEnv, change func(t *Task)) {
 		sc := e.s.loadSchedule(context.Background())
 		sc.mu.Lock()
@@ -438,7 +450,7 @@ func TestBriefCardsKeepEveryOwnerWaitWithinPhysicalBudget(t *testing.T) {
 	f.Directions = []prompts.BriefDirection{d}
 	const header = "Model unavailable; these are the computed facts"
 	card, plain, _ := (&Service{}).briefCardWithHeader(f, "Morning briefing", "", header)
-	card.Buttons(feishubot.Btn("Open", feishubot.Default, map[string]any{"a": "open"}))
+	card.Buttons(botcard.Btn("Open", botcard.Default, map[string]any{"a": "open"}))
 	cards := splitBriefAnswerCards(card, plain, header)
 	if len(cards) < 2 {
 		t.Fatalf("the oversized fixture produced %d card, want continuations", len(cards))
@@ -462,7 +474,7 @@ func TestBriefCardsKeepEveryOwnerWaitWithinPhysicalBudget(t *testing.T) {
 	last := -1
 	rendered := all.String()
 	for i, w := range d.Waits {
-		row := feishubot.EscapeMarkdown(w.Line) + briefLink(f.l, w.Link)
+		row := botcard.EscapeMarkdown(w.Line) + briefLink(f.l, w.Link)
 		if n := strings.Count(rendered, row); n != 1 {
 			t.Fatalf("owner row %d occurs %d times in the rich cards, want exactly once", i, n)
 		}

@@ -2,7 +2,7 @@ import CryptoKit
 import Foundation
 
 // The live screen's video over UDP (#7873, docs/extensions/computer-use.md "Video over UDP (#7873)"): the phone's end
-// of the packets the node's internal/screenlink sends and takes on a UDP flow. The AEAD is a `ScreenUDPCipher`:
+// of the packets the node's internal/modules/screen-share/screenlink sends and takes on a UDP flow. The AEAD is a `ScreenUDPCipher`:
 // CryptoKit's AES-256-GCM (`ScreenUDPAESGCM`), or a test's own. spec/fixtures/screen-udp holds both ends to the same
 // bytes.
 

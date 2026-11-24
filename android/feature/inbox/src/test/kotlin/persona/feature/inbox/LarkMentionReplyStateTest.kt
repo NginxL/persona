@@ -14,6 +14,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import persona.core.contracts.JsonCodec
 import java.io.IOException
+import persona.core.inbox.*
 
 /** #576 G122: picked mentions belong to the durable reply, not just to the text field currently on screen. */
 @OptIn(ExperimentalCoroutinesApi::class)

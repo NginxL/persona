@@ -205,7 +205,7 @@ func (s *Service) withTask(ix proto.Interaction) proto.Interaction {
 	if ok && l.Task {
 		ix.TaskTitle = l.Title
 	}
-	ix.FoldedUnder, ix.FoldedAs, ix.FoldedSide = s.foldedUnder(ix.MachineID, ix.SessionID)
+	ix.FoldedUnderMachineID, ix.FoldedUnder, ix.FoldedAs, ix.FoldedSide = s.foldedUnderWithMachine(ix.MachineID, ix.SessionID)
 	return ix
 }
 

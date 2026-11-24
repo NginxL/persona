@@ -19,24 +19,21 @@ export const PERMISSION_MODES: ModeOption[] = [
   { id: "bypassPermissions", title: t("lib-session-actions.mode_bypass_permissions"), detail: t("lib-session-actions.mode_bypass_permissions_detail") },
 ];
 
-export const EFFORTS: ModeOption[] = [
-  { id: "low", title: t("lib-session-actions.effort_low"), detail: t("lib-session-actions.effort_low_detail") },
-  { id: "medium", title: t("lib-session-actions.effort_medium"), detail: t("lib-session-actions.effort_medium_detail") },
-  { id: "high", title: t("lib-session-actions.effort_high"), detail: t("lib-session-actions.effort_high_detail") },
-  { id: "xhigh", title: t("lib-session-actions.effort_xhigh"), detail: t("lib-session-actions.effort_xhigh_detail") },
-  { id: "max", title: t("lib-session-actions.effort_max"), detail: t("lib-session-actions.effort_max_detail") },
-];
+const commonEfforts = ["low", "medium", "high", "xhigh", "max"];
 
-/** Codex's reasoning efforts (node/codex_effort.go); a thread offers those of its model, in `Session.efforts`. */
-export const CODEX_EFFORTS: ModeOption[] = [
-  { id: "minimal", title: t("lib-session-actions.codex_effort_minimal"), detail: t("lib-session-actions.codex_effort_minimal_detail") },
-  { id: "low", title: t("lib-session-actions.codex_effort_low"), detail: t("lib-session-actions.codex_effort_low_detail") },
-  { id: "medium", title: t("lib-session-actions.codex_effort_medium"), detail: t("lib-session-actions.codex_effort_medium_detail") },
-  { id: "high", title: t("lib-session-actions.codex_effort_high"), detail: t("lib-session-actions.codex_effort_high_detail") },
-  { id: "xhigh", title: t("lib-session-actions.codex_effort_xhigh"), detail: t("lib-session-actions.codex_effort_xhigh_detail") },
-  { id: "max", title: t("lib-session-actions.codex_effort_max"), detail: t("lib-session-actions.codex_effort_max_detail") },
-  { id: "ultra", title: t("lib-session-actions.codex_effort_ultra"), detail: t("lib-session-actions.codex_effort_ultra_detail") },
-];
+// The tier names are shared. Each engine keeps its own descriptions.
+function effortOptionsFor(ids: string[], detailPrefix: string): ModeOption[] {
+  return ids.map((id) => ({
+    id,
+    title: t(`lib-session-actions.effort_${id}`),
+    detail: t(`lib-session-actions.${detailPrefix}_${id}_detail`),
+  }));
+}
+
+export const EFFORTS = effortOptionsFor(commonEfforts, "effort");
+
+/** Codex's reasoning efforts (node/codex_effort.go). A thread offers those of its model in `Session.efforts`. */
+export const CODEX_EFFORTS = effortOptionsFor(["minimal", ...commonEfforts, "ultra"], "codex_effort");
 
 /** Modes a running session can switch to: "Allow all" is chosen only when it starts. */
 export const SWITCHABLE_MODES = PERMISSION_MODES.filter((m) => m.id !== "bypassPermissions");
@@ -66,7 +63,7 @@ export function modeTitle(id?: string): string {
 }
 
 export function effortTitle(id?: string): string {
-  return id ? (EFFORTS.find((m) => m.id === id)?.title ?? CODEX_EFFORTS.find((m) => m.id === id)?.title ?? id) : "";
+  return id ? (CODEX_EFFORTS.find((m) => m.id === id)?.title ?? id) : "";
 }
 
 /** The two chips (Claude Code's TUI bottom bar). The node says where they work (`capabilities.modes`, #1843): a runtime

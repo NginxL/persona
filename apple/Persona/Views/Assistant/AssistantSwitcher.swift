@@ -155,7 +155,7 @@ struct AssistantWaitingDot: View {
 
 /// The sidebar's header by default: the Persona face (the one picked in Appearance), the current assistant's name with
 /// an arrow, and its state. Settings uses `identityStyle` for its named scope heading with the same popover. A tap
-/// opens the list. `compact`: one line without the face, for a title bar's row (the Mac).
+/// opens the list.
 struct AssistantSwitcherHeader: View {
     enum IdentityStyle {
         case sidebar
@@ -165,7 +165,6 @@ struct AssistantSwitcherHeader: View {
     @Environment(AppModel.self) private var model
     var manager: HubManager
     var nameFont: Font
-    var compact = false
     var showsSwitchLabel = false
     var identityStyle: IdentityStyle = .sidebar
     /// Between the face and the name (the Sidebar layout's head brings the name onto its rows' titles line, #4206).
@@ -189,38 +188,32 @@ struct AssistantSwitcherHeader: View {
     var body: some View {
         // Read here, not in the label alone: the spoken name says it too.
         let othersWaiting = model.othersWaiting
-        let showsFace = !compact
         Button { listShown.toggle() } label: {
             HStack(spacing: faceGap) {
                 switch identityStyle {
                 case .sidebar:
-                    if showsFace {
-                        PersonaAvatar(size: Theme.Size.avatar)
-                            .overlay(alignment: .bottomTrailing) { AssistantStateDot(tone: ManagersText.status(manager, now: .now).tone) }
-                            .overlay(alignment: .topTrailing) { if othersWaiting { AssistantWaitingDot() } }
-                    }
+                    PersonaAvatar(size: Theme.Size.avatar)
+                        .overlay(alignment: .bottomTrailing) { AssistantStateDot(tone: ManagersText.status(manager, now: .now).tone) }
+                        .overlay(alignment: .topTrailing) { if othersWaiting { AssistantWaitingDot() } }
                     VStack(alignment: .leading, spacing: Theme.Space.xxs) {
                         HStack(spacing: Theme.Space.xs) {
-                            Text(manager.name).font(nameFont).foregroundStyle(ink).lineLimit(1).minimumScaleFactor(0.7)
+                            Text(manager.name).font(nameFont).foregroundStyle(Color.primary).lineLimit(1).minimumScaleFactor(0.7)
                             ThemedIcon(Theme.Icon.expand).font(Theme.Font.labelStrong).foregroundStyle(.secondary)
-                            if othersWaiting && !showsFace { AssistantWaitingDot() }
                         }
-                        if !compact {
-                            Text(AssistantSwitcherText.line(manager, now: .now)).font(Theme.Font.label).foregroundStyle(.secondary)
-                                .lineLimit(1)
-                        }
+                        Text(AssistantSwitcherText.line(manager, now: .now)).font(Theme.Font.label).foregroundStyle(.secondary)
+                            .lineLimit(1)
                     }
                 case let .settings(title, defaultID):
                     AssistantMonogram(manager: manager, defaultID: defaultID, now: .now, surface: Theme.pageBackground)
-                    Text(title).font(nameFont).foregroundStyle(ink).lineLimit(1).minimumScaleFactor(0.7)
+                    Text(title).font(nameFont).foregroundStyle(Color.primary).lineLimit(1).minimumScaleFactor(0.7)
                 }
                 if showsSwitchLabel {
                     Spacer(minLength: Theme.Space.s)
                     Text("Switch").font(Theme.Font.labelStrong).lineLimit(1)
                 }
             }
-            // A finger's target at least (the Mac's one line keeps its title row's height).
-            .scaledFrame(minHeight: compact ? nil : Theme.Size.tapTarget)
+            // A finger's target at least.
+            .scaledFrame(minHeight: Theme.Size.tapTarget)
             .contentShape(.rect)
         }
         .buttonStyle(.plain)
@@ -269,15 +262,6 @@ struct AssistantSwitcherHeader: View {
         case .sidebar: return "assistant-switcher"
         case .settings: return "settings-assistant-switch"
         }
-    }
-
-    /// The name's color: the Mac's title rows have their own label color.
-    private var ink: Color {
-        #if os(macOS)
-        Theme.macLabel
-        #else
-        Color.primary
-        #endif
     }
 
     /// Closes the list and keeps what presents something else (an alert, a sheet, Settings) for when it is gone.

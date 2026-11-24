@@ -132,7 +132,7 @@ func (s *Service) noteReady(ctx context.Context, t Task) {
 	}
 	l := s.lang(ctx)
 	text := i18n.T(l, "assistant-schedule.ready_again", i18n.Args{"name": t.labelIn(l)})
-	if t.Space == SpaceHealth { // the main conversation does not name a health task either (health.go)
+	if s.trackPolicy(ctx, t.Space).Redact { // the main conversation does not name a task of a space that redacts either (health.go)
 		text = i18n.T(l, "assistant-schedule.ready_again_unnamed")
 	}
 	if _, err := s.appendFeed(ctx, main, feedNotice, "", noticeBody{Text: text}); err != nil {

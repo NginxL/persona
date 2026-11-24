@@ -1,0 +1,4 @@
+needs_user の確認カードが保留中のまま、新しい外部情報が届きました（元のカードは未変更）：
+   - 新しい情報（https://github.com/example/app/pull/42）：PR https://github.com/example/app/pull/42 was approved (checks: success).
+   - 保留中の needs_user 質問：Should we merge PR #42 or wait for another reviewer?（おすすめ：Merge now）
+   - この情報が保留中の質問を解消または上書きするかを判断してください。引き続きオーナーの判断が必要なら supervision_finish(visibility="silent") で静かに終了し、元のカードをそのまま残してください。解消または上書きする場合は、task_review に新しい判定と明確な自然言語の理由を渡して古いカードを撤回してください（task_decided でオーナーの選択を捏造しないこと）。

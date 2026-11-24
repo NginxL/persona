@@ -192,6 +192,9 @@ func Do(ctx context.Context, client *http.Client, base, key string, r Request) (
 		req.Header.Set(k, put(v))
 	}
 	modelhttp.SetDefaultUserAgent(req.Header)
+	// A quota or usage read for an extension is Persona's own background request, never an Agent's: its source says so,
+	// replacing any source header the extension passed.
+	modelhttp.Source{Role: "background"}.ApplyForURL(req.Header, target.String())
 	if client == nil {
 		client = &http.Client{Timeout: 25 * time.Second}
 	}

@@ -12,8 +12,9 @@
 // with its own (see integrations/dsh/lib/map.js).
 
 import { randomUUID } from 'node:crypto'
+import { realpathSync } from 'node:fs'
 import { basename } from 'node:path'
-import { pathToFileURL } from 'node:url'
+import { fileURLToPath } from 'node:url'
 import { createRuntime, interactionId, light, page, RpcError } from '../index.js'
 
 /** An echo runtime; options are createRuntime's (socketPath, answerFirst…). */
@@ -110,8 +111,18 @@ export function createEchoRuntime(options = {}) {
   return { runtime: rt, sessions }
 }
 
+// Whether this file is the program Node runs. Node loads the entry by its real path, so compare real paths: a symlinked
+// directory on the way would otherwise skip the runtime and exit 0 (#12848).
+function isEntry() {
+  try {
+    return !!process.argv[1] && realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url))
+  } catch {
+    return false // no file behind argv[1] (node -e, a REPL import)
+  }
+}
+
 // Run it: node examples/echo-runtime.mjs [--socket <path> | --listen <port>]
-if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
+if (isEntry()) {
   const i = process.argv.indexOf('--socket')
   const l = process.argv.indexOf('--listen')
   const opts = { answerFirst: 'phone', log: (m) => console.error(m) }

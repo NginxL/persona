@@ -38,7 +38,7 @@ class ReadableMarkdownTableTest {
         val range = scroll.config[SemanticsProperties.HorizontalScrollAxisRange]
         assertTrue("content is wider than the viewport", range.maxValue() > 0)
         rule.onAllNodes(horizontal, useUnmergedTree = true)[0]
-            .performSemanticsAction(SemanticsActions.ScrollBy) { it(120f, 0f) }
+            .performSemanticsAction(SemanticsActions.ScrollBy) { val _ = it(120f, 0f) }
         rule.waitForIdle()
         assertTrue("the table scrolls", range.value() > 0)
         assertEquals(listOf("Area", "Finding", "中文说明", "Next step", "Network", "A complete English sentence that wraps.",

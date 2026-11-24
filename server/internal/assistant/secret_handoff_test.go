@@ -442,6 +442,9 @@ func TestHandoffFailuresAfterTheApproval(t *testing.T) {
 	if r.stages != 0 || len(r.f.starts) != 0 {
 		t.Fatalf("staged %d, started %d", r.stages, len(r.f.starts))
 	}
+	if task := onlyTodo(r.s); task.DoneAt == nil || task.StartError == "" {
+		t.Fatalf("the pre-start failure left an open task without a start error: %+v", task)
+	}
 	r.leaks(answer)
 
 	// Refused for ultracode before the node took the ticket: the same ticket starts it without.

@@ -210,3 +210,56 @@ func TestAgentsDisplayDatabaseConcurrentMigration(t *testing.T) {
 		t.Fatalf("concurrent explicit lost: %+v %v", got, err)
 	}
 }
+
+// The list's sort and Filter switches (docs/protocol/protocol.md "Agents display settings"): off unless manager.json's
+// agents section turns them on; a saved choice, either way, wins over that initial value.
+func TestAgentsDisplaySortAndFilterSwitches(t *testing.T) {
+	on := true
+	st := &agentsDisplayStore{settingsBoardStore: newSettingsBoardStore()}
+	s, _ := navigationService(t, st)
+	call := func(s *Service, method, body, role string) (int, agentsDisplay) {
+		t.Helper()
+		w := boardCall(s, method, "/api/v1/agents/display-settings", body, role)
+		var got agentsDisplay
+		_ = json.Unmarshal(w.Body.Bytes(), &got)
+		return w.Code, got
+	}
+	if code, got := call(s, "GET", "", roleAnswer); code != 200 || got.SortByActivity || got.ShowFilter {
+		t.Fatalf("no config, nothing saved: %d %+v", code, got)
+	}
+	for _, body := range []string{`{"sort_by_activity":true}`, `{"show_filter":true}`} {
+		if code, _ := call(s, "PUT", body, roleAnswer); code != http.StatusForbidden {
+			t.Fatalf("%s: %d", body, code)
+		}
+	}
+	for _, body := range []string{`{"sort_by_activity":"yes"}`, `{"show_filter":null}`, `{"sort_by_activity":true,"show_filter":true}`,
+		`{"sort_by_activity":true,"show_botmux":false}`, `{"sort_by_activity":true,"only_if_unset":true}`} {
+		if code, _ := call(s, "PUT", body, roleFull); code != 400 {
+			t.Fatalf("%s: %d", body, code)
+		}
+	}
+	if code, got := call(s, "PUT", `{"sort_by_activity":true}`, roleFull); code != 200 || !got.SortByActivity || got.ShowFilter || got.Configured || !got.ShowBotmux {
+		t.Fatalf("sort on: %d %+v", code, got)
+	}
+	if code, got := call(s, "PUT", `{"show_filter":true}`, roleFull); code != 200 || !got.SortByActivity || !got.ShowFilter {
+		t.Fatalf("filter on: %d %+v", code, got)
+	}
+	other, _ := navigationService(t, st)
+	if got, err := other.readAgentsDisplay(context.Background()); err != nil || !got.SortByActivity || !got.ShowFilter {
+		t.Fatalf("second service: %+v %v", got, err)
+	}
+
+	// manager.json's initial values: used until the user saves, and an explicit "off" beats an initial "on".
+	fresh := &agentsDisplayStore{settingsBoardStore: newSettingsBoardStore()}
+	c, hub2 := navigationService(t, fresh)
+	hub2.hello.Agents.SortByActivity, hub2.hello.Agents.ShowFilter = &on, &on
+	if code, got := call(c, "GET", "", roleAnswer); code != 200 || !got.SortByActivity || !got.ShowFilter || got.Configured {
+		t.Fatalf("configured default: %d %+v", code, got)
+	}
+	if code, got := call(c, "PUT", `{"sort_by_activity":false}`, roleFull); code != 200 || got.SortByActivity || !got.ShowFilter {
+		t.Fatalf("explicit off lost to the config: %d %+v", code, got)
+	}
+	if code, got := call(c, "GET", "", roleAnswer); code != 200 || got.SortByActivity || !got.ShowFilter {
+		t.Fatalf("explicit off after reload: %d %+v", code, got)
+	}
+}

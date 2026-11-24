@@ -1,0 +1,51 @@
+{
+  "name": "conversations_switch",
+  "description": "Switch Assistant conversations to another launcher/model; preview first unless confirmed. Busy items queue until turn end without interruption or synthetic messages. Execution saves original settings and returns a batch ID. `restore_batch_id` restores completed items exactly; `batch_id` reads status. Independent changes are refused.",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "conversation_ids": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "minItems": 1,
+        "maxItems": 50,
+        "uniqueItems": true,
+        "description": "IDs from conversations_list"
+      },
+      "machine_id": {
+        "type": "string",
+        "description": "Assistant machine; defaults to current"
+      },
+      "launcher": {
+        "type": "string",
+        "description": "target launcher"
+      },
+      "model": {
+        "type": "string",
+        "description": "target model; empty uses launcher default"
+      },
+      "effort": {
+        "type": "string",
+        "description": "target effort; empty uses launcher default"
+      },
+      "permission_mode": {
+        "type": "string",
+        "description": "target mode; empty preserves each conversation's mode"
+      },
+      "preview": {
+        "type": "boolean",
+        "description": "read-only; no batch, queue, or confirmation"
+      },
+      "restore_batch_id": {
+        "type": "string",
+        "description": "batch to restore; excludes forward fields"
+      },
+      "batch_id": {
+        "type": "string",
+        "description": "batch status; use alone"
+      }
+    }
+  }
+}

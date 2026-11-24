@@ -123,6 +123,12 @@ test('stopping a turn drops agy\'s stream-interrupted note in both export and na
   ])
   assert.deepEqual(transcriptState([input, reply, interrupted]), { status: 'idle' })
 
+  const blank = stepsToItems([input, { ...reply, content: '\n', thinking: 'Thinking' }, interrupted])
+  assert.equal(blank.turnError, undefined)
+  assert.deepEqual(blank.items.map((item) => [item.kind, item.text]), [
+    ['text', input.content], ['thinking', 'Thinking'], ['notice', '已中断'],
+  ])
+
   // An interrupted note still resets pending tool calls and does not trigger a stray wake notice.
   const afterWake = stepsToItems([
     input,
@@ -247,6 +253,91 @@ for (const exported of [false, true]) {
       await until('next send settles', idle)
       assert.equal((await items()).items.filter((item) => item.text === 'Continue.').length, 2)
     }
+  })
+}
+
+test('an empty Antigravity completion retries the same prompt once and displays one user message', async (t) => {
+  const { node, calls, items, row, idle } = await fixture(t, { initialCount: 1, promptPlan: [
+    { export: true, thinking: 'Thinking', reply: '\n' },
+    { export: true, reply: 'Here is the answer.' },
+  ] })
+  await node.peer.call('session.send', { session_id: SESSION, text: 'Please answer.', client_msg_id: 'empty-retry' })
+  await until('retried answer published', idle)
+  const prompts = calls().filter((call) => call.method === 'session/prompt')
+  assert.equal(prompts.length, 2)
+  assert.deepEqual(prompts[1].params, prompts[0].params)
+  const page = await items()
+  const messages = page.items.filter((item) => item.kind === 'text')
+  assert.deepEqual(messages.map((item) => item.text), [input.content, 'Please answer.', 'Here is the answer.'])
+  assert.equal(messages[1].client_msg_id, 'empty-retry')
+  assert.equal(row().turn_error, undefined)
+})
+
+test('a second empty completion publishes a retryable turn error', async (t) => {
+  const { node, row, calls, items, idle } = await fixture(t, { initialCount: 1, promptPlan: [
+    { export: true, thinking: 'Thinking', reply: '\n' },
+    { export: true, thinking: 'Still thinking', reply: '  \t' },
+    { export: true, reply: 'Next answer.' },
+  ] })
+  await node.peer.call('session.send', { session_id: SESSION, text: 'Please answer.' })
+  await until('empty-response failure published', () => idle() && row()?.turn_error)
+  assert.equal(calls().filter((call) => call.method === 'session/prompt').length, 2)
+  assert.match(row().turn_error, /no response returned.*try again/i)
+  assert.equal(row().turn_error_after_work, false)
+  const page = (await items()).items
+  assert.equal(page.filter((item) => item.text === 'Please answer.').length, 1)
+  const notice = page.find((item) => item.kind === 'notice' && /no response returned.*try again/i.test(item.text))
+  assert.ok(notice)
+
+  await node.peer.call('session.send', { session_id: SESSION, text: 'Next request.' })
+  await until('successor settled', () => idle() && row()?.last_text === 'Next answer.')
+  assert.equal(row().turn_error, undefined)
+  assert.ok((await items()).items.some((item) => item.id === notice.id && item.text === notice.text))
+})
+
+test('a blank cancelled turn is recorded before its queued successor and does not retry', async (t) => {
+  const { node, row, calls, items, idle } = await fixture(t, { initialCount: 1, promptPlan: [
+    { export: true, reply: '\n', thinking: 'Thinking', holdForCancel: true },
+    { export: true, reply: 'New answer.' },
+  ] })
+  await node.peer.call('session.send', { session_id: SESSION, text: 'Interrupted request.' })
+  await until('first prompt sent', () => calls().some((call) => call.method === 'session/prompt'))
+  assert.equal((await node.peer.call('session.send', { session_id: SESSION, text: 'New request.' })).queued, true)
+  await node.peer.call('session.queue.send_now', { session_id: SESSION })
+  await until('successor settled', idle)
+  const methods = calls().filter((call) => ['session/prompt', 'session/cancel'].includes(call.method))
+  assert.deepEqual(methods.map((call) => call.method), ['session/prompt', 'session/cancel', 'session/prompt'])
+  assert.equal(row().turn_error, undefined)
+  const page = await items()
+  const interrupted = page.items.findIndex((item) => item.kind === 'notice' && item.text === '已中断')
+  assert.ok(interrupted > page.items.findIndex((item) => item.text === 'Interrupted request.'))
+  assert.ok(interrupted < page.items.findIndex((item) => item.text === 'New request.'))
+  assert.equal(page.items.at(-1).text, 'New answer.')
+})
+
+test('a blank ACP cancelled result never starts a retry', async (t) => {
+  const { node, row, calls, items, idle } = await fixture(t, { initialCount: 1, promptPlan: [
+    { export: true, thinking: 'Thinking', reply: '\n', stopReason: 'cancelled' },
+  ] })
+  await node.peer.call('session.send', { session_id: SESSION, text: 'Please answer.' })
+  await until('cancelled turn settled', idle)
+  assert.equal(calls().filter((call) => call.method === 'session/prompt').length, 1)
+  assert.equal(row().turn_error, undefined)
+  assert.equal((await items()).items.filter((item) => item.kind === 'notice' && item.text === '已中断').length, 1)
+})
+
+for (const [name, plan] of [
+  ['an exported silent supervision finish', {
+    reply: '\n', calls: [{ name: 'mcp_persona_supervision_finish', args: { visibility: 'silent' } }],
+  }],
+  ['an answer in the export without a live text update', { reply: 'Already answered.', exportOnly: true }],
+]) {
+  test(`does not retry ${name}`, async (t) => {
+    const { node, row, calls, idle } = await fixture(t, { initialCount: 1, promptPlan: [{ ...plan, export: true }] })
+    await node.peer.call('session.send', { session_id: SESSION, text: 'Please check.' })
+    await until('turn settled', idle)
+    assert.equal(calls().filter((call) => call.method === 'session/prompt').length, 1)
+    assert.equal(row().turn_error, undefined)
   })
 }
 

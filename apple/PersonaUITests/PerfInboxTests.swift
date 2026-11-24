@@ -96,6 +96,15 @@ final class PerfInboxTests: PerfTestCase {
         measureTyping(see(app.textFields["lark.box"], "the Feishu composer", timeout: 30), text: "周六早上八点在地铁站集合，记得带水")
     }
 
+    /// A picked photo's thumbnail beside the composer, redrawn with every typed character.
+    @MainActor func testLarkAttachmentTyping() throws {
+        launch(["-dev.openChat", "", "-tab", "mail", "-inbox.kind", "", "-inbox.source", "",
+                "-openInboxItem", "lark:f2:200", "-showLarkAttachmentDraft", "photo", "-showLarkSendFresh", "YES"] + lark)
+        expandSource()
+        see(app.buttons["移除 照片.jpg"], "the picked photo", timeout: 30)
+        measureTyping(see(app.textFields["lark.box"], "the Feishu composer", timeout: 30), text: "周六早上八点在地铁站集合，记得带水")
+    }
+
     /// A topic group's cards (a non-lazy stack) scrolled.
     @MainActor func testFeishuTopicGroupScroll() throws {
         openItem("lark:f4:405")

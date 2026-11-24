@@ -5,7 +5,7 @@ import { t } from "../../i18n";
 import { api, errorText } from "../../lib/api";
 import { onShownHint } from "../../lib/shown-hints";
 import { filterQuery, SessionList, type ListCounts, type ListFilters } from "../../lib/session-list";
-import { groupMachines, type GroupDimension, type SessionGroup, type SessionPlace, type TodoNames } from "../../lib/session-groups";
+import { groupMachines, holdsPlace, JUST_FINISHED_KEY, type GroupDimension, type SessionGroup, type SessionPlace, type TodoNames } from "../../lib/session-groups";
 import { SESSION_LIST_METRICS, SESSION_LIST_STYLE } from "../../ui/list-metrics";
 import { SearchField } from "../../ui/SearchField";
 import { STATE_LABEL } from "../../lib/state-labels";
@@ -19,6 +19,7 @@ import { StatusMark } from "../../ui/StatusMark";
 import { shortPath } from "../../lib/format";
 import { removeStoredValue, storedValue, storeValue } from "../../lib/compatibility";
 import { ACTIVE_WINDOWS, activeWindow, splitByActivity, windowStart, type ActiveWindow } from "../../lib/session-activity";
+import { useHeldOrder } from "../../lib/sidebar-engaged";
 import { useFolded } from "../../lib/use-folded";
 import { nestUnderParents, type StableRowOrder } from "../../lib/side-sessions";
 import { sameValue } from "../../lib/stable-lines";
@@ -73,6 +74,10 @@ export interface PagedSessionListProps<T> {
   /** The words a failed read of the list's rows or groups is said in, given its reason (the reason alone by default): the
    *  sidebar's says it could not read the Agents list, as its complete list does. */
   failureText?: (reason: string) => string;
+  /** The hub's counts of this list's scope as the page shows them, given rows read in that scope: the sidebar's leaves
+   *  out of Unread an agent seen on this page that those rows, and so the counts read with them, still have Unread
+   *  (lib/seen-outbox.ts heldCounts). The chips' numbers and By state's sections follow it. */
+  holdCounts?: (counts: ListCounts, rows: readonly T[]) => ListCounts;
 }
 
 export interface PagedGrouping<T> {
@@ -80,6 +85,14 @@ export interface PagedGrouping<T> {
   /** The sections follow this scope's fold-all (useFolded). */ foldScope?: string;
   /** Stable structural placement. The transport still uses `compare`, whose newest-first order binds the hub's cursors. */
   rowOrder?: StableRowOrder<T>;
+  /** "Sort Agents by recent activity" (Settings › Agents): the computers' and spaces' sections by their newest session,
+   *  the rows in the transport's newest-first order (no `rowOrder`). */
+  byUpdate?: boolean;
+  /** Keep the order the list is drawn in while someone is using the sidebar (lib/sidebar-engaged.ts); the activity
+   *  order then moves once they look away. Rows and sections still update in place. */
+  hold?: boolean;
+  /** What the Filter button narrows the list by, beyond the chips and ⌘K's words (the computer, as `machine_id`). */
+  filters?: ListFilters;
   /** The words ⌘K's "Filter Agents list" put on the list (#6589), sent as the search: the sidebar's list has no field of
    *  its own, `chips` says what narrows it where the field was. */
   query?: string; chips?: ReactNode;
@@ -116,7 +129,7 @@ export function scrollParent(el: HTMLElement | null): HTMLElement | null {
   return null;
 }
 
-export function PagedSessionList<T>({ root, path, identity, compare, removeIdentity, event, renderRow, personal = false, label, machineOrder, catalog = false, justFinished = false, placeOf, activeAt, needsYou, isOpen, parentOf, excludeIdentities, grouping, failureText = sameText }: PagedSessionListProps<T>) {
+export function PagedSessionList<T>({ root, path, identity, compare, removeIdentity, event, renderRow, personal = false, label, machineOrder, catalog = false, justFinished = false, placeOf, activeAt, needsYou, isOpen, parentOf, excludeIdentities, grouping, failureText = sameText, holdCounts }: PagedSessionListProps<T>) {
   const [query, setQuery] = useState("");
   const [typed, setTyped] = useState("");
   // the sidebar's groupings take ⌘K's words (#6589); every other list its own field's, once typing pauses
@@ -150,12 +163,14 @@ export function PagedSessionList<T>({ root, path, identity, compare, removeIdent
   const stateChip = useMemo((): ListFilters => (state ? { state } : NONE), [state]);
   const chip = quick ? quick.select : stateChip;
   const exclude = quick?.exclude ?? NONE;
+  const narrowed = grouping?.filters ?? NONE;
   const filters: ListFilters = useMemo(() => ({
     ...(q ? { q } : {}), ...chip, ...(provider ? { provider } : {}),
     ...groupFilters,
     ...(spaceMachine ? { machine_id: spaceMachine } : {}),
+    ...narrowed,
     ...exclude,
-  }), [q, chip, groupFilters, spaceMachine, provider, exclude]);
+  }), [q, chip, groupFilters, spaceMachine, provider, narrowed, exclude]);
   const filtered = Object.keys(filters).length > 0;
   // a dimension with no group picked: the list is drawn as its groups, and the one flat list is not read; in the
   // sidebar's groupings a search lists its matches flat
@@ -163,15 +178,18 @@ export function PagedSessionList<T>({ root, path, identity, compare, removeIdent
   const summaryMode = root.isSummary();
   // a hub that folds child sessions (#5120): every read and count of this list leaves them out, as the root's do
   const rootsMode = root.isRoots();
+  const crossMachineMode = root.isCrossMachineHierarchy();
   const queryPath = `${path}${path.includes("?") ? "&" : "?"}`;
-  const countsPath = rootsMode ? `${queryPath}roots=1&` : queryPath;
+  const countsPath = rootsMode ? `${queryPath}roots=1&${crossMachineMode ? "cross_machine_hierarchy=1&" : ""}` : queryPath;
   const rowOrder = grouping?.rowOrder;
   const presentation = useMemo(() => rowOrder ? { ...rowOrder, parentOf } : undefined, [rowOrder, parentOf]);
-  const list = useMemo(() => filtered ? new SessionList<T>(path, identity, compare, undefined, removeIdentity, { summary: summaryMode, roots: rootsMode, pageCounts: () => root.usesPageCounts(), presentation }) : root,
-    [filtered, path, identity, compare, removeIdentity, summaryMode, rootsMode, root, filters, presentation]);
+  const list = useMemo(() => filtered ? new SessionList<T>(path, identity, compare, undefined, removeIdentity, { summary: summaryMode, roots: rootsMode, crossMachineHierarchy: crossMachineMode, pageCounts: () => root.usesPageCounts(), presentation }) : root,
+    [filtered, path, identity, compare, removeIdentity, summaryMode, rootsMode, crossMachineMode, root, filters, presentation]);
   // The root is shared with the hub's counts and invalidation. Apply the same retention as a filtered list instead of
   // letting an activity-only transport prefix displace a flat list's shown rows (#11801).
-  useLayoutEffect(() => { if (presentation) root.setPresentation(presentation); }, [root, presentation]);
+  // The sidebar's list also lets go of it when the activity order is chosen (Settings › Agents), which has none.
+  const sidebarList = Boolean(grouping);
+  useLayoutEffect(() => { if (presentation || sidebarList) root.setPresentation(presentation); }, [root, presentation, sidebarList]);
   const page = useSyncExternalStore(list.subscribe, list.getSnapshot, list.getSnapshot);
   const [facets, setFacets] = useState<ListCounts | null>(null);
   const [facetError, setFacetError] = useState("");
@@ -186,7 +204,7 @@ export function PagedSessionList<T>({ root, path, identity, compare, removeIdent
   }, [filters]);
   const rootPage = useSyncExternalStore(root.subscribe, root.getSnapshot, root.getSnapshot);
   // Counts without state keep other state tabs reachable; machine scopes disambiguate computer-local groups.
-  const facetFilters = useMemo(() => ({ ...(q ? { q } : {}), ...(provider ? { provider } : {}), ...(spaceMachine ? { machine_id: spaceMachine } : {}), ...exclude }), [q, provider, spaceMachine, exclude]);
+  const facetFilters = useMemo(() => ({ ...(q ? { q } : {}), ...(provider ? { provider } : {}), ...(spaceMachine ? { machine_id: spaceMachine } : {}), ...narrowed, ...exclude }), [q, provider, spaceMachine, narrowed, exclude]);
   // Unscoped counts are the root's own: follow them. Scoped counts are read on their own, now and once per hint; they
   // do not follow the root's counts, which land for that same hint (a second read of the same counts every time).
   const facetScoped = Object.keys(facetFilters).length > 0;
@@ -270,7 +288,45 @@ export function PagedSessionList<T>({ root, path, identity, compare, removeIdent
     else void root.retry().catch(() => {});
   }, [facetScoped, root]);
   const grouped = useSessionGroups({ dimension, catalog: cataloged, countsPath, scope: groupScope, facets, facetQuery, facetsError: facetsFailure, retryFacets, waiting: sections ? scopeNeeds : 0, event, todos: grouping?.todos, justFinished, machineOrder });
-  const allGroups = grouped.groups;
+  // The scope's counts as the page shows them (holdCounts): only against the rows the same answer brought (the root's,
+  // or the filtered list's own page, on a hub that sends a page's counts with it), so a newer count is never taken for
+  // an older row's or the other way round. Counts read on their own (a scope only the hub can count, such as hidden
+  // botmux sessions in a grouping) are the hub's: they are read again on every hint, the one after the hub records a
+  // seen too.
+  const coupled = !root.usesPageCounts() ? undefined
+    : scopeQuery === "counts=1" ? (rootPage.counts ? { counts: rootPage.counts, rows: rootPage.rows } : undefined)
+    : scopeFromFacets && facetsFromList && page.counts ? { counts: page.counts, rows: page.rows } : undefined;
+  const coupledCounts = coupled?.counts, coupledRows = coupled?.rows;
+  const held = useMemo(() => (coupledCounts && coupledRows && holdCounts ? holdCounts(coupledCounts, coupledRows) : undefined),
+    [coupledCounts, coupledRows, holdCounts]);
+  const shownCounts = held && held !== coupledCounts ? held : scopeCounts;
+  // By state drawn from those same counts (no chip narrows the groups): the sections the held agents left (Unread, Just
+  // finished) are smaller, Seen larger
+  const chipless = !Object.keys(filters).some((key) => (CHIP_KEYS as readonly string[]).includes(key));
+  const countedGroups = useMemo(() => {
+    const groups = grouped.groups;
+    if (!groups || dimension !== "state" || !chipless || !held || !coupledCounts || held === coupledCounts) return groups;
+    const unread = (coupledCounts.state.unread ?? 0) - (held.state.unread ?? 0);
+    const finished = (coupledCounts.just_finished ?? 0) - (held.just_finished ?? 0);
+    const less = (key: string) => (key === "unread" ? unread : key === JUST_FINISHED_KEY ? finished : key === "idle" ? -(unread + finished) : 0);
+    return groups.map((g) => (less(g.key) ? { ...g, count: Math.max(0, g.count - less(g.key)) } : g));
+  }, [grouped.groups, dimension, chipless, held, coupledCounts]);
+  // "Sort Agents by recent activity": the computers' and spaces' sections by their newest session, as far as the root's
+  // newest page tells (the hub reads no group's time); the ones it has none of keep their order after them, and the
+  // sessions on no space stay last. Its to-dos, projects and states keep their own orders there too.
+  const byUpdate = Boolean(grouping?.byUpdate) && (dimension === "machine" || dimension === "group");
+  const rankedGroups = useMemo(() => {
+    if (!byUpdate || !countedGroups || !placeOf) return countedGroups;
+    const places = rootPage.rows.map(placeOf);
+    const rank = (g: SessionGroup) => {
+      if (g.rest) return places.length + 1;
+      const at = places.findIndex((p) => holdsPlace(g, dimension as GroupDimension, p));
+      return at < 0 ? places.length : at;
+    };
+    return countedGroups.map((g) => ({ g, at: rank(g) })).sort((a, b) => a.at - b.at).map(({ g }) => g);
+  }, [byUpdate, countedGroups, placeOf, rootPage.rows, dimension]);
+  const heldGroups = useHeldOrder(rankedGroups ?? [], (g) => g.key, Boolean(grouping?.hold) && byUpdate);
+  const allGroups = rankedGroups ? (heldGroups as SessionGroup[]) : rankedGroups;
   // the picked group follows what the hub says of it now (a project gains a directory); gone from the scope, it stays picked
   useEffect(() => {
     if (!picked || !allGroups) return;
@@ -283,11 +339,13 @@ export function PagedSessionList<T>({ root, path, identity, compare, removeIdent
     () => excludeIdentities?.size ? rawTransportRows.filter((row) => !excludeIdentities.has(identity(row))) : rawTransportRows,
     [rawTransportRows, excludeIdentities, identity],
   );
-  const pageRows = useMemo(
+  const visibleRows = useMemo(
     () => excludeIdentities?.size ? page.rows.filter((row) => !excludeIdentities.has(identity(row))) : page.rows,
     [page.rows, excludeIdentities, identity],
   );
-  const visiblePageTotal = Math.max(0, page.total - (page.rows.length - pageRows.length));
+  // held still while someone uses the sidebar under the activity order: a row updates in place, it does not move
+  const pageRows = useHeldOrder(visibleRows, identity, Boolean(grouping?.hold) && Boolean(grouping?.byUpdate)) as T[];
+  const visiblePageTotal = Math.max(0, page.total - (page.rows.length - visibleRows.length));
   // Activity totals need their own newest-first transport groups: structural presentation can put an unrelated older
   // row between a recent side session and its parent, which must not end the transport's recent prefix (#11801).
   const activityNesting = useMemo(() => activeAt && parentOf ? nestUnderParents(transportRows, identity, parentOf, activeAt) : null, [transportRows, identity, parentOf, activeAt]);
@@ -390,13 +448,13 @@ export function PagedSessionList<T>({ root, path, identity, compare, removeIdent
     return () => parent.removeEventListener("scroll", scroll);
   }, [list, getScrollElement, sections, hasMore, page.loadingMore, page.error, margin, totalSize]);
 
-  const stateTotals = scopeCounts?.state ?? {};
+  const stateTotals = shownCounts?.state ?? {};
   // the quick filters' numbers, as the complete list counts them: Working without the ones waiting in the background
   const quickCounts = useMemo((): FilterCounts | undefined => {
-    if (!scopeCounts) return undefined;
-    const by = scopeCounts.state ?? {}, waiting = scopeCounts.background_waiting ?? 0, origin = scopeCounts.pane_source ?? {};
+    if (!shownCounts) return undefined;
+    const by = shownCounts.state ?? {}, waiting = shownCounts.background_waiting ?? 0, origin = shownCounts.pane_source ?? {};
     return { needs: by.needs_you ?? 0, unread: by.unread ?? 0, working: Math.max(0, (by.working ?? 0) - waiting), bg_waiting: waiting, feishu: origin.feishu ?? 0, terminal: origin.terminal ?? 0 };
-  }, [scopeCounts]);
+  }, [shownCounts]);
   const onQuickCounts = quick?.onCounts;
   useEffect(() => { onQuickCounts?.(quickCounts); }, [onQuickCounts, quickCounts]);
   // the fixed group order: the menu lists a bounded number of them, and the picked one whatever its place
@@ -428,8 +486,8 @@ export function PagedSessionList<T>({ root, path, identity, compare, removeIdent
   };
   const chooseGroup = (key: string) => setPicked(key ? groups.find((g) => g.key === key) ?? null : null);
   // an open section reads the collection as the list above it does
-  const source: GroupedSource<T> = useMemo(() => ({ path, identity, compare, removeIdentity, event, summary: summaryMode, roots: rootsMode, parentOf, rowOrder, excludeIdentities }),
-    [path, identity, compare, removeIdentity, event, summaryMode, rootsMode, parentOf, rowOrder, excludeIdentities]);
+  const source: GroupedSource<T> = useMemo(() => ({ path, identity, compare, removeIdentity, event, summary: summaryMode, roots: rootsMode, crossMachineHierarchy: crossMachineMode, parentOf, rowOrder, excludeIdentities, hold: Boolean(grouping?.hold) && Boolean(grouping?.byUpdate) }),
+    [path, identity, compare, removeIdentity, event, summaryMode, rootsMode, crossMachineMode, parentOf, rowOrder, excludeIdentities, grouping?.hold, grouping?.byUpdate]);
   const openRow = sections && isOpen && placeOf ? rootPage.rows.find(isOpen) : undefined;
   const autoMore = useRef(0);
   useEffect(() => {

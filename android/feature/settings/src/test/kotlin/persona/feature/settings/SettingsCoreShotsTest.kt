@@ -164,7 +164,7 @@ class SettingsCoreShotsTest {
                     rule.onNodeWithTag("settings-hub-address-selection").assertExists()
                     val address = rule.onNodeWithText(longHubAddress, useUnmergedTree = true).assertExists()
                     val layouts = mutableListOf<TextLayoutResult>()
-                    address.fetchSemanticsNode().config[SemanticsActions.GetTextLayoutResult].action!!(layouts)
+                    val _ = address.fetchSemanticsNode().config[SemanticsActions.GetTextLayoutResult].action!!(layouts)
                     val layout = layouts.single()
                     assertTrue("hub address must wrap in $s, dark=$d", layout.lineCount > 1)
                     assertFalse("hub address clipped in $s, dark=$d", layout.hasVisualOverflow)

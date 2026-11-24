@@ -15,7 +15,7 @@ import (
 func TestSegmentPreparationIsEmptyAndReceiptedAndRetirementIsReversible(t *testing.T) {
 	f := cliTest(t)
 	ctx := t.Context()
-	request := map[string]any{"operation_id": "scoped-operation", "launcher": "claude", "cwd": t.TempDir(), "text": "must not become a turn", "supervision_instructions": "must not be installed during preparation"}
+	request := map[string]any{"operation_id": "scoped-operation", "launcher": "claude", "cwd": t.TempDir(), "text": "must not become a turn", "supervision_instructions": "the role policy the manager made"}
 	raw, err := nodeCall(t, f.n, "assistant.segment.prepare", request)
 	if err != nil {
 		t.Fatal(err)
@@ -32,8 +32,9 @@ func TestSegmentPreparationIsEmptyAndReceiptedAndRetirementIsReversible(t *testi
 		t.Fatalf("replay created another session: %s %v", again, err)
 	}
 	saved, _ := f.n.state.get(receipt.SessionID)
-	if saved.SegmentOperation != "scoped-operation" || saved.SupervisionInstructions != "" {
-		t.Fatalf("preparation installed policy or lost receipt: %+v", saved)
+	// The manager's role policy is installed with the preparation, so the first input (same policy) keeps this process.
+	if saved.SegmentOperation != "scoped-operation" || saved.SupervisionInstructions != "the role policy the manager made" {
+		t.Fatalf("preparation lost the role policy or the receipt: %+v", saved)
 	}
 	input, _ := os.ReadFile(filepath.Join(f.dir, "stdin.jsonl"))
 	if strings.Contains(string(input), `"type":"user"`) || strings.Contains(string(input), "must not become a turn") {

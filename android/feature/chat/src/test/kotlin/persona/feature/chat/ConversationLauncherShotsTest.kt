@@ -89,6 +89,39 @@ class ConversationLauncherShotsTest {
         }
     }
 
+    @Test fun aSavedAliasSelectsAndNamesTheFoldedRow() {
+        val folded = AgentModel("claude-opus-5-5", "Opus 5.5", aliases = listOf("opus", "fable"))
+        val canonical = AgentModel("opus", "Canonical Opus")
+        assertEquals(folded, listedAgentModel(listOf(folded), "OPUS"))
+        assertEquals(canonical, listedAgentModel(listOf(folded, canonical), "opus"))
+        val foldedManagement = object : AssistantManagement by management {
+            override suspend fun launcherModels(machineId: String, launcher: String) = LauncherModels(agent = "claude",
+                models = listOf(AgentModel("default", name = "Default", isDefault = true), folded))
+        }
+        rule.setContent {
+            PersonaTheme(reduceMotion = true, style = AppStyle.Board) {
+                ConversationLauncherChip(foldedManagement, "box", "main", "old-launcher", "runtime", "opus") { _, _ -> }
+            }
+        }
+        rule.waitUntil(5_000) { rule.onAllNodes(androidx.compose.ui.test.hasText("runtime · Opus 5.5")).fetchSemanticsNodes().isNotEmpty() }
+    }
+
+    @Test fun theModelRouteRemedyOpensTheSameBriefAndBoardPicker() {
+        var open by mutableStateOf(false)
+        rule.setContent {
+            PersonaTheme(reduceMotion = true, style = AppStyle.Brief) {
+                ConversationLauncherChip(management, "box", "main", "old-launcher", "runtime", "opus",
+                    openRequested = open, onOpenHandled = { open = false }) { _, _ -> }
+            }
+        }
+        rule.runOnIdle { open = true }
+        rule.waitUntil(5_000) { rule.onAllNodes(hasDialogText("Opus")).fetchSemanticsNodes().isNotEmpty() }
+        assertEquals(false, open)
+    }
+
+    private fun hasDialogText(text: String) = androidx.compose.ui.test.hasText(text) and
+        androidx.compose.ui.test.hasAnyAncestor(isDialog())
+
     private fun runScene(largeText: Boolean) {
         var style by mutableStateOf(AppStyle.Glass)
         var dark by mutableStateOf(false)
@@ -114,8 +147,8 @@ class ConversationLauncherShotsTest {
         rule.waitUntil(5_000) { rule.onAllNodes(androidx.compose.ui.test.hasText("Default: claude")).fetchSemanticsNodes().isNotEmpty() }
         rule.onNodeWithText("Default: claude").performClick()
         rule.waitUntil(5_000) { rule.onAllNodes(androidx.compose.ui.test.hasText("Opus")).fetchSemanticsNodes().isNotEmpty() }
-        assertEquals(listOf("runtime", "codex-gw", "team-api"), sharedCandidates.map { it.name })
-        assertEquals(sharedAssistantNames, listOf("runtime", "team-api"))
+        assertEquals(listOf("runtime", "codex-gw", "team-api"), sharedAssistantNames)
+        // A main chat already on Claude keeps the same-engine Team API, not the other-engine Codex provider.
         rule.onNodeWithText("runtime").assertExists()
         rule.onNodeWithText("team-api", substring = true).assertExists()
         rule.onNodeWithText("codex-gw").assertDoesNotExist()

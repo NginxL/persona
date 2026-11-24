@@ -173,6 +173,17 @@ const (
 	CodeInboxSendFailed = "inbox_send_failed"
 	// CodeInboxSendUnrecorded: the once-only send record (sent_messages) could not be written, so nothing was tried.
 	CodeInboxSendUnrecorded = "inbox_send_unrecorded"
+	// CodeInboxReplyPolicyBlocked: inbox.reply_policy vetoed sending this reply suggestion; nothing was sent.
+	CodeInboxReplyPolicyBlocked = "inbox_reply_policy_blocked"
+)
+
+// Reply policy routes (inbox.reply_policy, docs/assistant/inbox.md "Reply policy").
+// The classifier outputs only a category; the server maps that category to one of these routes.
+const (
+	ReplyRouteOwnerDraft = "owner_draft"
+	ReplyRouteBot        = "bot"
+	ReplyRouteOwnerOnly  = "owner_only"
+	ReplyRouteNoReply    = "no_reply"
 )
 
 // Rounds of InboxRound.Round.
@@ -363,9 +374,10 @@ type InboxConfig struct {
 	// Rules are the user's own triage rules (setting inbox.rules, else manager.json's inbox.rules); AgentRules guide the
 	// judge linking a Needs you item to one of the user's tasks (inbox.agent_rules); what the AI twin takes on is set
 	// by inbox policies (docs/assistant/inbox.md "Policies").
-	Rules      string           `json:"rules,omitempty"`
-	AgentRules string           `json:"agent_rules,omitempty"`
-	Agent      InboxAgentConfig `json:"agent"`
+	Rules       string                 `json:"rules,omitempty"`
+	AgentRules  string                 `json:"agent_rules,omitempty"`
+	Agent       InboxAgentConfig       `json:"agent"`
+	ReplyPolicy InboxReplyPolicyConfig `json:"reply_policy,omitempty"`
 	// LarkAccount is the default Feishu account, the gateway account Feishu items came to unless they say another: the
 	// Feishu extension's default (GET accounts of its messaging source), else hub.json's lark.account (#5098).
 	LarkAccount int `json:"lark_account,omitempty"`
@@ -393,6 +405,22 @@ type InboxAgentConfig struct {
 	// (extmgr/self_settings.go inboxAgentRules). The database value wins once set; without either, what the twin takes on
 	// is set by inbox policies. Kept so older hub.json files still parse.
 	Rules string `json:"rules,omitempty"`
+}
+
+// InboxReplyPolicyConfig is manager.json's opt-in inbox.reply_policy configuration.
+// Default is disabled (Enabled: false), preserving existing queue, suggestion, and confirmation behavior.
+type InboxReplyPolicyConfig struct {
+	Enabled bool `json:"enabled,omitempty"`
+	// Revision identifies the policy revision. Combined with a canonical digest of the normalized policy so any
+	// policy change invalidates older snapshots.
+	Revision string `json:"revision,omitempty"`
+	// Categories maps classifier-produced category names to server routes (owner_draft, bot, owner_only, no_reply).
+	// When omitted while Enabled is true, the built-in default category table is used.
+	Categories map[string]string `json:"categories,omitempty"`
+	// Rules is optional extra classification guidance; it never grants or overrides server routes.
+	Rules string `json:"rules,omitempty"`
+	// TimeoutSeconds bounds each classification call (default 30 seconds).
+	TimeoutSeconds int `json:"timeout_seconds,omitempty"`
 }
 
 // InboxRepoMutes is MethodInboxRepoMutes's params.

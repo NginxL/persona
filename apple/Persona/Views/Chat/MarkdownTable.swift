@@ -1,8 +1,6 @@
 import MarkdownUI
 import SwiftUI
-#if canImport(UIKit)
 import UIKit
-#endif
 import PersonaWire
 
 /// How wide each column of a Markdown table is drawn. MarkdownUI lays a table out as a Grid, every column as wide as
@@ -245,35 +243,6 @@ struct FittedTable: View {
         let _ = PerfTrace.body("FittedTable")
         #endif
         let measure = preparation.measure(config.content, fontSize: fontSize)
-        #if os(macOS)
-        // TableBounds anchor preferences cycle in the Mac's flipped chat scroll view. Explicit cell widths and
-        // ordinary overlays keep table layout independent of scroll-position updates.
-        let widths = measure.natural.map { min($0, TablePlan.scrollCap) }
-        let rows = preparation.inlineRows(config.content)
-        ScrollView(.horizontal) {
-            Grid(alignment: .topLeading, horizontalSpacing: 0, verticalSpacing: 0) {
-                ForEach(rows.indices, id: \.self) { row in
-                    GridRow {
-                        ForEach(widths.indices, id: \.self) { column in
-                            let alignment = column < measure.alignments.count ? measure.alignments[column] : .leading
-                            macCell(column < rows[row].count ? rows[row][column] : AttributedString())
-                                .font(.system(size: fontSize, weight: row == 0 ? .semibold : .regular))
-                                .monospacedDigit()
-                                .multilineTextAlignment(alignment)
-                                .frame(width: widths[column], alignment: alignment == .trailing ? .trailing : alignment == .center ? .center : .leading)
-                                .fixedSize(horizontal: false, vertical: true)
-                                .padding(.horizontal, Self.cellPadding / 2)
-                                .padding(.vertical, Theme.Space.sm)
-                                .background(Color.primary.opacity(row == 0 ? 0.07 : row.isMultiple(of: 2) ? 0 : 0.035))
-                                .overlay { Rectangle().stroke(Color.primary.opacity(0.14), lineWidth: Self.border) }
-                        }
-                    }
-                }
-            }
-        }
-        .tint(Theme.accent)
-        .markdownMargin(top: 4, bottom: 12)
-        #else
         let n = CGFloat(measure.natural.count)
         let plan = available > 0
             ? TablePlan.fit(natural: measure.natural, minimum: measure.minimum,
@@ -314,20 +283,8 @@ struct FittedTable: View {
         }
         .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { available = $0 }
         .markdownMargin(top: 4, bottom: 12)
-        #endif
     }
 
-    #if os(macOS)
-    private func macCell(_ content: AttributedString) -> Text {
-        var styled = content
-        // Text handles emphasis and links, but does not apply the reply theme to inline code.
-        for run in content.runs where run.inlinePresentationIntent?.contains(.code) == true {
-            styled[run.range].font = .system(size: fontSize * ReplyMetrics.inlineCode, design: .monospaced)
-            styled[run.range].backgroundColor = Theme.codeBackground
-        }
-        return Text(styled)
-    }
-    #endif
 }
 
 /// A cell of `FittedTable`: as wide as its column's plan, wrapping inside it, its words aligned as the delimiter row

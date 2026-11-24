@@ -314,6 +314,19 @@ func TestIPhoneApprovals(t *testing.T) {
 	if res := <-done; !res.IsError || !strings.Contains(res.Content[0].Text, "declined") {
 		t.Fatalf("%+v", res)
 	}
+	// A card nobody answered (it expired, or was withdrawn) ends it too, but it is no decline: the model is told so.
+	for _, reason := range []string{proto.DismissedExpired, proto.DismissedWithdrawn} {
+		go func() { done <- h.callIPhoneTool(ctx, "c", "iphone_do", steps) }()
+		select {
+		case c := <-deskOf(h).ch:
+			c.answer <- proto.Resolution{Dismiss: true, Reason: reason}
+		case <-time.After(5 * time.Second):
+			t.Fatal("no card")
+		}
+		if res := <-done; !res.IsError || strings.Contains(res.Content[0].Text, "declined") || !strings.Contains(res.Content[0].Text, "did NOT decline") {
+			t.Fatalf("%s: %+v", reason, res)
+		}
+	}
 
 	// Ask before every action: it goes down with the call; the manager asks nothing before the node does.
 	if err := h.extensions.reg.SetConfig(ctx, iphoneExtensionID, json.RawMessage(`{"machines": ["mac"], "phones": ["dev-a1"], "confirm": true}`), "test"); err != nil {

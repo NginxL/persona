@@ -315,11 +315,7 @@ struct NewMainSheet: View {
                 }
             }
         }
-        #if os(macOS)
-        .macSheet()
-        #else
         .presentationDetents([.medium])
-        #endif
     }
 
     private func go() async {

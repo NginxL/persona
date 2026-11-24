@@ -377,7 +377,7 @@ function TodoSuggestion({ item, suggestion: s }: { item: InboxItem; suggestion: 
         <input type="date" value={day} onChange={(e) => setDay(e.target.value)} aria-label={t("inbox-inboxevent.todo_day")} className={field} data-todo-day />
         {day && !allDay && <input type="time" value={time} onChange={(e) => setTime(e.target.value)} aria-label={t("inbox-inboxevent.todo_time")} className={field} data-todo-time />}
         {day && (
-          <label className="flex items-center gap-2 text-[12.5px] whitespace-nowrap text-ink-2">
+          <label className="flex items-center gap-2 text-meta whitespace-nowrap text-ink-2">
             <Switch on={allDay} onChange={setAllDay} label={t("inbox-inboxevent.todo_all_day")} />
             {t("inbox-inboxevent.todo_all_day")}
           </label>

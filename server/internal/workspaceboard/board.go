@@ -69,6 +69,9 @@ type Mutation struct {
 	Cwd         string       `json:"cwd,omitempty"`
 	MoveTo      string       `json:"move_to,omitempty"`
 	Changes     []CardChange `json:"changes,omitempty"`
+	// Project creation is explicit; ordinary directory bindings never write to the node.
+	CreateDirectory bool   `json:"create_directory,omitempty"`
+	DesktopApp      string `json:"desktop_app,omitempty"`
 	// Discovery metadata is set by the hub after validating the workspace on its node.
 	Source   string `json:"-"`
 	SourceID string `json:"-"`
@@ -126,7 +129,7 @@ func Validate(s State) error {
 		if !columns[c.ColumnID] {
 			return invalid("unknown card column")
 		}
-		key := binding{c.MachineID, canonical}
+		key := binding{c.MachineID, CwdKey(canonical)}
 		if bindings[key] {
 			return invalid("workspace already bound; restore its existing card")
 		}
@@ -169,7 +172,7 @@ func Apply(current State, m Mutation) (State, error) {
 	}
 	switch m.Action {
 	case "batch_cards":
-		if m.ID != "" || m.ColumnID != "" || m.BeforeID != "" || m.Title != nil || m.Pinned != nil || m.Archived != nil || m.MachineID != "" || m.WorkspaceID != "" || m.Cwd != "" || m.MoveTo != "" || m.Source != "" || m.SourceID != "" || m.Branch != "" {
+		if m.ID != "" || m.ColumnID != "" || m.BeforeID != "" || m.Title != nil || m.Pinned != nil || m.Archived != nil || m.MachineID != "" || m.WorkspaceID != "" || m.Cwd != "" || m.MoveTo != "" || m.CreateDirectory || m.DesktopApp != "" || m.Source != "" || m.SourceID != "" || m.Branch != "" {
 			return State{}, invalid("batch_cards accepts only revision, action and changes")
 		}
 		if err := applyCardChanges(&next, m.Changes); err != nil {
@@ -179,6 +182,11 @@ func Apply(current State, m Mutation) (State, error) {
 		canonical, err := CanonicalCwd(m.Cwd)
 		if err != nil {
 			return State{}, err
+		}
+		for _, existing := range next.Cards {
+			if existing.MachineID == m.MachineID && CwdKey(existing.Cwd) == CwdKey(canonical) {
+				return State{}, invalid("workspace already bound; restore its existing card")
+			}
 		}
 		c := Card{ID: m.ID, MachineID: m.MachineID, WorkspaceID: m.WorkspaceID, Title: title(), Cwd: canonical, Source: m.Source, SourceID: m.SourceID, Branch: m.Branch, ColumnID: m.ColumnID}
 		if m.Pinned != nil {
@@ -373,4 +381,18 @@ func CanonicalCwd(cwd string) (string, error) {
 		return "", invalid("workspace path must be absolute")
 	}
 	return path.Clean(cwd), nil
+}
+
+// CwdKey compares remote Windows directories without changing their displayed
+// spelling. POSIX paths remain case-sensitive, even when the hub runs on Windows.
+func CwdKey(cwd string) string {
+	canonical, err := CanonicalCwd(cwd)
+	if err != nil {
+		return cwd
+	}
+	drive := len(canonical) >= 3 && canonical[0] >= 'a' && canonical[0] <= 'z' && canonical[1] == ':' && canonical[2] == '/'
+	if strings.HasPrefix(canonical, "//") || drive {
+		return strings.ToLower(canonical)
+	}
+	return canonical
 }

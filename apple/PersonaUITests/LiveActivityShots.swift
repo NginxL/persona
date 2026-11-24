@@ -103,7 +103,8 @@ final class LiveActivityShots: XCTestCase {
                 let settings = app.drawerSettingsButton
                 XCTAssertTrue(settings.waitForExistence(timeout: 5), "no Settings entry")
                 settings.tapCenter()
-                let row = app.buttons["settings-persona"]
+                XCTAssertTrue(app.openSettingsAdvancedPage(), "no Settings › Advanced:\n\(app.debugDescription)")
+                let row = app.settingsAdvancedRow("settings-persona")
                 XCTAssertTrue(row.waitForExistence(timeout: 10), "no 形象 row:\n\(app.debugDescription)")
                 row.tap()
             }

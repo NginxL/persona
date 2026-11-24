@@ -35,6 +35,10 @@ TIME_FRACTION = re.compile(r"^(.{10}[T ][0-9]{2}:[0-9]{2}:[0-9]{2})[.,]([0-9]+)"
 LEAD_CONTEXT = re.compile(r"(?s)^\s*<persona-context\b([^>]*)>(.*?)</persona-context>\s*")
 SOURCE_KIND = re.compile(r'\bkind="message-source"')
 SOURCE_KINDS = {"conversation", "patrol", "followup", "supervision", "meeting", "wake", "ask_later", "task_notice", "inbox", "system"}
+# A source kind the hub writes under another name than the report's round kind: an automatic continuation after a
+# transient error or a usage-limit reset (proto.SourceAutoContinue, #14112) is the same round as the older
+# transcripts' localized limit-continue marker below, so both count as a follow-up.
+SOURCE_ALIASES = {"auto-continue": "followup"}
 # Codex records runtime updates as role=user messages, but they are not new user inputs.
 CODEX_CONTEXT = re.compile(r"(?s)^\s*<(environment_context|codex_internal_context|turn_aborted)(?:\s[^>]*)?>.*</\1>\s*$")
 
@@ -78,11 +82,11 @@ def default_codex_files():
         for path in glob.iglob(os.path.join(home, directory, "**", "rollout-*.jsonl"), recursive=True):
             try:
                 with open(path, errors="replace") as f:
-                    first = json.loads(f.readline())
-                meta = first.get("payload") or {}
-                if first.get("type") == "session_meta" and meta.get("cwd") and os.path.realpath(meta["cwd"]) == assistant:
+                    first = object_or_empty(json.loads(f.readline()))
+                cwd = object_or_empty(first.get("payload")).get("cwd")
+                if first.get("type") == "session_meta" and isinstance(cwd, str) and cwd and os.path.realpath(cwd) == assistant:
                     yield path
-            except (OSError, ValueError, AttributeError):
+            except (OSError, ValueError):
                 continue
 
 
@@ -102,17 +106,32 @@ def transcript_files(paths):
                 yield candidate
 
 
+def object_or_empty(value):
+    return value if isinstance(value, dict) else {}
+
+
+def text_blocks(content, kind):
+    if not isinstance(content, list):
+        return []
+    return [block["text"] for block in content if isinstance(block, dict) and block.get("type") == kind
+            and isinstance(block.get("text"), str)]
+
+
+def token_count(value):
+    return value if type(value) is int and value >= 0 else None
+
+
 def message_text(entry):
     """The typed text of a user line, or None when the line is a tool result, meta or a compaction summary."""
     if entry.get("type") != "user" or entry.get("isMeta") or entry.get("isCompactSummary"):
         return None
-    content = (entry.get("message") or {}).get("content")
+    content = object_or_empty(entry.get("message")).get("content")
     if isinstance(content, str):
         return content
     if isinstance(content, list):
         if any(isinstance(b, dict) and b.get("type") == "tool_result" for b in content):
             return None
-        texts = [b.get("text", "") for b in content if isinstance(b, dict) and b.get("type") == "text"]
+        texts = text_blocks(content, "text")
         return "\n".join(texts) if texts else None
     return None
 
@@ -135,6 +154,7 @@ def classify(text):
             if meta.get("author") == "user" or not meta.get("kind"):
                 return "owner", rest
             kind = meta["kind"]
+            kind = SOURCE_ALIASES.get(kind, kind) if isinstance(kind, str) else kind
             return kind if isinstance(kind, str) and kind in SOURCE_KINDS else "other", rest
         if 'kind="context"' in m.group(1) and RELAY_TITLE.search(m.group(1)):
             body = RELAY_BODY.match(m.group(2).strip())
@@ -239,30 +259,35 @@ class Report:
                     continue
                 if e.get("type") != "assistant":
                     continue
-                msg = e.get("message") or {}
-                usage = msg.get("usage") or {}
+                msg = object_or_empty(e.get("message"))
+                usage = object_or_empty(msg.get("usage"))
                 if not usage:
+                    continue
+                counts = {key: 0 if usage.get(key) is None else token_count(usage[key]) for key in USAGE_FIELDS}
+                if any(value is None for value in counts.values()):
                     continue
                 # A line without a message id is a response of its own: gateways can leave the id empty, and one
                 # requestId can then cover several responses (transcript.RequestUsage counts them the same way).
-                key = msg.get("id") or ("line", e.get("uuid") or line_number)
+                key = msg.get("id")
+                if not isinstance(key, str) or not key:
+                    uuid = e.get("uuid")
+                    key = ("line", uuid if isinstance(uuid, str) and uuid else line_number)
                 prev = seen.get(key)
                 target = self.sidechain if e.get("isSidechain") else self.kinds[kind]
                 if prev is None:
-                    seen[key] = prev = {k: usage.get(k) or 0 for k in USAGE_FIELDS}
-                    prev["counted"] = counted
+                    seen[key] = dict(counts, counted=counted)
                     if not counted:
                         continue
                     target["model_calls"] += 1
-                    for k in USAGE_FIELDS:
-                        target[k] += usage.get(k) or 0
+                    for k, value in counts.items():
+                        target[k] += value
                         if not e.get("isSidechain"):
-                            self.conversations[conv][k] += usage.get(k) or 0
+                            self.conversations[conv][k] += value
                     continue
                 # A later line of the same response: count only what grew (output tokens stream in), and only for a
                 # response that began in the window.
-                for k in USAGE_FIELDS:
-                    grown = (usage.get(k) or 0) - prev[k]
+                for k, value in counts.items():
+                    grown = value - prev[k]
                     if grown > 0:
                         prev[k] += grown
                         if not prev["counted"]:
@@ -307,22 +332,25 @@ class Report:
                 p = e["payload"]
                 counted = self.includes_timestamp(e.get("timestamp"))
                 if e.get("type") == "response_item" and p.get("type") == "message" and p.get("role") == "user":
+                    parts = p.get("content")
+                    if not isinstance(parts, list):
+                        continue
                     last_event = None
-                    parts = p.get("content") or []
-                    texts = [x.get("text", "") for x in parts if isinstance(x, dict) and x.get("type") == "input_text"]
+                    texts = text_blocks(parts, "input_text")
                     text = "\n".join(texts)
                     if text and not CODEX_CONTEXT.match(text):
                         flush()
                         has_image = any(isinstance(x, dict) and x.get("type") in ("input_image", "image") for x in parts)
                         pending = (text, counted, texts if has_image else [])
                 elif e.get("type") == "event_msg" and p.get("type") == "item_completed":
-                    item = p.get("item") or {}
-                    if item.get("type") != "UserMessage" or (item.get("id") and item["id"] in seen_ids):
+                    item = object_or_empty(p.get("item"))
+                    ident = item.get("id")
+                    if item.get("type") != "UserMessage" or (isinstance(ident, str) and ident in seen_ids):
                         continue
-                    if item.get("id"):
-                        seen_ids.add(item["id"])
-                    text = "\n".join(x.get("text", "") for x in item.get("content", []) if isinstance(x, dict) and x.get("type") == "text")
+                    text = "\n".join(text_blocks(item.get("content"), "text"))
                     if text and not CODEX_CONTEXT.match(text):
+                        if isinstance(ident, str) and ident:
+                            seen_ids.add(ident)
                         if matches_pending(text):
                             counted = pending[1]
                             pending = None
@@ -346,10 +374,10 @@ class Report:
                 elif e.get("type") == "event_msg" and p.get("type") == "token_count":
                     flush()
                     last_event = None
-                    info = p.get("info") or {}
-                    current = (info.get("total_token_usage") or {}).get("total_tokens")
-                    last = info.get("last_token_usage") or {}
-                    if not isinstance(current, int) or current <= total:
+                    info = object_or_empty(p.get("info"))
+                    current = token_count(object_or_empty(info.get("total_token_usage")).get("total_tokens"))
+                    last = object_or_empty(info.get("last_token_usage"))
+                    if current is None or current <= total:
                         continue
                     total = current
                     if not counted:
@@ -358,10 +386,9 @@ class Report:
                     target["model_calls"] += 1
                     self.conversations[conv]["model_calls"] += 1
                     self.unknown[kind].add("cache_creation_input_tokens")
-                    inp, cached, out = last.get("input_tokens"), last.get("cached_input_tokens"), last.get("output_tokens")
-                    values = {"input_tokens": max(0, inp - cached) if isinstance(inp, int) and isinstance(cached, int) else None,
-                              "cache_read_input_tokens": cached if isinstance(cached, int) else None,
-                              "output_tokens": out if isinstance(out, int) else None}
+                    inp, cached, out = (token_count(last.get(key)) for key in ("input_tokens", "cached_input_tokens", "output_tokens"))
+                    values = {"input_tokens": max(0, inp - cached) if inp is not None and cached is not None else None,
+                              "cache_read_input_tokens": cached, "output_tokens": out}
                     for key, value in values.items():
                         if value is None:
                             self.unknown[kind].add(key)

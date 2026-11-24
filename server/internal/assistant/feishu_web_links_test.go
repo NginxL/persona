@@ -77,6 +77,7 @@ func answerCardsIn(posts *[]map[string]any) []string {
 // A long answer split over several cards carries the web link on its last card only; a one-card answer carries it on
 // that one. Without a public URL no card has a link.
 func TestFeishuAnswerOpenButtonOnLastPiece(t *testing.T) {
+	needsLarkLayer(t)
 	for _, tc := range []struct {
 		name   string
 		web    string

@@ -39,7 +39,7 @@ enum LauncherName {
             let app = AppModel.shared
             let scope = AssistantSettingsRequestScope(app)
             return .init(api: { scope.api(app) }, features: { app.hubFeatures },
-                         readiness: { app.readiness.current }, landReadiness: { app.readiness.land($0) },
+                         readiness: { app.readiness.current }, landReadiness: { app.readiness.land($0, modelPick: app.assistantMain.flatMap { app.session($0) }?.modelPick) },
                          machines: { scope.machines(app) })
         }
     }

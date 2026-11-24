@@ -206,5 +206,9 @@
   "board_nudged": "已催过",
   "board_verdict": "{title}：{verdict}",
   "moved_to_todos": "已转成待办",
-  "model_list_truncated": "列表已截断；请在模型设置中查看全部模型。"
+  "model_list_truncated": "列表已截断；请在模型设置中查看全部模型。",
+  "by_assistant": "由助手代答：{how}",
+  "by_default": "按默认：{how}",
+  "by_terminal": "在终端处理：{how}",
+  "by_other": "由他人代答：{how}"
 }

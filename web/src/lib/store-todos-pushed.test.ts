@@ -1,5 +1,6 @@
-// Pushes that say the to-dos changed come in bursts; each GET /todos is the whole list. A burst reads it at most twice
-// (the read out when it starts, one more after), and the last read still sees every change of the burst.
+// To-do pushes arrive in bursts. The web settles a short window, checks the hub-wide revision while one is available,
+// and reads the complete list only when that revision changed. Hidden pages wait for visibility; old hubs keep the
+// original full-read behavior.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { connect, getState, refreshTodos, reset, todosPushed } from "./store";
 
@@ -27,10 +28,21 @@ class FakeSocket {
 }
 
 const todo = (title: string) => ({ id: "t1", title, created_at: "", updated_at: "", spaces: [] });
+const settle = async () => {
+  await vi.dynamicImportSettled();
+  await vi.advanceTimersByTimeAsync(0);
+};
+const pushedSettle = async () => {
+  await settle(); // the lazy push module's import, before its 200 ms timer
+  await vi.advanceTimersByTimeAsync(200);
+};
 
-// Every GET /todos waits until the test answers it, in the order they went out.
 let reads: ((title: string) => void)[] = [];
-const settle = () => vi.advanceTimersByTimeAsync(0);
+let revision = 1;
+let revisionSupported = true;
+let failFull = false;
+let holdRevision = false;
+let heldRevisionReads: (() => void)[] = [];
 
 async function answerAll(title: string) {
   while (reads.length) {
@@ -43,9 +55,9 @@ async function online() {
   connect();
   const s = FakeSocket.all[FakeSocket.all.length - 1];
   s.open();
-  s.push({ type: "hello", server_version: "v1", event_stream: "s1", event_seq: 1 });
+  s.push({ type: "hello", server_version: "v1", event_stream: "s1", event_seq: 1, features: revisionSupported ? ["todo_revision"] : [] });
   await settle();
-  await answerAll("from hello"); // the hello's own refresh
+  await answerAll("from hello");
   return s;
 }
 
@@ -53,14 +65,36 @@ beforeEach(() => {
   vi.useFakeTimers();
   FakeSocket.all = [];
   reads = [];
+  revision = 1;
+  revisionSupported = true;
+  failFull = false;
+  holdRevision = false;
+  heldRevisionReads = [];
   vi.stubGlobal("WebSocket", FakeSocket);
   vi.stubGlobal("location", { protocol: "http:", host: "hub" });
   vi.stubGlobal("localStorage", { getItem: () => "tok", setItem: () => {}, removeItem: () => {} });
   vi.stubGlobal("window", { setTimeout: (f: () => void, ms: number) => setTimeout(f, ms), clearTimeout: (t: number) => clearTimeout(t) });
-  vi.stubGlobal("fetch", vi.fn().mockImplementation(async (url: string) => {
-    if (!new URL(url, "http://hub").pathname.endsWith("/todos")) return new Response("{}", { status: 200 });
+  vi.stubGlobal("fetch", vi.fn().mockImplementation(async (url: string, init?: RequestInit) => {
+    const path = new URL(url, "http://hub").pathname;
+    if (path.endsWith("/todos/revision")) {
+      if (!revisionSupported) return new Response("not found", { status: 404 });
+      if (holdRevision) await new Promise<void>((resolve) => heldRevisionReads.push(() => resolve()));
+      const etag = `W/"r${revision}"`;
+      const headers = { ETag: etag, "X-Persona-Todos-Revision": etag };
+      if (new Headers(init?.headers).get("If-None-Match") === etag) return new Response(null, { status: 304, headers });
+      return new Response(JSON.stringify({ revision: etag }), { status: 200, headers });
+    }
+    if (!path.endsWith("/todos")) return new Response("{}", { status: 200 });
+    if (failFull) {
+      failFull = false;
+      return new Response(JSON.stringify({ error: "down" }), { status: 503 });
+    }
     const title = await new Promise<string>((r) => reads.push(r));
-    return new Response(JSON.stringify({ todos: [todo(title)] }), { status: 200 });
+    const etag = `W/"r${revision}"`;
+    return new Response(JSON.stringify({ todos: [todo(title)] }), {
+      status: 200,
+      headers: { ETag: `W/"body${revision}"`, "X-Persona-Todos-Revision": etag },
+    });
   }));
 });
 
@@ -68,77 +102,133 @@ afterEach(() => {
   reset();
   vi.useRealTimers();
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
 });
 
-const todoReads = () => vi.mocked(fetch).mock.calls.filter(([url]) => new URL(String(url), "http://hub").pathname.endsWith("/todos")).length;
+const calls = (suffix: string) => vi.mocked(fetch).mock.calls.filter(([url]) => new URL(String(url), "http://hub").pathname.endsWith(suffix));
+const todoReads = () => calls("/todos").length;
+const revisionReads = () => calls("/todos/revision").length;
 
 describe("to-do pushes", () => {
-  it("a burst of pushes reads the list twice, not once per push", async () => {
+  it("settles a burst into one unchanged revision read and no full list", async () => {
     const s = await online();
-    const before = todoReads();
+    const fullBefore = todoReads();
+    const revisionBefore = revisionReads();
     for (let i = 0; i < 10; i++) s.push({ type: "todos" });
-    await settle();
+    await settle(); // load the push module before measuring its settle window
+    await vi.advanceTimersByTimeAsync(199);
+    expect(revisionReads() - revisionBefore).toBe(0);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(revisionReads() - revisionBefore).toBe(1);
+    expect(todoReads() - fullBefore).toBe(0);
+    expect(getState().todos.map((t) => t.title)).toEqual(["from hello"]);
+  });
+
+  it("reads the full list once when the revision changed", async () => {
+    const s = await online();
+    const before = todoReads();
+    revision++;
+    for (let i = 0; i < 10; i++) s.push({ type: "todos" });
+    await pushedSettle();
     expect(todoReads() - before).toBe(1);
-
     await answerAll("after the burst");
-    expect(todoReads() - before).toBe(2);
     expect(getState().todos.map((t) => t.title)).toEqual(["after the burst"]);
+    expect(todoReads() - before).toBe(1);
   });
 
-  it("a push that lands while a read is out is read after it", async () => {
+  it("a push during the revision check is checked again after it", async () => {
     const s = await online();
-    const before = todoReads();
+    const before = revisionReads();
+    holdRevision = true;
     s.push({ type: "todos" });
+    await pushedSettle();
+    expect(revisionReads() - before).toBe(1);
+    s.push({ type: "todos" });
+    heldRevisionReads.shift()!();
     await settle();
-    s.push({ type: "todos" }); // a change the read already out may not have
-    reads.shift()!("before the change");
+    await pushedSettle();
+    expect(revisionReads() - before).toBe(2);
+    heldRevisionReads.shift()!();
     await settle();
-    expect(todoReads() - before).toBe(2);
-    reads.shift()!("with the change");
-    await settle();
-    expect(getState().todos.map((t) => t.title)).toEqual(["with the change"]);
-    expect(reads).toHaveLength(0);
+    expect(todoReads()).toBe(1); // only hello's full read
   });
 
-  it("pushes one at a time each read the list", async () => {
-    const s = await online();
-    const before = todoReads();
-    for (const title of ["one", "two", "three"]) {
-      s.push({ type: "todos" });
-      await settle();
-      await answerAll(title);
-      expect(getState().todos.map((t) => t.title)).toEqual([title]);
-    }
-    expect(todoReads() - before).toBe(3);
-  });
-
-  it("what the page changed itself reads at once, past a pushed read still out", async () => {
+  it("what the page changed itself reads at once without waiting for the push window", async () => {
     await online();
     const before = todoReads();
-    todosPushed();
-    await settle();
     const own = refreshTodos();
     await settle();
-    expect(todoReads() - before).toBe(2);
-    reads[1]("after my change");
+    expect(todoReads() - before).toBe(1);
+    await answerAll("after my change");
     await own;
-    reads[0]("older");
-    await settle();
     expect(getState().todos.map((t) => t.title)).toEqual(["after my change"]);
   });
 
-  it("a failed pushed read still lets the next push read", async () => {
+  it("a hidden page does not read; becoming visible reconciles once", async () => {
     const s = await online();
-    vi.mocked(fetch).mockImplementationOnce(async () => new Response(JSON.stringify({ error: "down" }), { status: 503 }));
+    vi.stubGlobal("document", { visibilityState: "hidden" });
+    const fullBefore = todoReads();
+    const revisionBefore = revisionReads();
+    s.push({ type: "todos" });
+    await pushedSettle();
+    expect(todoReads() - fullBefore).toBe(0);
+    expect(revisionReads() - revisionBefore).toBe(0);
+
+    vi.stubGlobal("document", { visibilityState: "visible" });
+    todosPushed(); // the production visibilitychange listener calls this same entry point
+    await pushedSettle();
+    expect(revisionReads() - revisionBefore).toBe(1);
+    expect(todoReads() - fullBefore).toBe(0);
+  });
+
+  it("an old hub falls back to the original full read", async () => {
+    revisionSupported = false;
+    const s = await online();
     const before = todoReads();
     s.push({ type: "todos" });
+    await pushedSettle();
+    expect(revisionReads()).toBe(0);
+    expect(todoReads() - before).toBe(1);
+    await answerAll("old hub");
+    expect(getState().todos.map((t) => t.title)).toEqual(["old hub"]);
+  });
+
+  it("a mixed fleet's 409 falls back to the complete list", async () => {
+    const s = await online();
+    const before = todoReads();
+    vi.mocked(fetch).mockImplementationOnce(async () => new Response(JSON.stringify({ error: "old manager" }), { status: 409 }));
+    s.push({ type: "todos" });
+    await pushedSettle();
+    expect(revisionReads()).toBe(1);
+    expect(todoReads() - before).toBe(1);
+    await answerAll("after fallback");
+    expect(getState().todos.map((t) => t.title)).toEqual(["after fallback"]);
+  });
+
+  it("a failed changed read still lets the next push recover", async () => {
+    const s = await online();
+    const before = todoReads();
+    revision++;
+    failFull = true;
+    s.push({ type: "todos" });
+    await pushedSettle();
     await settle();
     expect(getState().todosError).toBeTruthy();
     s.push({ type: "todos" });
-    await settle();
+    await pushedSettle();
     await answerAll("back");
     expect(todoReads() - before).toBe(2);
-    expect(getState()).toMatchObject({ todosError: null });
+    expect(getState().todosError).toBeNull();
     expect(getState().todos.map((t) => t.title)).toEqual(["back"]);
+  });
+
+  it("reset cancels a queued pushed read and its old validator", async () => {
+    const s = await online();
+    const before = revisionReads();
+    s.push({ type: "todos" });
+    reset();
+    await pushedSettle();
+    expect(revisionReads() - before).toBe(0);
+    expect(todoReads()).toBe(1);
   });
 });

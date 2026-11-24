@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/nwverse/persona/server/internal/connector"
-	"github.com/nwverse/persona/server/internal/mail"
 	"github.com/nwverse/persona/server/internal/proto"
 )
 
@@ -31,7 +30,7 @@ func connectorTool(t *testing.T, h *Manager, name, args string, assistant bool) 
 // is refused before the user is asked.
 func TestMailToolsThroughItsConnector(t *testing.T) {
 	h := newTestManager(t)
-	h.mail = (*mail.Service)(nil)
+	h.mail = testMail(t)
 	h.connectors = connector.NewRegistry(nil)
 	h.registerConnectors()
 	var agent []string
@@ -56,7 +55,7 @@ func TestMailToolsThroughItsConnector(t *testing.T) {
 // mail is not sent.
 func TestMailSendAsksWithTheSameCard(t *testing.T) {
 	h := newTestManager(t)
-	m := &replyMail{}
+	m := newReplyMail(t)
 	h.mail = m
 	h.connectors = connector.NewRegistry(nil)
 	h.registerConnectors()
@@ -77,7 +76,7 @@ func TestMailSendAsksWithTheSameCard(t *testing.T) {
 // none. (The hub hands the agent's mcp.call here as extensions.hub_call connector_tool.)
 func TestConnectorCardsBelongToTheCallingConversation(t *testing.T) {
 	h := newTestManager(t)
-	h.mail = &replyMail{}
+	h.mail = newReplyMail(t)
 	h.connectors = connector.NewRegistry(nil)
 	h.registerConnectors()
 	deny := false
@@ -97,7 +96,7 @@ func TestConnectorCardsBelongToTheCallingConversation(t *testing.T) {
 // withdraws its card: allowing it afterwards must not run the write.
 func TestAConnectorCardEndsWithItsCall(t *testing.T) {
 	h := newTestManager(t)
-	m := &replyMail{}
+	m := newReplyMail(t)
 	h.mail = m
 	h.connectors = connector.NewRegistry(nil)
 	h.registerConnectors()

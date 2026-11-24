@@ -48,6 +48,41 @@ describe("an extension page's last view", () => {
     expect(JSON.stringify([...stored.keys()])).not.toContain(token);
   });
 
+  it("preserves View-level tabs, filter, search, and split layout across cache round-trip", async () => {
+    const rich: UIView = {
+      title: "Fleet Board",
+      layout: "split",
+      tabs: {
+        name: "tab",
+        value: "active",
+        items: [
+          { value: "active", title: "Active", badge: "3" },
+          { value: "archived", title: "Archived" },
+        ],
+        action: { id: "switch-tab" },
+      },
+      search: { placeholder: "Filter nodes", value: "east", action: { id: "search" } },
+      filter: {
+        name: "env",
+        title: "Environment",
+        value: "prod",
+        choices: [
+          { value: "all", title: "All" },
+          { value: "prod", title: "Production" },
+        ],
+        action: { id: "filter-env" },
+      },
+      sections: [
+        { pane: "side", title: "Clusters", items: [{ type: "row", title: "us-east" }] },
+        { title: "Nodes", items: [{ type: "text", text: "3 healthy" }] },
+      ],
+    };
+    expect(cache.keepView(key(), rich)).toBe(true);
+    vi.resetModules();
+    await load();
+    expect(cache.readKeptView(page, [8], "m-1")?.view).toEqual(rich);
+  });
+
   it("is never shown for another manager, nor for a UI version the page is not drawn with now", () => {
     cache.keepView(key({ manager: "m-1" }), view("of m-1"));
     expect(cache.readKeptView(page, [7, 8], "m-2")).toBeNull();

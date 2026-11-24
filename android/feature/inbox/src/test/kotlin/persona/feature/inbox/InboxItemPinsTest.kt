@@ -21,6 +21,7 @@ import persona.core.contracts.api.ConnectionState
 import persona.core.contracts.api.InboxEntry
 import persona.core.contracts.api.ManagerPins
 import persona.core.domain.inbox.InboxItem
+import persona.core.inbox.*
 
 /** An inbox item's page names the item's manager on the requests it makes, and only on those. */
 @RunWith(AndroidJUnit4::class)

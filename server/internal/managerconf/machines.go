@@ -31,6 +31,9 @@ type MachinesFromHub struct {
 	Mesh bool `json:"mesh,omitempty"`
 	// TailcatDERPMapURL is the hub's tailcat DERP map at the last hand-over (the nodes were set up with the same).
 	TailcatDERPMapURL string `json:"tailcat_derp_map_url,omitempty"`
+	// PrivateNetwork: the hub was in office network mode at the last hand-over, so no machine is dialed over tailcat
+	// before it answers either.
+	PrivateNetwork bool `json:"private_network,omitempty"`
 	// HubID is the hub that handed it over: a manager that joined another hub since does not read it.
 	HubID string `json:"hub_id,omitempty"`
 	// Own: the list was taken over as the manager's own (the hub handed MachinesOwn): it is the list from then on, and

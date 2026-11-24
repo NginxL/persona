@@ -111,11 +111,6 @@ struct TodoHandoffSheet: View {
             }
         }
         .presentationDetents([.medium, .large])
-        #if os(macOS)
-        // A window sheet does not take the main window's grouped forms: the Mac put the labels in a column of their
-        // own, cut off at the sheet's left edge, and the text past its right (#1248).
-        .macSheet()
-        #endif
         .sheet(isPresented: $showNewChat) {
             // The new-chat form itself, with the todo: its context block goes ahead of the first message, the session
             // takes the todo's title, and only this hub's computers are offered.

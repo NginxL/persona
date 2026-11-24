@@ -28,7 +28,7 @@ func (s *Service) logicalAdapterPick(ctx context.Context, machine string, row pr
 	if !runtime {
 		return nil
 	}
-	source := proto.AssistantExecutionIdentity(row.Agent, row.SourceKind, row.SourceInstanceID, row.Launcher)
+	source := proto.AssistantExecutionIdentity(sessionEngineAgent(row), row.SourceKind, row.SourceInstanceID, row.Launcher)
 	if source == "" {
 		return logicalRefusal(ctx, "unknown_engine")
 	}

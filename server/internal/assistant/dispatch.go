@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 	"sync"
@@ -247,7 +248,13 @@ func (s *Service) dispatchStart(ctx context.Context, machine, session string, ar
 		params["cwd"], params["workspace_id"] = wt.Path, wt.WorkspaceID
 		note = fmt.Sprintf(" It runs in a new worktree on branch %s.", wt.Branch)
 	}
+	dispatchAllowAll(sctx, s, am, a.Launcher, params)
 	s.setPlanThen(ctx, am.ID, params)
+	decision := newPlacement(am.ID, "report")
+	if tracker != nil {
+		decision.TaskID = tracker.task.ID
+	}
+	sctx = context.WithValue(sctx, placementBindKey{}, decision)
 	attempted = true
 	if startErr = s.call(sctx, am.ID, DeviceSessionStart, params, &res); startErr != nil {
 		switch {
@@ -269,10 +276,14 @@ func (s *Service) dispatchStart(ctx context.Context, machine, session string, ar
 	if tracker == nil {
 		s.addDispatched(ctx, dispatchTask{FromMachine: machine, FromSession: session, Machine: s.canonical(am.ID),
 			Session: res.Session.SessionID, Cwd: a.Cwd, Title: title, At: now})
+		s.recordSubagentLink(s.canonical(am.ID), res.Session.SessionID, machine, session, proto.SubagentOriginDispatch)
 	}
 	s.logf("dispatch %s/%s -> %s/%s in %s", machine, short(session), am.ID, short(res.Session.SessionID), a.Cwd)
 	child := res.Session
-	s.superviseDispatched(ctx, am, child, a.Prompt, cmp.Or(from.From, short(session)), cmp.Or(from.FromMachine, machine))
+	if id := s.superviseDispatched(ctx, am, child, a.Prompt, cmp.Or(from.From, short(session)), cmp.Or(from.FromMachine, machine)); id != "" {
+		decision.TaskID = id
+		s.savePlacement(ctx, decision)
+	}
 	if tracker != nil {
 		return fmt.Sprintf("Started on %s in %s: session %s.%s A2A task %s. Questions and results will be delivered to this session. Read details with dispatch_read or a2a_get.",
 			am.Name, a.Cwd, res.Session.SessionID, note, tracker.task.ID), nil
@@ -450,19 +461,38 @@ func (s *Service) dispatchOverview(ctx context.Context, machine string, mine []d
 // and the supervision messages and task_review of any task the main conversation hands out. The calling agent still
 // reads the result with dispatch_read. Without a main conversation, or when the todo cannot be made, the task runs
 // untracked as before; the start itself has succeeded either way.
-func (s *Service) superviseDispatched(ctx context.Context, am Device, c proto.Session, prompt, from, fromMachine string) {
+func (s *Service) superviseDispatched(ctx context.Context, am Device, c proto.Session, prompt, from, fromMachine string) string {
 	main := s.settings(ctx).Main
 	if main == "" || c.SessionID == "" {
-		return
+		return ""
 	}
 	notes := i18n.T(s.lang(ctx), "assistant-tasks.dispatch_notes", i18n.Args{"from": from,
 		"from_machine": fromMachine, "machine": am.Name, "cwd": c.Cwd}) + "\n\n" + prompt
 	todo, made, err := s.adoptAgent(context.WithoutCancel(ctx), main, am, c, "", prompt, notes, nil, 0, false)
 	if err != nil {
 		s.logf("dispatch %s on %s: task: %v", short(c.SessionID), am.ID, err)
-		return
+		return ""
 	}
 	if made {
 		s.taskCard(ctx, main, todo.ID, "")
 	}
+	return todo.ID
+}
+
+// dispatchAllowAll starts a dispatched Agent, a supervised task's (superviseDispatched), in Allow all as agent_start
+// and a planned task start theirs (launcher_fit.go allowAll; docs/assistant/unified-entry.md "Permissions": Claude-family
+// launchers always start in bypassPermissions): without it a Claude Code child took its computer's default mode and
+// stopped at its first tool approval. A mode Model configuration's agent.new binding names stays. The launcher is only
+// looked up here: the start keeps the one it was given, and a launcher fitLauncher would refuse or replace, or one it
+// cannot tell, keeps the computer's default.
+func dispatchAllowAll(ctx context.Context, s *Service, am Device, launcher string, params map[string]any) {
+	if mode, _ := params["permission_mode"].(string); mode != "" {
+		return
+	}
+	probe := maps.Clone(params)
+	_, fit, err := s.fitLauncher(ctx, am, startPick{launcher: strings.TrimSpace(launcher)}, probe)
+	if err != nil || probe["launcher"] != params["launcher"] || !startTakesModes(fit.agent) || !fit.allowAll() {
+		return
+	}
+	params["permission_mode"] = "bypassPermissions"
 }

@@ -281,7 +281,7 @@ private fun BindStep(channel: HubChannel, prompt: BindPrompt, bind: BindState, m
             StepView.QrCode -> {
                 // The page the code points at, opened directly: on the phone that has the chat app.
                 prompt.link?.takeIf { StepView.isWebLink(it) }?.let { link ->
-                    JButton(prompt.linkText?.takeIf { it.isNotBlank() } ?: stringResource(R.string.settings_src_open_web), { runCatching { uri.openUri(link) } },
+                    JButton(prompt.linkText?.takeIf { it.isNotBlank() } ?: stringResource(R.string.settings_src_open_web), { val _ = runCatching { uri.openUri(link) } },
                         Modifier.fillMaxWidth(), icon = PhIcons.ArrowSquareOut)
                 }
                 JQrCode(rows, Modifier.align(Alignment.CenterHorizontally), label = stringResource(R.string.settings_src_channel_qr_label, channel.label))
@@ -307,7 +307,7 @@ private fun BindStep(channel: HubChannel, prompt: BindPrompt, bind: BindState, m
                 Waiting(if (prompt.kind == "pair_code") stringResource(R.string.settings_src_channel_waiting_send, channel.label) else stringResource(R.string.settings_src_channel_waiting_authorize))
                 Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.s)) {
                     prompt.url?.takeIf { prompt.kind == "device_code" && StepView.isWebLink(it) }?.let { url ->
-                        JButton(stringResource(R.string.settings_src_open_web), { runCatching { uri.openUri(url) } }, Modifier.weight(1f), kind = JButtonKind.Secondary, icon = PhIcons.ArrowSquareOut)
+                        JButton(stringResource(R.string.settings_src_open_web), { val _ = runCatching { uri.openUri(url) } }, Modifier.weight(1f), kind = JButtonKind.Secondary, icon = PhIcons.ArrowSquareOut)
                     }
                     JButton(stringResource(R.string.settings_src_cancel), model::cancelBind, Modifier.weight(1f), kind = JButtonKind.Secondary)
                 }

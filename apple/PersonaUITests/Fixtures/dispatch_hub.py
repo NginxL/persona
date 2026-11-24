@@ -18,12 +18,18 @@ spec = importlib.util.spec_from_file_location("dispatch_mock", root / "scripts/m
 hub = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(hub)
 
-# One standalone task with an Agent, and one still starting. The other two are the plan's tasks.
+# One standalone task with an Agent, one direct dispatch still starting before its plan loads, and one plain todo_create.
+# The other two are the plan's tasks.
 todos = {task["id"]: copy.deepcopy(task) for task in hub.TODOS_INIT}
 widget = todos["todo_task_widget"]
 widget.pop("plan_id", None)
 starting = copy.deepcopy(widget)
-starting.update(id="todo_dispatch_starting", title="检查启动状态", agents=[], created_at=hub.ago(minutes=1))
+starting.update(id="todo_dispatch_starting", title="检查启动状态", agents=[], created_at=hub.ago(minutes=1),
+                plan_id="plan_dispatch_not_loaded")
+plain = copy.deepcopy(starting)
+plain.update(id="todo_dispatch_plain", title="记录发布决定", created_at=hub.ago(minutes=0.5))
+plain.pop("plan_id", None)
+plain.pop("origin", None)
 plan = copy.deepcopy(hub.TASK_PLANS["plan_mock_1"])
 plan["tasks"] = [copy.deepcopy(hub.TASK_PLANS["plan_mock_1"]["tasks"][1]),
                  copy.deepcopy(hub.TASK_PLANS["plan_mock_2"]["tasks"][0])]
@@ -31,7 +37,7 @@ plan["tasks"].append(dict(plan["tasks"][0], title="未启动的计划任务", to
 for task in plan["tasks"]:
     if task.get("todo_id"):
         todos[task["todo_id"]]["plan_id"] = plan["id"]
-hub.TODOS_INIT[:] = [widget, todos["todo_task_tests"], todos["todo_task_release"], starting]
+hub.TODOS_INIT[:] = [widget, todos["todo_task_tests"], todos["todo_task_release"], starting, plain]
 hub.TODOS[:] = copy.deepcopy(hub.TODOS_INIT)
 hub.TASK_PLANS.clear()
 hub.TASK_PLANS[plan["id"]] = plan

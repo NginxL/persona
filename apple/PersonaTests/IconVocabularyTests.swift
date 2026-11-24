@@ -36,7 +36,7 @@ struct IconVocabularyTests {
     }
 
     private static func files() -> [URL] {
-        ["Persona", "PersonaWatch", "Shared"].flatMap { dir in
+        ["Persona", "Modules", "PersonaWatch", "Shared"].flatMap { dir in
             (FileManager.default.enumerator(at: ios.appending(path: dir), includingPropertiesForKeys: nil)?
                 .compactMap { $0 as? URL } ?? [])
                 .filter { $0.pathExtension == "swift" && $0.lastPathComponent != "Icons.swift" }

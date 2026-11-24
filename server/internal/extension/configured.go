@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"net"
 	"net/url"
+	"slices"
 	"strings"
 
 	"github.com/nwverse/persona/server/internal/extension/egress"
@@ -233,4 +234,153 @@ func SecretHint(s SecretSpec, value string) string {
 	}
 	r := []rune(value)
 	return string(r[len(r)-4:])
+}
+
+// SandboxConfig is config as a sandboxed program gets it (#13540): every permitted loopback address in a format uri
+// setting is written as egress.LocalHost, the name the hub machine's loopback has inside a sandbox (`127.0.0.1` there is
+// the sandbox itself). Its permissions decide whether an address is rewritten: a loopback address in
+// permissions.network, a loopback "config:" target on that port (http only when the manifest allows it) or a loopback
+// host the owner allowed. A schema default that is absent from config is filled in and rewritten too, so the program
+// gets the rewritten default. config comes back unchanged when nothing needs rewriting.
+func SandboxConfig(m *Manifest, config json.RawMessage, rule egress.Rule) json.RawMessage {
+	if m == nil || len(config) == 0 {
+		return config
+	}
+	sc, err := ParseSchema(m.Configuration)
+	if err != nil || sc == nil {
+		return config
+	}
+	var values map[string]any
+	if json.Unmarshal(config, &values) != nil || values == nil {
+		return config
+	}
+	changed := false
+	for _, f := range sc.Fields {
+		if f.Type == "string" && f.Format == "uri" {
+			v, ok := values[f.Name].(string)
+			if !ok {
+				if f.Default == nil {
+					continue
+				}
+				var d string
+				if json.Unmarshal(f.Default, &d) != nil {
+					continue
+				}
+				if r, rewritten := sandboxURL(d, rule); rewritten {
+					values[f.Name], changed = r, true
+				}
+				continue
+			}
+			if r, rewritten := sandboxURL(v, rule); rewritten {
+				values[f.Name], changed = r, true
+			}
+			continue
+		}
+		if !f.EntryList() || f.Items == nil {
+			continue
+		}
+		entries, ok := values[f.Name].([]any)
+		if !ok {
+			continue
+		}
+		for _, entry := range entries {
+			row, ok := entry.(map[string]any)
+			if !ok {
+				continue
+			}
+			for _, item := range f.Items.Fields {
+				if item.Type != "string" || item.Format != "uri" {
+					continue
+				}
+				v, ok := row[item.Name].(string)
+				if !ok {
+					continue
+				}
+				if r, rewritten := sandboxURL(v, rule); rewritten {
+					row[item.Name], changed = r, true
+				}
+			}
+		}
+	}
+	if !changed {
+		return config
+	}
+	out, err := json.Marshal(values)
+	if err != nil {
+		return config
+	}
+	return out
+}
+
+// sandboxURL is raw rewritten to egress.LocalHost when it is a permitted loopback http(s) / ws(s) URL, and whether it
+// was. User info stays in front of the new host (net/url keeps it apart from Host).
+func sandboxURL(raw string, rule egress.Rule) (string, bool) {
+	u, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || u.Opaque != "" || u.Host == "" {
+		return "", false
+	}
+	switch strings.ToLower(u.Scheme) {
+	case "http", "https", "ws", "wss":
+	default:
+		return "", false
+	}
+	if !isLoopbackHost(u.Hostname()) || !loopbackPermitted(u, rule) {
+		return "", false
+	}
+	if p := u.Port(); p != "" {
+		u.Host = net.JoinHostPort(egress.LocalHost, p)
+	} else {
+		u.Host = egress.LocalHost
+	}
+	return u.String(), true
+}
+
+// loopbackPermitted says whether rule lets u reach this machine's loopback: permissions.network lists a loopback
+// address, one of its Targets is that loopback port (plain http only when the target allows it), or the owner allowed a
+// loopback host (on that port, or on any when it names none).
+func loopbackPermitted(u *url.URL, rule egress.Rule) bool {
+	if rule.Loopback() {
+		return true
+	}
+	plain := strings.EqualFold(u.Scheme, "http") || strings.EqualFold(u.Scheme, "ws")
+	port := u.Port()
+	if port == "" {
+		if plain {
+			port = "80"
+		} else {
+			port = "443"
+		}
+	}
+	if slices.ContainsFunc(rule.Targets, func(t egress.Target) bool {
+		return isLoopbackHost(t.Host) && t.Port == port && (!plain || t.HTTP)
+	}) {
+		return true
+	}
+	return slices.ContainsFunc(rule.Owner, func(t egress.Target) bool {
+		return isLoopbackHost(t.Host) && (t.Port == "" || t.Port == port)
+	})
+}
+
+// HostLoopbackURL is raw rewritten from egress.LocalHost back to 127.0.0.1 on the hub machine itself, for a program
+// outside any sandbox (a gate's credentials assistantCredentials hands over); raw comes back unchanged when it is not
+// such a URL.
+func HostLoopbackURL(raw string) string {
+	u, err := url.Parse(raw)
+	if err != nil || u.Opaque != "" {
+		return raw
+	}
+	switch strings.ToLower(u.Scheme) {
+	case "http", "https", "ws", "wss":
+	default:
+		return raw
+	}
+	if !strings.EqualFold(u.Hostname(), egress.LocalHost) {
+		return raw
+	}
+	if p := u.Port(); p != "" {
+		u.Host = net.JoinHostPort("127.0.0.1", p)
+	} else {
+		u.Host = "127.0.0.1"
+	}
+	return u.String()
 }

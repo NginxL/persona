@@ -60,7 +60,7 @@ internal fun ShellChat(route: ChatRoute, session: ShellSession, navigator: Navig
     val routingState by routingConnection.state.collectAsStateWithLifecycle()
     val routingFeatures = routingConnection.lastHello?.features.orEmpty()
     val home = rememberChildSessionHome(SessionKey(route.machineId, route.sessionId), sessions, actions,
-        routingFeatures, routingState == ConnectionState.Online, side = route.side)
+        routingFeatures, routingState == ConnectionState.Online, side = route.side, directSubagent = route.subagentDetail)
     // A link to a side session (#7944: a notification, Needs you, a search hit) opens its parent, then the side over it,
     // once: Back from the side comes to the parent.
     val landedSide = remember(home, sessions, routingFeatures) { home.shownSide(sessions, routingFeatures) }
@@ -102,12 +102,12 @@ internal fun ShellChat(route: ChatRoute, session: ShellSession, navigator: Navig
     var git by remember { mutableStateOf<persona.core.contracts.api.SessionGitStatus?>(null) }
     val cwd = metadata?.cwd.orEmpty()
     val connectionState = (wiring?.connection ?: session.connection).state
-    LaunchedEffect(cwd, session.files, pane, connectionState) {
+    LaunchedEffect(key.machineId, cwd, session.files, pane, connectionState) {
         val files = session.files
-        if (!assistant && cwd.isNotBlank() && files != null) followGitStatus(connectionState, { files.status(route.machineId, cwd) }) { git = it }
+        if (!assistant && cwd.isNotBlank() && files != null) followGitStatus(connectionState, { files.status(key.machineId, cwd) }) { git = it }
     }
     val filesAvailable = !assistant && cwd.isNotBlank() && session.files != null
-    val canOpenFilePath = filesAvailable || (assistant && route.machineId.isNotBlank() && session.files != null)
+    val canOpenFilePath = filesAvailable || (assistant && key.machineId.isNotBlank() && session.files != null)
     fun open(p: FilesPane, path: String? = null, line: Int? = null) {
         insertionFocused = composer.focused; focus.clearFocus(); openedPath = path; openedLine = line; pane = p
     }
@@ -131,6 +131,8 @@ internal fun ShellChat(route: ChatRoute, session: ShellSession, navigator: Navig
                     mainConversation = assistantSnapshot.mainSession?.sessionId,
                     leaderConversations = assistantSnapshot.leaders.toSet(),
                     onOpenSession = { navigator.navigate(ChatRoute(it.machineId, it.sessionId)) },
+                    onOpenSubagent = { navigator.navigate(ChatRoute(it.machineId, it.sessionId, ConversationKind.Agent, subagentDetail = true)) },
+                    openSubagents = route.openSubagents,
                     onOpenSide = { navigator.navigate(ChatRoute(it.machineId, it.sessionId, ConversationKind.Agent, side = true)) },
                     onFollowSession = { onGroupGone(route, route.copy(machineId = it.machineId, sessionId = it.sessionId)) },
                     waiting = waiting,
@@ -140,14 +142,17 @@ internal fun ShellChat(route: ChatRoute, session: ShellSession, navigator: Navig
                     },
                     onOpenAssistant = { navigator.navigate(persona.feature.chat.conversationRoute(it, assistant = true)) },
                     onConnectionDetails = { navigator.navigate(SettingsPageRoute(SettingsPage.Diagnostics)) },
-                    files = session.files, hubScope = session.identity, ports = wiring?.ports,
+                    files = session.files, hubScope = wiring?.scope?.path ?: session.identity, ports = wiring?.ports,
                     onOpenPath = if (canOpenFilePath) ({ path, line -> open(FilesPane.Files, path, line) }) else null,
                     onOpenTodo = { todoId -> navigator.navigate(persona.core.navigation.TodoDetailRoute(todoId)) },
                     // A model error the hub named on Persona's turn: Fix It opens what the home's readiness card would (MainReadiness.kt).
                     onFixModel = { action, launcher, manager ->
-                        navigator.navigate(if (action == persona.core.designsystem.ReadinessActionId.EditProvider)
-                            launcher?.takeIf(String::isNotBlank)?.let { persona.core.navigation.ModelProviderRoute(it) } ?: SettingsPageRoute(SettingsPage.Providers)
-                        else persona.core.navigation.ModelPurposeRoute("assistant", manager))
+                        navigator.navigate(when (action) {
+                            persona.core.designsystem.ReadinessActionId.EditProvider ->
+                                launcher?.takeIf(String::isNotBlank)?.let { persona.core.navigation.ModelProviderRoute(it) } ?: SettingsPageRoute(SettingsPage.Providers)
+                            persona.core.designsystem.ReadinessActionId.PickModel -> SettingsPageRoute(SettingsPage.ModelConfig)
+                            else -> persona.core.navigation.ModelPurposeRoute("assistant", manager)
+                        })
                     },
                     // A briefing's recommended setup opens the page its mechanism is turned on at, and changes nothing (#5085).
                     onOpenSetup = { page, manager ->
@@ -167,7 +172,7 @@ internal fun ShellChat(route: ChatRoute, session: ShellSession, navigator: Navig
             if (pane != null && (filesAvailable || (canOpenFilePath && openedPath != null))) {
                 BackHandler { pane = null; openedPath = null; openedLine = null }
                 CompositionLocalProvider(persona.core.designsystem.LocalSplitDetail provides null) {
-                    SessionFilesScreen(route.copy(sessionId = key.sessionId), cwd.ifBlank { "~" }, requireNotNull(session.files), { pane = null; openedPath = null; openedLine = null }, { path ->
+                    SessionFilesScreen(route.copy(machineId = key.machineId, sessionId = key.sessionId), cwd.ifBlank { "~" }, requireNotNull(session.files), { pane = null; openedPath = null; openedLine = null }, { path ->
                         composer.value = insertFilePath(composer.value, path, insertionFocused)
                         pane = null
                         openedPath = null

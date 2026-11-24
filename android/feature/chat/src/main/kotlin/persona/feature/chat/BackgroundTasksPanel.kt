@@ -76,11 +76,11 @@ import java.time.Instant
 /** Keep the user's entry attached to the same computer, session and manager. */
 internal data class BackgroundPanelRequest(val session: SessionKey, val manager: String?, val target: BackgroundDestination)
 
-private data class BackgroundDetail(val row: Session? = null, val loading: Boolean = false, val failed: Boolean = false)
+internal data class BackgroundDetail(val row: Session? = null, val loading: Boolean = false, val failed: Boolean = false)
 
 /** A summary omits individual tasks. Its push hints trigger a coalesced exact lookup while this panel is shown. */
 @Composable
-private fun backgroundDetail(
+internal fun backgroundDetail(
     row: Session, actions: ChatActions?, connection: HubConnection?, exact: Boolean, retry: Int,
 ): BackgroundDetail {
     val latest by rememberUpdatedState(row)
@@ -296,7 +296,7 @@ private fun itemFocus(id: String, returned: String?, requester: FocusRequester, 
 }
 
 @Composable
-private fun BackgroundWorkflowRow(run: Workflow, index: Int, total: Int, modifier: Modifier, onOpen: () -> Unit) {
+internal fun BackgroundWorkflowRow(run: Workflow, index: Int, total: Int, modifier: Modifier, onOpen: () -> Unit) {
     val status = stringResource(when (run.state) {
         WorkflowStatus.Running -> R.string.chat_background_running
         WorkflowStatus.Failed, WorkflowStatus.Stalled -> R.string.chat_background_failed
@@ -311,7 +311,7 @@ private fun BackgroundWorkflowRow(run: Workflow, index: Int, total: Int, modifie
 }
 
 @Composable
-private fun BackgroundCommandRow(command: BackgroundCommand, now: Instant, index: Int, total: Int, modifier: Modifier, onOpen: () -> Unit) {
+internal fun BackgroundCommandRow(command: BackgroundCommand, now: Instant, index: Int, total: Int, modifier: Modifier, onOpen: () -> Unit) {
     val res = LocalResources.current
     val elapsed = command.elapsed(now)?.let { backgroundDuration(it) }
     val subtitle = listOfNotNull(backgroundStatus(command.outcome), elapsed).joinToString(stringResource(R.string.chat_background_separator))

@@ -1,5 +1,6 @@
 import { Fragment, useId, useLayoutEffect, useReducer, useRef, useState, type ComponentProps, type ReactNode, type RefObject } from "react";
 import { EASE } from "../../ui/atoms";
+import { placePickerCard } from "../../ui/overlay";
 
 const CARD_WIDTH = 280;
 const EDGE = 8;
@@ -73,13 +74,7 @@ export function PickerMenu<T>({ items, current, label, itemKey, group, renderRow
     const p = panel.current, row = active.current, g = glide.current;
     if (g) Object.assign(g.style, { top: `${row?.offsetTop ?? 0}px`, height: `${row?.offsetHeight ?? 0}px`, opacity: row ? 1 : 0 });
     if (!p || !detail) return;
-    const rect = p.getBoundingClientRect();
-    const w = p.offsetWidth || width;
-    const side = rect.left + w + CARD_WIDTH + 2 * EDGE <= innerWidth ? "right" : rect.left >= CARD_WIDTH + 2 * EDGE ? "left" : "inside";
-    const ceiling = EDGE - rect.top;
-    const height = Math.round(Math.max(1, Math.min(400, p.offsetHeight - ceiling)));
-    const rowTop = (list.current?.offsetTop ?? 0) + (row?.offsetTop ?? 0) - (list.current?.scrollTop ?? 0);
-    const top = Math.round(Math.max(ceiling, Math.min(rowTop, p.offsetHeight - Math.min(card.current?.scrollHeight ?? 0, height))));
+    const { side, top, height } = placePickerCard(p, list.current, row, card.current, { width, cardWidth: CARD_WIDTH, edge: EDGE });
     const label = row?.querySelector<HTMLElement>("[data-picker-title]");
     const clippedTitle = !!label && label.scrollWidth > label.clientWidth;
     setPlace(old => old.side === side && old.top === top && old.height === height && old.clippedTitle === clippedTitle

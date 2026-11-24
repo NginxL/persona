@@ -15,7 +15,6 @@ import (
 
 	"github.com/nwverse/persona/server/internal/apierr"
 	"github.com/nwverse/persona/server/internal/i18n"
-	"github.com/nwverse/persona/server/internal/identity"
 	"github.com/nwverse/persona/server/internal/proto"
 )
 
@@ -287,7 +286,8 @@ func (svc *Service) applyArchives(ctx context.Context, machine string, list []pr
 			b.pending[key] = true
 		}
 		if b.pending[key] {
-			rec.Archived, rec.ChangedAt = false, time.Now().UTC()
+			rec.Archived = false
+			rec.ChangedAt = nextAgentArchiveChangedAt(rec.ChangedAt)
 			rec.Session = archiveSnapshot(s)
 			rec.Session.MachineID = machine
 			if next == nil {
@@ -320,7 +320,12 @@ func (svc *Service) applyArchives(ctx context.Context, machine string, list []pr
 // archivedInventory is machine's whole list with the archive applied (archivedSessions), its children folded under
 // their parents among the rows left listed (foldInventory).
 func (svc *Service) archivedInventory(ctx context.Context, machine string) ([]proto.Session, bool, error) {
-	mark := svc.archiveMark()
+	return svc.archivedInventoryAtMark(ctx, machine, svc.archiveMark())
+}
+
+// archivedInventoryAtMark applies only activity visible at mark, so a publisher cannot undo an archive written after
+// the operation whose publication it is finishing.
+func (svc *Service) archivedInventoryAtMark(ctx context.Context, machine string, mark uint64) ([]proto.Session, bool, error) {
 	list, changed, err := svc.archivedSessions(ctx, machine, svc.decoratedUnarchived(machine), mark)
 	svc.foldInventory(machine, list)
 	return list, changed, err
@@ -518,7 +523,7 @@ func (svc *Service) listArchivedSessions(w http.ResponseWriter, r *http.Request)
 		}
 	}
 	out := []proto.Session{}
-	ext := r.Header.Get(RoleHeader) == roleExtension // never a health-space conversation (docs/extensions/extensions.md)
+	ext := r.Header.Get(RoleHeader) == roleExtension // never a conversation of a space hidden from extensions (docs/extensions/extensions.md)
 	for _, m := range svc.fleetMachines() {
 		if mid != "" && mid != m.ID {
 			continue
@@ -532,7 +537,7 @@ func (svc *Service) listArchivedSessions(w http.ResponseWriter, r *http.Request)
 			svc.publishList(m.ID)
 		}
 		for _, row := range list {
-			if row.Archived && !row.Assistant && (!row.HiddenByDirectory() || r.URL.Query().Get("include_hidden") == "1") && !(ext && (row.Space == SpaceHealth || identity.InHealthSpace(row.Cwd))) {
+			if row.Archived && !row.Assistant && (!row.HiddenByDirectory() || r.URL.Query().Get("include_hidden") == "1") && !(ext && svc.extensionHides(ctx, runSpace(row))) {
 				row.Manager = svc.id
 				row.NativeArchive = svc.nativeArchiveView(m.ID, row.SessionID)
 				out = append(out, row)
@@ -611,9 +616,11 @@ func (svc *Service) setAgentArchive(ctx context.Context, mid, sid string, archiv
 	if archived && agentArchiveBusy(row) {
 		return row, archiveBusyRefusal(row, false)
 	}
-	if err := svc.noteAgentArchive(ctx, row, archived); err != nil {
+	changedAt, err := svc.noteAgentArchiveAt(ctx, row, archived)
+	if err != nil {
 		return row, err
 	}
+	row.ArchiveChangedAt = archiveChangedAt(changedAt)
 	svc.publishList(row.MachineID)
 	return row, nil
 }
@@ -644,25 +651,43 @@ func (svc *Service) setAgentSessionArchive(w http.ResponseWriter, r *http.Reques
 }
 
 func (svc *Service) noteAgentArchive(ctx context.Context, s proto.Session, archived bool) error {
+	_, err := svc.noteAgentArchiveAt(ctx, s, archived)
+	return err
+}
+
+// nextAgentArchiveChangedAt returns the next per-session archive generation. The archive gate serializes callers;
+// using the persisted previous marker keeps it strictly increasing when the wall clock repeats or moves backwards.
+func nextAgentArchiveChangedAt(previous time.Time) time.Time {
+	now := time.Now().UTC()
+	if !now.After(previous) {
+		return previous.Add(time.Nanosecond)
+	}
+	return now
+}
+
+// noteAgentArchiveAt also returns the generation it wrote: a close started for this archive must complete only for
+// that same generation, not for a restore or re-archive written while its node call was out.
+func (svc *Service) noteAgentArchiveAt(ctx context.Context, s proto.Session, archived bool) (time.Time, error) {
 	ctx, cancel := context.WithTimeout(ctx, agentArchiveTimeout)
 	defer cancel()
 	b := &svc.agentArchives
 	if err := b.lock(ctx); err != nil {
-		return err
+		return time.Time{}, err
 	}
 	defer b.unlock()
 	if err := svc.loadAgentArchivesLocked(ctx); err != nil {
-		return err
+		return time.Time{}, err
 	}
 	key := runtimeListID(s.MachineID, s.SessionID)
 	next := maps.Clone(b.records)
-	next[key] = agentArchive{Session: archiveSnapshot(s), Archived: archived, ChangedAt: time.Now().UTC()}
+	changedAt := nextAgentArchiveChangedAt(b.records[key].ChangedAt)
+	next[key] = agentArchive{Session: archiveSnapshot(s), Archived: archived, ChangedAt: changedAt}
 	if err := svc.saveAgentArchivesLocked(ctx, next); err != nil {
-		return err
+		return time.Time{}, err
 	}
 	delete(b.pending, key)
 	svc.nativeArchiveWanted(s, archived) // the tool's own archive follows (agent_archive_native.go)
-	return nil
+	return changedAt, nil
 }
 
 func (svc *Service) agentArchiveRoutes() {

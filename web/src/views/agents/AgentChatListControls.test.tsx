@@ -2,6 +2,7 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { seedAgentsDisplay } from "../../lib/agents-display";
 vi.hoisted(() => {
   const g = globalThis as Record<string, unknown>;
   g.ResizeObserver ??= class {
@@ -68,6 +69,8 @@ let root: Root;
 beforeEach(() => {
   localStorage.clear();
   reset();
+  // Settings › Agents: the Filter is on for these tests (it is off until the hub says so)
+  seedAgentsDisplay({ show_botmux: true, configured: true, show_filter: true });
   resetAgentListFilters();
   vi.stubGlobal(
     "fetch",

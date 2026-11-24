@@ -31,10 +31,22 @@ import (
 
 // View is the card as the apps draw it, or nil when they cannot (it stays a code block).
 func (c PersonaCard) View() *View {
+	if c.Value != nil && !isFinite(*c.Value) {
+		return nil
+	}
+	if c.Total != nil && !isFinite(c.Total.Value) {
+		return nil
+	}
 	parts := append(append([]CardPart{}, c.Segments...), c.rest()...)
 	sum := 0.0
 	for _, p := range parts {
+		if !isFinite(p.Value) {
+			return nil
+		}
 		sum += p.Value
+	}
+	if !isFinite(sum) {
+		return nil
 	}
 	switch c.Type {
 	case PersonaCardKindStat:
@@ -51,6 +63,11 @@ func (c PersonaCard) View() *View {
 			}
 		}
 	case PersonaCardKindRing:
+		for _, p := range parts {
+			if p.Value < 0 {
+				return nil
+			}
+		}
 		if c.Total != nil && c.Total.Value > sum {
 			parts = append(parts, CardPart{Label: "剩余", Value: c.Total.Value - sum})
 			sum = c.Total.Value
@@ -58,18 +75,23 @@ func (c PersonaCard) View() *View {
 		if len(parts) < 2 || sum <= 0 {
 			return nil
 		}
-		for _, p := range parts {
-			if p.Value < 0 {
-				return nil
-			}
-		}
 	case PersonaCardKindLine:
 		if len(c.Points) < 2 {
 			return nil
 		}
+		for _, p := range c.Points {
+			if !isFinite(p.Value) {
+				return nil
+			}
+		}
 	case PersonaCardKindBar:
 		if len(c.Points) == 0 {
 			return nil
+		}
+		for _, p := range c.Points {
+			if !isFinite(p.Value) {
+				return nil
+			}
 		}
 	default:
 		return nil
@@ -181,20 +203,37 @@ func amount(v float64, unit string) string {
 	return s
 }
 
+func isFinite(v float64) bool {
+	return !math.IsNaN(v) && !math.IsInf(v, 0)
+}
+
 // Number writes v grouped by thousands with at most one decimal: 2,250 · 7.5 · -1,200.3 · 0.
 func Number(v float64) string {
-	r := math.Round(v*10) / 10
-	if r == 0 {
-		r = 0 // not -0
+	if !isFinite(v) {
+		return "0"
 	}
-	neg := r < 0
-	if neg {
-		r = -r
-	}
-	whole := math.Floor(r)
-	tenth := int(math.Round((r - whole) * 10))
-	if tenth == 10 {
-		whole, tenth = whole+1, 0
+	var (
+		neg   bool
+		whole float64
+		tenth int
+	)
+	if math.Abs(v) >= 1e16 {
+		neg = v < 0
+		whole = math.Abs(v)
+	} else {
+		r := math.Round(v*10) / 10
+		if r == 0 {
+			r = 0 // not -0
+		}
+		neg = r < 0
+		if neg {
+			r = -r
+		}
+		whole = math.Floor(r)
+		tenth = int(math.Round((r - whole) * 10))
+		if tenth == 10 {
+			whole, tenth = whole+1, 0
+		}
 	}
 	digits := strconv.FormatFloat(whole, 'f', 0, 64)
 	var b strings.Builder

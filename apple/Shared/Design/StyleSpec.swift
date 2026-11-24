@@ -52,30 +52,6 @@ nonisolated struct StyleSpec: Sendable {
         var cardStroke: Color
     }
 
-    /// The Mac window's own chrome around the pages (`MacTokens.swift`): the sections column, the side column beside a
-    /// page's list (Inbox's filters), how their rows and the shell's lists show the selected one, and the discs of names
-    /// without a picture. Each `nil` (or empty) keeps the Mac's system look, as every style but Lark does. Read on the
-    /// Mac only: the iPhone and iPad draw none of it.
-    struct MacChrome: Sendable {
-        /// The sections column's color; nil, the system sidebar's (`Theme.systemSidebar`).
-        var sidebar: Color? = nil
-        /// A selected row in the sections column: a raised block of this color with its icon in the accent (Feishu's
-        /// navigation); nil, the shell's selection.
-        var sidebarSelected: Color? = nil
-        /// The side column beside a page's list; nil, the page's color.
-        var sideColumn: Color? = nil
-        /// Every other selected row (side columns, the inbox, the conversation lists): the accent at this opacity, the
-        /// row's icon in the accent; nil, the gray well (`Theme.Fill.macSelected`).
-        var selectionTint: Double? = nil
-        /// A row under the pointer; nil, half the gray well.
-        var hover: Color? = nil
-        /// Names without a picture on one of these, picked by the name and the same every time, the letter white
-        /// (Feishu's avatars); empty, the neutral disc (`Theme.monogramFill`).
-        var monogramHues: [Color] = []
-
-        static let system = MacChrome()
-    }
-
     /// What can be tapped. White words on it (solid buttons, selected chips) need ≥ 3.5:1.
     var accent: Color
     var extensionRoles: ExtensionThemePalette?
@@ -105,8 +81,6 @@ nonisolated struct StyleSpec: Sendable {
     var workList: WorkList
     /// How SF Symbols are drawn (`IconSpec`, docs/apple/icons.md).
     var icons: IconSpec
-    /// The Mac window's chrome (the style's own, whatever the color).
-    var mac: MacChrome
 
     var usesGlass: Bool { surface == .glass }
 
@@ -142,7 +116,6 @@ nonisolated struct StyleSpec: Sendable {
         components = style.components
         workList = style.workList
         icons = style.icons
-        mac = style.mac
         lark = LarkChrome(blue: colors.larkBlue, myBubble: colors.larkMyBubble, otherBubble: style.larkOtherBubble ?? card,
                           cardBackground: style.larkCard ?? card, cardStroke: style.cardStroke)
         self.personaPrimary = personaPrimary
@@ -199,8 +172,6 @@ nonisolated struct ComponentSpec: Sendable {
     /// Lark's other people's bubbles and its cards: the style's own, or (nil) its cards.
     var larkOtherBubble: Color? = nil
     var larkCard: Color? = nil
-    /// The Mac window's chrome; `.system` keeps the Mac's own.
-    var mac: StyleSpec.MacChrome = .system
     /// The colors it came with: Theme Color › Match Interface Style.
     var colors: ColorSpec
 }

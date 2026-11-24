@@ -16,7 +16,7 @@ import persona.core.contracts.api.MessageSender
 import persona.core.contracts.api.MessageTransport
 import persona.core.contracts.api.MessageTransportResult
 import persona.core.contracts.api.SessionsRepository
-import persona.feature.inbox.InboxHandOffRequest
+import persona.core.inbox.InboxHandOffRequest
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job

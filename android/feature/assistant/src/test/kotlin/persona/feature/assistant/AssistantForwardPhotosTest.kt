@@ -215,7 +215,11 @@ class AssistantForwardPhotosTest {
             org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle()
             condition()
         }
-        waitMain { composerState.attachments.size == 2 && composerState.ready }
+        try {
+            waitMain { composerState.attachments.size == 2 && composerState.ready }
+        } catch (timeout: Throwable) {
+            throw AssertionError("forward-photo-state: ${composerState.attachments.map { "${it.name}:${it.uploadState}:path=${it.path}:error=${it.error}" }}; uploads=${composer.uploads}", timeout)
+        }
         rule.onNodeWithContentDescription("Photo 1", useUnmergedTree = true).assertExists()
         rule.onNodeWithContentDescription("Photo 2", useUnmergedTree = true).assertExists()
         assertEquals(setOf(main to "first.png", main to "second.png"), composer.uploads.toSet())

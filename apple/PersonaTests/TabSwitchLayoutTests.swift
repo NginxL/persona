@@ -1,4 +1,3 @@
-#if os(iOS)
 import Foundation
 import SwiftUI
 import Testing
@@ -194,4 +193,3 @@ struct TabSwitchLayoutTests {
         #expect(!source.contains("toolbarVisibility(.hidden, for: .tabBar)"))
     }
 }
-#endif

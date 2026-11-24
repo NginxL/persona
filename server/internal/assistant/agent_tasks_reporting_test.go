@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/nwverse/persona/server/internal/db"
 	"github.com/nwverse/persona/server/internal/proto"
 )
 
@@ -309,5 +310,19 @@ func TestReportFromAReportingTodoRechecksReporterRegistration(t *testing.T) {
 	})
 	if got := strings.Join(f.noticesTo("lark1"), "\n"); strings.Contains(got, "after expiry") {
 		t.Fatalf("the expired reporter still received the report: %s", got)
+	}
+}
+
+// The reporting exception keeps main's ordinary auto-close, while other legacy unsupervised tasks attach to main (#12152, #5732).
+func TestReportingTaskCompletionKeepsLegacyAutoClose(t *testing.T) {
+	s, _ := reportingWithTask(t)
+	todo := onlyTodo(s)
+	if todo.Supervision != nil {
+		t.Fatalf("reporting fixture gained a ledger: %+v", todo.Supervision)
+	}
+	s.applyTaskDone(context.Background(), todo, time.Now(), true, taskDoneCheck{Verdict: verdictDone, Reason: "finished"}, nil)
+	got := todoNow(s, todo.ID)
+	if got.DoneAt == nil || got.DoneBy != db.DoneByAuto || got.Supervision != nil {
+		t.Fatalf("reporting completion did not keep its ordinary auto-close: %+v", got)
 	}
 }

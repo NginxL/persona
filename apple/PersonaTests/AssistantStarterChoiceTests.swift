@@ -178,6 +178,19 @@ struct AssistantStarterChoiceTests {
         // A model picked under it: that model's levels.
         #expect(AssistantStarterEffort.options(launcher: "claude", model: "fable", response: response, list: claude).map(\.id)
                 == ["low", "high", "max", "xhigh"])
+
+        let folded = LauncherModels(agent: "claude", models: [
+            AgentModel(id: "claude-opus-5-5", name: "Opus 5.5", efforts: ["low", "high"], aliases: ["fable", "opus"]),
+        ], locked: nil, machine: nil)
+        #expect(AssistantStarterEffort.options(launcher: "claude", model: "fable", response: response, list: folded).map(\.id)
+                == ["low", "high"], "a saved folded alias keeps the row's effort levels")
+        let foldedCurrent = AssistantStarterChoice.effective(launcher: "claude", model: "fable", fallback: "claude",
+                                                             mainDefault: response.default)
+        let foldedAliases = AssistantModelChoice.selectionAliases(folded)
+        #expect(AssistantModelChoice.selectedModel(try #require(foldedCurrent), launcher: "claude", aliases: foldedAliases)
+                == "claude-opus-5-5")
+        #expect(AssistantStarterChoice.pick(launcher: "claude", model: "claude-opus-5-5", current: foldedCurrent,
+                                            aliases: foldedAliases) == nil)
         // The effort check's key tells the models apart, and a model never counts without its launcher.
         let fable = AssistantStarterModels.source(box, launcher: "claude", model: "fable", fallback: "claude")
         #expect(fable != AssistantStarterModels.source(box, launcher: "claude", model: nil, fallback: "claude"))

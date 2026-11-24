@@ -129,6 +129,8 @@ func (s *Service) inboxRoutes() {
 			apierr.WriteCode(w, http.StatusServiceUnavailable, assistantwire.CodeModelUnavailable, i18n.Err("assistant-inbox.draft_no_model"))
 		case errors.Is(err, errDraftWithheld): // the drafts kept repeating what an extension marked never to quote
 			apierr.WriteCode(w, http.StatusUnprocessableEntity, "draft_withheld", err)
+		case errors.Is(err, errReplyPolicyBlocked):
+			apierr.WriteCode(w, http.StatusUnprocessableEntity, assistantwire.CodeInboxReplyPolicyBlocked, err)
 		case err != nil:
 			apierr.Write(w, http.StatusBadGateway, err)
 		default:

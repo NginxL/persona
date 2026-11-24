@@ -193,3 +193,79 @@ func TestInboxDeliveredCommentDoesNotHideFailedAgentDelivery(t *testing.T) {
 		t.Fatalf("only the second comment should reach the agent: %q", got)
 	}
 }
+
+func TestInboxReviewsKeepReachingSupervisorAfterAcceptance(t *testing.T) {
+	s, f := newQuietService(t)
+	turnInboxSignalsOn(t, s)
+	ctx := t.Context()
+	task := agentTask(t, s, f)
+	s.setTaskStage(ctx, task.ID, "review", linkedPRURL)
+	now := time.Now().UTC()
+	s.todos.mu.Lock()
+	current := s.todos.todos[task.ID]
+	current.DoneAt = &now
+	current.Supervision.State = reviewAccepted
+	current.Supervision.Reviews = []TaskReview{{Verdict: reviewAccepted, At: now}}
+	s.todos.mu.Unlock()
+
+	it := linkedPRItem(s, "", "review:1", "Add a regression case for an expired request.")
+	it.Connector.ThreadState = "open"
+	b := &s.inbox
+	b.mu.Lock()
+	b.items[it.ID] = it
+	b.mu.Unlock()
+	before := len(sentToAgent(f))
+	s.linkInboxTaskURLs(ctx)
+	waitFor(t, "first post-acceptance review", func() bool { return len(f.notices()) == 1 })
+	s.linkInboxTaskURLs(ctx) // delivery is deduplicated across repeated collections of the same review
+
+	b.mu.Lock()
+	receive(b, it, "review:2", "Check the empty-state wording as well.", 1)
+	b.mu.Unlock()
+	s.linkInboxTaskURLs(ctx)
+	waitFor(t, "second post-acceptance review", func() bool { return len(f.notices()) == 2 })
+	notices := f.notices()
+	if !strings.Contains(notices[0], "Add a regression case") || !strings.Contains(notices[1], "Check the empty-state wording") ||
+		!strings.Contains(notices[1], "待办已验收") || !strings.Contains(notices[1], linkedPRURL) {
+		t.Fatalf("notices: %q", notices)
+	}
+	if after := todoNow(s, task.ID); after.DoneAt == nil || !acceptanceStands(after) || len(sentToAgent(f)) != before {
+		t.Fatalf("post-acceptance notifications changed the work: %+v, sends=%v", after.Supervision, sentToAgent(f))
+	}
+}
+
+func TestAcceptedTaskFeedbackDoesNotFollowClosedOrUnrelatedPRs(t *testing.T) {
+	for _, state := range []string{"closed", "merged", "other PR", "cancelled", "unknown state"} {
+		t.Run(state, func(t *testing.T) {
+			s, _ := newQuietService(t)
+			turnInboxSignalsOn(t, s)
+			task := supervisedTodo(t, s, "Fix the timer")
+			ctx := t.Context()
+			s.setTaskStage(ctx, task.ID, "review", linkedPRURL)
+			now := time.Now().UTC()
+			s.todos.mu.Lock()
+			current := s.todos.todos[task.ID]
+			current.DoneAt = &now
+			current.Supervision.State = reviewAccepted
+			current.Supervision.Reviews = []TaskReview{{Verdict: reviewAccepted, At: now}}
+			if state == "cancelled" {
+				current.CancelledAt = &now
+			}
+			s.todos.mu.Unlock()
+
+			it := linkedPRItem(s, task.ID, "review:1", "A new comment on the patch.")
+			switch state {
+			case "closed", "merged":
+				it.Connector.ThreadState = state
+			case "other PR":
+				it.Connector.URL, it.Connector.ThreadState = "https://github.com/example/other/pull/12", "open"
+			case "cancelled":
+				it.Connector.ThreadState = "open"
+			}
+			s.superviseInbox(ctx, []*InboxItem{it}, nil)
+			if _, ok := pendingInbox(s, task.ID); ok || it.Agent.signaledOf != "" {
+				t.Fatal("this feedback was treated as routable")
+			}
+		})
+	}
+}

@@ -16,6 +16,7 @@ import (
 // at the end of the run, when no later update writes it again: if it does not wait the card-update window out, the
 // answer becomes a card of its own and the progress card keeps saying it is still working for good (#3915).
 func TestFeishuAnswerWaitsOutACardUpdateThrottle(t *testing.T) {
+	needsLarkLayer(t)
 	s, posts, _ := cotHub(t, false)
 	r, _ := cotRun(s)
 	feishuSink{s}.progress(context.Background(), r, time.Second, []string{"运行 `ls`"}, "")
@@ -23,9 +24,7 @@ func TestFeishuAnswerWaitsOutACardUpdateThrottle(t *testing.T) {
 	if card == "" || len(*posts) != 1 {
 		t.Fatalf("progress: posts %v, ext %v", *posts, r.Ext)
 	}
-	old := answerCardWait
-	answerCardWait = time.Millisecond
-	t.Cleanup(func() { answerCardWait = old })
+	s.setLarkTiming("answer_card_wait", time.Millisecond)
 	updates := 0
 	s.hub.(*fakeHub).answerApp(AppFeishu, FeishuUpdateCard, func(p json.RawMessage) (any, error) {
 		updates++
@@ -57,6 +56,7 @@ func TestFeishuAnswerWaitsOutACardUpdateThrottle(t *testing.T) {
 // A quiet end has nothing to send but its last line, which replaces the progress card: the same wait applies, or the
 // card keeps saying the run is still going with nothing to come.
 func TestFeishuQuietEndWaitsOutACardUpdateThrottle(t *testing.T) {
+	needsLarkLayer(t)
 	s, posts, _ := cotHub(t, false)
 	r, _ := cotRun(s)
 	feishuSink{s}.progress(context.Background(), r, time.Second, []string{"运行 `ls`"}, "")
@@ -64,9 +64,7 @@ func TestFeishuQuietEndWaitsOutACardUpdateThrottle(t *testing.T) {
 		t.Fatalf("progress: posts %v, ext %v", *posts, r.Ext)
 	}
 	progress, _ := (*posts)[0]["card"].(string)
-	old := answerCardWait
-	answerCardWait = time.Millisecond
-	t.Cleanup(func() { answerCardWait = old })
+	s.setLarkTiming("answer_card_wait", time.Millisecond)
 	updates := 0
 	cards := []string{}
 	s.hub.(*fakeHub).answerApp(AppFeishu, FeishuUpdateCard, func(p json.RawMessage) (any, error) {
@@ -92,15 +90,14 @@ func TestFeishuQuietEndWaitsOutACardUpdateThrottle(t *testing.T) {
 // An update refused for another reason is Feishu's word on that card: the answer does not wait it out, it becomes a
 // card of its own at once.
 func TestFeishuAnswerDoesNotWaitForARefusedCard(t *testing.T) {
+	needsLarkLayer(t)
 	s, posts, _ := cotHub(t, false)
 	r, _ := cotRun(s)
 	feishuSink{s}.progress(context.Background(), r, time.Second, []string{"运行 `ls`"}, "")
 	if r.Ext["card"] == "" || len(*posts) != 1 {
 		t.Fatalf("progress: posts %v, ext %v", *posts, r.Ext)
 	}
-	old := answerCardWait
-	answerCardWait = time.Hour
-	t.Cleanup(func() { answerCardWait = old })
+	s.setLarkTiming("answer_card_wait", time.Hour)
 	updates := 0
 	s.hub.(*fakeHub).answerApp(AppFeishu, FeishuUpdateCard, func(json.RawMessage) (any, error) {
 		updates++

@@ -332,8 +332,11 @@ decode takes tens of milliseconds. `UIImage(data:)` decodes lazily at first draw
 - `apple/Persona/Persona/PersonaStore.swift:566`: `avatar(_:points:scale:)` reads and decodes the avatar file and calls
   `preparingForDisplay()` on the main actor; `apple/Persona/Persona/PersonaViews.swift:19` calls it from `body`, so the
   first draw of each avatar decodes on the main thread (cached afterwards).
-- `apple/Persona/Views/Inbox/Lark/LarkAttachmentView.swift:33` and `apple/Persona/Views/Session/CompareView.swift:249`: `UIImage(data:)` in `body`, on every render.
+- `apple/Persona/Views/Session/CompareView.swift:249`: `UIImage(data:)` in `body`, on every render.
 - `apple/Persona/Views/Chat/PhotoAttach.swift:35`: picked photos decoded, scaled and encoded on the main actor.
+- Fixed before: `LarkAttachmentView` decoded its thumbnail in `body` on every render. Its attachment-ID-keyed,
+  byte-costed `LarkAttachmentThumbnailCache` now shares ImageIO thumbnails decoded off the main actor at the compact and
+  full pixel sizes; malformed or missing thumbnail bytes keep the file-card fallback.
 - Fixed before: the clipboard preview built `UIImage(data:)` from the computer's full-size picture in `body` (#7925).
   SwiftUI decodes such a picture on its own threads, but Core Animation's commit waits for that decode
   (`-[_SwiftUIProxyImage finish]`). A new `UIImage` in every `body` also means a full decode on every redraw. With a
@@ -644,7 +647,7 @@ Grep counts are across `apple/` without tests; they are leads to read, not each 
 
 - `apple/Persona/App/AppModel.swift:277`: `assistantCurrent` writes UserDefaults on every set, even when the value did not change; `apple/Persona/App/AppModel.swift:229` writes `dev.openChat` on every chat open. Each write recomputes every `@AppStorage` view (49 remain, most in `apple/Persona/Views/Session/SessionPanes.swift` and `apple/Persona/Views/Session/Terminal/TerminalExtras.swift`).
 - `apple/PersonaWatch/PersonaWatchApp.swift:196`: the watch writes its whole seen-card list to UserDefaults on each refresh that finds new cards.
-- `apple/Persona/Views/Machines/ScreenCredentials.swift:36`: a keychain read on the main actor when Screen Sharing opens (once per tap; minor).
+- `apple/Modules/ScreenShare/ScreenCredentials.swift:33`: a keychain read on the main actor when Screen Sharing opens (once per tap; minor).
 
 **P3: `@State` initial values**
 
@@ -679,7 +682,6 @@ Grep counts are across `apple/` without tests; they are leads to read, not each 
 **P8: images**
 
 - `apple/Persona/Persona/PersonaStore.swift:566`: avatar decode and `preparingForDisplay()` on the main actor, from `body` (`apple/Persona/Persona/PersonaViews.swift:19`); `isOnPhone` checks the file system before the cache on every call.
-- `apple/Persona/Views/Inbox/Lark/LarkAttachmentView.swift:33`: `UIImage(data:)` of the thumbnail in `body`, every render.
 - `apple/Persona/Views/Session/CompareView.swift:249`: decodes both full images of a comparison from `body`, every render.
 - `apple/Persona/Views/Chat/PhotoAttach.swift:35`: picked photos are decoded at full size, scaled and encoded to JPEG on the main actor (`MessagePhotos`); `apple/Persona/Views/Assistant/AssistantView.swift:1036-1042` does the same.
 - `apple/PersonaWatch/WatchPetView.swift:169`: `UIImage(contentsOfFile:)` in a watch row's `body`.

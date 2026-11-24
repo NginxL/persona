@@ -378,12 +378,10 @@ final class SandboxedHTMLCoordinator: NSObject, WKNavigationDelegate, WKUIDelega
         config.preferences.javaScriptCanOpenWindowsAutomatically = false
         config.preferences.isFraudulentWebsiteWarningEnabled = false // no lookup leaves the device
         config.mediaTypesRequiringUserActionForPlayback = .all
-        #if os(iOS) || os(visionOS)
         config.dataDetectorTypes = []
         config.allowsPictureInPictureMediaPlayback = false
         config.allowsAirPlayForMediaPlayback = false
         config.allowsInlineMediaPlayback = true
-        #endif
         let content = config.userContentController
         // A weak hop: the controller keeps its handler alive, which would keep the coordinator (and its closures).
         content.add(WeakScriptHandler(coordinator), name: handler)
@@ -395,12 +393,10 @@ final class SandboxedHTMLCoordinator: NSObject, WKNavigationDelegate, WKUIDelega
         web.uiDelegate = coordinator
         web.allowsLinkPreview = false
         web.allowsBackForwardNavigationGestures = false
-        #if os(iOS) || os(visionOS)
         web.isOpaque = false
         web.backgroundColor = .clear
         web.scrollView.backgroundColor = .clear
         web.scrollView.bounces = false
-        #endif
         return web
     }
 
@@ -533,7 +529,6 @@ private final class WeakScriptHandler: NSObject, WKScriptMessageHandler {
     }
 }
 
-#if os(iOS) || os(visionOS)
 struct SandboxedHTMLView: UIViewRepresentable {
     let html: String
     var onRequest: (HTMLCardRequest) -> Void
@@ -561,35 +556,6 @@ struct SandboxedHTMLView: UIViewRepresentable {
         coordinator.dismantle(web)
     }
 }
-#else
-struct SandboxedHTMLView: NSViewRepresentable {
-    let html: String
-    var onRequest: (HTMLCardRequest) -> Void
-    var onUnavailable: () -> Void = {}
-
-    func makeCoordinator() -> SandboxedHTMLCoordinator {
-        let coordinator = SandboxedHTMLCoordinator(onRequest: onRequest)
-        coordinator.onUnavailable = onUnavailable
-        return coordinator
-    }
-
-    func makeNSView(context: Context) -> WKWebView {
-        let web = SandboxedHTMLCoordinator.makeWebView(context.coordinator)
-        context.coordinator.load(html, in: web)
-        return web
-    }
-
-    func updateNSView(_ web: WKWebView, context: Context) {
-        context.coordinator.onRequest = onRequest
-        context.coordinator.onUnavailable = onUnavailable
-        context.coordinator.load(html, in: web)
-    }
-
-    static func dismantleNSView(_ web: WKWebView, coordinator: SandboxedHTMLCoordinator) {
-        coordinator.dismantle(web)
-    }
-}
-#endif
 
 #if DEBUG
 extension View {

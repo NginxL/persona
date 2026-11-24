@@ -6,6 +6,9 @@ struct MessageJump: Equatable {
     var key: SessionKey
     var item: String
     var id = UUID() // the same message linked twice still moves there again
+    /// A task's card in the assistant's pager whose View in Chat opened this chat (#12625): `item` is found from it once the
+    /// chat's items are in (`CardSource.source`), the message that asked or, without a tool use id, the newest question.
+    var card: Interaction? = nil
     #if os(iOS)
     var starred: StarredSource? = nil
     #endif
@@ -97,9 +100,6 @@ extension AppModel {
         if session(key)?.assistant == true || key == assistantMain {
             openAssistantConversation(key)
         } else {
-            #if os(macOS)
-            MacShellState.shared.willOpen()
-            #endif
             open(key)
         }
     }

@@ -133,9 +133,10 @@ type ccPluginQueuedSettings struct {
 
 // ccPluginDelivery is what a woken poll returns to the plugin.
 type ccPluginDelivery struct {
-	Messages  []ccPluginMessage  `json:"messages"`
-	Interrupt *ccPluginInterrupt `json:"interrupt,omitempty"`
-	Settings  *ccPluginSettings  `json:"settings,omitempty"`
+	Messages    []ccPluginMessage  `json:"messages"`
+	Interrupt   *ccPluginInterrupt `json:"interrupt,omitempty"`
+	Settings    *ccPluginSettings  `json:"settings,omitempty"`
+	Permissions bool               `json:"permissions,omitempty"`
 }
 
 // ccPluginAck is what the plugin said became of a message, interrupt or settings update.
@@ -145,9 +146,10 @@ type ccPluginAck struct {
 }
 
 type ccPluginCaps struct {
-	busyInput bool
-	interrupt bool
-	settings  bool
+	busyInput   bool
+	interrupt   bool
+	settings    bool
+	permissions bool
 }
 
 // ccPluginSession is a session whose plugin polls this node.
@@ -155,6 +157,7 @@ type ccPluginSession struct {
 	pid             int
 	version, engine string
 	caps            ccPluginCaps
+	permAuthorized  bool
 	seen            time.Time
 	// poll is the waiting poll's hand-off, nil while none waits; done ends it early (a newer poll).
 	poll chan ccPluginDelivery
@@ -164,15 +167,21 @@ type ccPluginSession struct {
 
 // ccPluginRegistry is every session whose plugin polled this node since it started; its zero value is ready.
 type ccPluginRegistry struct {
-	mu       sync.Mutex
-	sessions map[string]*ccPluginSession
-	queued   map[string]ccPluginQueuedSettings
+	mu             sync.Mutex
+	sessions       map[string]*ccPluginSession
+	queued         map[string]ccPluginQueuedSettings
+	personaHooks   map[string]ccPluginPersonaHook
+	perms          map[ccPluginPermID]*ccPluginPerm
+	completedReqs  map[ccPluginPermID]time.Time
+	completedTools map[string]time.Time
 }
 
 // polled records a poll from session id's claude pid and makes it the session's waiting poll; the poll it replaces
 // (the same session's, still waiting) is ended. When settings were pre-queued for id and the plugin supports settings,
-// polled returns them immediately without leaving a waiting channel. It also returns whether capabilities changed.
-func (r *ccPluginRegistry) polled(id string, pid int, version, engine string, caps ccPluginCaps) (poll chan ccPluginDelivery, done chan struct{}, immediate *ccPluginSettings, capabilitiesChanged bool) {
+// polled returns them immediately without leaving a waiting channel. When permission authorization changed (for example
+// the first authorized poll of a permissions-capable plugin), permAuthChanged is true and the caller responds at once
+// instead of holding the first poll for 25 s. It also returns whether capabilities changed.
+func (r *ccPluginRegistry) polled(id string, pid int, version, engine string, caps ccPluginCaps, allowPerms bool) (poll chan ccPluginDelivery, done chan struct{}, immediate *ccPluginSettings, permAuthChanged, capabilitiesChanged bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.sessions == nil {
@@ -200,17 +209,22 @@ func (r *ccPluginRegistry) polled(id string, pid int, version, engine string, ca
 		close(s.done)
 		s.poll, s.done = nil, nil
 	}
-	changed := isNew || s.caps != caps
-	s.version, s.engine, s.caps, s.seen = version, engine, caps, now
+	auth := caps.permissions && allowPerms
+	permAuthChanged = s.permAuthorized != auth
+	changed := isNew || s.caps != caps || permAuthChanged
+	s.version, s.engine, s.caps, s.permAuthorized, s.seen = version, engine, caps, auth, now
 	if caps.settings {
 		if q, ok := r.queued[id]; ok {
 			delete(r.queued, id)
 			cp := q.settings
-			return nil, nil, &cp, changed
+			return nil, nil, &cp, permAuthChanged, changed
 		}
 	}
+	if permAuthChanged {
+		return nil, nil, nil, true, changed
+	}
 	s.poll, s.done = make(chan ccPluginDelivery, 1), make(chan struct{})
-	return s.poll, s.done, nil, changed
+	return s.poll, s.done, nil, false, changed
 }
 
 // pollEnded takes poll off session id when it is still the waiting one; ok false when a delivery was handed to it (or
@@ -260,6 +274,22 @@ func (r *ccPluginRegistry) settingsCapable(id string, pid int) bool {
 	defer r.mu.Unlock()
 	s := r.sessions[id]
 	return s != nil && s.pid == pid && s.caps.settings && (s.poll != nil || time.Since(s.seen) < ccPluginStale)
+}
+
+// permissionsCapable reports whether session id's polling plugin is authorized and supports permission approval bridging.
+func (r *ccPluginRegistry) permissionsCapable(id string, pid int) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	s := r.sessions[id]
+	return s != nil && s.pid == pid && s.caps.permissions && s.permAuthorized && (s.poll != nil || time.Since(s.seen) < ccPluginStale)
+}
+
+// permissionsAuthorized reports whether session id's current poll authorization permits bridging permissions.
+func (r *ccPluginRegistry) permissionsAuthorized(id string, pid int) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	s := r.sessions[id]
+	return s != nil && s.pid == pid && s.permAuthorized
 }
 
 // queueSettings stores desired model/effort settings for session id so the next settings-capable poll receives them
@@ -421,6 +451,11 @@ func (n *Node) ccPluginSettingsCapable(id string, pid int) bool {
 	return n.ccPlugins.settingsCapable(id, pid)
 }
 
+// ccPluginPermissionsCapable: session id, open in claude pid, has a polling plugin authorized for permission bridging.
+func (n *Node) ccPluginPermissionsCapable(id string, pid int) bool {
+	return n.ccPlugins.permissionsCapable(id, pid)
+}
+
 // queueCCPluginSettings queues session-scoped model / effort overrides for session id (e.g. a newly seeded or resting
 // desktop session whose claude process has not polled yet).
 func (n *Node) queueCCPluginSettings(id, model, effort string) {
@@ -552,15 +587,18 @@ func isHTTPRequestLine(line []byte) bool {
 // serveCCPluginHTTP answers one HTTP request on the node socket: the plugin's. first is the request's start, already
 // read; rest the connection's reader after it.
 func (n *Node) serveCCPluginHTTP(ctx context.Context, c net.Conn, first []byte, rest *bufio.Reader) {
-	// A request is small: its line, a few headers and a body of at most ccPluginBodyMost. What is past this bound is
-	// never read, so no caller makes the node keep more.
-	br := bufio.NewReader(io.LimitReader(io.MultiReader(bytes.NewReader(first), rest), ccPluginRequestMost))
+	// A request is small on /poll and /ack; /permission may carry large ExitPlanMode plans or Write/Edit tool_input.
+	bodyLimit, reqLimit := int64(ccPluginBodyMost), int64(ccPluginRequestMost)
+	if bytes.HasPrefix(first, []byte("POST "+ccPluginPrefix+"permission ")) {
+		bodyLimit, reqLimit = ccPluginPermBodyMost, ccPluginPermRequestMost
+	}
+	br := bufio.NewReader(io.LimitReader(io.MultiReader(bytes.NewReader(first), rest), reqLimit))
 	req, err := http.ReadRequest(br)
 	if err != nil {
 		return
 	}
-	body, err := io.ReadAll(io.LimitReader(req.Body, ccPluginBodyMost+1))
-	if err != nil || len(body) > ccPluginBodyMost {
+	body, err := io.ReadAll(io.LimitReader(req.Body, bodyLimit+1))
+	if err != nil || int64(len(body)) > bodyLimit {
 		writeCCPluginHTTP(c, http.StatusRequestEntityTooLarge, map[string]any{"error": "too_large"})
 		return
 	}
@@ -578,7 +616,7 @@ func (n *Node) serveCCPluginHTTP(ctx context.Context, c net.Conn, first []byte, 
 // ccPluginRequest is one of the plugin's requests, answered with a status and a JSON body.
 func (n *Node) ccPluginRequest(ctx context.Context, c net.Conn, method, path string, body []byte) (int, any) {
 	what, ok := strings.CutPrefix(path, ccPluginPrefix)
-	if !ok || method != http.MethodPost || (what != "poll" && what != "ack") {
+	if !ok || method != http.MethodPost || (what != "poll" && what != "ack" && what != "permission" && what != "permission-done") {
 		return http.StatusNotFound, map[string]any{"error": "unknown"}
 	}
 	var in struct {
@@ -603,9 +641,14 @@ func (n *Node) ccPluginRequest(ctx context.Context, c net.Conn, method, path str
 	if !ok || claude.SessionID != in.SessionID {
 		return http.StatusForbidden, map[string]any{"error": "not_this_session", "retry_ms": ccPluginStrangerRetry.Milliseconds()}
 	}
-	if what == "ack" {
+	switch what {
+	case "ack":
 		n.ccPlugins.acked(in.SessionID, pid, in.ID, ccPluginAck{Submitted: in.Submitted, Reason: clipReason(in.Reason)})
 		return http.StatusOK, map[string]any{"ok": true}
+	case "permission":
+		return n.ccPluginPermission(ctx, pid, claude, body)
+	case "permission-done":
+		return n.ccPluginPermissionDone(pid, claude, body)
 	}
 	if !ccPluginServes(n, claude) {
 		// A pane's claude takes typing, and the assistant's or an SDK's is driven by its own host: none of them gets
@@ -617,21 +660,27 @@ func (n *Node) ccPluginRequest(ctx context.Context, c net.Conn, method, path str
 		wait = ccPluginPollMost
 	}
 	caps := ccPluginCaps{
-		busyInput: slices.Contains(in.Capabilities, "busy_input"),
-		interrupt: slices.Contains(in.Capabilities, "interrupt"),
-		settings:  slices.Contains(in.Capabilities, "settings"),
+		busyInput:   slices.Contains(in.Capabilities, "busy_input"),
+		interrupt:   slices.Contains(in.Capabilities, "interrupt"),
+		settings:    slices.Contains(in.Capabilities, "settings"),
+		permissions: slices.Contains(in.Capabilities, "permissions"),
 	}
-	poll, done, immediate, changed := n.ccPlugins.polled(in.SessionID, pid, clipReason(in.PluginVersion), clipReason(in.EngineVersion), caps)
+	allowPerms := caps.permissions && n.ccPluginServesPermissions(claude)
+	poll, done, immediate, permAuthChanged, changed := n.ccPlugins.polled(in.SessionID, pid, clipReason(in.PluginVersion), clipReason(in.EngineVersion), caps, allowPerms)
 	if changed {
 		n.notifySessions()
 	}
 	if immediate != nil {
-		return http.StatusOK, ccPluginDelivery{Messages: []ccPluginMessage{}, Settings: immediate}
+		return http.StatusOK, ccPluginDelivery{Messages: []ccPluginMessage{}, Settings: immediate, Permissions: allowPerms}
+	}
+	if permAuthChanged {
+		return http.StatusOK, ccPluginDelivery{Messages: []ccPluginMessage{}, Permissions: allowPerms}
 	}
 	t := time.NewTimer(wait)
 	defer t.Stop()
 	select {
 	case d := <-poll:
+		d.Permissions = n.ccPlugins.permissionsAuthorized(in.SessionID, pid)
 		return http.StatusOK, d
 	case <-done:
 	case <-t.C:
@@ -640,11 +689,12 @@ func (n *Node) ccPluginRequest(ctx context.Context, c net.Conn, method, path str
 	if !n.ccPlugins.pollEnded(in.SessionID, poll) {
 		select {
 		case d := <-poll: // handed over as the poll ended
+			d.Permissions = n.ccPlugins.permissionsAuthorized(in.SessionID, pid)
 			return http.StatusOK, d
 		default:
 		}
 	}
-	return http.StatusOK, ccPluginDelivery{Messages: []ccPluginMessage{}}
+	return http.StatusOK, ccPluginDelivery{Messages: []ccPluginMessage{}, Permissions: n.ccPlugins.permissionsAuthorized(in.SessionID, pid)}
 }
 
 // clipReason keeps a short word from the plugin (a version, a reason) short.

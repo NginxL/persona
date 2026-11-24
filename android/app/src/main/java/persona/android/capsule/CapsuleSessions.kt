@@ -30,7 +30,7 @@ import persona.feature.agents.AgentsPreferencesSnapshot
 import persona.feature.agents.listSession
 import persona.feature.chat.ChatWiringSource
 import persona.feature.chat.ChatAppBindings
-import persona.feature.inbox.InboxSnapshot
+import persona.core.inbox.InboxSnapshot
 import persona.platform.capsule.*
 import java.util.UUID
 

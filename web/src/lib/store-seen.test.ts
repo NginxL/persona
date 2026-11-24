@@ -6,8 +6,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { api } from "./api";
 import { connect, getSession, getState, markSeen, reset, upsertSession, viewSession as openView } from "./store";
-import { runtimeSessions } from "./runtime-list";
-import { SEEN_CONFIRM_MS } from "./seen-outbox";
+import { runtimeIdentity, runtimeSessions } from "./runtime-list";
+import { heldCounts, heldSeen, SEEN_CONFIRM_MS, SEEN_SETTLE_MS } from "./seen-outbox";
 import { stateOf } from "./format";
 import type { Session } from "./types";
 
@@ -76,6 +76,7 @@ function online(rows: Session[] = [unread()]) {
   return sock();
 }
 const shown = () => stateOf(getSession("mac", "s1")!);
+const ID = runtimeIdentity(unread());
 
 describe("viewing a chat marks it seen", () => {
   it("shows it seen at once and tells the hub", () => {
@@ -116,9 +117,34 @@ describe("viewing a chat marks it seen", () => {
     const s = online();
     viewSession("mac", "s1")();
     s.push({ type: "sessions", machine_id: "mac", sessions: [unread({ state: "idle", seen_at: "2026-01-01T00:00:01Z" })] });
-    expect(getState().seen).toEqual({});
+    // recorded: nothing goes again, over the socket or HTTP
+    expect(getState().seen[ID].recordedAt).toBeDefined();
+    s.sent = [];
+    vi.advanceTimersByTime(SEEN_CONFIRM_MS + 10);
+    expect(seenPosts()).toEqual([]);
+    expect(s.seen()).toEqual([]);
     s.push({ type: "sessions", machine_id: "mac", sessions: [unread({ updated_at: "2026-01-01T00:05:00Z", seen_at: "2026-01-01T00:00:01Z" })] });
+    expect(getState().seen).toEqual({});
     expect(shown()).toBe("unread");
+  });
+
+  it("keeps the sidebar's own list seen until it reads again, once another list showed it recorded", () => {
+    // A paging hub: the sidebar draws its list's own rows, read on that list's hints (at most once in two seconds),
+    // while the chat's own read and the store's list read on theirs. The first of them to show the seen recorded let
+    // the mark go, and the sidebar's row, still the one read before the look, went green again until its list read.
+    const s = online();
+    viewSession("mac", "s1");
+    const before = { ...unread(), waiting: false };
+    s.push({ type: "sessions", machine_id: "mac", sessions: [unread({ state: "idle", seen_at: "2026-01-01T00:00:01Z" })] });
+    vi.advanceTimersByTime(1_500);
+    expect(stateOf(heldSeen(before, getState().seen[ID], Date.now()))).toBe("idle");
+    // the hub's counts read with that row still count it Unread: shown without it
+    const counts = { total: 3, revision: "r", state: { unread: 2, idle: 1 }, machine: {}, project: {}, group: {} };
+    expect(heldCounts(counts, [before], getState().seen, Date.now()).state).toEqual({ unread: 1, idle: 2 });
+    // long after every list has read again, the mark is gone
+    vi.advanceTimersByTime(SEEN_SETTLE_MS);
+    s.push({ type: "sessions", machine_id: "mac", sessions: [unread({ state: "idle", seen_at: "2026-01-01T00:00:01Z" })] });
+    expect(getState().seen).toEqual({});
   });
 
   it("does not mark from a background tab, and does when it comes to the front", () => {

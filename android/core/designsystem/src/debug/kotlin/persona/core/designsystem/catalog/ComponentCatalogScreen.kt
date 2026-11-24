@@ -319,7 +319,7 @@ fun ComponentCatalogScreen(modifier: Modifier = Modifier, onBack: (() -> Unit)? 
             )
             QueueStrip("排队中 1 条 · Codex 忙完会依次处理", listOf("先别提交，等我看完 diff"), onItem = {}, busy = true)
         }
-        // Voice chat: the orb in each state, the status under it, captions and the controls (feature:voice).
+        // Voice chat: the orb in each state, the status under it, captions and the controls (the voice module, :module:voice).
         section("语音对话") {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                 listOf(VoiceOrbMode.Connecting to "连接中", VoiceOrbMode.Listening to "在听", VoiceOrbMode.Speaking to "正在说",

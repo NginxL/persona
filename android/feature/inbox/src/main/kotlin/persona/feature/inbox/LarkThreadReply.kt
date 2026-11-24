@@ -1,5 +1,7 @@
 package persona.feature.inbox
 
+import persona.core.inbox.*
+
 /** Use the pairing's durable draft store for both the editor and its immutable pending request. */
 internal class LarkThreadReplyRepository(
     private val base: InboxRepository,

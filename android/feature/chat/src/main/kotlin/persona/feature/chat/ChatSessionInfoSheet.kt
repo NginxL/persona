@@ -210,7 +210,7 @@ internal fun ChatSessionInfoSheet(
         session.externalLink?.let { url ->
             JGroupItem(GroupPosition.of(0, 1), Modifier.padding(top = Tokens.Space.m)) {
                 JRow(stringResource(R.string.chat_host_open_feishu), leadingIcon = PersonaIcons.openExternal, chevron = false,
-                    onClick = { runCatching { uriHandler.openUri(url) } })
+                    onClick = { val _ = runCatching { uriHandler.openUri(url) } })
             }
         }
         // The questions the assistant answered for this agent; its own conversations have none.
@@ -251,7 +251,7 @@ internal fun ChatSessionInfoSheet(
  * caution colour from [ContextUsage.WARN_USED] percent used; read out as one line with the share used and the window.
  */
 @Composable
-private fun ContextUsageRow(label: String, value: String, usage: ContextUsage) {
+internal fun ContextUsageRow(label: String, value: String, usage: ContextUsage) {
     val palette = PersonaTheme.palette
     val spoken = stringResource(R.string.chat_info_context_spoken, value, usage.used, usage.detail)
     Column(Modifier.clearAndSetSemantics { contentDescription = spoken }) {
@@ -270,7 +270,7 @@ private fun ContextUsageRow(label: String, value: String, usage: ContextUsage) {
  * new answer reaches the Agent as a message). Nothing while it loads or when there are none; a failure says so with Retry.
  */
 @Composable
-private fun DelegatedHistorySection(session: Session, state: ChatChromeState) {
+internal fun DelegatedHistorySection(session: Session, state: ChatChromeState) {
     val res = LocalResources.current
     var answers by remember(session.key) { mutableStateOf<List<DelegatedAnswer>?>(null) }
     var failure by remember(session.key) { mutableStateOf<String?>(null) }

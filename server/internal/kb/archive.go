@@ -19,20 +19,10 @@ import (
 
 // Defined in the contract package kbwire (docs/server/architecture.md "Contract packages"); the old names stay.
 type (
+	Source        = kbwire.Source
 	SourceChat    = kbwire.SourceChat
 	SourceMessage = kbwire.SourceMessage
 )
-
-// Source is where chats come from (Feishu through the Lark extension).
-type Source interface {
-	Name() string // "lark"
-	Chats(ctx context.Context, limit int) ([]SourceChat, error)
-	// Messages returns messages newer than after (the latest page when after is ""), oldest first,
-	// with the cursor to continue from.
-	Messages(ctx context.Context, chat SourceChat, after string, limit int) (msgs []SourceMessage, newer string, more bool, err error)
-	// Download saves one media path to dst.
-	Download(ctx context.Context, media, dst string) error
-}
 
 // attributeChat keeps a connector's ownership separate from its archive-source name.
 // Once attributed, another connector cannot append to or take over that chat.

@@ -47,8 +47,11 @@ func TestTmuxClaudeWaitingOnADialogIsNotComputerOnly(t *testing.T) {
 
 	var s proto.Session
 	waitFor(t, "the dialog named", func() bool { s = byID(listSessions(t, n))[sidA]; return s.AttentionReason == want })
-	if s.PaneID != "tmux:%11" || s.Capabilities == nil || !s.Capabilities.Terminal {
-		t.Fatalf("not driven through its pane: %+v", s)
+	if s.PaneID != "tmux:%11" || s.Capabilities == nil || !s.Capabilities.Terminal || !s.Capabilities.Approve || !s.Capabilities.Interrupt {
+		t.Fatalf("not driven through its pane: %+v caps=%+v", s, s.Capabilities)
+	}
+	if cp := s.Capabilities; cp.QueueEdit == nil || !*cp.QueueEdit || cp.QueueSendNow == nil || !*cp.QueueSendNow {
+		t.Fatalf("its pane takes the queue's keys (#12789): %+v", cp)
 	}
 	if s.Status != proto.StatusBlocked || s.AttentionReason != want {
 		t.Fatalf("attention %q, want the dialog %q (status %s)", s.AttentionReason, want, s.Status)

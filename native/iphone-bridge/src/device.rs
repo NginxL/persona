@@ -57,9 +57,10 @@ const CLIENT_SUPPORTED_FEATURES: u64 = 140;
 const DEVELOPER_MODE: (&str, Option<&str>) = ("DeveloperModeStatus", Some("com.apple.security.mac.amfi"));
 /// Stopping the display stream when idle must not hang `serve` on a link that has gone quiet.
 const STOP_TIMEOUT: Duration = Duration::from_secs(3);
-/// A service directory read (or tried) this recently is current: `device_info` doesn't read it again.
+/// A session that doesn't list the developer services asked the phone whether it has the image this recently:
+/// `device_info` doesn't ask again.
 const SERVICES_FRESH: Duration = Duration::from_secs(5);
-/// Reading the service directory again must not hold up `device_info` on a link that has gone quiet.
+/// Reading the service directory again (after `mount_ddi`) must not hold up the request on a link that has gone quiet.
 const SERVICES_REREAD_TIMEOUT: Duration = Duration::from_secs(5);
 /// cryptexd answers a lookup in well under a second. One that doesn't (seen on iOS 27.2.1: every routine hung while an
 /// install sent to the locked phone was pending) must not hold up the request, nor `device_info` and the node's
@@ -107,7 +108,7 @@ pub struct Device {
     springboard: Option<SpringBoardServicesClient>,
     /// Where the service directory answers inside the tunnel, to read it again after a mount.
     rsd_port: u16,
-    /// When the service directory was last read or tried (tokio's clock, so tests can move it).
+    /// When the service directory was last read, or the phone last asked whether it has the image (tokio's clock).
     services_checked: tokio::time::Instant,
     /// The iOS major version, read once.
     ios_major: Option<u32>,
@@ -390,27 +391,26 @@ impl Device {
         let level = level.and_then(|v| v.as_unsigned_integer());
         let charging = charging.and_then(|v| v.as_boolean());
         // The developer services are listed only while the disk image is mounted, and a session reads the directory
-        // when it connects. One mounted since (by Xcode, or by another session's mount_ddi) needs a fresh read. A
-        // cryptex install resets the phone's service directory connections (seen on iOS 27.2.1: Xcode's was torn down
-        // when this bridge installed the image), and a directory that can't be read again, or still doesn't list the
-        // services although the phone has the image, means this session can't reach them: connect again.
+        // when it connects: one mounted since (by Xcode, or by another session's mount_ddi) shows only in a new
+        // session. Reading the directory again in this one is no way to find out: on iOS 27.2.1 that second read
+        // fails and breaks the tunnel with it (every connection after it fails with "device socket io failed"). So
+        // ask the phone whether it has the image (cryptexd and the image mounter). If it does, this session can't
+        // reach the services; if asking finds the link gone, nothing can. Either way the node connects again. A phone
+        // that says it has no image, or can't say (cryptexd busy with an install the phone locked itself during),
+        // keeps its session (#12556).
         if developer_mode != Some(false)
             && !self.lists_developer_services()
             && self.services_checked.elapsed() >= SERVICES_FRESH
         {
-            let reason = if !self.read_services_again().await {
-                Some("the phone's service directory can't be read again (a disk image mounted since resets it)")
-            } else if !self.lists_developer_services()
-                && matches!(
-                    tokio::time::timeout(CRYPTEXD_TIMEOUT, crate::ddi::Mounter::mounted(self)).await,
-                    Ok(Ok(true))
-                )
-            {
-                Some(
-                    "the developer disk image was mounted after this session connected and its services aren't listed here",
-                )
-            } else {
-                None
+            self.services_checked = tokio::time::Instant::now();
+            let reason = match tokio::time::timeout(CRYPTEXD_TIMEOUT, crate::ddi::Mounter::mounted(self)).await {
+                Ok(Ok(true)) => Some(
+                    "the developer disk image was mounted after this session connected and its services aren't \
+                     listed here"
+                        .to_owned(),
+                ),
+                Ok(Err(e)) if e.link_lost() => Some(e.message),
+                _ => None,
             };
             if let Some(reason) = reason {
                 self.stale = true;
@@ -1180,6 +1180,8 @@ impl Device {
 
     /// Reads the service directory again, for services that came (or went) with a disk image since this session
     /// read it; the clients opened from the old one are dropped. False, keeping the old one, when it can't be read.
+    /// On iOS 27.2.1 it can't, and the failed read breaks the tunnel too: only `mount_ddi` tries it, whose session
+    /// is to be started afresh either way when the services don't show.
     async fn read_services_again(&mut self) -> bool {
         self.services_checked = tokio::time::Instant::now();
         let read = async {

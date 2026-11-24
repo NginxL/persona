@@ -32,6 +32,8 @@ import persona.core.contracts.api.*
 import persona.core.designsystem.*
 import persona.core.navigation.AppTab
 import persona.core.navigation.Navigator
+import persona.feature.assistant.settings.AssistantSettingsManagerTest
+import persona.feature.assistant.settings.AssistantSettingsScreen
 import java.io.File
 import java.io.IOException
 
@@ -145,6 +147,41 @@ class AssistantDetailsShotsTest {
             capture("$name-3-failed")
             rule.onNodeWithText("Resend").assertExists()
             rule.onNodeWithText("Delete").performClick(); rule.waitForIdle()
+        }
+    }
+
+    /** #6401's Details identity and Rename action remain visible and usable with the system's largest text. */
+    @Config(sdk = [35], qualifiers = "en-w400dp-h1800dp-xhdpi", fontScale = 2f)
+    @Test fun profileIdentityAndRenameAtTheLargestTextSize() {
+        var style by mutableStateOf(AppStyle.Glass)
+        var dark by mutableStateOf(false)
+        val roster = ManagerRoster(listOf(
+            HubManager("assistant", "Helper", online = true, isDefault = true),
+            HubManager("work", "Work", online = true),
+        ), "assistant")
+        val hub = AssistantSettingsManagerTest.Hub(
+            mutableMapOf("assistant" to AssistantConfig(manager = "assistant")),
+            managers = roster.managers.toMutableList(),
+        )
+        rule.setContent {
+            PersonaTheme(darkTheme = dark, reduceMotion = true, style = style) {
+                CompositionLocalProvider(LocalManagerRoster provides roster) {
+                    Box(Modifier.testTag("profile-shot").width(400.dp).height(1800.dp).background(PersonaTheme.palette.background)) {
+                        AssistantSettingsScreen(hub, emptyList(), onBack = {})
+                    }
+                }
+            }
+        }
+        rule.waitForIdle()
+        rule.onNodeWithText("Helper").assertIsDisplayed()
+        rule.onNodeWithText("Rename").assertIsDisplayed().assertHasClickAction()
+        for (s in AppStyle.entries) for (d in listOf(false, true)) {
+            style = s; dark = d
+            rule.waitForIdle()
+            val bitmap = rule.onNodeWithTag("profile-shot").captureToImage().asAndroidBitmap()
+            val out = File(System.getProperty("persona.shots") ?: "build/assistant-details-shots").also { it.mkdirs() }
+            val suffix = "${s.name.lowercase()}-${if (d) "dark" else "light"}"
+            File(out, "profile-rename-large-$suffix.png").outputStream().use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
         }
     }
 }

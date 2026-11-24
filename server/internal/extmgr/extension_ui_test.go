@@ -157,7 +157,7 @@ func serveUIExtensionForTest() {
 				return ui(ctx, method, params)
 			},
 			"event": func(_ context.Context, method string, params json.RawMessage) (any, error) {
-				if method == "agent.finished" || method == "kb.changed" || method == "kb.forgotten" || method == "todo.changed" || method == "todo.decision" ||
+				if method == "assistant.entries.changed" || method == "agent.finished" || method == "kb.changed" || method == "kb.forgotten" || method == "todo.changed" || method == "todo.decision" ||
 					method == "leader.changed" || method == "leader.report" {
 					finished.Add(1)
 				}

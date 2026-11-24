@@ -90,7 +90,8 @@ func TestUsageOpencode(t *testing.T) {
 		if done {
 			completed = fmt.Sprint(ms(at) + 500)
 		}
-		return fmt.Sprintf(`INSERT INTO session_message VALUES (%q, 'ses_1', 'assistant', 0, %d, %d, json_object('model', json_object('id', 'model-o', 'providerID', 'p'), `+
+		// SQL string literals stay single-quoted: sqlite3 builds with DQS disabled read Go's %q as an identifier.
+		return fmt.Sprintf(`INSERT INTO session_message VALUES ('%s', 'ses_1', 'assistant', 0, %d, %d, json_object('model', json_object('id', 'model-o', 'providerID', 'p'), `+
 			`'time', json_object('created', %d, 'completed', %s), 'tokens', json_object('input', %d, 'output', %d, 'reasoning', %d, 'cache', json_object('read', 100, 'write', 0))))`,
 			id, ms(at), ms(at), ms(at), completed, in, out, reasoning)
 	}

@@ -1,0 +1,10 @@
+{
+  "agent_pair": "--machine と --session は空にできず、両方を一緒に指定する必要があります",
+  "create_usage": "使用法: personad create-direction <名前> --project <プロジェクトスラッグ> [--machine <マシン ID> --session <セッション ID>]\n  終了コード: 0 作成済み（方向の JSON を出力）、1 失敗、2 使用法または入力エラー、4 利用不可、130 中断",
+  "id_required": "空でない方向 ID を 1 つ指定してください",
+  "invalid_flags": "引数が無効です: {reason}",
+  "name_required": "空でない名前を引用符で囲んで 1 つ指定してください",
+  "progress_required": "--reached、--doing、--needs-you のいずれか 1 つが必要です",
+  "project_required": "--project は必須です",
+  "write_usage": "使用法: personad write-progress <方向 ID> [--reached <テキスト>] [--doing <テキスト>] [--needs-you <テキスト>] [--link <URL> ...]\n  終了コード: 0 書き込み済み（方向の JSON を出力）、1 失敗、2 使用法または入力エラー、4 利用不可、130 中断"
+}

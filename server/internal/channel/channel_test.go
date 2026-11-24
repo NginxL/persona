@@ -42,15 +42,16 @@ func TestItemValidate(t *testing.T) {
 		t.Fatal(err)
 	}
 	bad := map[string]func(*Item){
-		"reserved id":  func(i *Item) { i.ID = "feishu" },
-		"uuid-like id": func(i *Item) { i.ID = "cafebabe" },
-		"no name":      func(i *Item) { i.Name = " " },
-		"kind":         func(i *Item) { i.Kind = KindApp },
-		"format":       func(i *Item) { i.Capabilities.Format = "html" },
-		"asks":         func(i *Item) { i.Capabilities.Asks = "cards" },
-		"max_text":     func(i *Item) { i.Capabilities.MaxText = 50 },
-		"bind alone":   func(i *Item) { i.Connector = "" },
-		"bind value":   func(i *Item) { i.Bind = BindNone },
+		"reserved id":     func(i *Item) { i.ID = "feishu" },
+		"uuid-like id":    func(i *Item) { i.ID = "cafebabe" },
+		"no name":         func(i *Item) { i.Name = " " },
+		"kind":            func(i *Item) { i.Kind = KindApp },
+		"format":          func(i *Item) { i.Capabilities.Format = "html" },
+		"asks":            func(i *Item) { i.Capabilities.Asks = "cards" },
+		"max_text":        func(i *Item) { i.Capabilities.MaxText = 50 },
+		"bind alone":      func(i *Item) { i.Connector = "" },
+		"bind value":      func(i *Item) { i.Bind = BindNone },
+		"reply_only+push": func(i *Item) { i.Capabilities.ReplyOnly = true; i.Capabilities.Push = true },
 	}
 	for what, f := range bad {
 		it := good
@@ -58,6 +59,11 @@ func TestItemValidate(t *testing.T) {
 		if it.Validate() == nil {
 			t.Errorf("%s: accepted", what)
 		}
+	}
+	replyOnly := good
+	replyOnly.Capabilities.ReplyOnly = true
+	if err := replyOnly.Validate(); err != nil {
+		t.Fatalf("reply_only rejected: %v", err)
 	}
 }
 
@@ -110,6 +116,9 @@ func TestPluginFeatures(t *testing.T) {
 		t.Fatal(got)
 	}
 	if got := ids(PluginFeatures("", Capabilities{Asks: AsksNone}, nil)); got != "" {
+		t.Fatal(got)
+	}
+	if got := ids(PluginFeatures("", Capabilities{Asks: AsksText, Push: true, ReplyOnly: true}, nil)); got != "asks,all_asks" {
 		t.Fatal(got)
 	}
 }

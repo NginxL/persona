@@ -1,8 +1,6 @@
 import Foundation
 import Observation
-#if canImport(UIKit)
 import UIKit
-#endif
 import PersonaWire
 
 /// The hub's side of a recording (docs/protocol/protocol.md「Recording sync」, #3235): what `PUT /api/v1/recordings/{id}` takes.
@@ -273,11 +271,9 @@ final class RecordingSync {
             self.onSegments?(id)
             self.onChange?(id)
         }
-        #if canImport(UIKit) && !os(watchOS)
         NotificationCenter.default.addObserver(forName: UIApplication.didBecomeActiveNotification, object: nil, queue: .main) { @Sendable _ in
             Task { @MainActor in RecordingSync.shared.kick(reconcile: true) }
         }
-        #endif
         purgeExpired()
         kick(reconcile: true)
     }

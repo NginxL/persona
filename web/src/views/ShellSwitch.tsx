@@ -8,6 +8,7 @@ import { href, onLinkClick, type Route } from "../lib/router";
 import { useScopedCounts } from "../lib/current-assistant";
 import { heldOnlyNeeds } from "../lib/attention";
 import { othersWaiting } from "../lib/sessions";
+import { supervisorHeldOnly } from "../lib/supervisor-held";
 import { useStore } from "../lib/store";
 import type { Session } from "../lib/types";
 import { cx, IconButton } from "../ui/atoms";
@@ -33,7 +34,8 @@ function WaitingBadge({ count, className }: { count: number; className?: string 
  *  off where the header's switch already shows that number. */
 export function ChatSidebarButton({ session, counted, onClick }: { session?: Session; counted: boolean; onClick: () => void }) {
   const { badge, quietCounted } = useScopedCounts();
-  const held = useStore((s) => Boolean(s.pushGrading) && !!session && heldOnlyNeeds(session, s.interactions));
+  // left out of the badge already: graded to wait, or waiting only on cards its task's supervisor holds
+  const held = useStore((s) => !!session && ((Boolean(s.pushGrading) && heldOnlyNeeds(session, s.interactions)) || supervisorHeldOnly(s.interactions).has(`${session.machine_id}/${session.session_id}`)));
   const waiting = counted ? othersWaiting(badge, session, quietCounted, held) : 0;
   const label = t("chat-chatview.sidebar");
   return (

@@ -195,6 +195,19 @@ func (s *Service) replaceTaskQueue(ctx context.Context, task PlanTask, next *Tas
 		return false
 	}
 	current.Queue = next
+	// Change the card's placement summary in the same compare-and-set as the queue.
+	// The queue token stays readable by a manager from before placement records.
+	var decision json.RawMessage
+	if next != nil {
+		if task.Placement != nil {
+			current.Placement = task.Placement
+		}
+		current.Placement = queuedPlacement(*current, next)
+		decision, err = json.Marshal(current.Placement)
+		if err != nil {
+			return false
+		}
+	}
 	var changed bool
 	st := s.store()
 	if policy == queueQuotaStart && st != nil {
@@ -205,13 +218,13 @@ func (s *Service) replaceTaskQueue(ctx context.Context, task PlanTask, next *Tas
 		plan.UpdatedAt = time.Now().UTC()
 		replacement, _ := json.Marshal(next)
 		changed, err = store.ClaimUnstartedTaskQueue(ctx, plan.ID, index, task.TodoID,
-			task.Queue.Gateway.Since, expected, replacement, plan.UpdatedAt)
+			task.Queue.Gateway.Since, expected, replacement, decision, plan.UpdatedAt)
 	} else if store, ok := st.(interface {
-		CompareTaskQueue(context.Context, string, int, string, json.RawMessage, json.RawMessage, time.Time) (bool, error)
+		CompareTaskQueue(context.Context, string, int, string, json.RawMessage, json.RawMessage, json.RawMessage, time.Time) (bool, error)
 	}); ok {
 		plan.UpdatedAt = time.Now().UTC()
 		replacement, _ := json.Marshal(next)
-		changed, err = store.CompareTaskQueue(ctx, plan.ID, index, task.TodoID, expected, replacement, plan.UpdatedAt)
+		changed, err = store.CompareTaskQueue(ctx, plan.ID, index, task.TodoID, expected, replacement, decision, plan.UpdatedAt)
 	} else {
 		if policy == queueQuotaStart {
 			ready, err := s.gatewayTaskReadyAt(ctx, task, task.Queue.Gateway.Since)
@@ -226,6 +239,9 @@ func (s *Service) replaceTaskQueue(ctx context.Context, task PlanTask, next *Tas
 		return false
 	}
 	if changed {
+		if next != nil {
+			s.savePlacement(ctx, current.Placement)
+		}
 		s.event(ctx, map[string]any{"type": "task_plan", "plan": s.planWithSpace(ctx, plan)})
 	}
 	return changed

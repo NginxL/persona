@@ -16,7 +16,7 @@ struct ShellPlaces {
     /// the conversation (#6332) are the conversation.
     static func isPlace(_ page: ShellPage) -> Bool {
         switch page {
-        case .newConversation, .health, .conversation: false
+        case .newConversation, .health, .space, .newSpace, .conversation: false
         default: true
         }
     }
@@ -28,8 +28,9 @@ struct ShellPlaces {
     }
 
     /// `page` is chosen while the stack is `path`. Returns the path to show: the one the place was left with, or nil
-    /// for its root (first time, or chosen again while in front).
-    mutating func enter(_ page: ShellPage, from path: NavigationPath) -> NavigationPath? {
+    /// for its root (first time, or chosen again while in front). `fresh`: the page shows another of its places now (a
+    /// To-dos place picked in the sidebar, #10465), so what it kept belongs to the one before and it starts at its root.
+    mutating func enter(_ page: ShellPage, from path: NavigationPath, fresh: Bool = false) -> NavigationPath? {
         guard Self.isPlace(page) else {
             leave(with: path)
             return nil
@@ -40,7 +41,8 @@ struct ShellPlaces {
         }
         leave(with: path)
         current = page
-        return saved.removeValue(forKey: page)
+        let kept = saved.removeValue(forKey: page)
+        return fresh ? nil : kept
     }
 
     /// Back out of the place to the conversation by the user: nothing to keep.

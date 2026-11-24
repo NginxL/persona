@@ -67,11 +67,7 @@ struct NotificationSettingsView: View {
                                   isOn: binding(\.input))
                 .disabled(prefs == nil)
             } footer: {
-                #if os(macOS)
-                Text("On permission and plan notifications you can Allow/Approve or Deny/Reject directly (hover over the notification and click Options).")
-                #else
                 Text("On permission and plan notifications you can Allow/Approve (after unlocking) or Deny/Reject directly.")
-                #endif
             }
 
             Section {
@@ -82,11 +78,7 @@ struct NotificationSettingsView: View {
                 } label: {
                     Label("When an Agent Finishes", systemImage: Theme.Icon.success)
                 }
-                #if os(macOS)
-                .pickerStyle(.radioGroup) // a Mac form's one-of-several (#1221)
-                #else
                 .pickerStyle(.inline)
-                #endif
                 .labelsHidden() // the section header says it
                 .disabled(prefs == nil)
             } header: {
@@ -157,12 +149,7 @@ struct NotificationSettingsView: View {
             // The hub's switch, for every device (#8157): after this device's own rows.
             if let lowDistraction { lowDistractionSection(lowDistraction) }
 
-            // The Mac had the button twice while notifications were off (#1224 A5): the warning above has it then.
-            #if os(macOS)
-            if !systemOff { systemSettingsSection }
-            #else
             systemSettingsSection
-            #endif
         }
         .themedPage()
         .detailTitle(String(localized: "Notifications"))
@@ -209,11 +196,7 @@ struct NotificationSettingsView: View {
 
     /// Allowed for a while (App Clips): iOS only.
     private static func ephemeral(_ status: UNAuthorizationStatus) -> Bool {
-        #if os(iOS) || os(visionOS)
         status == .ephemeral
-        #else
-        false
-        #endif
     }
 
     /// Notifications are not allowed for the app (the system's switch): the page says so first.

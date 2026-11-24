@@ -138,11 +138,7 @@ struct SSHTunnelForm<Status: View>: View {
                 Toggle(isOn: $always) { Text("Always Use SSH").lineLimit(1) }
                     .accessibilityIdentifier("ssh.always")
             } footer: {
-                #if os(macOS)
-                Text("When off, the app connects to the hub directly first and only uses the SSH tunnel if that fails. The tunnel retries automatically after it disconnects.")
-                #else
                 Text("When off, the app connects to the hub directly first and only uses the SSH tunnel if that fails. The tunnel is rebuilt when the iPhone app returns to the foreground.")
-                #endif
             }
             if let problem {
                 Section {
@@ -154,9 +150,6 @@ struct SSHTunnelForm<Status: View>: View {
                     .accessibilityIdentifier("ssh.problem")
                 }
             }
-            #if os(macOS)
-            macActions
-            #else
             Section {
                 Button { Task { await testAndSave() } } label: {
                     HStack(spacing: Theme.Space.s) {
@@ -182,13 +175,8 @@ struct SSHTunnelForm<Status: View>: View {
                     .bareListRow()
                 }
             }
-            #endif
         }
         .themedPage()
-        #if os(macOS)
-        .modifier(MacFormChrome(inSheet: dismissOnSave, unsaved: opened.map { $0 != fields } ?? false,
-                                cancel: { dismiss() }, save: saveButton))
-        #endif
         .onAppear(perform: load)
         .onChange(of: host) { _, _ in serverChanged() }
         .onChange(of: port) { _, _ in serverChanged() }
@@ -235,19 +223,6 @@ struct SSHTunnelForm<Status: View>: View {
                 }
                 .accessibilityElement(children: .combine)
                 .accessibilityIdentifier("ssh.publicKey")
-                #if os(macOS)
-                // Standard push buttons side by side, as a Mac form has them, not two tinted rows (#1170).
-                HStack(spacing: Theme.Space.s) {
-                    Spacer(minLength: 0)
-                    Button { copy(line) } label: { Label("Copy Public Key", systemImage: Theme.Icon.sshKey).lineLimit(1) }
-                        .accessibilityIdentifier("ssh.copyKey")
-                    Button { copy(authorizedKeysLine(key)) } label: {
-                        Label("Copy authorized_keys Line", systemImage: Theme.Icon.copy).lineLimit(1)
-                    }
-                    .accessibilityIdentifier("ssh.copyAuthorizedKeys")
-                }
-                .buttonStyle(.bordered)
-                #else
                 Button { copy(line) } label: {
                     SettingsRow(title: String(localized: "Copy Public Key"), symbol: Theme.Icon.sshKey, tint: Theme.accent)
                 }
@@ -260,7 +235,6 @@ struct SSHTunnelForm<Status: View>: View {
                 .modifier(SettingsButtonLook())
                 .accessibilityIdentifier("ssh.copyAuthorizedKeys")
                 .bareListRow()
-                #endif
             } else if let keyProblem {
                 Text(keyProblem).font(Theme.Font.secondary).foregroundStyle(Theme.danger)
             }
@@ -275,41 +249,6 @@ struct SSHTunnelForm<Status: View>: View {
         key.authorizedKeysLine(targetHost: targetHostValue, targetPort: Int(targetPort) ?? SSHRoute.defaultTargetPort, comment: SSHKeys.comment)
     }
 
-    #if os(macOS)
-    // MARK: Mac buttons
-
-    /// Test Connection and Save as a Mac button: the sheet's default button in its bar, or a standard one at the page's end.
-    private var saveButton: some View {
-        Button { Task { await testAndSave() } } label: {
-            HStack(spacing: Theme.Space.s) {
-                if checking { ProgressView().controlSize(.small) }
-                Text(checking ? String(localized: "Testing…") : String(localized: "Test Connection and Save")).lineLimit(1)
-            }
-        }
-        .disabled(checking || draft == nil)
-        .accessibilityIdentifier("ssh.save")
-    }
-
-    /// The page's own buttons at the end of the form (in a sheet, saving is in its bar): standard ones at the trailing
-    /// edge, not full-width tinted capsules (#1170).
-    @ViewBuilder private var macActions: some View {
-        if saved != nil || !dismissOnSave {
-        Section {
-            HStack(spacing: Theme.Space.s) {
-                if saved != nil {
-                    Button(role: .destructive) { removing = true } label: { Text("Delete SSH Tunnel…").lineLimit(1) }
-                        .buttonStyle(.bordered)
-                }
-                Spacer(minLength: 0)
-                if !dismissOnSave { saveButton.buttonStyle(.borderedProminent) }
-            }
-        } footer: {
-            Text("Signs in to the SSH server with the settings above and opens one forward to the tunnel target.")
-        }
-        }
-    }
-    #endif
-
     private func copy(_ s: String) {
         UIPasteboard.general.string = s
         Haptics.tap()
@@ -320,11 +259,6 @@ struct SSHTunnelForm<Status: View>: View {
 
     @ViewBuilder
     private func field(_ title: String, _ text: Binding<String>, prompt: String, digits: Bool = false, id: String) -> some View {
-        #if os(macOS)
-        TextField(title, text: text, prompt: Text(verbatim: prompt))
-            .autocorrectionDisabled()
-            .accessibilityIdentifier(id)
-        #else
         LabeledContent {
             TextField(title, text: text, prompt: Text(verbatim: prompt))
                 .multilineTextAlignment(.trailing)
@@ -335,7 +269,6 @@ struct SSHTunnelForm<Status: View>: View {
         } label: {
             Text(title).lineLimit(1)
         }
-        #endif
     }
 
     private var targetHostValue: String {
@@ -460,27 +393,3 @@ extension SSHTunnelForm where Status == EmptyView {
         self.init(saved: saved, onSave: onSave, dismissOnSave: dismissOnSave, status: { EmptyView() })
     }
 }
-
-#if os(macOS)
-/// The SSH form's frame on the Mac: a sheet's size and bar (Cancel, and saving as the default button), or the page's
-/// grouped form in the detail column.
-private struct MacFormChrome<Save: View>: ViewModifier {
-    var inSheet: Bool
-    var unsaved: Bool
-    var cancel: () -> Void
-    var save: Save
-
-    func body(content: Content) -> some View {
-        if inSheet {
-            content
-                .macSheet()
-                .sheetCancel(unsaved: unsaved, cancel: cancel)
-                .toolbar {
-                    ToolbarItem(placement: .confirmationAction) { save }
-                }
-        } else {
-            content.formStyle(.grouped)
-        }
-    }
-}
-#endif

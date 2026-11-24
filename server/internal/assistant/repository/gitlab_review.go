@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"time"
 )
 
 // GitLabReview reads merge request link of the GitLab repository id (GET /api/v4/projects/:id/merge_requests/:iid,
@@ -31,11 +32,13 @@ func (c Checker) GitLabReview(ctx context.Context, id Identity, link TaskLink, t
 		return ReviewStatus{}, err
 	}
 	var mr struct {
-		IID             int64   `json:"iid"`
-		State           string  `json:"state"`
-		WebURL          string  `json:"web_url"`
-		MergeCommitSHA  *string `json:"merge_commit_sha"`
-		SquashCommitSHA *string `json:"squash_commit_sha"`
+		IID             int64     `json:"iid"`
+		State           string    `json:"state"`
+		WebURL          string    `json:"web_url"`
+		MergeCommitSHA  *string   `json:"merge_commit_sha"`
+		SquashCommitSHA *string   `json:"squash_commit_sha"`
+		MergedAt        time.Time `json:"merged_at"`
+		ClosedAt        time.Time `json:"closed_at"`
 	}
 	if json.Unmarshal(raw, &mr) != nil || strconv.FormatInt(mr.IID, 10) != link.Number {
 		return ReviewStatus{}, &CheckError{"inconclusive"}
@@ -47,9 +50,9 @@ func (c Checker) GitLabReview(ctx context.Context, id Identity, link TaskLink, t
 	case "opened", "locked":
 		return ReviewStatus{State: ReviewOpen}, nil
 	case "closed":
-		return ReviewStatus{State: ReviewClosed}, nil
+		return ReviewStatus{State: ReviewClosed, TerminalAt: mr.ClosedAt}, nil
 	case "merged":
-		return ReviewStatus{State: ReviewMerged, MergeCommit: cmp.Or(deref(mr.MergeCommitSHA), deref(mr.SquashCommitSHA))}, nil
+		return ReviewStatus{State: ReviewMerged, MergeCommit: cmp.Or(deref(mr.MergeCommitSHA), deref(mr.SquashCommitSHA)), TerminalAt: mr.MergedAt}, nil
 	}
 	return ReviewStatus{}, &CheckError{"inconclusive"}
 }

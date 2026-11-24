@@ -14,11 +14,14 @@ import (
 // ResidentReload drains work while Attach is still serving. Only the final exec closes existing connections;
 // idle conversations that need the SIGKILL fallback are reaped before that transport gap begins.
 type ResidentReload struct {
-	mu     sync.Mutex
-	active int
-	paused bool
-	idle   chan struct{}
-	peers  map[*rpc.Peer]func()
+	mu             sync.Mutex
+	active         int
+	paused         bool
+	headlessPaused bool
+	grace          time.Duration
+	graceSet       bool
+	idle           chan struct{}
+	peers          map[*rpc.Peer]func()
 }
 
 func (r *ResidentReload) enter() (func(), error) {
@@ -42,6 +45,38 @@ func (r *ResidentReload) enter() (func(), error) {
 			close(r.idle)
 		}
 	}, nil
+}
+
+func (r *ResidentReload) enterHeadless() error {
+	if r == nil {
+		return nil
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.paused || r.headlessPaused {
+		return &rpc.Error{Code: nodeproto.CodeRestarting, Message: nodeproto.CodeRestarting}
+	}
+	return nil
+}
+
+// SetHeadlessPaused controls only new external assistant turns. Other RPCs and recovery of an admitted turn continue.
+func (r *ResidentReload) SetHeadlessPaused(paused bool) {
+	if r == nil {
+		return
+	}
+	r.mu.Lock()
+	r.headlessPaused = paused
+	r.mu.Unlock()
+}
+
+// SetGrace sets the next Prepare's admission grace. Zero preserves the indefinite natural-idle wait.
+func (r *ResidentReload) SetGrace(grace time.Duration) {
+	if r == nil {
+		return
+	}
+	r.mu.Lock()
+	r.grace, r.graceSet = grace, true
+	r.mu.Unlock()
 }
 
 func (r *ResidentReload) peer(p *rpc.Peer, disconnect func()) {
@@ -68,37 +103,64 @@ func (r *ResidentReload) Resume() {
 	r.mu.Unlock()
 }
 
-// Prepare never stops an answering conversation or an admitted RPC. New requests get an explicit not-started code.
+// Prepare never stops an answering conversation or an admitted RPC. Natural idle pauses admission immediately;
+// after the grace it stays paused while admitted replies and current turns finish. New requests get an explicit
+// not-started code. A pre-transfer headless pause stays in force until the manager clears it.
 func (r *ResidentReload) Prepare(ctx context.Context) error {
+	r.mu.Lock()
+	grace, graceSet := r.grace, r.graceSet
+	r.mu.Unlock()
+	if !graceSet {
+		grace = time.Duration(proto.DefaultNodeUpdateHandoffGraceSeconds) * time.Second
+	}
+	var handoffDeadline time.Time
+	if grace > 0 {
+		handoffDeadline = time.Now().Add(grace)
+	}
 	for {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
+		expired := !handoffDeadline.IsZero() && !time.Now().Before(handoffDeadline)
 		r.mu.Lock()
 		idle, ready := r.idle, r.active == 0
-		if ready {
+		if ready || expired {
 			r.paused = true
+		}
+		if expired {
+			r.headlessPaused = true
 		}
 		r.mu.Unlock()
 		if ready {
 			if !AssistantsBusy() {
 				break
 			}
-			r.Resume()
+			if !expired {
+				r.Resume()
+			}
 		}
+		delay := 200 * time.Millisecond
+		if !expired && !handoffDeadline.IsZero() {
+			delay = min(delay, time.Until(handoffDeadline))
+		}
+		timer := time.NewTimer(delay)
 		if !ready {
 			select {
 			case <-idle:
+			case <-timer.C:
 			case <-ctx.Done():
+				timer.Stop()
 				return ctx.Err()
 			}
 		} else {
 			select {
-			case <-time.After(200 * time.Millisecond):
+			case <-timer.C:
 			case <-ctx.Done():
+				timer.Stop()
 				return ctx.Err()
 			}
 		}
+		timer.Stop()
 	}
 	var procs []*assistantProc
 	liveAssistants.Range(func(key, _ any) bool {

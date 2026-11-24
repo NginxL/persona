@@ -54,7 +54,7 @@ class ConcurrencyTests(unittest.TestCase):
         self.assertIn('workflow_dispatch', workflow('apple-test.yml')['on'])
 
     def test_heavy_matrices_keep_all_shards_with_bounded_parallelism(self):
-        for filename, job, maximum, size in [('server-test.yml', 'server', 2, 4),
+        for filename, job, maximum, size in [('server-test.yml', 'server', 2, 7),
                                               ('android-test.yml', 'android', 2, 2),
                                               ('scripts-tests.yml', 'scripts', 1, 2)]:
             with self.subTest(filename=filename):

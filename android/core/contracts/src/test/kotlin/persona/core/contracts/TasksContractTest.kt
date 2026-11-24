@@ -155,6 +155,40 @@ class TasksContractTest {
         assertEquals("修登录崩溃", (ix.taskTitle).zhAny())
     }
 
+    /** Cancellation and takeover history survive the wire, while an older hub's payload still decodes (#5732). */
+    @Test fun cancellationAndLineageDecode() {
+        val todo = JsonCodec.decodeFromString<Todo>("""{"id":"new","done_at":"2026-11-12T08:00:00Z",
+            "cancelled_at":"2026-11-12T08:00:00Z","cancelled_reason":"Superseded by the revised plan",
+            "lineage":[{"todo_id":"old","title":"First attempt","agent":"claude","machine":"box","session_id":"s1",
+              "started":"2026-11-11T08:00:00Z","ended":"2026-11-12T07:00:00Z","why":"continues",
+              "superseded_by":"new"},{"todo_id":"new","title":"Revised attempt","continues":"old","current":true}]}""")
+        assertTrue(todo.isCancelled)
+        assertEquals("Superseded by the revised plan", todo.cancellationReason)
+        assertEquals(listOf("old", "new"), todo.lineage?.map { it.todoId })
+        assertEquals("new", todo.lineage?.first()?.supersededBy)
+        assertEquals("old", todo.lineage?.last()?.continues)
+        assertEquals(true, todo.lineage?.last()?.current)
+
+        val legacy = JsonCodec.decodeFromString<Todo>("""{"id":"old","done_at":"2026-11-12T08:00:00Z",
+            "done_by":"review","done_reason":"superseded","supervision":{"state":"cancelled"}}""")
+        assertTrue(legacy.isCancelled)
+        assertEquals("superseded", legacy.cancellationReason)
+        assertEquals(null, legacy.lineage)
+        val oldHub = JsonCodec.decodeFromString<Todo>("""{"id":"plain","title":"Unchanged"}""")
+        assertEquals(null, oldHub.cancelledReason)
+        assertEquals(null, oldHub.lineage)
+    }
+
+    @Test fun cancelledReopenedAndExplicitlyCompletedIsNotCancelled() {
+        for (doneBy in listOf("", "auto")) {
+            val marker = if (doneBy.isEmpty()) "" else """"done_by":"$doneBy","""
+            val completed = JsonCodec.decodeFromString<Todo>("""{"id":"reopened","done_at":"2026-11-13T08:00:00Z",
+                $marker"reopened_at":"2026-11-13T07:00:00Z","supervision":{"state":"cancelled"}}""")
+            assertFalse(completed.isCancelled)
+            assertEquals(null, completed.cancellationReason)
+        }
+    }
+
     /** An answered record has every question with its answer in full (#1231); one from before it shows its line. */
     @Test fun answeredItemsInFullOrTheLine() {
         val res = JsonCodec.decodeFromString<FeedResponse>("""{"items":[

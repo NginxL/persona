@@ -1,4 +1,3 @@
-#if os(iOS)
 import Foundation
 import Testing
 @testable import Persona
@@ -165,5 +164,4 @@ struct WorkoutSplitsTests {
         #expect(WorkoutSplits.active(from: at(0), to: at(600), paused: paused) == 600 - 60 - 30 - 100)
     }
 }
-#endif
 import PersonaWire

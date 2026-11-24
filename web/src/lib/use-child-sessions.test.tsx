@@ -6,8 +6,8 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { setToken } from "./api";
-import { SESSIONS_HIERARCHY_FEATURE } from "./child-sessions";
-import { SESSIONS_LIST_FEATURE } from "./session-list";
+import { SESSIONS_CROSS_MACHINE_HIERARCHY_FEATURE, SESSIONS_HIERARCHY_FEATURE } from "./child-sessions";
+import { SESSIONS_LIST_FEATURE, SessionList } from "./session-list";
 import { getSession, getState, reset, upsertSession } from "./store";
 import type { Interaction, Session } from "./types";
 import { InteractionCard } from "../views/chat/Interactions";
@@ -63,6 +63,16 @@ describe("useChildSessions on a hub that pushes every row", () => {
     expect(last().rows[0].state).toBe("working");
   });
 
+  it("collects cross-machine children on a pushed hub too", () => {
+    Object.assign(getState(), { loaded: true });
+    upsertSession(row("p"));
+    upsertSession(row("local", { folded_under: "p", started_at: "2026-11-12T10:01:00Z" }));
+    upsertSession(row("remote", { machine_id: "box", folded_under: "p", folded_under_machine_id: "m", started_at: "2026-11-12T10:02:00Z" }));
+    act(() => root.render(<Probe />));
+    expect(last().rows.map((s) => `${s.machine_id}/${s.session_id}`)).toEqual(["m/local", "box/remote"]);
+    expect(heldChild("box", "remote")?.session_id).toBe("remote");
+  });
+
   it("off: none", () => {
     upsertSession(row("a", { folded_under: "p" }));
     act(() => root.render(<Probe enabled={false} />));
@@ -115,6 +125,34 @@ describe("useChildSessions on a paging hub", () => {
     expect(fetcher).not.toHaveBeenCalled();
   });
 
+  it("uses parent_machine_id when sessions_cross_machine_hierarchy is advertised and holds cross-machine children", async () => {
+    Object.assign(getState(), { loaded: true, features: [SESSIONS_LIST_FEATURE, SESSIONS_HIERARCHY_FEATURE, SESSIONS_CROSS_MACHINE_HIERARCHY_FEATURE] });
+    const asked: string[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+      const u = new URL(url, "http://x");
+      asked.push(`${u.pathname}?${u.searchParams}`);
+      const body = u.searchParams.get("counts") === "1"
+        ? { total: 2, machine: {}, project: {}, group: {}, state: {}, revision: "r1" }
+        : {
+          sessions: [
+            row("local-kid", { folded_under: "p", started_at: "2026-11-12T10:01:00Z", waiting: false }),
+            row("remote-kid", { machine_id: "box", folded_under: "p", folded_under_machine_id: "m", started_at: "2026-11-12T10:02:00Z", waiting: false }),
+          ],
+          remove: [], has_more: false, revision: "r1", total: 2,
+        };
+      return new Response(JSON.stringify(body), { headers: { "Content-Type": "application/json" } });
+    }));
+    act(() => root.render(<Probe />));
+    await flush();
+    expect(last().rows.map((s) => `${s.machine_id}/${s.session_id}`)).toEqual(["m/local-kid", "box/remote-kid"]);
+    const read = asked.find((a) => !a.includes("counts=1"))!;
+    const params = new URL(read, "http://x").searchParams;
+    expect(params.get("parent_machine_id")).toBe("m");
+    expect(params.get("parent_session_id")).toBe("p");
+    expect(params.get("machine_id")).toBeNull();
+    expect(heldChild("box", "remote-kid")?.session_id).toBe("remote-kid");
+  });
+
   it("a paging hub that does not fold: none, and nothing asked", async () => {
     Object.assign(getState(), { loaded: true, features: [SESSIONS_LIST_FEATURE] });
     const fetcher = vi.fn();
@@ -135,5 +173,26 @@ describe("sameRows", () => {
     expect(sameRows(prev, [a, b])).toBe(prev);
     expect(sameRows(prev, [b, a])).not.toBe(prev);
     expect(sameRows(undefined, prev)).toBe(prev);
+  });
+});
+
+describe("SessionList cross_machine_hierarchy query", () => {
+  it("sends roots=1&cross_machine_hierarchy=1 when crossMachineHierarchy is enabled", async () => {
+    const asked: string[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+      const u = new URL(url, "http://x");
+      asked.push(`${u.pathname}?${u.searchParams}`);
+      const body = u.searchParams.get("counts") === "1"
+        ? { total: 0, machine: {}, project: {}, group: {}, state: {}, revision: "r1" }
+        : { sessions: [], remove: [], has_more: false, revision: "r1", total: 0 };
+      return new Response(JSON.stringify(body), { headers: { "Content-Type": "application/json" } });
+    }));
+    const list = new SessionList<Session>("/sessions", (s) => `${s.machine_id}/${s.session_id}`, () => 0, undefined, undefined, {
+      roots: true,
+      crossMachineHierarchy: true,
+    });
+    await list.load();
+    expect(asked.some((q) => q.includes("roots=1") && q.includes("cross_machine_hierarchy=1"))).toBe(true);
+    list.reset();
   });
 });

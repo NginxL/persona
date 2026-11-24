@@ -7,6 +7,7 @@ import persona.core.contracts.api.*
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.*
 import okhttp3.HttpUrl
 import okhttp3.MediaType.Companion.toMediaType
@@ -18,12 +19,27 @@ class HttpChatActions internal constructor(
     /** For a rewind (null: [request]): the node walks Claude's /rewind for up to 90 s and the hub waits 100 s to hear why. */
     private val slowRequest: (suspend (String, String, RequestBody?) -> Response)? = null,
     private val request: suspend (String, String, RequestBody?) -> Response,
+    /** Slow lane with custom headers (e.g. `X-Persona-Op-Id` on idempotent session starts); falls back to [slowRequest]. */
+    private val slowRequestWithHeaders: (suspend (String, String, RequestBody?, Map<String, String>) -> Response)? = null,
+    private val crossMachineHierarchy: () -> Boolean = { false },
 ) : ChatActions {
+    internal constructor(
+        slowRequest: (suspend (String, String, RequestBody?) -> Response)? = null,
+        request: suspend (String, String, RequestBody?) -> Response,
+    ) : this(slowRequest, request, null, { false })
+
     constructor(connection: OkHttpHubConnection) : this(
-        { path, method, body -> connection.request(path, method, body, readTimeoutSeconds = REWIND_READ_TIMEOUT_SECONDS) },
-        connection::request)
+        slowRequest = { path, method, body -> connection.request(path, method, body, readTimeoutSeconds = REWIND_READ_TIMEOUT_SECONDS) },
+        request = connection::request,
+        slowRequestWithHeaders = { path, method, body, headers ->
+            connection.request(path, method, body, headers = headers, readTimeoutSeconds = REWIND_READ_TIMEOUT_SECONDS)
+        },
+        crossMachineHierarchy = { SESSIONS_CROSS_MACHINE_HIERARCHY in connection.serverFeatures.value },
+    )
 
     private val slow get() = slowRequest ?: request
+    private suspend fun slowWithHeaders(path: String, method: String, body: RequestBody?, headers: Map<String, String>): Response =
+        slowRequestWithHeaders?.invoke(path, method, body, headers) ?: slow(path, method, body)
 
     private val lock = Mutex()
     private val uncertain = mutableMapOf<Pair<SessionKey, String>, ChatAction>()
@@ -83,6 +99,17 @@ class HttpChatActions internal constructor(
                 failure?.kind in listOf(HubError.NoNetwork, HubError.PairingExpired)
             if (rejected) ChatActionResult.Failed(CoreText.of(if (failure?.kind == HubError.PairingExpired) Key.PairingExpired else Key.ActionNotDone), cause = error)
             else { uncertain[key] = action; ChatActionResult.Unknown }
+        }
+    }
+
+    override suspend fun continueStart(session: Session, choice: String): Session {
+        require(session.machineId.isNotBlank() && session.sessionId.isNotBlank())
+        val body = buildJsonObject { put("choice", choice) }.toString().toRequestBody("application/json; charset=utf-8".toMediaType())
+        // The hub may wait 20 seconds for the kept terminal; only a completed 2xx is an answer.
+        return slow(api("sessions", session.machineId, session.sessionId, "start", "continue"), "POST", body).use {
+            if (!it.isSuccessful) throw HubFailure.from(it)
+            val answer = JsonCodec.parseToJsonElement(it.body?.string().orEmpty()).jsonObject
+            JsonCodec.decodeFromJsonElement(answer["session"] ?: error("no session in the answer"))
         }
     }
 
@@ -183,6 +210,55 @@ class HttpChatActions internal constructor(
         }
     }
 
+    override suspend fun codexTakeoverInfo(session: Session): CodexTakeoverInfo {
+        require(session.machineId.isNotBlank() && session.sessionId.isNotBlank())
+        return request(api("machines", session.machineId, "codex", session.sessionId, "takeover"), "GET", null).use { response ->
+            if (!response.isSuccessful) throw HubFailure.from(response)
+            JsonCodec.decodeFromString<CodexTakeoverInfo>(response.body?.string().orEmpty())
+        }
+    }
+
+    override suspend fun codexTakeover(session: Session, token: String, confirmStop: Boolean): Session {
+        require(session.machineId.isNotBlank() && session.sessionId.isNotBlank())
+        val body = JsonCodec.encodeToString(CodexTakeoverRequest(token = token, confirmStop = confirmStop))
+            .toRequestBody("application/json; charset=utf-8".toMediaType())
+        return slow(api("machines", session.machineId, "codex", session.sessionId, "takeover"), "POST", body).use { response ->
+            if (!response.isSuccessful) throw HubFailure.from(response)
+            val adopted = JsonCodec.decodeFromString<CodexTakeoverResponse>(response.body?.string().orEmpty()).session
+            if (adopted.machineId.isBlank()) adopted.copy(machineId = session.machineId) else adopted
+        }
+    }
+
+    override suspend fun startCodexContinuation(session: Session, info: CodexTakeoverInfo, operationId: String): AgentStartResult {
+        require(session.machineId.isNotBlank() && info.cwd.isNotBlank())
+        val body = CodexContinuationReceipt.startBody(session.machineId, info, session.todo?.id)
+        return CodexContinuationReceipt.startWithReconciliation(
+            machineId = session.machineId,
+            operationId = operationId,
+            post = { headers ->
+                slowWithHeaders(api("sessions"), "POST", body, headers).use { response ->
+                    if (!response.isSuccessful) throw HubFailure.from(response)
+                    JsonCodec.parseToJsonElement(response.body?.string().orEmpty()).jsonObject
+                }
+            },
+            fetchOperation = { opId -> codexContinuationOperation(session, opId) },
+        )
+    }
+
+    override suspend fun codexContinuationOperation(session: Session, operationId: String): AgentStartResult {
+        java.util.UUID.fromString(operationId)
+        val receipt = try {
+            request(api("ops", operationId), "GET", null).use { response ->
+                if (!response.isSuccessful) throw HubFailure.from(response)
+                JsonCodec.parseToJsonElement(response.body?.string().orEmpty()).jsonObject
+            }
+        } catch (failure: HubFailure) {
+            CodexContinuationReceipt.operationFailure(failure)?.let { return it }
+            throw failure
+        }
+        return CodexContinuationReceipt.receiptOutcome(receipt, session.machineId)
+    }
+
     override suspend fun info(session: Session): SessionInfo =
         request(api("sessions", session.machineId, session.sessionId, "info"), "GET", null).use {
             if (!it.isSuccessful) throw HubFailure.from(it)
@@ -209,11 +285,18 @@ class HttpChatActions internal constructor(
         var cursor: String? = null
         var revision: String? = null
         var total = 0
+        val cross = crossMachineHierarchy()
         do {
             val url = HttpUrl.Builder().scheme("https").host("example.com").addPathSegments("api/v1/sessions")
                 .addQueryParameter("summary", "1").addQueryParameter("limit", "200")
-                .addQueryParameter("machine_id", session.machineId).addQueryParameter("parent_session_id", session.sessionId)
                 .apply {
+                    if (cross) {
+                        addQueryParameter("parent_machine_id", session.machineId)
+                        addQueryParameter("parent_session_id", session.sessionId)
+                    } else {
+                        addQueryParameter("machine_id", session.machineId)
+                        addQueryParameter("parent_session_id", session.sessionId)
+                    }
                     cursor?.let { addQueryParameter("cursor", it) }
                     since?.let { addQueryParameter("since", it) }
                 }.build()
@@ -228,7 +311,16 @@ class HttpChatActions internal constructor(
             if (revision != null && revision != page.revision) throw HubFailure(HubError.Protocol, retryable = false)
             revision = page.revision
             total = page.total
-            rows += page.sessions.filter { it.foldedUnder == session.sessionId }.map { it.copy(machineId = session.machineId) }
+            rows += page.sessions.map { row ->
+                if (row.machineId.isBlank()) row.copy(machineId = session.machineId) else row
+            }.filter { row ->
+                if (cross) {
+                    row.foldedUnderKey == session.key ||
+                        (row.foldedUnder.isNullOrBlank() && row.parentKey == session.key)
+                } else {
+                    row.foldedUnder == session.sessionId && row.machineId == session.machineId
+                }
+            }
             removed += page.remove
             cursor = if (page.hasMore) {
                 page.nextCursor?.takeIf { it.isNotBlank() && cursors.add(it) }

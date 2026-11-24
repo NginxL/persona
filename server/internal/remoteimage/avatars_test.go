@@ -236,7 +236,10 @@ func TestAvatarsLimitCountsOnlyFetches(t *testing.T) {
 		t.Fatalf("Avatars.PerCaller %d does not let two screens of new pictures through a minute", Avatars.PerCaller)
 	}
 	f := New(Options{Profile: Avatars, CacheDir: t.TempDir()})
-	f.limits = newLimiter(screen, time.Minute, time.Now) // exactly one screen's worth
+	// Exactly one screen's worth, on a clock that stands still: the bucket refills screen a minute (one every 1.2 s),
+	// so on a real clock a run slower than that (-race, a busy CI) earns the extra fetch this test expects refused.
+	start := time.Now()
+	f.limits = newLimiter(screen, time.Minute, func() time.Time { return start })
 	var gets atomic.Int32
 	get := func(context.Context) ([]byte, error) { gets.Add(1); return pngBytes(t, 200, 200, false), nil }
 	ask := func(size int) []error {

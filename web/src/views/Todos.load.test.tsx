@@ -136,7 +136,7 @@ describe("todo list load failures", () => {
     await act(async () => { await refreshTodos(); });
     await render();
     const header = host.querySelector("header")!;
-    const emptySummary = t("todos.summary_triage", { open: 0, parked: 0, shelved: 0, done: 0 });
+    const emptySummary = t("todos.summary_triage", { open: 0, parked: 0, shelved: 0, done: 0, cancelled: 0 });
     expect(header.textContent).not.toContain(emptySummary);
 
     api.mockImplementation(async (path) => path === "/todos" ? { todos: [] } : {});
@@ -146,7 +146,7 @@ describe("todo list load failures", () => {
 
     api.mockImplementation(async (path) => path === "/todos" ? { todos: [todo] } : {});
     await act(async () => { await refreshTodos(); });
-    const populatedSummary = t("todos.summary_triage", { open: 1, parked: 0, shelved: 0, done: 0 });
+    const populatedSummary = t("todos.summary_triage", { open: 1, parked: 0, shelved: 0, done: 0, cancelled: 0 });
     expect(header.textContent).toContain(populatedSummary);
     failReads();
     await act(async () => { await refreshTodos(); });

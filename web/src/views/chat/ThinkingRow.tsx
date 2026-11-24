@@ -13,6 +13,7 @@ import { Icon } from "../../ui/icons";
 import { CHEVRON_SLOT, ROW_CHROME, ROW_HOVER, STATUS_SLOT } from "./ActionRow";
 import { useExpanded } from "./expanded";
 import { useReveal } from "./search-reveal";
+import { StepTelemetry } from "./StepTelemetry";
 import { ThinkingText } from "./ThinkingText";
 
 const NONE: string[] = [];
@@ -39,6 +40,8 @@ export function ThinkingRow({ item, scope = "" }: { item: Item; scope?: string }
   // tokenized once: what it draws and its hover text
   const tokens = useMemo(() => tokenizeThinkingText(open ? raw : words), [open, raw, words]);
   const title = useMemo(() => (open ? undefined : thinkingPlainText(tokens)), [open, tokens]);
+  const hasTelemetry = Boolean(item.usage?.length || (typeof item.ttft_ms === "number" && item.ttft_ms >= 0));
+  const stepItems = useMemo(() => [item], [item]);
   // a search hit in its words (search-reveal.ts): it opens
   useReveal(scope, words ? [item.id] : NONE, () => {
     if (open) return;
@@ -77,6 +80,7 @@ export function ThinkingRow({ item, scope = "" }: { item: Item; scope?: string }
           {opens && <Icon name="chevronRight" size={13} stroke={2.2} className="transition-transform duration-150 motion-reduce:transition-none" style={{ transform: open ? "rotate(90deg)" : "none" }} />}
         </span>
       </div>
+      {open && hasTelemetry && <StepTelemetry items={stepItems} className="mt-1 mb-1 pl-7" />}
     </div>
   );
 }

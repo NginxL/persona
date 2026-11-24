@@ -5,9 +5,7 @@ import Foundation
 import OSLog
 import Security
 import SwiftUI
-#if canImport(UIKit)
 import UIKit
-#endif
 
 /// The app's half of the Fleet Live Activity (docs/apple/live-activity.md). The hub decides what it shows and pushes it while
 /// the app is away; the app
@@ -32,16 +30,18 @@ final class LiveActivityController {
     }
 
     private var watching: Set<String> = []
+    /// Activities `keepOne` is ending: their end runs on, and until then nothing updates them in place of the kept one.
+    private var ending: Set<String> = []
     private var endTask: Task<Void, Never>?
     private var started = false
 
     private var activity: Activity<LegacyFleetActivityAttributes>? {
-        Activity<LegacyFleetActivityAttributes>.activities.first { $0.activityState == .active || $0.activityState == .stale }
+        Activity<LegacyFleetActivityAttributes>.activities.first { Self.running($0.activityState) && !ending.contains($0.id) }
     }
 
     /// Keep activities created by the interim canonical-identity builds alive too.
     private var canonicalActivity: Activity<PersonaActivityAttributes>? {
-        Activity<PersonaActivityAttributes>.activities.first { $0.activityState == .active || $0.activityState == .stale }
+        Activity<PersonaActivityAttributes>.activities.first { Self.running($0.activityState) && !ending.contains($0.id) }
     }
     private var runningContent: ActivityContent<FleetState>? { canonicalActivity?.content ?? activity?.content }
     private var hasActivity: Bool { activity != nil || canonicalActivity != nil }
@@ -97,6 +97,7 @@ final class LiveActivityController {
         }
         for activity in Activity<LegacyFleetActivityAttributes>.activities { watch(activity) }
         for activity in Activity<PersonaActivityAttributes>.activities { watch(activity) }
+        keepOne()
     }
 
     /// The hub's current fleet (the `fleet` event, or GET /api/v1/fleet on becoming active).
@@ -106,6 +107,7 @@ final class LiveActivityController {
             endAll()
             return
         }
+        keepOne()
         let step = Self.step(state, running: hasActivity, active: UIApplication.shared.applicationState == .active)
         if step == .endSoon {
             // The last request went (answered here or on a computer, or gone): off the activity now, with its buttons,
@@ -221,6 +223,49 @@ final class LiveActivityController {
         let status = SecItemDelete([kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: "persona.look"] as CFDictionary)
         if status == errSecSuccess { FleetLookStore.log.notice("deleted the keychain look of an older build") }
     }()
+
+    /// One Fleet card on the Lock Screen (#12982): of every activity this app has, of either attribute type, the running
+    /// one updated last stays; every other ends at once, ended ones too — iOS ends an activity after about eight hours
+    /// but leaves it on the Lock Screen, stale, for hours, where `activity` no longer sees it and a new one would start
+    /// beside it.
+    func keepOne() {
+        let legacy = Activity<LegacyFleetActivityAttributes>.activities.map {
+            Self.Candidate(id: $0.id, running: Self.running($0.activityState), staleDate: $0.content.staleDate)
+        }
+        let canonical = Activity<PersonaActivityAttributes>.activities.map {
+            Self.Candidate(id: $0.id, running: Self.running($0.activityState), staleDate: $0.content.staleDate)
+        }
+        let keep = Self.kept(legacy + canonical)
+        for activity in Activity<LegacyFleetActivityAttributes>.activities where activity.id != keep && ending.insert(activity.id).inserted {
+            Self.end(activity)
+        }
+        for activity in Activity<PersonaActivityAttributes>.activities where activity.id != keep && ending.insert(activity.id).inserted {
+            Self.end(activity)
+        }
+    }
+
+    /// An activity as `kept` weighs it.
+    nonisolated struct Candidate: Equatable, Sendable {
+        var id: String
+        var running: Bool
+        var staleDate: Date?
+    }
+
+    nonisolated static func running(_ state: ActivityState) -> Bool { state == .active || state == .stale }
+
+    /// Which activity stays: a running one, the one whose content was updated last (each update moves its stale date
+    /// on); nil when none runs, so every one ends.
+    nonisolated static func kept(_ all: [Candidate]) -> String? {
+        all.filter(\.running).max { ($0.staleDate ?? .distantPast) < ($1.staleDate ?? .distantPast) }?.id
+    }
+
+    /// The app went to the background. With no push route to this phone (the hub's `none`), nothing can update or
+    /// end the activity from now on: it would go stale and keep showing old counts and an old request for hours. It
+    /// ends now instead, and the app starts it again when it is back in front (#12982).
+    func left(pushReaches: Bool?) {
+        guard pushReaches == false else { return }
+        endAll()
+    }
 
     func endAll() {
         endTask?.cancel()

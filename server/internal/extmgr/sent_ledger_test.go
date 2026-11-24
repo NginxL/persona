@@ -12,7 +12,7 @@ import (
 
 	"github.com/nwverse/persona/server/internal/connector"
 	"github.com/nwverse/persona/server/internal/db"
-	"github.com/nwverse/persona/server/internal/mail"
+	"github.com/nwverse/persona/server/internal/mailwire"
 	"github.com/nwverse/persona/server/internal/proto"
 )
 
@@ -255,7 +255,7 @@ type sendingMail struct {
 }
 
 func (m *sendingMail) CallRef(_ context.Context, _ string, args json.RawMessage, _ func(context.Context, string, json.RawMessage) bool) (proto.ToolResult, string) {
-	var req mail.SendRequest
+	var req mailwire.SendRequest
 	_ = json.Unmarshal(args, &req)
 	m.sent = append(m.sent, req)
 	return proto.TextResult("Mail sent to "+req.To[0].Email+".", false), m.id
@@ -266,7 +266,7 @@ func TestSentLedgerKeepsAMailsMessageID(t *testing.T) {
 	h := newTestManager(t)
 	st := newSentLedgerStore()
 	h.store = st
-	m := &sendingMail{id: "1A2B.3C4D@hub.example.com"}
+	m := &sendingMail{replyMail: *newReplyMail(t), id: "1A2B.3C4D@hub.example.com"}
 	h.mail = m
 	h.connectors = h.newConnectors([]connector.Rule{{Connector: "mail", Action: "mail_send", Decision: connector.Allow}})
 	h.registerConnectors()

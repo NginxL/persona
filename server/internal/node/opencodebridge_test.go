@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"net"
 	"os"
 	"os/exec"
@@ -11,6 +12,7 @@ import (
 	"runtime"
 	"slices"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"testing/synctest"
@@ -313,5 +315,161 @@ func TestOpencodeBridgeCommandExtractsAndPassesFlags(t *testing.T) {
 		if !slices.Contains(cmd.Args, flag) {
 			t.Fatalf("cmd.Args %v missing %q", cmd.Args, flag)
 		}
+	}
+}
+
+// fakeOpencodeClock replaces the restart loop's clock: every wait returns at once and moves the clock on by its length,
+// so a test sees an hour of restarts without waiting for it.
+type fakeOpencodeClock struct {
+	mu    sync.Mutex
+	now   time.Time
+	waits []time.Duration
+}
+
+func useFakeOpencodeClock(t *testing.T) *fakeOpencodeClock {
+	t.Helper()
+	c := &fakeOpencodeClock{now: time.Unix(1_700_000_000, 0)}
+	oldNow, oldAfter := opencodeBridgeNow, opencodeBridgeAfter
+	t.Cleanup(func() { opencodeBridgeNow, opencodeBridgeAfter = oldNow, oldAfter })
+	opencodeBridgeNow = func() time.Time {
+		c.mu.Lock()
+		defer c.mu.Unlock()
+		return c.now
+	}
+	opencodeBridgeAfter = func(d time.Duration) <-chan time.Time {
+		c.mu.Lock()
+		c.now = c.now.Add(d)
+		c.waits = append(c.waits, d)
+		fired := make(chan time.Time, 1)
+		fired <- c.now
+		c.mu.Unlock()
+		return fired
+	}
+	return c
+}
+
+func (c *fakeOpencodeClock) recorded() []time.Duration {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return slices.Clone(c.waits)
+}
+
+// #12848: a companion that exits before it ever reaches runtime.sock (there, an entry check that skipped main() under
+// a symlinked home: exit 0, no output) is logged with its exit status and how long it ran, and is retried with a wait
+// that keeps doubling up to an hour instead of once a minute for good.
+func TestOpencodeBridgeBacksOffCompanionThatNeverConnects(t *testing.T) {
+	oldFind, oldCmd := findOpencodeExecutable, opencodeBridgeCommand
+	t.Cleanup(func() { findOpencodeExecutable, opencodeBridgeCommand = oldFind, oldCmd })
+	t.Setenv("PERSONA_BUILTIN_OPENCODE", "")
+	findOpencodeExecutable = func() string { return "opencode" }
+	clock := useFakeOpencodeClock(t)
+
+	const runs = 16
+	startedAt := make(chan time.Time, 64)
+	opencodeBridgeCommand = func(context.Context, *RuntimeHost, string, string) (*exec.Cmd, error) {
+		select {
+		case startedAt <- opencodeBridgeNow():
+		default:
+		}
+		if runtime.GOOS == "windows" {
+			return exec.Command("cmd", "/c", "exit 0"), nil
+		}
+		return exec.Command("/bin/sh", "-c", "exit 0"), nil
+	}
+
+	host := NewRuntimeHost("test", "runtime.sock")
+	logs := &lockedLog{}
+	host.logger = log.New(logs, "", 0)
+	host.setOpencodeBridge(true)
+	var starts []time.Time
+	for len(starts) < runs {
+		select {
+		case at := <-startedAt:
+			starts = append(starts, at)
+		case <-time.After(10 * time.Second):
+			t.Fatalf("only %d companion starts", len(starts))
+		}
+	}
+	host.setOpencodeBridge(false)
+
+	if got := logs.String(); !strings.Contains(got, "companion exited (exit status 0) after ") || !strings.Contains(got, "without connecting to runtime.sock") {
+		t.Fatalf("no log for the companion that exited without connecting:\n%s", got)
+	}
+	inFirstHour := 0
+	for _, at := range starts {
+		if at.Sub(starts[0]) < time.Hour {
+			inFirstHour++
+		}
+	}
+	if inFirstHour > 13 {
+		t.Fatalf("%d starts within the first hour, want at most 13 (waits %v)", inFirstHour, clock.recorded())
+	}
+	waits := clock.recorded()
+	if len(waits) < runs-1 || waits[runs-2] != time.Hour {
+		t.Fatalf("waits do not reach an hour: %v", waits)
+	}
+}
+
+// A companion that reached runtime.sock and then exits is restarted as before: the wait never passes a minute and the
+// never-connected line is not logged.
+func TestOpencodeBridgeConnectedCompanionKeepsMinuteCap(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX shell script fixture")
+	}
+	oldFind, oldCmd := findOpencodeExecutable, opencodeBridgeCommand
+	t.Cleanup(func() { findOpencodeExecutable, opencodeBridgeCommand = oldFind, oldCmd })
+	t.Setenv("PERSONA_BUILTIN_OPENCODE", "")
+	findOpencodeExecutable = func() string { return "opencode" }
+	clock := useFakeOpencodeClock(t)
+
+	dir := t.TempDir()
+	instances := make(chan string, 1)
+	opencodeBridgeCommand = func(_ context.Context, _ *RuntimeHost, _, instance string) (*exec.Cmd, error) {
+		instances <- instance
+		// Runs until the test has said hello as this instance and left again, then exits 0.
+		gate := filepath.Join(dir, instance)
+		return exec.Command("/bin/sh", "-c", fmt.Sprintf("while [ ! -f %q ]; do sleep 0.01; done", gate)), nil
+	}
+
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	host := NewRuntimeHost("test", "runtime.sock")
+	logs := &lockedLog{}
+	host.logger = log.New(logs, "", 0)
+	host.setOpencodeBridge(true)
+	defer host.setOpencodeBridge(false)
+	const runs = 9
+	for range runs {
+		var instance string
+		select {
+		case instance = <-instances:
+		case <-time.After(10 * time.Second):
+			t.Fatal("companion not started")
+		}
+		client, hello := startOpencodeHello(t, ctx, host, "opencode", instance)
+		if err := <-hello; err != nil {
+			t.Fatal(err)
+		}
+		_ = client.Close()
+		waitFor(t, "companion connection gone", func() bool {
+			host.reg.mu.Lock()
+			defer host.reg.mu.Unlock()
+			return len(host.reg.conns) == 0
+		})
+		if err := os.WriteFile(filepath.Join(dir, instance), nil, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	host.setOpencodeBridge(false)
+
+	if strings.Contains(logs.String(), "without connecting") {
+		t.Fatalf("a connected companion was logged as never connecting:\n%s", logs.String())
+	}
+	waits := clock.recorded()
+	if len(waits) < runs-1 {
+		t.Fatalf("only %d restarts: %v", len(waits), waits)
+	}
+	if last := waits[len(waits)-1]; last != time.Minute || slices.Max(waits) != time.Minute {
+		t.Fatalf("connected companion's waits %v, want them capped at a minute", waits)
 	}
 }

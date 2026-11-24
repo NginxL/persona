@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/nwverse/persona/server/internal/feishubot"
+	"github.com/nwverse/persona/server/internal/botcard"
 	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/proto"
 )
@@ -41,7 +41,7 @@ func (s *Service) workbenchCommand(ctx context.Context, f FeishuFeatures, cmd st
 		return false
 	}
 	// The cards stand on their own: quoting the one-word command above them only adds a line.
-	reply := func(c *feishubot.Card, fallback string) {
+	reply := func(c *botcard.Card, fallback string) {
 		if _, err := s.botPost(ctx, "", c, fallback); err != nil {
 			s.logf("bots: workbench: %v", err)
 		}
@@ -61,7 +61,7 @@ func (s *Service) workbenchCommand(ctx context.Context, f FeishuFeatures, cmd st
 
 // workbenchNav answers a workbench button ({a: nav, to}): a switch of where messages go is a toast; a card is posted
 // from a goroutine (Feishu gives the callback 3 seconds).
-func (s *Service) workbenchNav(ctx context.Context, a *feishubot.CardAction) *feishubot.CardResponse {
+func (s *Service) workbenchNav(ctx context.Context, a *botcard.CardAction) *botcard.CardResponse {
 	l := s.botLang(ctx)
 	f, _ := s.feishuFeatures(ctx)
 	if !f.Workbench {
@@ -105,7 +105,7 @@ func (s *Service) workbenchNav(ctx context.Context, a *feishubot.CardAction) *fe
 	go func() {
 		cctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
-		post := func(c *feishubot.Card, fallback string) {
+		post := func(c *botcard.Card, fallback string) {
 			if _, err := s.botPost(cctx, "", c, fallback); err != nil {
 				s.logf("bots: workbench %s: %v", to, err)
 			}
@@ -132,8 +132,8 @@ func (s *Service) workbenchNav(ctx context.Context, a *feishubot.CardAction) *fe
 	return toast("info", wbT(l, "opening"))
 }
 
-func wbNavButton(label, style, to string) feishubot.Button {
-	return feishubot.Btn(label, style, map[string]any{"a": "nav", "to": to})
+func wbNavButton(label, style, to string) botcard.Button {
+	return botcard.Btn(label, style, map[string]any{"a": "nav", "to": to})
 }
 
 // wbCounts is what the home card sums up.
@@ -223,7 +223,7 @@ func (s *Service) workbenchInbox() []InboxItem {
 // down), the agents at work (each a row that switches the chat to it), the Inbox and the day, the week's tokens, and one
 // row of buttons with a "more" menu for every other card and companion bot. said is the card without its "updated at"
 // note, to tell a redraw that would change nothing (boardPut).
-func (s *Service) homeCard(ctx context.Context, f FeishuFeatures) (card *feishubot.Card, fallback, said string) {
+func (s *Service) homeCard(ctx context.Context, f FeishuFeatures) (card *botcard.Card, fallback, said string) {
 	l, web := s.botLang(ctx), s.webBase(ctx)
 	loc := s.location(ctx)
 	now := s.standing.clock()
@@ -231,12 +231,12 @@ func (s *Service) homeCard(ctx context.Context, f FeishuFeatures) (card *feishub
 	rows := s.boardRows(ctx, l, web, now)
 	title := wbT(l, "home_title")
 	target := s.targetLabel(ctx, s.botTargetFor("", ""))
-	card = feishubot.NewCard(title, feishubot.Blue, wbT(l, "home_summary")).Subtitle(wbT(l, "home_target", i18n.Args{"target": clip(target, 40)}))
+	card = botcard.NewCard(title, botcard.Blue, wbT(l, "home_summary")).Subtitle(wbT(l, "home_target", i18n.Args{"target": clip(target, 40)}))
 	if len(rows) > 0 {
-		card.Tag(wbT(l, "home_tag_waiting", i18n.Args{"n": len(rows)}), feishubot.Orange)
+		card.Tag(wbT(l, "home_tag_waiting", i18n.Args{"n": len(rows)}), botcard.Orange)
 	}
 	if c.working > 0 {
-		card.Tag(wbT(l, "home_tag_busy", i18n.Args{"n": c.working}), feishubot.Blue)
+		card.Tag(wbT(l, "home_tag_busy", i18n.Args{"n": c.working}), botcard.Blue)
 	}
 	var fb strings.Builder
 	fb.WriteString(title + "\n")
@@ -251,8 +251,8 @@ func (s *Service) homeCard(ctx context.Context, f FeishuFeatures) (card *feishub
 				card.Note(wbT(l, "home_waits_more", i18n.Args{"count": len(rows) - wbHomeRows}))
 				break
 			}
-			line := "**" + feishubot.EscapeMarkdown(r.from) + "** · " + feishubot.EscapeMarkdown(r.summary) + "\n<font color='grey'>" +
-				feishubot.EscapeMarkdown(i18n.T(l, "assistant-feishu_cards.board_waited", i18n.Args{"wait": boardWait(l, r.waited)})) + "</font>"
+			line := "**" + botcard.EscapeMarkdown(r.from) + "** · " + botcard.EscapeMarkdown(r.summary) + "\n<font color='grey'>" +
+				botcard.EscapeMarkdown(i18n.T(l, "assistant-feishu_cards.board_waited", i18n.Args{"wait": boardWait(l, r.waited)})) + "</font>"
 			switch {
 			case r.blocking:
 				card.Row(map[string]any{"a": "nav", "to": "ix", "id": r.id}, line)
@@ -285,12 +285,12 @@ func (s *Service) homeCard(ctx context.Context, f FeishuFeatures) (card *feishub
 		if i == 2 {
 			break
 		}
-		inbox += "\n· " + wbT(l, "pair", i18n.Args{"a": feishubot.EscapeMarkdown(clip(wbSender(it), 10)), "b": feishubot.EscapeMarkdown(clip(wbGist(it), 40))})
+		inbox += "\n· " + wbT(l, "pair", i18n.Args{"a": botcard.EscapeMarkdown(clip(wbSender(it), 10)), "b": botcard.EscapeMarkdown(clip(wbGist(it), 40))})
 	}
 	day = append(day, inbox)
 	if cal := snapshotCalendar(s.connectorSnapshots(ctx), now); cal != nil && len(cal.Events) > 0 {
 		e := cal.Events[0]
-		day = append(day, wbT(l, "home_next_meeting", i18n.Args{"time": e.Start.In(loc).Format("15:04"), "title": feishubot.EscapeMarkdown(clip(e.Title, 30))}))
+		day = append(day, wbT(l, "home_next_meeting", i18n.Args{"time": e.Start.In(loc).Format("15:04"), "title": botcard.EscapeMarkdown(clip(e.Title, 30))}))
 	}
 	day = append(day, wbT(l, "home_machines", i18n.Args{"online": c.online, "count": c.machines}))
 	card.Markdown(strings.Join(day, "\n"))
@@ -298,10 +298,10 @@ func (s *Service) homeCard(ctx context.Context, f FeishuFeatures) (card *feishub
 
 	// One row: the Inbox (filled when something there needs the owner), the tasks, and a "more" menu with the rest.
 	companions := s.companionBots(ctx)
-	var bs []feishubot.Button
+	var bs []botcard.Button
 	inboxBot := slices.IndexFunc(companions, func(b CompanionBot) bool { return b.Kind == CompanionInbox })
 	if inboxBot < 0 {
-		label, style := wbT(l, "btn_inbox"), feishubot.Default
+		label, style := wbT(l, "btn_inbox"), botcard.Default
 		if c.inboxNeed > 0 {
 			label, style = wbT(l, "btn_inbox_count", i18n.Args{"count": c.inboxNeed}), wbFilled
 		}
@@ -312,17 +312,17 @@ func (s *Service) homeCard(ctx context.Context, f FeishuFeatures) (card *feishub
 		if c.inboxNeed > 0 {
 			label += " · " + fmt.Sprint(c.inboxNeed)
 		}
-		btn := feishubot.LinkBtn(label, b.link())
+		btn := botcard.LinkBtn(label, b.link())
 		if c.inboxNeed > 0 {
 			btn["type"] = wbFilled
 		}
 		bs = append(bs, btn)
 	}
-	bs = append(bs, wbNavButton(wbT(l, "btn_tasks"), feishubot.Default, "tasks"))
-	nav := func(key, to string) feishubot.MenuItem {
-		return feishubot.MenuItem{Label: wbT(l, key), Value: map[string]any{"to": to}}
+	bs = append(bs, wbNavButton(wbT(l, "btn_tasks"), botcard.Default, "tasks"))
+	nav := func(key, to string) botcard.MenuItem {
+		return botcard.MenuItem{Label: wbT(l, key), Value: map[string]any{"to": to}}
 	}
-	menu := []feishubot.MenuItem{nav("btn_today", "today")}
+	menu := []botcard.MenuItem{nav("btn_today", "today")}
 	if f.Agents {
 		menu = append(menu, nav("btn_agents", "agents"), nav("btn_start", "start"))
 	}
@@ -332,10 +332,10 @@ func (s *Service) homeCard(ctx context.Context, f FeishuFeatures) (card *feishub
 	menu = append(menu, nav("btn_refresh", "refresh"))
 	for i, b := range companions {
 		if i != inboxBot {
-			menu = append(menu, feishubot.MenuItem{Label: strings.TrimSpace(b.Name), URL: b.link()})
+			menu = append(menu, botcard.MenuItem{Label: strings.TrimSpace(b.Name), URL: b.link()})
 		}
 	}
-	card.Buttons(append(bs, feishubot.Overflow(map[string]any{"a": "nav"}, menu...))...)
+	card.Buttons(append(bs, botcard.Overflow(map[string]any{"a": "nav"}, menu...))...)
 	said = card.JSON()
 	card.Note(wbT(l, "home_note_pinned", i18n.Args{"time": now.In(loc).Format("15:04")}))
 	return card, clip(strings.TrimSpace(fb.String()), reportFallbackMax), said
@@ -344,24 +344,24 @@ func (s *Service) homeCard(ctx context.Context, f FeishuFeatures) (card *feishub
 // agentStateTags are the tags an agent's state is shown with in a list: what the owner is to act on orange, at work
 // blue, done and not yet read green, the rest grey.
 var agentStateTags = map[string]struct{ key, color string }{
-	proto.StateNeedsYou: {"assistant-feishu_cards.state_needs_you", feishubot.Orange},
-	proto.StateWorking:  {"assistant-feishu_cards.state_working", feishubot.Blue},
-	proto.StateUnread:   {"assistant-feishu_cards.state_unread", feishubot.Green},
-	proto.StateIdle:     {"assistant-feishu_cards.state_idle", feishubot.Neutral},
+	proto.StateNeedsYou: {"assistant-feishu_cards.state_needs_you", botcard.Orange},
+	proto.StateWorking:  {"assistant-feishu_cards.state_working", botcard.Blue},
+	proto.StateUnread:   {"assistant-feishu_cards.state_unread", botcard.Green},
+	proto.StateIdle:     {"assistant-feishu_cards.state_idle", botcard.Neutral},
 }
 
 // agentRowMarkdown is an agent as a list row shows it: its state as a tag, its label and computer, the session's other
 // name (feishuSessionNames' secondary) under them, and its last words (up to last runes) in grey.
 func agentRowMarkdown(l i18n.Lang, label, secondary, machine string, sess proto.Session, last int) string {
-	line := "**" + feishubot.EscapeMarkdown(label) + "** · " + feishubot.EscapeMarkdown(machine)
+	line := "**" + botcard.EscapeMarkdown(label) + "** · " + botcard.EscapeMarkdown(machine)
 	if st, ok := agentStateTags[sess.State]; ok {
-		line = feishubot.InlineTag(i18n.T(l, st.key), st.color) + " " + line
+		line = botcard.InlineTag(i18n.T(l, st.key), st.color) + " " + line
 	}
 	if secondary != "" {
-		line += "\n" + feishubot.EscapeMarkdown(secondary)
+		line += "\n" + botcard.EscapeMarkdown(secondary)
 	}
 	if sess.LastText != "" {
-		line += "\n<font color='grey'>" + feishubot.EscapeMarkdown(clip(oneLine(stripMarkdownMarks(sess.LastText)), last)) + "</font>"
+		line += "\n<font color='grey'>" + botcard.EscapeMarkdown(clip(oneLine(stripMarkdownMarks(sess.LastText)), last)) + "</font>"
 	}
 	return line
 }
@@ -414,11 +414,11 @@ func wbSource(l i18n.Lang, it InboxItem) string {
 }
 
 // todayCard is the day at a glance: the main conversation's "Today" (the one the app shows), plus what waits.
-func (s *Service) todayCard(ctx context.Context) (*feishubot.Card, string) {
+func (s *Service) todayCard(ctx context.Context) (*botcard.Card, string) {
 	l, loc := s.botLang(ctx), s.location(ctx)
 	now := s.standing.clock().In(loc)
 	title := wbT(l, "today_title", i18n.Args{"date": now.Format(wbT(l, "date_layout")), "weekday": wbT(l, "weekday_"+now.Weekday().String())})
-	card := feishubot.NewCard(title, feishubot.Blue, title)
+	card := botcard.NewCard(title, botcard.Blue, title)
 	var body todayBody
 	if main := s.settings(ctx).Main; main != "" {
 		if it, _, err := s.ensureToday(ctx, main); err == nil {
@@ -442,37 +442,37 @@ func (s *Service) todayCard(ctx context.Context) (*feishubot.Card, string) {
 		wait = append(wait, wbT(l, "today_pending", i18n.Args{"count": c.pending}))
 	}
 	for _, t := range body.Waiting {
-		wait = append(wait, feishubot.EscapeMarkdown(clip(t.Title, 60)))
+		wait = append(wait, botcard.EscapeMarkdown(clip(t.Title, 60)))
 	}
 	for i, it := range s.workbenchInbox() {
 		if i == wbHomeRows || !wbNeedsYou(it) {
 			break
 		}
-		wait = append(wait, wbT(l, "pair", i18n.Args{"a": feishubot.EscapeMarkdown(clip(wbWho(it), 16)), "b": feishubot.EscapeMarkdown(clip(wbGist(it), 50))}))
+		wait = append(wait, wbT(l, "pair", i18n.Args{"a": botcard.EscapeMarkdown(clip(wbWho(it), 16)), "b": botcard.EscapeMarkdown(clip(wbGist(it), 50))}))
 	}
 	section(wbT(l, "today_waiting"), wait)
 	var meet []string
 	for _, m := range body.Meetings {
-		meet = append(meet, m.Start.In(loc).Format("15:04")+"–"+m.End.In(loc).Format("15:04")+" "+feishubot.EscapeMarkdown(clip(m.Title, 40)))
+		meet = append(meet, m.Start.In(loc).Format("15:04")+"–"+m.End.In(loc).Format("15:04")+" "+botcard.EscapeMarkdown(clip(m.Title, 40)))
 	}
 	section(wbT(l, "today_meetings"), meet)
 	var done []string
 	for _, t := range body.Done {
-		done = append(done, feishubot.EscapeMarkdown(clip(t.Title, 60)))
+		done = append(done, botcard.EscapeMarkdown(clip(t.Title, 60)))
 	}
 	section(wbT(l, "today_done"), done)
 	var fail []string
 	for _, x := range body.Failed {
-		line := feishubot.EscapeMarkdown(clip(x.Title, 40))
+		line := botcard.EscapeMarkdown(clip(x.Title, 40))
 		if x.Why != "" {
-			line = wbT(l, "pair", i18n.Args{"a": line, "b": feishubot.EscapeMarkdown(clip(x.Why, 60))})
+			line = wbT(l, "pair", i18n.Args{"a": line, "b": botcard.EscapeMarkdown(clip(x.Why, 60))})
 		}
 		fail = append(fail, line)
 	}
 	section(wbT(l, "today_failed"), fail)
 	var at []string
 	for _, ch := range body.AtMe {
-		at = append(at, feishubot.EscapeMarkdown(clip(ch.Name, 20))+" · "+feishubot.EscapeMarkdown(clip(ch.Preview, 40)))
+		at = append(at, botcard.EscapeMarkdown(clip(ch.Name, 20))+" · "+botcard.EscapeMarkdown(clip(ch.Preview, 40)))
 	}
 	section(wbT(l, "today_at_me"), at)
 	quiet := strings.TrimSpace(b.String()) == ""
@@ -486,20 +486,20 @@ func (s *Service) todayCard(ctx context.Context) (*feishubot.Card, string) {
 		b.WriteString("\n" + wbT(l, "today_quiet"))
 	}
 	if c.pending > 0 {
-		card.Tag(wbT(l, "home_tag_waiting", i18n.Args{"n": c.pending}), feishubot.Orange)
+		card.Tag(wbT(l, "home_tag_waiting", i18n.Args{"n": c.pending}), botcard.Orange)
 	}
 	card.Markdown(strings.TrimSpace(b.String()))
-	inbox := wbNavButton(wbT(l, "btn_inbox"), feishubot.Default, "inbox")
+	inbox := wbNavButton(wbT(l, "btn_inbox"), botcard.Default, "inbox")
 	if c.inboxNeed > 0 {
 		inbox = wbNavButton(wbT(l, "btn_inbox_count", i18n.Args{"count": c.inboxNeed}), wbFilled, "inbox")
 	}
-	card.Buttons(inbox, wbNavButton(wbT(l, "btn_tasks"), feishubot.Default, "tasks"),
-		feishubot.TextBtn(wbT(l, "btn_home"), map[string]any{"a": "nav", "to": "home"}))
+	card.Buttons(inbox, wbNavButton(wbT(l, "btn_tasks"), botcard.Default, "tasks"),
+		botcard.TextBtn(wbT(l, "btn_home"), map[string]any{"a": "nav", "to": "home"}))
 	return card, title + "\n\n" + strings.TrimSpace(b.String())
 }
 
 // inboxCard lists the open Inbox with a row of actions per item.
-func (s *Service) inboxCard(ctx context.Context) (*feishubot.Card, string) {
+func (s *Service) inboxCard(ctx context.Context) (*botcard.Card, string) {
 	l := s.botLang(ctx)
 	open := s.workbenchInbox()
 	need := 0
@@ -509,50 +509,50 @@ func (s *Service) inboxCard(ctx context.Context) (*feishubot.Card, string) {
 		}
 	}
 	title := wbT(l, "inbox_title", i18n.Args{"count": need})
-	color := feishubot.Blue
+	color := botcard.Blue
 	if need > 0 {
-		color = feishubot.Orange
+		color = botcard.Orange
 	}
-	card := feishubot.NewCard(title, color, title)
+	card := botcard.NewCard(title, color, title)
 	var fb strings.Builder
 	fb.WriteString(title + "\n")
 	if len(open) == 0 {
 		card.Markdown(wbT(l, "inbox_empty"))
-		return card.Buttons(feishubot.TextBtn(wbT(l, "btn_home"), map[string]any{"a": "nav", "to": "home"})), title
+		return card.Buttons(botcard.TextBtn(wbT(l, "btn_home"), map[string]any{"a": "nav", "to": "home"})), title
 	}
 	for i, it := range open {
 		if i == wbInboxMost {
 			card.Note(wbT(l, "inbox_more", i18n.Args{"count": len(open) - wbInboxMost}))
 			break
 		}
-		state, color := wbT(l, "inbox_tag_need"), feishubot.Orange
+		state, color := wbT(l, "inbox_tag_need"), botcard.Orange
 		if it.Urgent {
-			state, color = wbT(l, "inbox_tag_urgent"), feishubot.Red
+			state, color = wbT(l, "inbox_tag_urgent"), botcard.Red
 		} else if !wbNeedsYou(it) {
-			state, color = wbT(l, "inbox_tag_fyi"), feishubot.Neutral
+			state, color = wbT(l, "inbox_tag_fyi"), botcard.Neutral
 		}
-		head := feishubot.InlineTag(state, color) + " **" + feishubot.EscapeMarkdown(clip(wbSender(it), 16)) + "**"
+		head := botcard.InlineTag(state, color) + " **" + botcard.EscapeMarkdown(clip(wbSender(it), 16)) + "**"
 		if it.Sender != "" && it.Title != "" && it.Title != it.Sender {
-			head += " · " + feishubot.EscapeMarkdown(clip(it.Title, 16))
+			head += " · " + botcard.EscapeMarkdown(clip(it.Title, 16))
 		}
 		line := head
 		if g := wbGist(it); g != "" {
-			line += "\n" + feishubot.EscapeMarkdown(clip(g, 120))
+			line += "\n" + botcard.EscapeMarkdown(clip(g, 120))
 		}
-		line += "\n<font color='grey'>" + feishubot.EscapeMarkdown(wbSource(l, it)) + " · " + wbClock(s.location(ctx), it.UpdatedAt, s.standing.clock()) + "</font>"
+		line += "\n<font color='grey'>" + botcard.EscapeMarkdown(wbSource(l, it)) + " · " + wbClock(s.location(ctx), it.UpdatedAt, s.standing.clock()) + "</font>"
 		if i > 0 {
 			card.HR()
 		}
 		card.Markdown(line)
 		// One row: drafting a reply first where the item can be answered, then done, muting the sender in "more".
-		var btns []feishubot.Button
+		var btns []botcard.Button
 		if inboxCanReply(it) {
-			btns = append(btns, feishubot.Btn(wbT(l, "btn_draft"), feishubot.Primary, map[string]any{"a": "ib", "op": "draft", "id": it.ID}))
+			btns = append(btns, botcard.Btn(wbT(l, "btn_draft"), botcard.Primary, map[string]any{"a": "ib", "op": "draft", "id": it.ID}))
 		}
-		btns = append(btns, feishubot.Btn(wbT(l, "btn_done"), feishubot.Default, map[string]any{"a": "ib", "op": "done", "id": it.ID}))
+		btns = append(btns, botcard.Btn(wbT(l, "btn_done"), botcard.Default, map[string]any{"a": "ib", "op": "done", "id": it.ID}))
 		if len(it.Mutes) > 0 {
-			btns = append(btns, feishubot.Overflow(map[string]any{"a": "ib", "id": it.ID},
-				feishubot.MenuItem{Label: wbT(l, "btn_mute"), Value: map[string]any{"op": "mute"}}))
+			btns = append(btns, botcard.Overflow(map[string]any{"a": "ib", "id": it.ID},
+				botcard.MenuItem{Label: wbT(l, "btn_mute"), Value: map[string]any{"op": "mute"}}))
 		}
 		card.Buttons(btns...)
 		fmt.Fprintf(&fb, "- %s\n", wbT(l, "pair", i18n.Args{"a": wbWho(it), "b": clip(wbGist(it), 60)}))
@@ -585,7 +585,7 @@ func (s *Service) workbenchItem(id string) (InboxItem, bool) {
 // workbenchInboxAction answers an Inbox button ({a: ib, op, id}): done and mute change the list card in place;
 // drafting posts a draft card (the model takes longer than the callback may), and sending it updates that card. The
 // hub checked the owner pressed it; sending is the same reply the app's Send makes, once per draft card.
-func (s *Service) workbenchInboxAction(ctx context.Context, a *feishubot.CardAction) *feishubot.CardResponse {
+func (s *Service) workbenchInboxAction(ctx context.Context, a *botcard.CardAction) *botcard.CardResponse {
 	l := s.botLang(ctx)
 	if f, _ := s.feishuFeatures(ctx); !f.Workbench {
 		return toast("info", i18n.T(l, "assistant-feishu_cards.card_expired"))
@@ -595,9 +595,9 @@ func (s *Service) workbenchInboxAction(ctx context.Context, a *feishubot.CardAct
 	if !ok {
 		return toast("info", wbT(l, "inbox_gone"))
 	}
-	refresh := func(msg string) *feishubot.CardResponse {
+	refresh := func(msg string) *botcard.CardResponse {
 		card, _ := s.inboxCard(ctx)
-		return &feishubot.CardResponse{Toast: &feishubot.Toast{Type: "success", Content: msg}, Card: card.Raw()}
+		return &botcard.CardResponse{Toast: &botcard.Toast{Type: "success", Content: msg}, Card: card.Raw()}
 	}
 	switch op {
 	case "done":
@@ -664,10 +664,10 @@ func (s *Service) workbenchInboxAction(ctx context.Context, a *feishubot.CardAct
 				return
 			}
 			// Sent, the draft is over: grey, what went out.
-			card := feishubot.NewCard(wbT(l, "sent_title", i18n.Args{"who": clip(wbWho(it), 20)}), feishubot.Grey, wbT(l, "sent_title", i18n.Args{"who": wbWho(it)})).
-				Markdown(feishubot.EscapeMarkdown(text))
+			card := botcard.NewCard(wbT(l, "sent_title", i18n.Args{"who": clip(wbWho(it), 20)}), botcard.Grey, wbT(l, "sent_title", i18n.Args{"who": wbWho(it)})).
+				Markdown(botcard.EscapeMarkdown(text))
 			if err != nil {
-				card = feishubot.NewCard(wbT(l, "send_failed_title"), feishubot.Red, wbT(l, "send_failed_title")).Markdown(feishubot.EscapeMarkdown(clip(oneLine(err.Error()), 200)))
+				card = botcard.NewCard(wbT(l, "send_failed_title"), botcard.Red, wbT(l, "send_failed_title")).Markdown(botcard.EscapeMarkdown(clip(oneLine(err.Error()), 200)))
 			}
 			if err := s.botUpdateCard(cctx, mid, card); err != nil {
 				s.logf("bots: sent card: %v", err)
@@ -683,7 +683,7 @@ func (s *Service) workbenchInboxAction(ctx context.Context, a *feishubot.CardAct
 }
 
 // draftCard is a draft to edit and send as the owner; list is the Inbox card to redraw once it is sent.
-func (s *Service) draftCard(ctx context.Context, it InboxItem, text string, err error, list string) *feishubot.Card {
+func (s *Service) draftCard(ctx context.Context, it InboxItem, text string, err error, list string) *botcard.Card {
 	l := s.botLang(ctx)
 	title := wbT(l, "draft_title", i18n.Args{"who": clip(wbWho(it), 20)})
 	if err != nil || strings.TrimSpace(text) == "" {
@@ -691,36 +691,36 @@ func (s *Service) draftCard(ctx context.Context, it InboxItem, text string, err 
 		if err != nil {
 			why = wbT(l, "pair", i18n.Args{"a": why, "b": clip(oneLine(err.Error()), 200)})
 		}
-		return feishubot.NewCard(title, feishubot.Red, title).Markdown(feishubot.EscapeMarkdown(why)).
-			Buttons(feishubot.Btn(wbT(l, "btn_draft"), feishubot.Primary, map[string]any{"a": "ib", "op": "draft", "id": it.ID, "list": list}))
+		return botcard.NewCard(title, botcard.Red, title).Markdown(botcard.EscapeMarkdown(why)).
+			Buttons(botcard.Btn(wbT(l, "btn_draft"), botcard.Primary, map[string]any{"a": "ib", "op": "draft", "id": it.ID, "list": list}))
 	}
-	card := feishubot.NewCard(title, feishubot.Orange, title)
+	card := botcard.NewCard(title, botcard.Orange, title)
 	if p := strings.TrimSpace(it.Preview); p != "" {
-		card.Note(wbT(l, "draft_original", i18n.Args{"text": feishubot.EscapeMarkdown(clip(p, 160))}))
+		card.Note(wbT(l, "draft_original", i18n.Args{"text": botcard.EscapeMarkdown(clip(p, 160))}))
 	}
-	box := feishubot.Input("text", wbT(l, "draft_text"), "", true)
+	box := botcard.Input("text", wbT(l, "draft_text"), "", true)
 	box["default_value"] = text
-	instr := feishubot.Input("instruction", wbT(l, "draft_instruction"), wbT(l, "draft_instruction_placeholder"), false)
+	instr := botcard.Input("instruction", wbT(l, "draft_instruction"), wbT(l, "draft_instruction_placeholder"), false)
 	// Sending goes out under the owner's name: Feishu's dialog asks first.
 	card.Form("draft", []any{box, instr},
-		feishubot.Confirm(feishubot.Submit(wbT(l, "btn_send"), wbFilled, "send_submit", map[string]any{"a": "ib", "op": "send", "id": it.ID, "list": list}),
+		botcard.Confirm(botcard.Submit(wbT(l, "btn_send"), wbFilled, "send_submit", map[string]any{"a": "ib", "op": "send", "id": it.ID, "list": list}),
 			wbT(l, "send_confirm_title"), wbT(l, "send_confirm_text", i18n.Args{"who": clip(wbWho(it), 20)})),
-		feishubot.Submit(wbT(l, "btn_redraft"), feishubot.Default, "redraft_submit", map[string]any{"a": "ib", "op": "redraft", "id": it.ID, "list": list}))
+		botcard.Submit(wbT(l, "btn_redraft"), botcard.Default, "redraft_submit", map[string]any{"a": "ib", "op": "redraft", "id": it.ID, "list": list}))
 	reply := wbT(l, "draft_as_you")
 	if it.Connector != nil && it.Connector.ReplyTo != "" {
 		reply = it.Connector.ReplyTo
 	}
-	card.Note(feishubot.EscapeMarkdown(reply))
+	card.Note(botcard.EscapeMarkdown(reply))
 	return card
 }
 
 // wbModeSelect is the /start form's permission field: one of proto.PermissionModes, or none (the launcher's own).
 func wbModeSelect(l i18n.Lang) map[string]any {
-	opts := make([]feishubot.Option, 0, len(proto.PermissionModes))
+	opts := make([]botcard.Option, 0, len(proto.PermissionModes))
 	for _, m := range proto.PermissionModes {
-		opts = append(opts, feishubot.Option{Label: wbT(l, "mode_"+m), Value: m})
+		opts = append(opts, botcard.Option{Label: wbT(l, "mode_"+m), Value: m})
 	}
-	return feishubot.Select("mode", wbT(l, "mode_placeholder"), opts, false)
+	return botcard.Select("mode", wbT(l, "mode_placeholder"), opts, false)
 }
 
 // wbClock is when, as a time that stays true on a card nobody redraws: the clock today, the date before.

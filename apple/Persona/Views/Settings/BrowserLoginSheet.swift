@@ -1,7 +1,5 @@
 import SwiftUI
-#if os(iOS) || os(visionOS)
 import VisionKit
-#endif
 
 // Settings › Devices › Scan Browser Sign-in Code (#10293): one sheet that scans the web sign-in page's code, then asks
 // whether that browser may sign in, then shows the number to type there, then says how it ended. Every step leaves by
@@ -12,9 +10,7 @@ struct BrowserLoginSheet: View {
     /// Set by the scanner (or from the start: a DEBUG sample).
     @State private var page: BrowserLoginApprovalModel?
     @State private var notOurs = false
-    #if os(iOS) || os(visionOS)
     @State private var canScan = false
-    #endif
 
     init() {
         #if DEBUG
@@ -45,7 +41,6 @@ struct BrowserLoginSheet: View {
 
     @ViewBuilder private var scanner: some View {
         SettingsForm {
-            #if os(iOS) || os(visionOS)
             if canScan {
                 Section {
                     QRScanner { code in
@@ -63,13 +58,10 @@ struct BrowserLoginSheet: View {
             } else {
                 Section { Text("This device can't scan codes with its camera.").foregroundStyle(.secondary) }
             }
-            #endif
         }
         .themedPage()
         .navigationTitle("Scan Browser Sign-in Code")
-        #if os(iOS) || os(visionOS)
         .task { canScan = DataScannerViewController.isSupported && DataScannerViewController.isAvailable }
-        #endif
     }
 
     private static let where_ = String(localized: "Scan the code on the browser's sign-in page.")

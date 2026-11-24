@@ -37,6 +37,7 @@ import persona.core.designsystem.AppStyle
 import persona.core.designsystem.PersonaTheme
 import persona.core.domain.inbox.InboxItem
 import persona.core.navigation.Navigator
+import persona.core.inbox.*
 
 /** Thread in every style, both color schemes and at 1x / 2x; PNGs go to build/inbox-line-shots (or -Dpersona.shots). */
 @RunWith(AndroidJUnit4::class)

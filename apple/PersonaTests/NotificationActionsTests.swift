@@ -7,7 +7,8 @@ struct NotificationActionsTests {
     /// The hub names categories "INTERACTION_" + upper-cased kind (push.go); every kind must have one registered, beside
     /// the app's own calendar meeting reminder (#8731 G2).
     @Test func categoriesMatchWhatTheHubSends() {
-        let ids = Set(NotificationActions.categories.map(\.identifier))
+        // Keep the original category contract; the built-in water category has its own focused assertions.
+        let ids = Set(NotificationActions.categories.map(\.identifier)).subtracting([WaterReminderActions.category])
         #expect(ids == ["INTERACTION_PERMISSION", "INTERACTION_PLAN", "INTERACTION_QUESTION", "INTERACTION_SCREEN",
                         "INTERACTION_ELICITATION", "SESSION_DONE", "TODO_DECIDE", "pair_receipt", "computer_joining",
                         "MEETING_REMINDER"])

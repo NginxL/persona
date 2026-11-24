@@ -21,6 +21,7 @@ import persona.core.contracts.api.LarkMention
 import persona.core.designsystem.JAvatar
 import persona.core.designsystem.JRow
 import persona.core.designsystem.Tokens
+import persona.core.inbox.*
 
 /** Only a known group or a topic group offers the conversation's member picker. */
 fun larkMentionFeed(feedId: String, conversation: LarkConversation): String? =

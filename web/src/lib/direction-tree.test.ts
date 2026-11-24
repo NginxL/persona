@@ -65,6 +65,39 @@ describe("direction tree", () => {
     const planned = normalizeTree({ directions: [{ id: "c", counts: { planned: 2 }, tasks: [{ id: "p", title: "P", state: "planned" }] }] }).directions[0];
     expect(planned.tasks?.[0].state).toBe("planned");
     expect(planned.counts).toEqual(counts(0, 0, 0, 0, 2));
+    // responsible (#12712) is preserved when valid and omitted when malformed or absent
+    const withResp = normalizeTree({
+      directions: [{
+        id: "d",
+        counts: { working: 1 },
+        tasks: [
+          { id: "r1", title: "R1", state: "working", responsible: { kind: "session", name: " ops-watch ", machine_id: " box-1 ", session_id: " s-1 " } },
+          { id: "r2", title: "R2", state: "working", responsible: { kind: "invalid", name: "x" } },
+          { id: "r3", title: "R3", state: "working", responsible: { kind: "person", name: "   " } },
+        ],
+      }],
+    }).directions[0];
+    expect(withResp.tasks?.[0].responsible).toEqual({ kind: "session", name: "ops-watch", machine_id: "box-1", session_id: "s-1" });
+    expect("responsible" in (withResp.tasks?.[1] ?? {})).toBe(false);
+    expect("responsible" in (withResp.tasks?.[2] ?? {})).toBe(false);
+  });
+
+  it("normalizes external metadata without turning a direction id or an incomplete pair into a target", () => {
+    const tree = normalizeTree({ directions: [
+      { id: "outside", name: "Outside", external: true, machine_id: "mac", session_id: "agent-7" },
+      { id: "targetless", name: "Targetless", external: true, machine_id: "mac" },
+      { id: "malformed", name: "Malformed", external: true, machine_id: 7, session_id: " " },
+      { id: "conversation", name: "Conversation", external: false, machine_id: "hub", session_id: "conversation" },
+      { id: "main", secretary: true, external: true, machine_id: "hub", session_id: "main" },
+    ] });
+    expect(tree.directions.map((d) => ({ id: d.id, external: d.external, machine_id: d.machine_id, session_id: d.session_id }))).toEqual([
+      { id: "outside", external: true, machine_id: "mac", session_id: "agent-7" },
+      { id: "targetless", external: true, machine_id: "mac", session_id: undefined },
+      { id: "malformed", external: true, machine_id: undefined, session_id: undefined },
+      { id: "conversation", external: undefined, machine_id: undefined, session_id: undefined },
+      { id: "main", external: undefined, machine_id: undefined, session_id: undefined },
+    ]);
+    // Complete and incomplete pairs become only the routes asserted in SidebarLeaders.test.tsx.
   });
 
   it("groups by direction only with a leader; the secretary's group shows only with a leader and a task", () => {

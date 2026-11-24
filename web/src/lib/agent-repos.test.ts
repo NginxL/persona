@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildRepoMachineTree, repoOf, showsWorktreeLevel, type RepoTree } from "./agent-repos";
+import { buildRepoMachineTree, gitPlaceOf, repoOf, sessionWorkspace, showsWorktreeLevel, type RepoTree } from "./agent-repos";
 import type { AgentState, Machine, Session } from "./types";
 
 const machines: Machine[] = [
@@ -60,6 +60,78 @@ const onMachineA = (all: Session[]) => {
   return built[0]!.repos;
 };
 
+describe("Windows repository paths", () => {
+  it("recognizes both separators and matches a repository root without case differences", () => {
+    expect(repoOf("c:\\work\\app\\src", "C:/Work/App/")).toEqual({
+      repo: "C:/Work/App", name: "App", worktree: "C:/Work/App", main: true,
+    });
+    expect(repoOf("C:\\Work\\App-extra", "C:/Work/App").main).toBe(false);
+    expect(repoOf("C:\\Work\\App", "C:\\").main).toBe(true);
+    expect(repoOf("\\\\SERVER\\SHARE\\Project\\src", "//server/share/project").main).toBe(true);
+  });
+
+  it("recognizes Windows worktree folders", () => {
+    expect(repoOf("C:\\Work\\App\\.claude\\worktrees\\fix-login")).toEqual({
+      repo: "C:/Work/App", name: "App", worktree: "C:/Work/App/.claude/worktrees/fix-login", main: false,
+    });
+    expect(repoOf("C:\\Work\\App\\.CLAUDE\\WORKTREES\\fix-login").repo).toBe("C:/Work/App");
+    expect(gitPlaceOf({ repo_root: "C:\\Work\\App", worktree: "c:/work/app/" })?.main).toBe(true);
+  });
+
+  it("preserves worktree marker offsets in Unicode Windows paths", () => {
+    expect(repoOf("C:\\İ\\App\\.CLAUDE\\WORKTREES\\fix-login")).toEqual({
+      repo: "C:/İ/App", name: "App", worktree: "C:/İ/App/.CLAUDE/WORKTREES/fix-login", main: false,
+    });
+  });
+
+  it("groups equivalent Windows directories into one repository and worktree", () => {
+    const tree = onMachineA([
+      session("one", "C:\\Work\\App"),
+      session("two", "c:/work/app/"),
+      session("three", "C:/WORK/APP/src", { repo_root: "c:\\work\\app", worktree: "C:\\Work\\App" }),
+    ]);
+    expect(tree).toHaveLength(1);
+    expect(tree[0]!.worktrees).toHaveLength(1);
+    expect(ids(tree[0]!.worktrees[0]!.sessions).sort()).toEqual(["one", "three", "two"]);
+    expect(tree[0]!.name).toBe("App");
+  });
+
+  it("names a Windows linked checkout with the repository folder after its holding folder", () => {
+    const tree = onMachineA([
+      session("main", "C:/Work/App", { repo_root: "c:/work/app" }),
+      session("linked", "C:/Users/User/.codex/worktrees/fix-login/APP", { repo_root: "c:/work/app" }),
+    ]);
+    expect(worktrees(tree[0]!)).toEqual(["app*", "fix-login"]);
+  });
+
+  it("keeps POSIX directory case and literal backslashes distinct", () => {
+    expect(repoOf("/work/app/src", "/work/App").main).toBe(false);
+    expect(repoOf("/work/a\\b").name).toBe("a\\b");
+    expect(onMachineA([session("upper", "/work/App"), session("lower", "/work/app")])).toHaveLength(2);
+  });
+
+  it("matches desktop sessions to Windows workspace directories including drive and share roots", () => {
+    const workspace = (cwd: string) => ({ id: "workspace", machine_id: "machine-a", source: "directory", source_id: cwd, title: "Project", cwd });
+    const root = workspace("C:\\");
+    const project = workspace("C:\\Work\\App");
+    expect(sessionWorkspace(session("desktop", "c:/work/app/src", { space_kind: "codex_app" }), [root, project])).toBe(project);
+    expect(sessionWorkspace(session("desktop", "c:/other", { space_kind: "codex_app" }), [root, project])).toBe(root);
+    const share = workspace("\\\\SERVER\\SHARE\\");
+    expect(sessionWorkspace(session("desktop", "//server/share/project"), [share])).toBe(share);
+    expect(sessionWorkspace(session("desktop", "/work/a/b"), [workspace("/work/a\\b")])).toBeUndefined();
+    expect(sessionWorkspace(session("desktop", "c:/work/app/.claude/worktrees/child"), [project])).toBeUndefined();
+  });
+
+  it.each(["codex_app", "claude_desktop"])("uses directory placement when a %s project id has no exact catalog entry", (host) => {
+    const project = { id: "workspace", machine_id: "machine-a", source: "directory", source_id: "directory-project", title: "Project", cwd: "C:\\Work\\App" };
+    const desktop = session("desktop", "c:/work/app/src", { space_kind: host, space_id: "desktop-project" });
+    expect(sessionWorkspace(desktop, [project])).toBe(project);
+    expect(sessionWorkspace({ ...desktop, workspace_id: "explicit-binding" }, [project])).toBeUndefined();
+    const exact = { ...project, id: "desktop-workspace", source: host, source_id: "desktop-project" };
+    expect(sessionWorkspace(desktop, [project, exact])).toBe(exact);
+  });
+});
+
 describe("按仓库分组的树", () => {
   it("带 repo_root 的会话（Paseo 的 worktree）归到主仓库下，不再各成一个仓库", () => {
     const tree = onMachineA([
@@ -71,6 +143,18 @@ describe("按仓库分组的树", () => {
     expect(tree[0]!.worktrees.map((w) => [w.name, w.main, ids(w.sessions)])).toEqual([
       ["app", true, ["main"]], ["brave-fox", false, ["w1"]], ["calm-bear", false, ["w2"]],
     ]);
+  });
+
+  it("names a linked tree whose folder has the repository's name after the folder holding it (#12800)", () => {
+    const tree = onMachineA([
+      session("main", "/code/app", { repo_root: "/code/app" }),
+      session("codex", "/home/me/.codex/worktrees/fix-login/app", { repo_root: "/code/app" }),
+      session("codex-2", "/home/me/.codex/worktrees/fix-login-2/app", { repo_root: "/code/app" }),
+      session("branch", "/home/me/.codex/worktrees/fix-ui/app", { repo_root: "/code/app", branch: "ui-polish" }),
+      session("sibling", "/code/app-feature", { repo_root: "/code/app" }),
+    ]);
+    // the main checkout keeps the repository's name, a branch still wins, and a folder named otherwise keeps its name
+    expect(worktrees(tree[0]!)).toEqual(["app*", "app-feature", "fix-login", "fix-login-2", "ui-polish"]);
   });
 
   it("先给主工作树，再按名字给工作树", () => {

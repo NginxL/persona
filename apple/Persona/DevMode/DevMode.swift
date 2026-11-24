@@ -1,9 +1,7 @@
 import Foundation
 import Network
 import PersonaWire
-#if canImport(UIKit)
 import UIKit
-#endif
 
 /// Developing Persona (Settings › About, #9460, docs/operations/developing-persona.md): the device's own switch. While
 /// it is on the app records its logs, errors and energy use on the device (`DevRecorder`, `DevMetrics`) for the owner
@@ -139,9 +137,7 @@ final class DevMode {
         case .chats: "agents"
         case .mail: "inbox"
         case .settings: "settings"
-        #if os(iOS) || os(visionOS)
         case .feishu: "feishu"
-        #endif
         }
     }
 
@@ -205,7 +201,6 @@ final class DevMode {
                 Task { @MainActor in if let self, self.isOn { run(self) } }
             })
         }
-        #if canImport(UIKit)
         on(UIApplication.didBecomeActiveNotification) { m in
             m.recorder.lifecycle(active: true, device: m.device())
             m.tick()
@@ -215,7 +210,6 @@ final class DevMode {
             m.recorder.lifecycle(active: false, device: m.device())
         }
         on(UIApplication.willTerminateNotification) { m in m.recorder.flush() }
-        #endif
         on(ProcessInfo.thermalStateDidChangeNotification) { m in m.recorder.device("thermal", ["state": m.device().thermal]) }
         on(Notification.Name.NSProcessInfoPowerStateDidChange) { m in m.recorder.device("power", ["low_power": m.device().lowPower]) }
         #if os(iOS)
@@ -258,11 +252,7 @@ final class DevMode {
     #endif
 
     private static var inFront: Bool {
-        #if canImport(UIKit)
         UIApplication.shared.applicationState != .background
-        #else
-        true
-        #endif
     }
 }
 

@@ -12,6 +12,7 @@ require (
 	github.com/emersion/go-sasl v0.0.0-20241020182733-b788ff22d5a6
 	github.com/emersion/go-smtp v0.25.0
 	github.com/jackc/pgx/v5 v5.7.5
+	github.com/pelletier/go-toml/v2 v2.2.4
 	github.com/lnquy/cron v1.1.1
 	github.com/mdp/qrterminal/v3 v3.2.1
 	github.com/nwverse/persona/sdk/go v0.0.0

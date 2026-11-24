@@ -259,7 +259,7 @@ func recipeFormat() map[string]any {
 		"modes": map[string]string{
 			wire.ConnectorSubscriptionModeItems:    "new items, each kept once (a JSON result with a list)",
 			wire.ConnectorSubscriptionModeSnapshot: "the result as one state kept when it changes (any result; text can only be a snapshot); at most hourly, daily by default",
-			wire.ConnectorSubscriptionModeThings:   "a tool that answers Inbox rows ready-made (a connector's own inbox_things): kept and handed to the Inbox as they are; group_by thread, no fields, Inbox only",
+			wire.ConnectorSubscriptionModeThings:   "a tool that answers Inbox rows ready-made (a connector's own inbox_things): the Inbox gets the latest answer's rows as they are; group_by thread, no fields, Inbox only",
 		},
 		"kinds": wire.ConnectorSubscriptionKinds,
 		"group_by": map[string]string{

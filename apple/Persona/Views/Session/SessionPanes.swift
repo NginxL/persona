@@ -153,17 +153,9 @@ struct TerminalPanel: View {
     @AppStorage(TerminalPrefs.autoHide) private var autoHideKeys = false
     @AppStorage(TerminalPrefs.inputMode) private var inputMode = "direct"
     @AppStorage(TerminalPrefs.tipsSeen) private var tipsSeen = false
-    /// The first-use tips are about touch (double-tap to paste, two-finger swipe, the keyboard button): not on the Mac.
-    /// The key bar stays there: its ⚡ is how saved commands are reached.
-    #if os(macOS)
-    private static let touchTips = false
-    #else
+    /// The first-use tips are about touch (double-tap to paste, two-finger swipe, the keyboard button).
     private static let touchTips = true
-    #endif
     @AppStorage(TerminalPrefs.size) private var sizeMode = "phone"
-    #if os(macOS)
-    @AppStorage(TerminalPrefs.mouseMode) private var mouseMode = MacTerminalMouse.Mode.program.rawValue
-    #endif
     /// A grid change waiting to go out (the keyboard animates, a pinch goes on: the last size is what counts).
     @State private var gridTask: Task<Void, Never>?
     /// The keyboard is up on the terminal (typing straight in).
@@ -245,9 +237,6 @@ struct TerminalPanel: View {
         }
         .sheet(isPresented: $showSettings) {
             TerminalSettingsView().environment(\.colorScheme, scheme)
-            #if os(macOS)
-                .macSheet()
-            #endif
         }
         .alert("Another program on the computer is using this terminal", isPresented: Binding(get: { feed.control == .busy }, set: { shown in
             if !shown, feed.control == .busy { feed.watchOnly(String(localized: "View only: another program on the computer is using this terminal")) }
@@ -514,12 +503,6 @@ struct TerminalPanel: View {
                              onWheel: feed.drives && model.canScrollTerminal(key.group) ? { model.terminalScroll(key, lines: $0, at: $1) } : nil,
                              onClick: feed.drives && model.canClickTerminal(key.group) ? { model.terminalClick(key, column: $0, row: $1) } : nil,
                              onGrid: gridChanged)
-                #if os(macOS)
-                .files(takeFiles, dropping: { on in dropping = on && feed.drives })
-                .mouse(feed.drives && model.canMouseTerminal(key.group) ? { e in
-                    model.terminalMouse(key, action: e.action.rawValue, button: e.button.rawValue, column: e.column, row: e.row, mods: e.mods)
-                } : nil, mode: MacTerminalMouse.mode(mouseMode))
-                #endif
             }
             .overlay(alignment: .top) {
                 if let status = uploads.status { uploadingBar(status).padding(Theme.Space.s) }

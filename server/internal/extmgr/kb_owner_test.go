@@ -8,21 +8,21 @@ import (
 
 	"github.com/nwverse/persona/server/internal/assistantwire"
 	"github.com/nwverse/persona/server/internal/connector"
-	"github.com/nwverse/persona/server/internal/mail"
+	"github.com/nwverse/persona/server/internal/mailwire"
 	"github.com/nwverse/persona/server/internal/proto"
 )
 
 type ownerAccountsMail struct {
 	Mail
-	accounts []mail.MailAccount
+	accounts []mailwire.MailAccount
 }
 
-func (m ownerAccountsMail) Tools() []proto.Tool                       { return nil }
-func (m ownerAccountsMail) ListAccounts() ([]mail.MailAccount, error) { return m.accounts, nil }
+func (m ownerAccountsMail) Tools() []proto.Tool                           { return nil }
+func (m ownerAccountsMail) ListAccounts() ([]mailwire.MailAccount, error) { return m.accounts, nil }
 func TestKBConnectorOwnerOnlyReturnsIdentityMetadata(t *testing.T) {
 	h := newTestManager(t)
 	h.connectors = connector.NewRegistry(nil)
-	h.mail = ownerAccountsMail{accounts: []mail.MailAccount{{ID: "account", Name: "private label", Email: "owner@example.com", Username: "private login", IMAPHost: "imap.example.com", Password: "private secret"}}}
+	h.mail = ownerAccountsMail{accounts: []mailwire.MailAccount{{ID: "account", Name: "private label", Email: "owner@example.com", Username: "private login", IMAPHost: "imap.example.com", Password: "private secret"}}}
 	if err := h.addConnector(mailConnector{h: h}); err != nil {
 		t.Fatal(err)
 	}

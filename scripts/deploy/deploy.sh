@@ -162,6 +162,15 @@ for plat in "${PLATFORMS[@]}"; do
   GOOS=${plat%-*} GOARCH=${plat#*-} CGO_ENABLED=0 go build -tags "$TAGS" -trimpath -ldflags "$LDFLAGS" -o "bin/persona-node-$plat" ./cmd/persona-node
   GOOS=${plat%-*} GOARCH=${plat#*-} CGO_ENABLED=0 go build -tags "$TAGS" -trimpath -ldflags "$LDFLAGS" -o "bin/persona-link-$plat" ./cmd/persona-link
 done
+# The Windows node programs, named with .exe as the release names them (publish.sh): no machine this script installs
+# runs Windows, but the hub keeps them for Redeploy. Without them the hub's version has no Windows build of its own,
+# and the one an earlier deploy or update left there is another build (#12958).
+WINDOWS_PLATFORMS=(windows-amd64 windows-arm64)
+for plat in "${WINDOWS_PLATFORMS[@]}"; do
+  for p in personad persona-node; do
+    GOOS=${plat%-*} GOARCH=${plat#*-} CGO_ENABLED=0 go build -tags "$TAGS" -trimpath -ldflags "$LDFLAGS" -o "bin/$p-$plat.exe" "./cmd/$p"
+  done
+done
 # adhoc_identifiers <dir>: the darwin builds in dir, signed ad hoc again under their program's identifier
 # (com.nwverse.personad, com.nwverse.persona-node, ...) in place of the a.out Go's linker always writes. Only the name
 # changes: an ad-hoc signature's designated requirement stays the build's cdhash, so keeping macOS privacy permissions
@@ -342,6 +351,23 @@ ensure_herdr() { # machine-id
   fi 2>&1 | sed "s/^/$id: /" || true
 }
 
+# bubblewrap on a Linux hub that has none (scripts/deploy/ensure-bwrap.sh; PERSONA_SKIP_BWRAP=1 skips it): an update must
+# not leave extension sandboxes switched off. Never fails the deploy.
+ensure_bwrap() { # machine-id
+  local id=$1 host via vh
+  [ "${PERSONA_SKIP_BWRAP:-}" = 1 ] && return 0
+  host=$(field "$id" ssh); host=${host:-$id}
+  via=$(field "$id" via)
+  if is_here "$id"; then
+    sh ../scripts/deploy/ensure-bwrap.sh
+  elif [ -n "$via" ]; then
+    vh=$(field "$via" ssh); vh=${vh:-$via}
+    ssh -o ConnectTimeout=10 "$vh" "ssh -o BatchMode=yes -o ConnectTimeout=15 $host 'sh -s'" < ../scripts/deploy/ensure-bwrap.sh
+  else
+    ssh -o ConnectTimeout=10 "$host" 'sh -s' < ../scripts/deploy/ensure-bwrap.sh
+  fi 2>&1 | sed "s/^/$id: /" || true
+}
+
 # A resident node (scripts/deploy/node-launchd.sh, Mac or Linux) keeps the old binary until it restarts: it does so
 # once none of the assistant's conversations is busy, which go on across hub restarts (docs/operations/hub-restart.md).
 restart_resident() { ../scripts/deploy/node-launchd.sh restart-idle || true; }
@@ -384,6 +410,12 @@ for t in "${TARGETS[@]}"; do
         remote_state "$PERSONA_HUB_SSH" 'n="$PERSONA_HOME/bin/nodes/'"persona-link-$plat"'"; rm -f "$n.version"; cat > "$n.new" && mv "$n.new" "$n"' < "bin/persona-link-$plat"
         printf '%s\n' "$VERSION" | remote_state "$PERSONA_HUB_SSH" 'cat > "$PERSONA_HOME/bin/nodes/'"persona-link-$plat.version"'"'
       done
+      # The Windows node programs the same way, under the names the hub looks them up by (devices/packages.go).
+      for plat in "${WINDOWS_PLATFORMS[@]}"; do
+        remote_state "$PERSONA_HUB_SSH" 'mkdir -p "$PERSONA_HOME/bin/nodes"; n="$PERSONA_HOME/bin/nodes/'"personad-$plat.exe"'"; rm -f "$n.version"; cat > "$n.new" && mv "$n.new" "$n"' < "bin/personad-$plat.exe"
+        remote_state "$PERSONA_HUB_SSH" 'n="$PERSONA_HOME/bin/nodes/'"persona-node-$plat.exe"'"; rm -f "$n.version"; cat > "$n.new" && mv "$n.new" "$n"' < "bin/persona-node-$plat.exe"
+        printf '%s\n' "$VERSION" | remote_state "$PERSONA_HUB_SSH" 'cat > "$PERSONA_HOME/bin/nodes/'"persona-node-$plat.exe.version"'"'
+      done
       remote_state "$PERSONA_HUB_SSH" 'persona_alias_binaries "$PERSONA_HOME/bin/nodes"'
       hub_plat=$(machine_platform "$t") || exit 2
       install_bin "$t" "bin/personad-$hub_plat"
@@ -397,6 +429,7 @@ for t in "${TARGETS[@]}"; do
         echo "hub: deployed-commits.txt not made; its deploy checks ask GitHub" >&2
       fi
       ensure_herdr "$t"
+      ensure_bwrap "$t"
       hub_admin_access
       python3 ../scripts/persona_identity.py --service hub --prepare --prefix ../scripts/deploy/hub-systemd.sh | ssh "$PERSONA_HUB_SSH" 'bash -s'
       echo "$t: hub on the new binary"

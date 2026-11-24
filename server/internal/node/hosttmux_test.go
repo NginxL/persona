@@ -85,3 +85,30 @@ esac
 		t.Fatalf("socket not passed = %q", b)
 	}
 }
+
+func TestTmuxClientPaneInfo(t *testing.T) {
+	dir := t.TempDir()
+	calls := filepath.Join(dir, "calls")
+	bin := filepath.Join(dir, "tmux")
+	script := `#!/bin/sh
+[ "$1" = "-S" ] && { echo "socket:$2" >> ` + calls + `; shift 2; }
+case "$1" in
+display-message) echo "$@" >> ` + calls + `; printf '4242\t/dev/ttys009\t0\t1\n' ;;
+esac
+`
+	if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	c := tmux.Client{Bin: bin, Socket: "/tmp/tmux-501/work"}
+	info, err := c.PaneInfo(context.Background(), "%11")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.PID != 4242 || info.TTY != "/dev/ttys009" || info.Dead || !info.InMode {
+		t.Fatalf("PaneInfo = %+v", info)
+	}
+	b, err := os.ReadFile(calls)
+	if err != nil || !strings.Contains(string(b), "socket:/tmp/tmux-501/work") || !strings.Contains(string(b), "display-message -p -t %11") {
+		t.Fatalf("calls = %q, err = %v", b, err)
+	}
+}

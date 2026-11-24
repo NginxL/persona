@@ -169,9 +169,6 @@ struct InboxSameMatterPicker: View {
         .accessibilityIdentifier("inbox.sameMatter")
         .presentationDetents([.medium, .large])
         .interactiveDismissDisabled(busy != nil)
-        #if os(macOS)
-        .macSheet()
-        #endif
     }
 
     private func row(_ candidate: InboxItem) -> some View {

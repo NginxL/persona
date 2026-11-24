@@ -118,6 +118,10 @@ nonisolated struct MeetingTranscriptionView: Hashable, Sendable {
     var problem: String?
     /// The live log is being filled from the phone's text.
     var fallback: Bool
+    /// While the final pass runs (#13461): the recording seconds it has finished, and the recording's end. nil when the
+    /// hub sends none (an older hub, the pass not started yet) or not as numbers.
+    var finalDone: Double?
+    var end: Double?
 
     nonisolated enum State: String, Sendable { case live, finishing, final, failed }
 
@@ -130,8 +134,10 @@ nonisolated struct MeetingTranscriptionView: Hashable, Sendable {
     /// The hub is done with it: its text is the transcript (`final`), or it made nothing usable (`failed`).
     var settled: Bool { known == .final || known == .failed }
 
-    init(mode: MeetingTranscriptionMode, state: String? = nil, gaps: [MeetingGap] = [], problem: String? = nil, fallback: Bool = false) {
+    init(mode: MeetingTranscriptionMode, state: String? = nil, gaps: [MeetingGap] = [], problem: String? = nil, fallback: Bool = false,
+         finalDone: Double? = nil, end: Double? = nil) {
         self.mode = mode; self.state = state; self.gaps = gaps; self.problem = problem; self.fallback = fallback
+        self.finalDone = finalDone; self.end = end
     }
 
     /// Leniently from the JSON value: nil when it isn't an object with a `mode` string.
@@ -142,12 +148,54 @@ nonisolated struct MeetingTranscriptionView: Hashable, Sendable {
         gaps = MeetingGap.list(o["gaps"])
         problem = o["problem"]?.meetingText
         fallback = o["fallback"]?.bool ?? false
+        finalDone = o["final_done"]?.meetingNumber
+        end = o["end"]?.meetingNumber
     }
 
     /// `detail.meta.transcription` of a recording's detail (`GET /api/v1/kb/recordings/{id}`).
     init?(meta: JSONValue?) {
         guard case .object(let o)? = meta else { return nil }
         self.init(o["transcription"])
+    }
+}
+
+/// What the minutes line says while the minutes are on their way and none are shown (#13461, spec/fixtures/minutes-wait,
+/// docs/assistant/meeting-minutes.md「Gaps and the final pass」): the hub checking the whole recording while it finishes a
+/// hub-mode transcript, with minutes done of the total once its final pass has started; else writing the minutes.
+nonisolated enum MinutesWaitLine: Equatable, Sendable {
+    /// Minutes done of the whole recording, both whole minutes.
+    struct Progress: Equatable, Sendable {
+        var done: Int
+        var total: Int
+    }
+
+    case checking(Progress?)
+    case writing
+
+    /// The line for a recording's transcription: `checking` while the hub finishes a hub-mode transcript, `writing`
+    /// otherwise (final, failed, live, the phone's, none, a state the app doesn't know).
+    static func of(_ view: MeetingTranscriptionView?) -> MinutesWaitLine {
+        guard let view, view.mode == .hub, view.state == MeetingTranscriptionView.State.finishing.rawValue else { return .writing }
+        guard let done = view.finalDone, let end = view.end, done.isFinite, end.isFinite, done >= 0, end > 0 else {
+            return .checking(nil)
+        }
+        let total = max(1, Int((end / 60).rounded(.toNearestOrAwayFromZero)))
+        return .checking(Progress(done: min(Int((done / 60).rounded(.down)), total), total: total))
+    }
+
+    /// The line while the minutes are `pending` and none are shown, else nil (the minutes, Updating, or their failure).
+    static func of(_ view: MeetingTranscriptionView?, minutesState: String?, hasMinutes: Bool) -> MinutesWaitLine? {
+        guard minutesState == "pending", !hasMinutes else { return nil }
+        return of(view)
+    }
+
+    /// The line's words, beside a spinner.
+    var title: String {
+        switch self {
+        case .checking(let p?): String(localized: "Checking the whole recording (\(p.done) of \(p.total) min)…")
+        case .checking(nil): String(localized: "Checking the whole recording…")
+        case .writing: String(localized: "Writing the minutes…")
+        }
     }
 }
 

@@ -3,7 +3,9 @@ package assistant
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -268,5 +270,136 @@ func TestSendParamsEndsHeldRunBeforeOwnerSend(t *testing.T) {
 	}
 	if runs := s.channelRuns("examplechat"); len(runs) != 1 || !runs[0].Held {
 		t.Fatalf("the manager's own message ended its held run: %+v", runs)
+	}
+}
+
+// Tool-result images use the user role but belong to the background continuation. Both live
+// session.items and polling (including restored held state) must retain and route its answer.
+func TestHeldToolImageContinuation(t *testing.T) {
+	for _, mode := range []string{"poll", "live", "restored live"} {
+		for _, background := range []int{0, 1} {
+			t.Run(fmt.Sprintf("%s/background=%d", mode, background), func(t *testing.T) {
+				items := []proto.Item{
+					{ID: "n3", Seq: 3, Role: "user", Kind: proto.KindNotice, Wake: true, Text: "Background command finished"},
+					{ID: "t4", Seq: 4, Role: "assistant", Kind: proto.KindToolUse, ToolUseID: "read-1", ToolName: "Read"},
+					{ID: "i5", Seq: 5, Role: "user", Kind: proto.KindImage, ToolUseID: "read-1"},
+					{ID: "a6", Seq: 6, Role: "assistant", Kind: proto.KindText, Text: "The screenshot confirms the result."},
+				}
+				s, sent, r := heldRunHub(t, items, background, 1)
+				if mode == "restored live" {
+					raw, err := json.Marshal(r)
+					if err != nil {
+						t.Fatal(err)
+					}
+					restored := new(channel.Run)
+					if err := json.Unmarshal(raw, restored); err != nil {
+						t.Fatal(err)
+					}
+					s.chans.mu.Lock()
+					s.chans.st.Runs[0] = restored
+					s.chans.mu.Unlock()
+					r = restored
+				}
+				if mode != "poll" {
+					s.SessionItems(context.Background(), SessionItems{MachineID: r.MachineID, SessionID: r.SessionID, Items: items[:3]})
+					if runs := s.channelRuns("examplechat"); len(runs) != 1 || !runs[0].Held {
+						t.Fatalf("tool image ended the live held run: %+v", runs)
+					}
+				}
+				s.checkChannelRun(r.ID)
+				if len(*sent) != 1 {
+					t.Fatalf("sends = %v, want one continuation answer", *sent)
+				}
+				want := "The screenshot confirms the result."
+				if background > 0 {
+					want += "\n\n" + i18n.T("", "channel-turns.background", i18n.Args{"count": background})
+				}
+				if (*sent)[0]["text"] != want || (*sent)[0]["reply_to"] != "m9" {
+					t.Fatalf("continuation routed incorrectly: %v", *sent)
+				}
+				runs := s.channelRuns("examplechat")
+				if background == 0 && len(runs) != 0 || background > 0 && (len(runs) != 1 || !runs[0].Held || runs[0].Base != 6) {
+					t.Fatalf("unexpected final/held state: %+v", runs)
+				}
+				s.checkChannelRun(r.ID)
+				if len(*sent) != 1 {
+					t.Fatalf("repeated check duplicated answer: %v", *sent)
+				}
+			})
+		}
+	}
+}
+
+func TestHeldToolImageThenLiveOwnerInput(t *testing.T) {
+	for _, kind := range []string{proto.KindText, proto.KindImage} {
+		t.Run(kind, func(t *testing.T) {
+			s, sent, r := heldRunHub(t, nil, 1)
+			s.SessionItems(context.Background(), SessionItems{MachineID: r.MachineID, SessionID: r.SessionID, Items: []proto.Item{
+				{ID: "i3", Seq: 3, Role: "user", Kind: proto.KindImage, ToolUseID: "read-1"},
+				{ID: "u4", Seq: 4, Role: "user", Kind: kind, Text: "An unrelated question"},
+				{ID: "a5", Seq: 5, Role: "assistant", Kind: proto.KindText, Text: "A private answer."},
+			}})
+			assertHeldRunFinishedQuietly(t, s, sent)
+		})
+	}
+}
+
+// A repeated live image notification can race the polling completion. It must neither
+// supersede the run nor produce another final answer.
+func TestHeldToolImageConcurrentCompletion(t *testing.T) {
+	items := []proto.Item{
+		{ID: "i3", Seq: 3, Role: "user", Kind: proto.KindImage, ToolUseID: "read-1"},
+		{ID: "a4", Seq: 4, Role: "assistant", Kind: proto.KindText, Text: "The screenshot confirms the result."},
+	}
+	s, sent, r := heldRunHub(t, items, 0)
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	for range 2 {
+		wg.Go(func() {
+			<-start
+			s.SessionItems(context.Background(), SessionItems{MachineID: r.MachineID, SessionID: r.SessionID, Items: items[:1]})
+		})
+		wg.Go(func() { <-start; s.checkChannelRun(r.ID) })
+	}
+	close(start)
+	wg.Wait()
+	if len(*sent) != 1 || (*sent)[0]["text"] != "The screenshot confirms the result." || (*sent)[0]["reply_to"] != "m9" {
+		t.Fatalf("concurrent completion sent %v, want one routed answer", *sent)
+	}
+	if runs := s.channelRuns("examplechat"); len(runs) != 0 {
+		t.Fatalf("completed run retained: %+v", runs)
+	}
+}
+
+func TestHeldToolImageAnswerRetriesFailedDelivery(t *testing.T) {
+	s, sent, r := heldRunHub(t, []proto.Item{
+		{ID: "i3", Seq: 3, Role: "user", Kind: proto.KindImage, ToolUseID: "read-1"},
+		{ID: "a4", Seq: 4, Role: "assistant", Kind: proto.KindText, Text: "The screenshot confirms the result."},
+	}, 0)
+	f := s.hub.(*pagedHub).fakeHub
+	attempts := 0
+	f.answerApp(AppChannels, ChannelsSend, func(p json.RawMessage) (any, error) {
+		attempts++
+		if attempts == 1 {
+			return nil, fmt.Errorf("synthetic send failure")
+		}
+		var m map[string]any
+		if err := json.Unmarshal(p, &m); err != nil {
+			return nil, err
+		}
+		*sent = append(*sent, m)
+		return map[string]any{}, nil
+	})
+	s.checkChannelRun(r.ID)
+	if len(*sent) != 0 || len(s.channelRuns("examplechat")) != 1 {
+		t.Fatalf("failed delivery lost the held run or sent an answer: %v", *sent)
+	}
+	s.checkChannelRun(r.ID)
+	s.checkChannelRun(r.ID)
+	if attempts != 2 || len(*sent) != 1 || (*sent)[0]["text"] != "The screenshot confirms the result." || (*sent)[0]["reply_to"] != "m9" {
+		t.Fatalf("delivery retries = %d attempts, sent %v", attempts, *sent)
+	}
+	if runs := s.channelRuns("examplechat"); len(runs) != 0 {
+		t.Fatalf("delivered run retained: %+v", runs)
 	}
 }

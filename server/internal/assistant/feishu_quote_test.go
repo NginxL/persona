@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/nwverse/persona/server/internal/feishubot"
+	"github.com/nwverse/persona/server/internal/botcard"
 	"github.com/nwverse/persona/server/internal/proto"
 )
 
@@ -28,8 +28,8 @@ func quoteHub(t *testing.T, resource appAnswer) (*fakeHub, *Service) {
 	return f, newTestService(t, f)
 }
 
-func quoteReply() *feishubot.MessageEvent {
-	var ev feishubot.MessageEvent
+func quoteReply() *botcard.MessageEvent {
+	var ev botcard.MessageEvent
 	ev.Message.MessageID, ev.Message.ParentID, ev.Message.RootID = "om_ask", "om_pic", "om_pic"
 	ev.Message.ChatType, ev.Message.MessageType, ev.Message.Content = "p2p", "text", `{"text":"这张图里写的什么？"}`
 	return &ev
@@ -61,7 +61,7 @@ func TestFeishuReplyToAPictureCarriesThePicture(t *testing.T) {
 		return map[string]any{"data": []byte("png"), "mime": "image/png"}, nil
 	})
 	ev := quoteReply()
-	content := feishubot.ParseContent(ev.Message.MessageType, ev.Message.Content, nil)
+	content := botcard.ParseContent(ev.Message.MessageType, ev.Message.Content, nil)
 	if err := s.botSend(context.Background(), ev, content, botTarget{Kind: targetMain}); err != nil {
 		t.Fatal(err)
 	}
@@ -80,7 +80,7 @@ func TestFeishuReplyToAPictureCarriesThePicture(t *testing.T) {
 func TestFeishuQuotedPictureGoneStillSends(t *testing.T) {
 	f, s := quoteHub(t, func(json.RawMessage) (any, error) { return nil, errors.New("resource gone") })
 	ev := quoteReply()
-	content := feishubot.ParseContent(ev.Message.MessageType, ev.Message.Content, nil)
+	content := botcard.ParseContent(ev.Message.MessageType, ev.Message.Content, nil)
 	if err := s.botSend(context.Background(), ev, content, botTarget{Kind: targetMain}); err != nil {
 		t.Fatalf("held back: %v", err)
 	}
@@ -185,7 +185,7 @@ func TestFeishuQuoteAndForwardNameTheirMentions(t *testing.T) {
 				"sender": map[string]any{"id": "ou_a", "sender_type": "user"}, "body": map[string]any{"content": `{"text":"@_user_1 please check"}`}}}}, nil
 		})
 		ev := quoteReply()
-		content := feishubot.ParseContent(ev.Message.MessageType, ev.Message.Content, nil)
+		content := botcard.ParseContent(ev.Message.MessageType, ev.Message.Content, nil)
 		if err := s.botSend(context.Background(), ev, content, botTarget{Kind: targetMain}); err != nil {
 			t.Fatal(err)
 		}
@@ -202,10 +202,10 @@ func TestFeishuQuoteAndForwardNameTheirMentions(t *testing.T) {
 					"sender": map[string]any{"id": "ou_a", "sender_type": "user"}, "body": map[string]any{"content": `{"text":"@_user_1 please check"}`}},
 			}}, nil
 		})
-		var ev feishubot.MessageEvent
+		var ev botcard.MessageEvent
 		ev.Message.MessageID, ev.Message.ChatType, ev.Message.MessageType = "om_fwd", "p2p", "merge_forward"
 		ev.Message.Content = `{"content":"Merged and Forwarded Message"}`
-		content := feishubot.ParseContent(ev.Message.MessageType, ev.Message.Content, nil)
+		content := botcard.ParseContent(ev.Message.MessageType, ev.Message.Content, nil)
 		if err := s.botSend(context.Background(), &ev, content, botTarget{Kind: targetMain}); err != nil {
 			t.Fatal(err)
 		}

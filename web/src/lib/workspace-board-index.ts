@@ -2,15 +2,16 @@
 // render: a search keystroke used to filter every session for every card (cards x sessions directory() calls).
 // Each lookup gives what the scan it replaces gives (cardSessions, Array.find), in the same order.
 import type { Machine, Session } from "./types";
-import { directory, type BoardCard, type Workspace } from "./workspace-board";
+import type { BoardCard, Workspace } from "./workspace-board";
+import { directoryKey } from "./workspace-directory";
 
 /** What a card with no Agent gets: one shared array, so a memoized card sees no change. */
 export const NO_SESSIONS: readonly Session[] = Object.freeze([]);
 
-// directory() never returns a path with a NUL in it, so the last NUL of a key splits machine and directory: no two
+// directoryKey() never returns a path with a NUL in it, so the last NUL of a key splits machine and directory: no two
 // different pairs share a key. null: the path is not absolute, which sameDirectory never matches.
 function placeKey(machineID: string, cwd: string): string | null {
-  const dir = directory(cwd);
+  const dir = directoryKey(cwd);
   return dir === null ? null : `${machineID}\0${dir}`;
 }
 

@@ -97,9 +97,11 @@ def main():
 
     def adb(*args, capture=False):
         cmd = ["adb", "-s", serial, *args]
-        if capture:
-            return subprocess.run(cmd, capture_output=True, text=True, timeout=90).stdout
-        subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=90)
+        try:
+            return subprocess.run(cmd, stdout=subprocess.PIPE if capture else subprocess.DEVNULL,
+                                  stderr=subprocess.DEVNULL, text=True, timeout=90, check=True).stdout
+        except subprocess.CalledProcessError as error:
+            raise SystemExit(f"adb {' '.join(args[:2])} failed (exit {error.returncode})") from None
 
     w, h = map(int, re.findall(r"(\d+)x(\d+)", adb("shell", "wm", "size", capture=True))[-1])
 
@@ -114,7 +116,10 @@ def main():
             found = re.search(pattern, text)
             return int(found.group(1)) if found else None
 
-        return dict(total=num(r"Total frames rendered: (\d+)"), janky=num(r"Janky frames: (\d+)"), histogram=histogram(text))
+        total, janky = num(r"Total frames rendered: (\d+)"), num(r"Janky frames: (\d+)")
+        if not total or janky is None or janky > total:
+            raise SystemExit("gfxinfo did not report a usable frame sample")
+        return dict(total=total, janky=janky, histogram=histogram(text))
 
     raw = dict(("%s/%s" % (label, name), []) for label, _ in packages for name in links)
     cold = dict((label, []) for label, _ in packages)
@@ -123,11 +128,13 @@ def main():
 
     def save():
         for key, runs in raw.items():
-            frames = sum(r["total"] or 0 for r in runs)
+            if not runs:
+                continue
+            frames = sum(r["total"] for r in runs)
             result[key] = dict(
                 frames_total=frames,
-                janky_percent_total=round(100.0 * sum(r["janky"] or 0 for r in runs) / max(1, frames), 2),
-                janky_percent_per_run=stats([100.0 * r["janky"] / r["total"] for r in runs if r["total"]]),
+                janky_percent_total=round(100.0 * sum(r["janky"] for r in runs) / frames, 2),
+                janky_percent_per_run=stats([100.0 * r["janky"] / r["total"] for r in runs]),
                 frame_ms=histogram_stats(merged(runs)),
                 runs=[dict(total=r["total"], janky=r["janky"]) for r in runs],
             )

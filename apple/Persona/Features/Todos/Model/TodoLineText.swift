@@ -46,6 +46,8 @@ nonisolated enum TodoLineText {
         /// After a separator, in the secondary color.
         var rest: String?
         var tone: Tone = .plain
+        /// It says a time ("since Tue", "until Fri", "Finished Tue"): the row's end says none beside it.
+        var timed = false
 
         /// One string, for the row's spoken label.
         func spoken(separator: String) -> String { [lead, rest].compactMap { $0 }.joined(separator: separator) }
@@ -62,8 +64,12 @@ nonisolated enum TodoLineText {
         let args = line.args ?? [:]
         func arg(_ name: String) -> String? { args[name].flatMap { $0.isEmpty ? nil : $0 } }
         func time(_ name: String) -> Date? { arg(name).flatMap(JSON.parseDate) }
-        let day = { (date: Date) in TodoTimeWords.day(date, now: now, words: words, calendar: calendar) }
-        let sinceRest = since.map { words("since \(day($0)) [To-dos Line]") }
+        var timed = false
+        func day(_ date: Date) -> String {
+            timed = true
+            return TodoTimeWords.day(date, now: now, words: words, calendar: calendar)
+        }
+        func sinceRest() -> String? { since.map { words("since \(day($0)) [To-dos Line]") } }
         let check = words("check and tick [To-dos Line]")
         let run = arg("run")
         var said: Said
@@ -112,7 +118,7 @@ nonisolated enum TodoLineText {
             said = Said(lead: words("\(run ?? words("An Agent [To-dos Line]")) is working in the background [To-dos Line]"))
         case TodoLineKey.parked:
             let until = time(TodoLineArg.until).map { words("until \(day($0)) [To-dos Line]") }
-            said = Said(lead: arg("reason") ?? words("Put aside [To-dos Line]"), rest: until ?? sinceRest)
+            said = Said(lead: arg("reason") ?? words("Put aside [To-dos Line]"), rest: until ?? sinceRest())
         case TodoLineKey.finished:
             said = Said(lead: run.map { words("\($0) finished [To-dos Line]") } ?? words("Finished [To-dos Line]"), rest: check,
                         tone: .ready)
@@ -121,7 +127,7 @@ nonisolated enum TodoLineText {
         case TodoLineKey.deployed:
             said = Said(lead: words("Live [To-dos Line]"), rest: check, tone: .ready)
         case TodoLineKey.prOpen:
-            said = Said(lead: words("Waiting for a merge [To-dos Line]"), rest: sinceRest)
+            said = Said(lead: words("Waiting for a merge [To-dos Line]"), rest: sinceRest())
         case TodoLineKey.usageLimit:
             let lead = run.map { words("\($0) reached its usage limit [To-dos Line]") } ?? words("Usage limit reached [To-dos Line]")
             said = Said(lead: lead, rest: time(TodoLineArg.resetsAt).map { words("back \(day($0)) [To-dos Line]") })
@@ -129,7 +135,7 @@ nonisolated enum TodoLineText {
             let who = run ?? words("An Agent [To-dos Line]")
             let lead = arg("on") == "agent" ? words("\(who) is waiting for another Agent [To-dos Line]")
                 : words("\(who) is waiting for something outside [To-dos Line]")
-            said = Said(lead: lead, rest: sinceRest)
+            said = Said(lead: lead, rest: sinceRest())
         case TodoLineKey.finishedSeen:
             said = Said(lead: time(TodoLineArg.at).map { words("Finished \(day($0)) [To-dos Line]") } ?? words("Finished [To-dos Line]"))
         case TodoLineKey.completed:
@@ -156,14 +162,17 @@ nonisolated enum TodoLineText {
         if let step = arg("step"), !(said.lead?.hasPrefix(step) ?? false) {
             said.lead = said.lead.map { step + TodoTimeWords.separator + $0 } ?? step
         }
+        said.timed = timed
         return said
     }
 }
 
-/// Times as a row says them, from now (#10465): today's by the clock, the week's by its day, the rest by date.
+/// Times as a row says them, from now (#10465): a line's by the clock today, the week's by its day, the rest by date; the
+/// row's end in words that say what they are ("Due Fri", "16m ago"), never a bare day or clock.
 nonisolated enum TodoTimeWords {
-    /// Between the parts of a line: "Which ryokan? · Ryokan Hanami recommended".
-    static let separator = " · "
+    /// Between the parts of a line: "Which ryokan? · Ryokan Hanami recommended". The space before the dot does not
+    /// break, so a line that wraps keeps "·" with the word before it.
+    static let separator = "\u{00A0}· "
 
     /// "10:00" today; "Tue" within six days either way; "Apr 3" further.
     static func day(_ date: Date, now: Date, words: TodoWords, calendar: Calendar) -> String {
@@ -174,36 +183,41 @@ nonisolated enum TodoTimeWords {
         return date.formatted(style)
     }
 
-    /// A due day: "Today", "Thu" within the week, "Apr 3" further, and its year when not this one.
+    /// A due day at a row's end: "Due today", "Due Thu" within the week, "Due Apr 3" further, with its year when not
+    /// this one.
     static func due(_ date: Date, now: Date, words: TodoWords, calendar: Calendar) -> String {
-        if calendar.isDate(date, inSameDayAs: now) { return words("Today [To-dos Due]") }
+        if calendar.isDate(date, inSameDayAs: now) { return words("Due today [To-dos Due]") }
         var style = Date.FormatStyle(calendar: calendar, timeZone: calendar.timeZone).locale(words.formatting)
         let days = calendar.dateComponents([.day], from: calendar.startOfDay(for: now), to: calendar.startOfDay(for: date)).day ?? 99
-        if (1...6).contains(days) { return date.formatted(style.weekday(.abbreviated)) }
+        // A day's name has words of its own: Japanese adds the word for "day of the week" after an abbreviated one.
+        if (1...6).contains(days) { return words("Due \(date.formatted(style.weekday(.abbreviated))) [To-dos Due Weekday]") }
         style = style.month(.abbreviated).day()
         if calendar.component(.year, from: date) != calendar.component(.year, from: now), abs(days) > 180 { style = style.year() }
-        return date.formatted(style)
+        return words("Due \(date.formatted(style)) [To-dos Due]")
     }
 
-    /// How long ago, as short as a row's end has room for: "now", "16m", "3h", then the day.
+    /// A due moment's time alone, under a heading that names its day (Upcoming): "Due 15:00".
+    static func dueTime(_ date: Date, words: TodoWords, calendar: Calendar) -> String {
+        let style = Date.FormatStyle(calendar: calendar, timeZone: calendar.timeZone).locale(words.formatting).hour().minute()
+        return words("Due \(date.formatted(style)) [To-dos Due]")
+    }
+
+    /// How long ago, as short as a row's end has room for and never a day's name, which would read as a due day: "now",
+    /// "16m ago", "3h ago", "2d ago".
     static func age(_ date: Date, now: Date, words: TodoWords, calendar: Calendar) -> String {
         let seconds = now.timeIntervalSince(date)
         if seconds < 60 { return words("now [To-dos Age]") }
-        if seconds < 3600 { return words("\(Int(seconds / 60))m [To-dos Age]") }
-        if seconds < 86_400 { return words("\(Int(seconds / 3600))h [To-dos Age]") }
-        return day(date, now: now, words: words, calendar: calendar)
+        if seconds < 3600 { return words("\(Int(seconds / 60))m ago [To-dos Age]") }
+        if seconds < 86_400 { return words("\(Int(seconds / 3600))h ago [To-dos Age]") }
+        return words("\(days(date, now: now, calendar: calendar))d ago [To-dos Age]")
+    }
+
+    /// Whole days from `date`'s day to today's, at least one.
+    private static func days(_ date: Date, now: Date, calendar: Calendar) -> Int {
+        max(1, calendar.dateComponents([.day], from: calendar.startOfDay(for: date), to: calendar.startOfDay(for: now)).day ?? 1)
     }
 
     // Said in full for VoiceOver, where "16m" reads as a length and "Apr 4" does not say what it is.
-
-    /// "10:00" today; "Tuesday" within six days either way; "April 3" further.
-    static func spokenDay(_ date: Date, now: Date, words: TodoWords, calendar: Calendar) -> String {
-        var style = Date.FormatStyle(calendar: calendar, timeZone: calendar.timeZone).locale(words.formatting)
-        if calendar.isDate(date, inSameDayAs: now) { return date.formatted(style.hour().minute()) }
-        let days = abs(calendar.dateComponents([.day], from: calendar.startOfDay(for: now), to: calendar.startOfDay(for: date)).day ?? 99)
-        style = days <= 6 ? style.weekday(.wide) : style.month(.wide).day()
-        return date.formatted(style)
-    }
 
     /// "Due today", "Due Saturday", "Due April 3".
     static func spokenDue(_ date: Date, now: Date, words: TodoWords, calendar: Calendar) -> String {
@@ -214,12 +228,12 @@ nonisolated enum TodoTimeWords {
         return words("Due \(date.formatted(style)) [To-dos Spoken]")
     }
 
-    /// "Just now", "16 minutes ago", "3 hours ago", then "Since Tuesday".
+    /// "Just now", "16 minutes ago", "3 hours ago", "2 days ago".
     static func spokenAge(_ date: Date, now: Date, words: TodoWords, calendar: Calendar) -> String {
         let seconds = now.timeIntervalSince(date)
         if seconds < 60 { return words("Just now [To-dos Spoken]") }
         if seconds < 3600 { return words("\(Int(seconds / 60)) minutes ago [To-dos Spoken]") }
         if seconds < 86_400 { return words("\(Int(seconds / 3600)) hours ago [To-dos Spoken]") }
-        return words("Since \(spokenDay(date, now: now, words: words, calendar: calendar)) [To-dos Spoken]")
+        return words("\(days(date, now: now, calendar: calendar)) days ago [To-dos Spoken]")
     }
 }

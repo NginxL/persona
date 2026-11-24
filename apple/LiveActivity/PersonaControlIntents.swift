@@ -50,6 +50,29 @@ struct OpenPersonaDictationIntent: AppIntent {
     }
 }
 
+/// Calls Persona on the main conversation (#13241): the Call Persona control's intent. The call is Call Persona's own
+/// (`CallPersonaIntent.place()`, #9290), waiting for the app to be in front before its Start. A control needs an intent
+/// the widget extension also compiles, and `CallPersonaIntent` is the app's alone. Hidden from Shortcuts, where the
+/// Call Persona App Shortcut already is.
+struct OpenPersonaCallIntent: AppIntent {
+    nonisolated static let title: LocalizedStringResource = "Call Persona"
+    nonisolated static let description = IntentDescription("Opens Persona and calls it on your main chat.")
+    nonisolated static let isDiscoverable = false
+    @available(iOS 26.0, *)
+    nonisolated static var supportedModes: IntentModes { .foreground(.immediate) }
+    // iOS 18 has no supportedModes: it opens the app this way.
+    nonisolated static var openAppWhenRun: Bool { true }
+
+    nonisolated init() {}
+
+    nonisolated func perform() async throws -> some IntentResult {
+        #if !WIDGET_EXTENSION
+        await MainActor.run { CallPersonaIntent.place() }
+        #endif
+        return .result()
+    }
+}
+
 /// Opens Persona on the Agents tab (personal agents are one tap from there).
 struct OpenPersonaAgentsIntent: AppIntent {
     nonisolated static let title: LocalizedStringResource = "Open Persona Agents"

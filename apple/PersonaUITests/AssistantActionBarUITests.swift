@@ -57,6 +57,10 @@ final class AssistantActionBarUITests: XCTestCase {
         running.tap()
         let tray = app.otherElements["action-tray.running"].firstMatch
         XCTAssertTrue(tray.waitForExistence(timeout: 5), app.debugDescription)
+        // The tray stays inside the screen, whatever its rows say (#13656).
+        let window = app.windows.firstMatch.frame
+        XCTAssertGreaterThanOrEqual(tray.frame.minX, window.minX, "the tray starts left of the screen")
+        XCTAssertLessThanOrEqual(tray.frame.maxX, window.maxX, "the tray runs past the screen's right edge")
         app.waitForRows(app.trayTasks, atLeast: 1)
         let runningRows = rowLabels(app)
         XCTAssertFalse(runningRows.isEmpty, app.debugDescription)

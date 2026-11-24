@@ -235,12 +235,22 @@ type Session struct {
 	// optional effort metadata within the row size budget.
 	PendingEffort      *string `json:"pending_effort,omitempty"`
 	EffortChangeFailed bool    `json:"effort_change_failed,omitempty"`
+	// ContextRestartRecommended: the latest three measured requests each used over 300,000 input
+	// tokens since the last compaction. Omitted when false or the runtime has no request-level evidence.
+	// Kept with EffortChangeFailed so it fits the row's allocation size class.
+	ContextRestartRecommended bool `json:"context_restart_recommended,omitempty"`
 	// OffLauncher: Persona started this Claude Code Agent on Launcher, but the claude that runs it now was not started
 	// by Persona's command (it lacks Persona's --mcp-config): herdr's bare `claude --resume <id>` after a restart on a
 	// herdr older than 0.9.2, or a resume typed by hand (#11792). Launcher's settings, model, MCP and hooks do not
 	// apply to it, and a launcher switch to Launcher itself brings it back there. Beside EffortChangeFailed, in its
 	// padding: a Session stays in its allocation size class.
 	OffLauncher bool `json:"off_launcher,omitempty"`
+	// BackgroundStalledSince (#13744): the time since which this session's background commands have used no CPU and
+	// written no output, set only when a known worker (a build, tests, a download) runs there and that has lasted ten
+	// minutes while the turn is over. State stays working: a running tool is work, this only tells a client the work
+	// looks stuck. Zero (omitted) otherwise. Whole seconds in a uint32, in the padding before Ultracode: a Session
+	// stays in its allocation size class (TestSessionFitsItsSizeClass).
+	BackgroundStalledSince UnixTime32 `json:"background_stalled_since,omitempty"`
 	// Ultracode is Claude Code's independent session-only workflow switch: nil means unknown.
 	// UltracodePending (beside AsksRead) means a requested change waits for an idle input box; LostAt asks the client
 	// to offer reopening after a resumed process reset an enabled switch. Reopening or dismissing the notice clears
@@ -438,8 +448,9 @@ type Session struct {
 	// rollout's own rate limits), else what the hub reads off Claude Code's words when they name a time zone. Nil: not
 	// known, and nothing waits for it. Only a subscription's limit has one: a gateway's or an API key's 429 never does.
 	TurnErrorResetsAt *time.Time `json:"turn_error_resets_at,omitempty"`
-	// TurnErrorCode says what is wrong when the hub can tell from TurnError (docs/assistant/onboarding.md 5.2): one of the
-	// TurnErrorCode* values, for a card that says what to fix (sign in, the key, the model). Empty: not known.
+	// TurnErrorCode says what is wrong when the hub or node can tell from TurnError (docs/assistant/onboarding.md 5.2):
+	// one of the TurnError* values below, for a client fix card (sign in, the key, the model) or for upstream-stall
+	// visibility (TurnErrorUpstreamUnavailable). Empty: not known.
 	TurnErrorCode string `json:"turn_error_code,omitempty"`
 	// ModelFallback is the refusal fallback still active in this session, as the runtime recorded it.
 	ModelFallback *ModelRefusal `json:"model_fallback,omitempty"`
@@ -528,6 +539,13 @@ const (
 	// TurnErrorToolSearchUnsupported: the gateway refused Claude Code's on-demand tool loading (tool search, #10365). The
 	// node now starts that launcher and model with every tool loaded, so a retry works: not the user's to fix.
 	TurnErrorToolSearchUnsupported = "tool_search_unsupported"
+	// TurnErrorUpstreamUnavailable: the model gateway reported an exhausted upstream account pool, or the session hit >= 2
+	// consecutive upstream 5xx turns with no assistant progress in between (#13372). Visibility label: TurnErrorKind stays
+	// transient unless another rule marks it.
+	TurnErrorUpstreamUnavailable = "upstream_unavailable"
+	// TurnErrorImagesTooLarge: accumulated pictures in the conversation exceed the model API's size, count or dimension
+	// limit (#13045). Compacting the conversation clears older pictures so the failed turn can be sent again.
+	TurnErrorImagesTooLarge = "images_too_large"
 )
 
 // Codes a call refuses with when the assistant's conversation cannot start on a machine (docs/assistant/onboarding.md 4.6, 5.2):
@@ -761,4 +779,43 @@ const ContextNearlyFullShare = 0.85
 // ContextNearlyFull: what the model saw in the latest reply fills ContextNearlyFullShare of its window (both known).
 func ContextNearlyFull(tokens, window int) bool {
 	return window > 0 && tokens > 0 && float64(tokens) >= ContextNearlyFullShare*float64(window)
+}
+
+// UnixTime32 is a time in whole seconds since the epoch (zero: not set) that is sent as RFC 3339 like the other times;
+// four bytes, so that it fits the padding in Session.
+type UnixTime32 uint32
+
+// UnixTime32Of is t as a UnixTime32 (zero for the zero time and for times it cannot hold).
+func UnixTime32Of(t time.Time) UnixTime32 {
+	if t.IsZero() || t.Unix() <= 0 || t.Unix() > 1<<32-1 {
+		return 0
+	}
+	return UnixTime32(t.Unix())
+}
+
+// Time is the time it holds (the zero time when not set).
+func (u UnixTime32) Time() time.Time {
+	if u == 0 {
+		return time.Time{}
+	}
+	return time.Unix(int64(u), 0).UTC()
+}
+
+// MarshalJSON writes null for a zero one, so that a Session leaves it out of every encoder's output.
+func (u UnixTime32) MarshalJSON() ([]byte, error) {
+	if u == 0 {
+		return []byte("null"), nil
+	}
+	return u.Time().MarshalJSON()
+}
+
+func (u *UnixTime32) UnmarshalJSON(b []byte) error {
+	var t time.Time
+	if string(b) != "null" {
+		if err := t.UnmarshalJSON(b); err != nil {
+			return err
+		}
+	}
+	*u = UnixTime32Of(t)
+	return nil
 }

@@ -39,7 +39,7 @@ type mcpWaitNotifier interface {
 // manager records the origin itself: a later computer.elicit can only join this live call, never choose its machine.
 // A duplicate live id or a devices implementation without Notify keeps the unknown fallback.
 func (s *Service) mcpWaitContext(ctx context.Context, machine, callID string, enabled bool) context.Context {
-	notifier, ok := s.devs.(mcpWaitNotifier)
+	notifier, ok := s.physicalDevices().(mcpWaitNotifier)
 	if !enabled || !proto.ValidMCPWaitCallID(callID) || !ok {
 		return ctx
 	}

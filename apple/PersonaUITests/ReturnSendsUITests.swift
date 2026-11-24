@@ -95,7 +95,8 @@ final class ReturnSendsUITests: XCTestCase {
         app.terminate()
         app.launchArguments = ["-AppleLanguages", "(\(language))", "-ui.returnSends", "YES", "-ui.scheme", appearance, "-tab", "settings"]
         app.launchPinned()
-        let row = element("settings-appearance")
+        XCTAssertTrue(app.openSettingsAdvancedPage(), "no Settings › Advanced:\n\(app.debugDescription)")
+        let row = app.settingsAdvancedRow("settings-appearance")
         XCTAssertTrue(row.waitForExistence(timeout: 20), "no Appearance row:\n\(app.debugDescription)")
         row.tap()
         let toggle = element("settings-return-sends")

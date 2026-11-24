@@ -94,7 +94,7 @@ class AgentMarkTest {
         fun initialWidth(): Float {
             val result = mutableListOf<TextLayoutResult>()
             val node = rule.onNodeWithText("S", useUnmergedTree = true).fetchSemanticsNode()
-            node.config[SemanticsActions.GetTextLayoutResult].action!!.invoke(result)
+            val _ = node.config[SemanticsActions.GetTextLayoutResult].action!!.invoke(result)
             return result.single().getBoundingBox(0).width
         }
         val normal = initialWidth()

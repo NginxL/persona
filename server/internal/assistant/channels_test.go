@@ -11,8 +11,8 @@ import (
 	"time"
 
 	"github.com/nwverse/persona/server/internal/assistantwire"
+	"github.com/nwverse/persona/server/internal/botcard"
 	"github.com/nwverse/persona/server/internal/channel"
-	"github.com/nwverse/persona/server/internal/feishubot"
 	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/proto"
 	"github.com/nwverse/persona/server/internal/rpc"
@@ -457,7 +457,7 @@ func TestFeishuStalePressClosesTheCard(t *testing.T) {
 	_ = st.PutSetting(context.Background(), botStateKey, botState{Current: botTarget{Kind: targetMain},
 		Cards: map[string]*botCardRef{"ix_old": {MessageID: "om_old", Kind: proto.IxPermission, MachineID: "server", SessionID: "a1", At: time.Now()}}})
 	s := newServiceOn(t, f, st)
-	var a feishubot.CardAction
+	var a botcard.CardAction
 	a.Action.Value = map[string]any{"a": "ix", "id": "ix_old", "allow": "1"}
 	// Not known to be over: the toast only; the card stays live, its record kept.
 	for _, st2 := range []string{"pending", ""} {
@@ -1164,6 +1164,7 @@ func TestFeishuMessagesGoInInTheOrderTheyCame(t *testing.T) {
 // A message that comes while the previous run's answer waits for a progress update to let go of it is not folded
 // into that run: the answer goes out under the earlier message, and the later message's answer would carry it again.
 func TestFeishuRunBeingAnsweredIsNotFolded(t *testing.T) {
+	needsLarkLayer(t)
 	s, posts, _ := cotHub(t, true)
 	r, prog := cotRun(s)
 	r.MsgIDs = []string{"feishu-m1"}

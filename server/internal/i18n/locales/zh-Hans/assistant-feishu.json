@@ -34,6 +34,7 @@
   "end_gone": "对话已关闭",
   "end_offline": "电脑离线",
   "end_recalled": "撤回了，这一轮停了",
+  "end_unrelated": "已结束：开始处理其他请求",
   "tools_called_one": "调用了 {count} 次工具",
   "tools_called_other": "调用了 {count} 次工具",
   "state_working": "处理中",

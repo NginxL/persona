@@ -272,9 +272,9 @@ func (s *Service) retireAgent(ctx context.Context, refused taskCloseRefused, who
 	if who == "idle" {
 		cause = proto.StopIdle
 	}
-	// A done task ends its Agent's session: with the owner's close-on-end setting its terminal goes too (#10355,
-	// agent_terminal_close.go). An idle stop is no end: that Agent keeps its terminal either way.
-	closeIt := cause == proto.StopTaskCompleted && !agentCloseBusy(c) && s.closeEndedTerminals(ctx)
+	// A done task ends its Agent's session, and so does a long idle stop of an Agent Persona started (retirable): with
+	// the owner's close-on-end setting its terminal goes too (#10355, agent_terminal_close.go); off, it keeps it.
+	closeIt := !agentCloseBusy(c) && s.closeEndedTerminals(ctx)
 	var err error
 	if closeIt {
 		res.Stopped, err = s.closeEndedTerminal(cctx, machine, c.SessionID, cause)

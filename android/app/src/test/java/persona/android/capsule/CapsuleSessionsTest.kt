@@ -119,7 +119,7 @@ class CapsuleSessionsTest {
     @Test fun theThreeEntrancesHaveIndependentCountsAndUnreadInitiallyShowsAList() = runTest {
         val done = agent("home", "done", "unread")
         val fixture = Fixture(backgroundScope, listOf(done, agent("home", "working")))
-        fixture.inbox.value = persona.feature.inbox.InboxSnapshot(records = listOf(inboxRecord("mail:1")))
+        fixture.inbox.value = persona.core.inbox.InboxSnapshot(records = listOf(inboxRecord("mail:1")))
         runCurrent()
         val content = fixture.source.content.value
         assertEquals(listOf("未读", "主对话", "收件箱"), content.sections.map { it.title })
@@ -242,7 +242,7 @@ class CapsuleSessionsTest {
     @Test fun inboxUsesTheActualActionRowsIncludingMergedRequestsInsteadOfActionCount() {
         val primary = agent("home", "waiting", "needs_you")
         val other = agent("home~g0a1b2c3d", "waiting", "needs_you")
-        val snapshot = persona.feature.inbox.InboxSnapshot(
+        val snapshot = persona.core.inbox.InboxSnapshot(
             records = listOf(inboxRecord("mail:action"), inboxRecord("mail:fyi", "fyi"), inboxRecord("mail:done", done = true)),
             interactions = listOf(inboxRequest("ask-a", primary), inboxRequest("ask-b~g0a1b2c3d", other)),
             sessions = listOf(primary, other).map(::personaAgent),
@@ -258,7 +258,7 @@ class CapsuleSessionsTest {
         val question = inboxRequest("question", session).copy(title = "采用哪个实现方案？", summary = null)
         val plan = inboxRequest("plan", session).copy(title = "计划等你批准", summary = "")
         val permission = inboxRequest("permission", session).copy(title = "请求使用 Bash", summary = "运行测试")
-        val rows = capsuleInbox(persona.feature.inbox.InboxSnapshot(interactions = listOf(question, plan, permission),
+        val rows = capsuleInbox(persona.core.inbox.InboxSnapshot(interactions = listOf(question, plan, permission),
             sessions = listOf(personaAgent(session)))).entries.associateBy { it.id }
         assertEquals(1, rows.values.map { it.title }.distinct().size)
         assertEquals("采用哪个实现方案？", rows.getValue("inbox:request:question").summary)
@@ -271,7 +271,7 @@ class CapsuleSessionsTest {
         val other = agent("home~g0a1b2c3d", "waiting", "needs_you")
         val fixture = Fixture(backgroundScope, listOf(other))
         fixture.bindings.value = fixture.binding()
-        fixture.inbox.value = persona.feature.inbox.InboxSnapshot(records = listOf(inboxRecord("lark:a:b")),
+        fixture.inbox.value = persona.core.inbox.InboxSnapshot(records = listOf(inboxRecord("lark:a:b")),
             interactions = listOf(inboxRequest("ask~g0a1b2c3d", other)), sessions = listOf(personaAgent(other)))
         runCurrent()
         fixture.source.selectSection(InboxSection)
@@ -286,7 +286,7 @@ class CapsuleSessionsTest {
     @Test fun aRequestOutsideAnySessionOpensItsCardInsteadOfABlankConversation() = runTest {
         val fixture = Fixture(backgroundScope)
         fixture.bindings.value = fixture.binding()
-        fixture.inbox.value = persona.feature.inbox.InboxSnapshot(
+        fixture.inbox.value = persona.core.inbox.InboxSnapshot(
             interactions = listOf(inboxRequest("script", Session("home", "")).copy(title = "Deploy?")))
         runCurrent()
         fixture.source.selectSection(InboxSection)
@@ -299,7 +299,7 @@ class CapsuleSessionsTest {
     @Test fun anOldInboxCannotOpenTheSameRawIdInANewPairing() = runTest {
         val fixture = Fixture(backgroundScope)
         fixture.bindings.value = fixture.binding()
-        fixture.inbox.value = persona.feature.inbox.InboxSnapshot(records = listOf(inboxRecord("mail:1")))
+        fixture.inbox.value = persona.core.inbox.InboxSnapshot(records = listOf(inboxRecord("mail:1")))
         runCurrent()
         fixture.source.selectSection(InboxSection)
         runCurrent()
@@ -759,7 +759,7 @@ class CapsuleSessionsTest {
     }
 
     private fun personaAgent(session: Session) = persona.core.domain.sort.AgentSession(session)
-    private fun inboxRecord(id: String, tier: String = "action", done: Boolean = false) = persona.feature.inbox.InboxRecord(
+    private fun inboxRecord(id: String, tier: String = "action", done: Boolean = false) = persona.core.inbox.InboxRecord(
         persona.core.domain.inbox.InboxItem(id, title = "Item $id", preview = "Needs an answer", tier = tier,
             doneAt = if (done) "2026-11-05T08:00:00Z" else null))
     private fun inboxRequest(id: String, session: Session) = persona.core.domain.inbox.InboxInteraction(id, session.machineId, session.sessionId,
@@ -784,7 +784,7 @@ class CapsuleSessionsTest {
         val openedInbox = mutableListOf<String?>()
         val read = mutableListOf<Pair<SessionKey, String>>()
         val openedCards = mutableListOf<persona.core.navigation.RequestRef>()
-        val inbox = MutableStateFlow(persona.feature.inbox.InboxSnapshot())
+        val inbox = MutableStateFlow(persona.core.inbox.InboxSnapshot())
         val hubPreferences = MutableStateFlow(HubPreferencesSnapshot())
         val messages = mutableMapOf<SessionKey, MutableStateFlow<ChatSnapshot>>()
         val connection = TestConnection()

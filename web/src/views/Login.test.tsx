@@ -150,14 +150,20 @@ describe("Login", () => {
 });
 
 describe("scanning a code with Persona on a phone (#10291)", () => {
-  it("starts folded, below the phone steps, and makes no code until it is opened", async () => {
+  it("leads with the link field and creates a scan code only when requested", async () => {
     qr.mounted = 0;
     await act(async () => root.render(<Login onDone={() => {}} />));
-    expect(host.querySelector("#login-phone")).not.toBeNull(); // the phone steps lead, as before #6862
+    const steps = host.querySelector<HTMLElement>("#login-help")!;
+    expect(steps.hidden).toBe(true);
+    expect(input(t("login.link_placeholder")).compareDocumentPosition(steps) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(qr.mounted).toBe(0);
     const toggle = host.querySelector<HTMLButtonElement>('button[aria-controls="login-qr"]')!;
-    expect(toggle.textContent).toContain(t("login.qr_open"));
+    expect(toggle.textContent).toContain(t("login.qr_short"));
     await act(async () => toggle.click());
     expect(qr.mounted).toBeGreaterThan(0);
+    const help = host.querySelector<HTMLButtonElement>('button[aria-controls="login-help"]')!;
+    await act(async () => help.click());
+    expect(steps.hidden).toBe(false);
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
   });
 });

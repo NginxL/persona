@@ -34,6 +34,15 @@ class OperationFeedbackTest {
         assertTrue(failureDetail(internal).contains("HTTP 503"))
     }
 
+    @Test fun launcherRetryCapabilityLossUsesWebWordingWithoutLeakingTheInternalError() {
+        val error = persona.core.contracts.api.LauncherRetryUnsupportedException()
+        val feedback = operationFeedback(error)
+
+        assertEquals(UiText.Res(R.string.designsystem_retry_launcher_unsupported), feedback.text)
+        assertEquals(FailureAction.None, feedback.action)
+        assertEquals(feedback.text, failureReasonText(error))
+    }
+
     @Test fun codeOverridesWordingAndOfflineNoticesAreLimitedPerKind() = runTest {
         val input = HubFailure(HubError.Server, "超时失败", code = "input_draft", delivered = "none", retryable = true)
         val changed = HubFailure(HubError.Server, "完全不同的文字", code = "input_draft", delivered = "none", retryable = true)

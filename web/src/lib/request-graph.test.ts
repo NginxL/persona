@@ -120,6 +120,39 @@ describe("requests", () => {
     expect(active.find((r) => r.key === "todo:broke")!.nodes[0].state).toBe("failed");
   });
 
+  it("keeps cancelled requests and pieces out of Done, including a mixed terminal request", () => {
+    const todos = [
+      todo("cancelled-root", { done_at: at(30) }),
+      todo("cancelled-a", { part_of: "cancelled-root", done_at: at(31), cancelled_at: at(31), cancelled_reason: "Owner stopped it" }),
+      todo("cancelled-b", { part_of: "cancelled-root", done_at: at(32), cancelled_at: at(32) }),
+      todo("mixed-root", { done_at: at(40) }),
+      todo("mixed-done", { part_of: "mixed-root", done_at: at(41) }),
+      todo("mixed-cancelled", { part_of: "mixed-root", done_at: at(42), cancelled_at: at(42) }),
+      todo("complete", { done_at: at(50) }),
+    ];
+    const g = graph(todos);
+    expect(g.active).toEqual([]);
+    expect(g.done.map((r) => r.key)).toEqual(["todo:complete"]);
+    expect(g.cancelled.map((r) => r.key)).toEqual(["todo:mixed-root", "todo:cancelled-root"]);
+    const cancelled = g.cancelled.find((r) => r.key === "todo:cancelled-root")!;
+    expect(cancelled.nodes.map((n) => n.state)).toEqual(["cancelled", "cancelled"]);
+    const mixed = g.cancelled.find((r) => r.key === "todo:mixed-root")!;
+    expect(node(mixed, "mixed-done").state).toBe("done");
+    expect(node(mixed, "mixed-cancelled").state).toBe("cancelled");
+  });
+
+  it("keeps a cancelled parent with ordinary Done pieces out of Done and preserves its root card", () => {
+    const g = graph([
+      todo("parent", { done_at: at(30), cancelled_at: at(30), cancelled_reason: "Owner stopped the request" }),
+      todo("piece", { part_of: "parent", done_at: at(31) }),
+    ]);
+    expect(g.active).toEqual([]);
+    expect(g.done).toEqual([]);
+    expect(g.cancelled.map((r) => r.key)).toEqual(["todo:parent"]);
+    expect(g.cancelled[0].merged).toBe(false);
+    expect(node(g.cancelled[0], "piece").state).toBe("done");
+  });
+
   it("draws a leader's workers among its Agents (a closed one ended), not as requests of their own, and lists earlier Agents last", () => {
     const todos = [
       todo("lead", { agents: [link("L"), link("old", { released_at: at(2) })] }),
@@ -280,10 +313,11 @@ describe("root × piece: when one card stands for both", () => {
   it.each(cases)("$name", (c) => {
     const { todos, sessions } = caseTodos(c, at, todo);
     const g = graph(todos, sessions);
-    const req = [...g.active, ...g.done].find((r) => r.key === `todo:r-${caseKey(c)}`)!;
+    const req = [...g.active, ...g.done, ...g.cancelled].find((r) => r.key === `todo:r-${caseKey(c)}`)!;
     expect(req.kind).toBe("parent");
-    expect({ state: node(req, `p-${caseKey(c)}`).state, merged: req.merged, done: req.done, filed: g.done.includes(req) ? "done" : "active" })
-      .toEqual({ state: c.state, merged: c.merged, done: c.done, filed: c.done ? "done" : "active" });
+    const filed = g.done.includes(req) ? "done" : g.cancelled.includes(req) ? "cancelled" : "active";
+    expect({ state: node(req, `p-${caseKey(c)}`).state, merged: req.merged, done: req.done, filed })
+      .toEqual({ state: c.state, merged: c.merged, done: c.done, filed: c.cancelled ? "cancelled" : c.done ? "done" : "active" });
     // a merged block has no connectors; a split one has the root's
     expect(req.edges.map((e) => e.from)).toEqual(c.merged ? [] : ["root"]);
     // never a done-looking card standing for an open request
@@ -294,7 +328,7 @@ describe("root × piece: when one card stands for both", () => {
     const all = MERGE_CASES.map((c) => caseTodos(c, at, todo));
     const g = graph(all.flatMap((x) => x.todos), all.flatMap((x) => x.sessions));
     for (const c of MERGE_CASES) {
-      const req = [...g.active, ...g.done].find((r) => r.key === `todo:r-${caseKey(c)}`)!;
+      const req = [...g.active, ...g.done, ...g.cancelled].find((r) => r.key === `todo:r-${caseKey(c)}`)!;
       expect([req.merged, req.done], caseName(c)).toEqual([c.merged, c.done]);
     }
   });
@@ -303,7 +337,7 @@ describe("root × piece: when one card stands for both", () => {
     for (const kind of Object.keys(PIECES) as PieceKind[]) {
       const lone = todo(`solo-${kind}`, { title: "Rename", ...PIECES[kind].patch(at) });
       const lg = graph([lone], (PIECES[kind] as { sessions?: (a: typeof at) => Session[] }).sessions?.(at) ?? []);
-      const r = [...lg.active, ...lg.done][0];
+      const r = [...lg.active, ...lg.done, ...lg.cancelled][0];
       expect([r.kind, r.merged], kind).toEqual(["single", true]);
     }
     const r = graph([], [], { p: plan("p", "open", [task("Rename", { brief: { request: { text: "Rename", at: at(0) } } as PlanTask["brief"] })]) }).active[0];

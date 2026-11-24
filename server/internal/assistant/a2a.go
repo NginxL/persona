@@ -12,6 +12,7 @@ import (
 
 	"github.com/nwverse/persona/server/internal/assistantwire"
 	"github.com/nwverse/persona/server/internal/db"
+	"github.com/nwverse/persona/server/internal/devicewire"
 	"github.com/nwverse/persona/server/internal/identity"
 	"github.com/nwverse/persona/server/internal/proto"
 )
@@ -51,7 +52,9 @@ type a2aStore interface {
 	A2ACount(context.Context, string, string, string, string, string, *time.Time) (int, error)
 	A2AUpdate(context.Context, db.A2ARow, time.Time, *time.Time) (bool, error)
 	A2AClaim(context.Context, int) ([]db.A2ARow, error)
+	A2AReady(context.Context, string, string) error
 	A2ADispatches(context.Context, string, string, string, time.Time) ([]db.A2ARow, error)
+	A2ALaunchesForTargets(context.Context, string, []string) ([]db.A2ARow, error)
 }
 
 type a2aRef struct {
@@ -66,14 +69,16 @@ type a2aCaller struct {
 
 type a2aEvent struct {
 	// Seq is the position in the task's append-only conversation.
-	Seq       int       `json:"seq"`
-	ID        string    `json:"message_id"`
-	Kind      string    `json:"kind"`
-	Text      string    `json:"text,omitempty"`
-	State     string    `json:"state,omitempty"`
-	At        time.Time `json:"at"`
-	Delivery  string    `json:"delivery,omitempty"`
-	Attempted time.Time `json:"attempted,omitzero"`
+	Seq            int       `json:"seq"`
+	ID             string    `json:"message_id"`
+	Kind           string    `json:"kind"`
+	Text           string    `json:"text,omitempty"`
+	State          string    `json:"state,omitempty"`
+	At             time.Time `json:"at"`
+	Delivery       string    `json:"delivery,omitempty"`
+	Attempted      time.Time `json:"attempted,omitzero"`
+	WaitingSince   time.Time `json:"waiting_since,omitzero"`
+	DeliveryReason string    `json:"delivery_reason,omitempty"`
 }
 
 type a2aBody struct {
@@ -85,14 +90,16 @@ type a2aBody struct {
 }
 
 type a2aLaunch struct {
-	CWD        string `json:"cwd"`
-	Worktree   string `json:"worktree,omitempty"`
-	Launcher   string `json:"launcher,omitempty"`
-	Pending    bool   `json:"pending"`
-	Dispatch   bool   `json:"dispatch,omitempty"`
-	Branch     string `json:"branch,omitempty"`
-	Title      string `json:"title,omitempty"`
-	PromptHash string `json:"prompt_hash,omitempty"`
+	CWD            string `json:"cwd"`
+	Worktree       string `json:"worktree,omitempty"`
+	Launcher       string `json:"launcher,omitempty"`
+	PermissionMode string `json:"permission_mode,omitempty"`
+	Pending        bool   `json:"pending"`
+	Dispatch       bool   `json:"dispatch,omitempty"`
+	Subagent       bool   `json:"subagent,omitempty"`
+	Branch         string `json:"branch,omitempty"`
+	Title          string `json:"title,omitempty"`
+	PromptHash     string `json:"prompt_hash,omitempty"`
 }
 
 type a2aTask struct {
@@ -147,6 +154,9 @@ func (s *Service) a2aConfig(ctx context.Context) assistantwire.A2AConfig {
 }
 
 func (s *Service) a2aStore() (a2aStore, error) {
+	if s.store == nil {
+		return nil, errA2AUnavailable
+	}
 	st, ok := s.store().(a2aStore)
 	if !ok || st == nil {
 		return nil, errA2AUnavailable
@@ -167,32 +177,86 @@ func (s *Service) a2aMachineAllowed(ctx context.Context, cfg assistantwire.A2ACo
 }
 
 // Persona binds callers to Node-attested sessions and keeps discovery and delivery
-// within the owning manager's confirmed computers.
+// within the owning manager's confirmed computers. Peer discovery and unsolicited
+// peer sends exclude subagents; A2A-launched subagents remain eligible as the target
+// endpoint of their own launch task (a2aTaskEndpointAllowed / a2aToolAllowed).
 func (s *Service) a2aAllowed(ctx context.Context, cfg assistantwire.A2AConfig, ref a2aRef) bool {
+	return s.a2aEndpointAllowed(ctx, cfg, ref, false)
+}
+
+func (s *Service) a2aEndpointAllowed(ctx context.Context, cfg assistantwire.A2AConfig, ref a2aRef, allowSubagent bool) bool {
 	if ref.Session == "" || !s.a2aMachineAllowed(ctx, cfg, ref.Machine) || s.conversationAvailable(ctx, ref.Machine, ref.Session) != nil {
 		return false
 	}
 	if machine := s.logicalExecutionMachine(ctx, ref.Machine, ref.Session); machine != ref.Machine && !s.a2aMachineAllowed(ctx, cfg, machine) {
 		return false
 	}
-	if row, ok := s.nodeSession(ref.Machine, ref.Session); ok && (!a2aVisible(row) || s.hiddenByDirectory(ref.Machine, row)) {
+	if !allowSubagent && s.isA2ASubagent(ctx, ref) {
 		return false
+	}
+	if row, ok := s.nodeSession(ref.Machine, ref.Session); ok {
+		visible := a2aDiscoverable(row)
+		if allowSubagent {
+			visible = a2aEndpointVisible(row)
+		}
+		if !visible || s.hiddenByDirectory(ref.Machine, row) {
+			return false
+		}
 	}
 	if row, ok, _ := s.archivedRow(ctx, ref.Machine, ref.Session); ok && row.Archived {
 		return false
 	}
 	_, guest, err := s.guestOf(ctx, ref.Machine, ref.Session)
-	return err == nil && !guest && !s.inHealth(ctx, ref.Session)
+	return err == nil && !guest && !s.selfPolicy(ctx, ref.Session).HideFromExtensions
+}
+
+// a2aTaskEndpointAllowed permits an A2A-launched subagent to act as the target endpoint
+// of its own launch task while keeping peer discovery closed to subagents.
+func (s *Service) a2aTaskEndpointAllowed(ctx context.Context, cfg assistantwire.A2AConfig, ref a2aRef, t *a2aTask) bool {
+	allowSubagent := t != nil && t.Launch != nil && t.target() == ref
+	return s.a2aEndpointAllowed(ctx, cfg, ref, allowSubagent)
+}
+
+// a2aToolAllowed checks whether ref may invoke A2A tools (peers, plus A2A-launched
+// subagents reporting or reading their own task).
+func (s *Service) a2aToolAllowed(ctx context.Context, cfg assistantwire.A2AConfig, ref a2aRef) bool {
+	return s.a2aEndpointAllowed(ctx, cfg, ref, s.isA2ASubagent(ctx, ref))
+}
+
+// a2aDiscoverable reports whether session may appear in peer discovery and accept
+// new unsolicited A2A requests. Subagents are always excluded.
+func a2aDiscoverable(session proto.Session) bool {
+	return a2aEndpointVisible(session) && !session.IsSubagent
+}
+
+// a2aEndpointVisible checks session visibility without rejecting subagents, for
+// task-bound delivery and observation of an A2A-launched subagent's own task.
+func a2aEndpointVisible(session proto.Session) bool {
+	return !session.Archived && !session.IsDeleted() && !session.HiddenByDirectory() &&
+		runSpace(session) == "" // any space: a2aEndpointVisible has no registry, so it fails closed
 }
 
 func a2aVisible(session proto.Session) bool {
-	return !session.Archived && !session.IsDeleted() && !session.HiddenByDirectory() && !session.IsSubagent &&
-		session.Space != identity.SpaceHealth && !identity.InHealthSpace(session.Cwd)
+	return a2aDiscoverable(session)
 }
 
 func a2aSendable(session proto.Session) bool {
-	return a2aVisible(session) &&
-		(session.Capabilities == nil && session.SourceKind == "" || session.Capabilities != nil && session.Capabilities.Send)
+	return a2aDiscoverable(session) && a2aCanSendCapability(session)
+}
+
+func a2aEndpointSendable(session proto.Session) bool {
+	return a2aEndpointVisible(session) && a2aCanSendCapability(session)
+}
+
+func a2aTaskSendable(session proto.Session, t *a2aTask, to a2aRef) bool {
+	if t != nil && t.Launch != nil && t.target() == to {
+		return a2aEndpointSendable(session)
+	}
+	return a2aSendable(session)
+}
+
+func a2aCanSendCapability(session proto.Session) bool {
+	return session.Capabilities == nil && session.SourceKind == "" || session.Capabilities != nil && session.Capabilities.Send
 }
 
 func (s *Service) a2aSession(ctx context.Context, cfg assistantwire.A2AConfig, ref a2aRef) (proto.Session, error) {
@@ -241,7 +305,7 @@ func (s *Service) a2aSave(ctx context.Context, st a2aStore, t *a2aTask) error {
 	}
 	t.Body = raw
 	var next *time.Time
-	if !a2aTerminal(t.State) || slices.ContainsFunc(t.Events, a2aActiveDelivery) {
+	if t.State != a2aQueued && (!a2aTerminal(t.State) || slices.ContainsFunc(t.Events, a2aActiveDelivery)) {
 		now := time.Now().Add(time.Second)
 		next = &now
 	}
@@ -260,6 +324,9 @@ func (s *Service) a2aSave(ctx context.Context, st a2aStore, t *a2aTask) error {
 		return errA2AConflict
 	}
 	t.Revision++
+	if a2aTerminal(t.State) {
+		s.a2aSignal()
+	}
 	return nil
 }
 
@@ -268,32 +335,52 @@ func a2aActiveDelivery(e a2aEvent) bool {
 }
 
 func (s *Service) a2aStart(ctx context.Context, st a2aStore, cfg assistantwire.A2AConfig, c a2aCaller, to a2aRef, id, contextID, text string, wake bool, launch *a2aLaunch) (*a2aTask, error) {
+	if !a2aValidID(id) || !a2aValidText(text) || contextID != "" && !a2aValidID(contextID) {
+		return nil, errA2AInvalid
+	}
 	if launch != nil {
 		if c.Ref.Session == "" || to.Session != "" || contextID != "" {
 			return nil, errA2AInvalid
 		}
-		if cfg.Machines == nil && !s.hello(ctx).Agents.Dispatch.On() {
-			return nil, fmt.Errorf("%w: starting a remote session requires Agent dispatch to be enabled", errA2AUnavailable)
-		}
 		dev, ok := s.machineByName(ctx, to.Machine)
-		if !ok || dev.ID != to.Machine || !a2aValidText(launch.CWD) || identity.InHealthSpace(launch.CWD) {
+		if !ok || dev.ID != to.Machine || !s.a2aMachineAllowed(ctx, cfg, to.Machine) || !a2aValidText(launch.CWD) || s.trackPolicy(ctx, identity.SpaceAt(launch.CWD)).HideFromExtensions {
 			return nil, errA2AUnavailable
 		}
+		launch.PermissionMode = strings.TrimSpace(launch.PermissionMode)
+		launch.Subagent = true
 		launch.CWD = proto.ExpandHome(launch.CWD, dev.Home)
+		// Check for an idempotent retry BEFORE validating current launch toggle or caller permission,
+		// so a caller recovering from a lost launch reply is never blocked by later policy/mode changes.
+		if old, err := decodeA2A(st.A2ARequest(ctx, c.Owner, id)); old != nil || err != nil {
+			return a2aCheckRetry(old, err, to, contextID, text, wake, launch)
+		}
+		if !cfg.LaunchAllowed() {
+			return nil, fmt.Errorf("%w: starting new A2A subagent sessions is disabled by configuration", errA2AUnavailable)
+		}
+		if launch.PermissionMode != "" {
+			mode, err := s.a2aLaunchPermissionMode(ctx, c.Ref, launch.PermissionMode)
+			if err != nil {
+				return nil, err
+			}
+			launch.PermissionMode = mode
+		}
 		to.Session = newStartSessionID()
 		s.dispatch.admit.Lock()
 		defer s.dispatch.admit.Unlock()
 	}
-	if !a2aValidID(id) || !a2aValidText(text) || contextID != "" && !a2aValidID(contextID) || to == c.Ref {
+	if to == c.Ref {
 		return nil, errA2AInvalid
 	}
-	if !s.a2aAllowed(ctx, cfg, to) {
+	if !s.a2aEndpointAllowed(ctx, cfg, to, launch != nil) {
 		return nil, errA2AUnavailable
 	}
 	if old, err := decodeA2A(st.A2ARequest(ctx, c.Owner, id)); old != nil || err != nil {
 		return a2aCheckRetry(old, err, to, contextID, text, wake, launch)
 	}
 	if launch == nil {
+		if c.Ref.Session != "" && !s.a2aAllowed(ctx, cfg, c.Ref) {
+			return nil, errA2AUnavailable
+		}
 		if _, err := s.a2aSession(ctx, cfg, to); err != nil {
 			return nil, err
 		}
@@ -317,7 +404,62 @@ func (s *Service) a2aStart(ctx context.Context, st a2aStore, cfg assistantwire.A
 	t.append(a2aEvent{ID: id, Kind: "message", Text: text, State: a2aSubmitted, Delivery: a2aQueued})
 	t.Body, _ = json.Marshal(t.a2aBody)
 	created, err := decodeA2A(st.A2ACreate(ctx, t.A2ARow))
-	return a2aCheckRetry(created, err, to, contextID, text, wake, launch)
+	out, err := a2aCheckRetry(created, err, to, contextID, text, wake, launch)
+	if err == nil && out != nil && out.Launch != nil {
+		s.recordA2ASubagent(out)
+	}
+	return out, err
+}
+
+// a2aPermissionRank assigns an explicit privilege rank to every supported permission mode.
+// Unknown or unmapped modes return (_, false) and fail closed — never silently treated as plan.
+func a2aPermissionRank(mode string) (int, bool) {
+	switch mode {
+	case "plan":
+		return 0, true
+	case "default":
+		return 1, true
+	case "acceptEdits":
+		return 2, true
+	case "auto":
+		return 3, true
+	case "bypassPermissions":
+		return 4, true
+	default:
+		return -1, false
+	}
+}
+
+// a2aLaunchPermissionMode validates an explicit permission_mode on an A2A launch.
+// "plan" is always permitted. Any higher mode requires live node-attested SourcePermission
+// evidence bound to the calling session (never a cached session-list snapshot, #9671) and
+// fails closed when missing or insufficient:
+//   - prompting attestation permits at most "default" (interactive approval on every write/command);
+//   - bypass attestation permits any allowlisted mode up to "bypassPermissions".
+func (s *Service) a2aLaunchPermissionMode(ctx context.Context, caller a2aRef, requested string) (string, error) {
+	requested = strings.TrimSpace(requested)
+	reqRank, ok := a2aPermissionRank(requested)
+	if !ok || !slices.Contains(proto.PermissionModes, requested) {
+		return "", fmt.Errorf("%w: unsupported permission_mode %q", errA2AInvalid, requested)
+	}
+	if reqRank == 0 {
+		return "plan", nil
+	}
+	proof := devicewire.SourcePermissionFrom(ctx)
+	if !proof.Valid() || proof.Session != caller.Session {
+		return "", fmt.Errorf("%w: permission_mode %q requires live source-node permission attestation; omit permission_mode or use \"plan\"", errA2AInvalid, requested)
+	}
+	maxRank := -1
+	switch proof.Class {
+	case "prompting":
+		maxRank = 1 // "default"
+	case "bypass":
+		maxRank = 4 // "bypassPermissions"
+	}
+	if reqRank > maxRank {
+		return "", fmt.Errorf("%w: requested permission_mode %q exceeds live source permission class %q", errA2AInvalid, requested, proof.Class)
+	}
+	return requested, nil
 }
 
 func a2aCheckRetry(t *a2aTask, err error, to a2aRef, contextID, text string, wake bool, launch *a2aLaunch) (*a2aTask, error) {
@@ -331,7 +473,7 @@ func a2aCheckRetry(t *a2aTask, err error, to a2aRef, contextID, text string, wak
 	textMatches := t.Events[0].Text == text
 	if t.Launch != nil && launch != nil {
 		targetMatches = t.TargetMachine == to.Machine && t.Launch.CWD == launch.CWD && t.Launch.Launcher == launch.Launcher &&
-			t.Launch.Dispatch == launch.Dispatch && t.Launch.Branch == launch.Branch
+			t.Launch.PermissionMode == launch.PermissionMode && t.Launch.Dispatch == launch.Dispatch && t.Launch.Branch == launch.Branch
 		if t.Launch.Dispatch {
 			textMatches = t.Launch.PromptHash == launch.PromptHash
 		}
@@ -354,10 +496,10 @@ func (s *Service) a2aGet(ctx context.Context, st a2aStore, cfg assistantwire.A2A
 }
 
 func (s *Service) a2aTaskVisible(ctx context.Context, cfg assistantwire.A2AConfig, c a2aCaller, t *a2aTask) bool {
-	if t.SourceSession != "" && !s.a2aAllowed(ctx, cfg, t.source()) {
+	if t.SourceSession != "" && !s.a2aTaskEndpointAllowed(ctx, cfg, t.source(), t) {
 		return false
 	}
-	return s.a2aAllowed(ctx, cfg, t.target()) ||
+	return s.a2aTaskEndpointAllowed(ctx, cfg, t.target(), t) ||
 		t.Owner == c.Owner && s.a2aMachineAllowed(ctx, cfg, t.TargetMachine) &&
 			(t.TargetClosed || a2aTerminal(t.State) && s.a2aEndpointClosed(ctx, cfg, t.target()))
 }
@@ -439,7 +581,7 @@ func a2aCancel(t *a2aTask) (bool, error) {
 		t.append(a2aEvent{ID: randomHex(16), Kind: "status", State: a2aCanceled})
 		return true, nil
 	}
-	if t.State != a2aSubmitted {
+	if t.State != a2aSubmitted && t.State != a2aQueued {
 		return false, errA2ACancel
 	}
 	for i := len(t.Events) - 1; i >= 0; i-- {

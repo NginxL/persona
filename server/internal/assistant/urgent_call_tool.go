@@ -65,6 +65,9 @@ type urgentAsk struct {
 	Rule          string `json:"rule"`
 	Happening     string `json:"happening"`
 	InteractionID string `json:"interaction_id"`
+	// matter is the matter's key kept from its own title when only its words, not its track, redacted it: redacted
+	// titles all read alike and would make unrelated matters one (urgentMatter).
+	matter string
 }
 
 // toolUrgentCall is urgent_call: ring the owner's phone about a matter, when the gates let it; otherwise the matter
@@ -87,8 +90,12 @@ func (s *Service) toolUrgentCall(ctx context.Context, machine, self string, args
 	if s.justMeNow(machine, self) {
 		return justMeNotice(s.lang(ctx)), nil
 	}
-	if s.inHealth(ctx, self) { // the lock screen hears there is news, not what it is (health.go)
-		a.Title, a.Body = healthNotice(s.lang(ctx))
+	// The lock screen hears there is news, not what it is, when what it would say is redacted (health.go).
+	if space, _ := s.selfSpace(ctx, self); s.exitPolicy(ctx, a.Title+"\n"+a.Body, self, space).Redact {
+		if !s.trackPolicy(ctx, space).Redact {
+			a.matter = urgentMatter(a)
+		}
+		a.Title, a.Body = s.redactedNotice(ctx, s.lang(ctx), space)
 	}
 	a.Title = clipRunesTo(a.Title, urgentTitleMax)
 	st := s.urgentStore()
@@ -128,6 +135,9 @@ func (s *Service) toolUrgentCall(ctx context.Context, machine, self string, args
 func urgentMatter(a urgentAsk) string {
 	if a.InteractionID != "" {
 		return "ix:" + a.InteractionID
+	}
+	if a.matter != "" {
+		return a.matter
 	}
 	return "title:" + strings.ToLower(a.Title)
 }
@@ -248,7 +258,7 @@ func (s *Service) urgentFallback(ctx context.Context, machine, self string, a ur
 	if body == "" {
 		body = a.Happening
 	}
-	res, err := s.pushResult(ctx, Notification{Subtitle: "Persona", DeviceID: machine, SessionID: self, Title: a.Title, Body: body,
+	res, err := s.pushResult(withCard(ctx, cardUrgentCall), Notification{Subtitle: "Persona", DeviceID: machine, SessionID: self, Title: a.Title, Body: body,
 		Asked: true, Level: assistantwire.LevelP0, RelatedKey: "urgent:" + urgentMatter(a)})
 	if err != nil {
 		return "", err
@@ -326,7 +336,7 @@ func (s *Service) ring(ctx context.Context, c db.UrgentCall) assistantwire.CallR
 // urgentPush pushes a call's matter at P0 (a missed call, a declined one, a reminder, one that could not ring), to
 // the phone and the Feishu bot and channels, opening the conversation.
 func (s *Service) urgentPush(ctx context.Context, c db.UrgentCall, title, body string) {
-	s.push(ctx, Notification{Subtitle: "Persona", DeviceID: c.MachineID, SessionID: c.Conversation, Title: title, Body: body,
+	s.push(withCard(ctx, cardUrgentCall), Notification{Subtitle: "Persona", DeviceID: c.MachineID, SessionID: c.Conversation, Title: title, Body: body,
 		Level: assistantwire.LevelP0, RelatedKey: "urgent:" + c.ID + ":" + randomHex(2)})
 	s.channelsPushed(c.MachineID, c.Conversation, title, body)
 }

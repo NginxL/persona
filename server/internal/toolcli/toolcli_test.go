@@ -297,6 +297,7 @@ func TestKindBeforeWords(t *testing.T) {
 		retry int
 	}{
 		{proto.ErrorResult(proto.ToolErrorDeclined, "主人在手机上拒绝了", 0), exitDeclined, 0},
+		{proto.ErrorResult(proto.ToolErrorUnanswered, "Nobody answered the confirmation card on the phone", 0), exitUnanswered, 0},
 		{proto.ErrorResult(proto.ToolErrorUnavailable, "Telegram 没登录", 0), exitUnavailable, 0},
 		{proto.ErrorResult(proto.ToolErrorRateLimited, "too many requests", 30), exitRateLimited, 30},
 		{proto.ErrorResult(proto.ToolErrorRateLimited, "Telegram is not available: Telegram 限流，12 秒后再试", 0), exitRateLimited, 12},

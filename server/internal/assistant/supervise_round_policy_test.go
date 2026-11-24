@@ -23,13 +23,13 @@ import (
 
 // mainOnlySignals are the signals the instructions' background line leaves to the main conversation; their handling
 // rules name the tools a round withholds (task_start_screen, task_start_keys, task_retry, conversation_send).
-var mainOnlySignals = []string{sigFailed, sigStarted, sigEscalated, sigLeaderStuck}
+var mainOnlySignals = []string{sigFailed, sigStarted, sigEscalated, sigLeaderStuck, sigTodoReady}
 
-// backgroundSignals are the signals digestTo sends the background supervisor for the main conversation's tasks:
-// every kind but mainOnlySignals.
+// backgroundSignals are the signals an existing background conversation can receive for explicitly addressed legacy
+// notices. Without that explicit legacy target, all of them stay with main for new assistant-dispatched work (#5732).
 var backgroundSignals = []string{sigReview, sigIdle, sigUnjudged, sigNeedsYou, sigStalled, sigNoProgress, sigTimedOut, sigAllStopped, sigInterrupted,
-	sigPRConflict, sigDraftPR, sigReport, sigOrphaned, sigAsk, sigDecide, sigDecisionReply, sigRecheck, sigUndecidable,
-	sigOwnerCannot, sigParkedDue, sigParkDecided, sigInbox, sigOverdue, sigCheck}
+	sigPRConflict, sigDraftPR, sigPRMerged, sigReport, sigOrphaned, sigAsk, sigDecide, sigDecisionReply, sigRecheck, sigUndecidable, sigDeliveryHold, sigCardlessWait,
+	sigOwnerCannot, sigParkedDue, sigParkedSummary, sigParkDecided, sigInbox, sigNeedsUserExternalInfo, sigOverdue, sigCheck}
 
 // roundConnectorTools are the round's tools that come with the Lark extension (lark_search) or the lark-cli connector
 // (larkcli_search) rather than the assistant's own list.
@@ -139,6 +139,8 @@ func roundMessage(lang string) string {
 			e.Detail = "the model service answered 529"
 		case sigDraftPR:
 			e.Detail = prompts.RenderDraftPR(prompts.DraftPR{Language: lang, URL: "https://github.com/example/repo/pull/1", Head: "abc123"})
+		case sigPRMerged:
+			e.Detail = prompts.RenderPRMergedWake(prompts.PRMergedWake{Language: lang, PRURL: "https://github.com/example/repo/pull/1"})
 		case sigReport:
 			e.Report, e.Said, e.Evidence, e.Step, e.Steps = "question", "Should it keep the old API?", []string{"https://example.com/log"}, 2, 3
 		case sigOrphaned:
@@ -162,6 +164,9 @@ func roundMessage(lang string) string {
 		case sigInbox:
 			e.Inbox = &prompts.SuperviseInbox{Item: "in1", Title: "Release thread", Sender: "A colleague", Preview: "Is it out?",
 				Count: 2, URL: "https://github.com/example/repo/issues/2", ToAgent: "sent"}
+		case sigNeedsUserExternalInfo:
+			e.ExternalInfo = &prompts.NeedsUserExternalInfo{Language: lang, Source: "PR status", Summary: "PR #12 merged",
+				PendingQuestion: "Merge PR #12 now?", PendingRecommend: "Merge after review"}
 		}
 		entries = append(entries, e)
 	}
@@ -201,7 +206,7 @@ var roundPassingMentions = map[string][]string{
 	"kb_search":          {"kb_list"},
 	"schedule_followup":  {"inbox_post"},
 	"supervision_finish": {"ask_user"},
-	"task_plan":          {"kb_list", "repositories_list", "repository_get", "task_retry"},
+	"task_plan":          {"kb_list", "repositories_list", "repository_get", "task_retry", "agent_transfer"},
 	"task_review":        {"agent_start"},
 	"task_scope":         {"agent_supervise", "ask_user"},
 	"todo_get":           {"todo_repository_links_add"},
@@ -356,39 +361,37 @@ func TestBackgroundSnapshotLeavesOutWhatOnlyMainActsOn(t *testing.T) {
 	}
 }
 
-// The signals the background line leaves to the main conversation go there while a background supervisor follows up
-// the main conversation's tasks; every other one comes to it, a decision reply of the owner's included.
-func TestBackgroundRoundNeverGetsMainOnlySignals(t *testing.T) {
+// New task signals stay with main, including every kind a Fresh legacy round can render. Only an explicitly addressed
+// old notice goes to the already configured background conversation; main-only signals never change that default.
+func TestBackgroundRoundGetsOnlyExplicitLegacySignals(t *testing.T) {
 	s, f, todo := newBackgroundService(t)
 	f.setSessions("server", proto.Session{SessionID: "conv1", MachineID: "server", Assistant: true, Status: proto.StatusIdle},
 		proto.Session{SessionID: "bg1", MachineID: "server", Assistant: true, Status: proto.StatusIdle})
 	setSettings(t, s, func(v *Settings) { v.BackgroundSupervisor, v.BackgroundSupervisorMachineID = "bg1", "server" })
 	cfg := s.settings(context.Background())
-	if own := s.ownSupervisor(cfg); own != "bg1" {
-		t.Fatalf("the main conversation's tasks are followed up by %q, not the background supervisor", own)
+	if own := s.ownSupervisor(cfg); own != "conv1" {
+		t.Fatalf("new tasks are followed up by %q, not the main conversation", own)
 	}
-	for _, kind := range mainOnlySignals {
-		if got := s.digestTo(cfg, superviseSignal{Todo: todo.ID, Kind: kind}); got != "conv1" {
-			t.Errorf("%s of a task the background supervisor follows up goes to %q, not the main conversation", kind, got)
+	for _, kind := range append(slices.Clone(mainOnlySignals), backgroundSignals...) {
+		if got := s.digestTo(context.Background(), cfg, superviseSignal{Todo: todo.ID, Kind: kind}); got != "conv1" {
+			t.Errorf("new %s goes to %q, not the main conversation", kind, got)
 		}
 	}
 	for _, kind := range backgroundSignals {
-		if got := s.digestTo(cfg, superviseSignal{Todo: todo.ID, Kind: kind}); got != "bg1" {
-			t.Errorf("%s goes to %q, not the background supervisor", kind, got)
+		if got := s.digestTo(context.Background(), cfg, superviseSignal{Todo: todo.ID, Kind: kind, To: "bg1"}); got != "bg1" {
+			t.Errorf("explicit legacy %s goes to %q, not the existing background conversation", kind, got)
 		}
 	}
 	for name, g := range map[string]superviseSignal{
-		"a review":                           {Todo: todo.ID, Kind: sigReview},
-		"a waiting agent":                    {Todo: todo.ID, Kind: sigNeedsYou},
-		"a decision the owner cannot answer": {Todo: todo.ID, Kind: sigOwnerCannot},
-		"a decision to recheck":              {Todo: todo.ID, Kind: sigRecheck},
-		"a decision nobody can answer":       {Todo: todo.ID, Kind: sigUndecidable},
-		"the owner's reply to a decision":    {Todo: todo.ID, Kind: sigDecisionReply},
-		"a task leader's decision for main":  {Todo: todo.ID, Kind: sigDecide, To: "conv1"},
-		"a card held by it":                  {Todo: todo.ID, Kind: sigAsk, To: "bg1"},
+		"a task leader's decision for main":    {Todo: todo.ID, Kind: sigDecide, To: "conv1"},
+		"a card held by the legacy background": {Todo: todo.ID, Kind: sigAsk, To: "bg1"},
 	} {
-		if got := s.digestTo(cfg, g); got != "bg1" {
-			t.Errorf("%s goes to %q, not the background supervisor", name, got)
+		want := "bg1"
+		if g.To == "conv1" {
+			want = "conv1"
+		}
+		if got := s.digestTo(context.Background(), cfg, g); got != want {
+			t.Errorf("%s goes to %q, want %q", name, got, want)
 		}
 	}
 }
@@ -435,6 +438,9 @@ func TestBackgroundRoundAsksTheOwnerWithNeedsUser(t *testing.T) {
 			name = "the bot on"
 		}
 		t.Run(name, func(t *testing.T) {
+			if bot {
+				needsLarkLayer(t)
+			}
 			var s *Service
 			var f *fakeHub
 			var todo Todo
@@ -449,8 +455,8 @@ func TestBackgroundRoundAsksTheOwnerWithNeedsUser(t *testing.T) {
 				s, f, todo = newBackgroundService(t)
 			}
 			waitsForReview(t, s, f, todo.ID, "Two ways: roll out to 10% first, or to everyone.")
-			bg := backgroundID(t, s)
-			listBackground(t, s, f, bg)
+			bg := withBackgroundBG1(t, s, f)
+			wakeRound(s, superviseSignal{Todo: todo.ID, Kind: sigReview, Key: "legacy-review"})
 			waitFor(t, "the background supervisor's message", func() bool { return len(f.noticesTo(bg)) == 1 })
 
 			raw, _ := json.Marshal(map[string]any{"todo_id": todo.ID, "verdict": "needs_user",

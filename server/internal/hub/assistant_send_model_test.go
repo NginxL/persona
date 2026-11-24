@@ -7,6 +7,7 @@ import (
 
 	"github.com/nwverse/persona/server/internal/assistant"
 	"github.com/nwverse/persona/server/internal/assistantwire"
+	"github.com/nwverse/persona/server/internal/modelhttp"
 	"github.com/nwverse/persona/server/internal/proto"
 )
 
@@ -105,8 +106,9 @@ func TestAssistantModelIsWhatThePhonesMessageRunsOn(t *testing.T) {
 	// Another conversation the hub doesn't list yet (the node just started) keeps its own: no model to say, and an
 	// explicitly empty supervision role, not an ordinary conversation's manual (#8251).
 	params, _ = json.Marshal(map[string]any{"session_id": "side"})
-	if got, err := nodeAsks(ctx, n.m, "assistant.model", params); err != nil || len(got.(map[string]any)) != 2 ||
-		got.(map[string]any)["is_main"] != false || got.(map[string]any)["supervision_instructions"] != "" {
+	if got, err := nodeAsks(ctx, n.m, "assistant.model", params); err != nil || len(got.(map[string]any)) != 3 ||
+		got.(map[string]any)["is_main"] != false || got.(map[string]any)["supervision_instructions"] != "" ||
+		got.(map[string]any)["model_source"] != (modelhttp.Source{Role: "main", Session: "side"}) {
 		t.Fatalf("an unlisted conversation: %v %v", got, err)
 	}
 }

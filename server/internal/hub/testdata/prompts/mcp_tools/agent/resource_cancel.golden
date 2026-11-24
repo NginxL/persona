@@ -1,0 +1,19 @@
+{
+  "name": "resource_cancel",
+  "description": "取消本会话持有的排队租约，加入者不能取消持有者的作业。",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "resource": {
+        "type": "string"
+      },
+      "lease_id": {
+        "type": "string"
+      }
+    },
+    "required": [
+      "resource",
+      "lease_id"
+    ]
+  }
+}

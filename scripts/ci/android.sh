@@ -18,7 +18,9 @@ usage() {
     'Accept SDK licenses using sdkmanager --licenses if required by your SDK tools.' \
     'Toolchain versions are read from android/gradle/libs.versions.toml.' \
     'No arguments runs the original complete verification. lint-build-test-0 owns checker tests,' \
-    'translation/token checks, all-module lint, the debug APK and feature test shard 0; test-1' \
+    'translation/token checks, all-module lint, the debug APK, the module guard (:app:moduleGuard),' \
+    'feature test shard 0, the :module:* tests and the app with an empty module list' \
+    '(-Ppersona.modules=: app unit tests and lint); test-1' \
     'runs core, feature shard 1, platform and app tests. Together the two lanes run every' \
     'included module once using its all-variant test lifecycle task (release unit tests included).' \
     '--profile writes Gradle timing reports to android/build/reports/profile/.' \
@@ -32,6 +34,8 @@ usage() {
 }
 LANE=full
 PROFILE=()
+# The lane that also runs the app with an empty module list (the one with room, by measured lane times).
+CORE_ALONE_LANE=lint-build-test-0
 while [[ $# -gt 0 ]]; do
   case $1 in
     --help|-h) usage; exit 0 ;;
@@ -140,10 +144,12 @@ run_check() {
 if [[ $LANE == full || $LANE == lint-build-test-0 ]]; then
   cd "$ROOT"
   run_check 'Refract About Version regeneration' python3 -I scripts/app/refract_about_version.py check --download
+  run_check 'Refract About Build regeneration' python3 -I scripts/app/refract_about_build.py check --download
   cd "$ROOT/scripts/ci"
   run_check 'Android shard coverage tests' python3 -B test_android_shards.py
   cd "$ROOT/scripts/app"
   run_check 'Refract About Version checker tests' python3 -B test_refract_about_version.py
+  run_check 'Refract About Build checker tests' python3 -B test_refract_about_build.py
   run_check 'translation checker tests' python3 -B test_android_i18n_check.py
   run_check 'token checker tests' python3 -B test_android_token_baseline.py
   run_check 'motion checker tests' python3 -B test_android_motion_baseline.py
@@ -155,6 +161,10 @@ if [[ $LANE == full || $LANE == lint-build-test-0 ]]; then
   run_check 'generated design tokens' python3 -B "$ROOT/scripts/assets/gen_tokens.py" --check \
     --kotlin "$ROOT/android/core/designsystem/src/main/kotlin/persona/core/designsystem/Tokens.kt"
   run_check 'icon meanings' python3 -B "$ROOT/scripts/assets/gen_icon_meanings.py" --check
+  # The module guard's rules (build-logic ModuleGuard); the guard itself, :app:moduleGuard, runs with the lane's tasks.
+  cd "$ROOT/android"
+  run_check 'module guard tests' bash ./gradlew --no-daemon --no-watch-fs --console=plain --max-workers="$WORKERS" \
+    -p build-logic :convention:test
 fi
 
 # The commit About shows: an explicit value, else the runner's public GITHUB_SHA, else unknown. Never read from git here.
@@ -179,6 +189,20 @@ if [[ ${#TASKS[@]} -gt 0 ]]; then
     ${PROFILE[@]+"${PROFILE[@]}"} "${TASKS[@]}"
 else
   printf 'Android CI: no modules in lane %s; no Gradle default tasks invoked\n' "$LANE"
+fi
+
+# Persona Core alone (docs/android/android.md "Modules"): the app with an empty module list must still pass its unit
+# tests and lint. Its own Gradle run, since -Ppersona.modules changes the app's dependencies and BuildConfig.
+if [[ $LANE == full || $LANE == "$CORE_ALONE_LANE" ]]; then
+  run_check 'Persona Core alone (empty module list)' bash ./gradlew \
+    --no-daemon --no-watch-fs --console=plain --stacktrace --continue \
+    --max-workers="$WORKERS" \
+    -PpersonaApplicationId=com.example.persona \
+    -PpersonaGoogleOAuthScheme=persona.oauth.unset \
+    -PpersonaRepoRoot="$ROOT" \
+    -PpersonaBuildCommit="$BUILD_COMMIT" \
+    -Ppersona.modules= \
+    ${PROFILE[@]+"${PROFILE[@]}"} :app:testDebugUnitTest :app:lintDebug
 fi
 
 if [[ ${#FAILED[@]} -ne 0 ]]; then

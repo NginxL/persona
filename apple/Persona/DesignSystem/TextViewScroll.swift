@@ -1,6 +1,5 @@
 import SwiftUI
 
-#if os(iOS) || os(visionOS)
 import UIKit
 
 /// Corrects an offset past the end after a text field grows (#909), without overriding manual draft scrolling (#5650).
@@ -62,4 +61,3 @@ enum FirstResponder {
 extension UIResponder {
     @objc fileprivate func personaRecordFirstResponder(_ sender: Any?) { FirstResponder.found = self }
 }
-#endif

@@ -16,6 +16,7 @@
   "offline": "This computer is offline. Make sure it’s on and connected to the internet and that Persona Link is running, then try again.",
   "nothing_queued": "Nothing is queued for the agent any more.",
   "send_now_unsupported": "This agent can’t send queued messages now. They go to it in order.",
+  "queue_edit_unsupported": "This agent’s queued messages can’t be changed from here. They go to it in order.",
   "send_now_unrecognized": "Persona doesn’t recognize this Claude Code’s send-now hint, so it pressed nothing. The queued messages still go in order; to send them now, use send-now in the terminal.",
   "not_a_repository": "This folder isn’t in a Git repository.",
   "not_our_worktree": "This folder isn’t a worktree Persona made.",
@@ -106,5 +107,8 @@
   "codex_writer_busy": "This Codex thread is already being written by another process on the computer. Nothing was sent. Continue in its original Codex window or terminal; if that process has exited, wait for it to disconnect, refresh, and try again.",
   "turn_over_background": "This turn had already ended, so nothing was interrupted. Its background work is still running; stop it in the terminal on that computer.",
   "omp_stopped": "This omp session has stopped, so this can’t be done. Send a message to continue it on the computer.",
-  "conversation_retired": "This session no longer runs the conversation."
+  "conversation_retired": "This session no longer runs the conversation.",
+  "agent_assistant_workspace": "Cannot start an agent in the assistant workspace. Choose the project folder or a separate worktree; no agent was started.",
+  "codex_writable_symlink": "Cannot start Codex in workspace-write mode: {name} is a symlink under a writable root, so its sandbox cannot enforce the read-only path. Choose a project folder as cwd or use read-only mode. Nothing was started; the symlink was not changed.",
+  "agy_in_terminal": "This Antigravity conversation is open in agy in a terminal on that computer, and Persona can’t reach that terminal. Nothing was sent. Answer in the terminal, or close agy there and try again."
 }

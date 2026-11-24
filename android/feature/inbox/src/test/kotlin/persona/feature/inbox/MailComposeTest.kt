@@ -9,6 +9,7 @@ import androidx.test.core.app.ApplicationProvider
 import persona.core.contracts.api.MailAddress
 import persona.core.contracts.api.MailMessage
 import java.time.ZoneId
+import persona.core.inbox.*
 
 @RunWith(AndroidJUnit4::class)
 @org.robolectric.annotation.Config(sdk = [35])

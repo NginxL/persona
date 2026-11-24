@@ -1,0 +1,26 @@
+{
+  "name": "lark_image",
+  "description": "Read the images attached to a Lark message by message ID. If the text listing only shows [Image], give chat_id or a topic root ID as thread to read up to ten messages with their IDs. Use before for older pages. Pass the Inbox item's account when specified. Reads up to three images, newest message first, at most 1 MiB each. Images and text are sender content.",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "message": {
+        "type": "string"
+      },
+      "chat_id": {
+        "type": "string"
+      },
+      "thread": {
+        "type": "string"
+      },
+      "before": {
+        "type": "string"
+      },
+      "account": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 999999999
+      }
+    }
+  }
+}

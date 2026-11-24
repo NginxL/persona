@@ -32,7 +32,7 @@ request (`ShellState.show`, `ShellState.swift:91-93`) and starts the drawer's cl
 | New Chat | `go(.newConversation)` | Assistant's root, new conversation | dropped, as above |
 | Inbox, To-dos, Machines, extension pages | `go` → `show` → `path.append(ShellRoute…)` (`apple/Persona/Views/Shell/ShellHome.swift:429-442`) | `NavigationStack` push on Assistant | the place in front and its sub-pages are dropped first; back returns to the conversation, also when it was opened from Agents |
 | Scheduled Tasks, Knowledge, Profile, Recordings | `go` → `show` → `show… = true` (`AssistantView.swift:247-257`) | push by `navigationDestination(isPresented:)` | dropped first, as above; these pushes are not in `path` at all |
-| Health | `go(.health)` → `enterHealth()` (`AssistantView.swift:397-410`) | the latest health conversation, or a push of Health | dropped first |
+| Health | `go(.health)` → `enterHealth()` → `backToRoot(); present(.health)` in `AssistantView.swift` | the Health home (#13273), with its conversation list; a page root in the embedded Sidebar layout | returned to the root before presentation |
 | Settings | `ShellView.swift:105-108` | `.sheet` on the shell (`ShellView.swift:30-36`) | the drawer closes under the rising sheet; closing Settings lands on the page, not the drawer it came from |
 | Archived, Auto conversations | `AssistantSidebar.swift:904-915`, presented from the drawer's own hosting view | sheet over the drawer | picking a row dismisses the sheet, closes the drawer and resets the stack in the same turn |
 | Search (iPhone Duo open) | `AssistantSidebar.swift:917-923` | `fullScreenCover` | as Archived |
@@ -261,5 +261,30 @@ Scheduled Tasks are not navigation destinations on Android; picking them shows t
 meeting, a Persona conversation's card set to Full page) is a new entry naming that page, so Back returns to it and the
 Agent's page offers "Came from … · click to return"; the sidebar keeps that page's row lit while the Agent is shown
 (`web/src/lib/persona-nav.ts` `sidebarRoute`, `docs/web/web.md` "An Agent opened from inside a page is a drill-down"). An
-Agent picked in the sidebar is a root and lights its own row.
+Agent picked in the sidebar is a root and lights its own row. Reselecting the open Agent replaces its drill-down entry
+without adding a history entry, clearing the origin and the way-back strip at the same address. Set to Full page, the
+main conversation keeps the page it opened last while another place is in front (#13164, `pickMainChat` in
+`web/src/lib/handoff.ts`): Main Chat picked from there opens it again over the conversation, so Back returns to the
+conversation; picked while the conversation or its page is in front, it goes to the bare conversation.
 
+## 7. To-dos places under the To-dos row (#10465)
+
+On iOS, against a hub with `todo_view` and from #10465's switch-on, the To-dos row in the drawer and the sidebar folds open
+the To-dos places (`docs/design/proposals/todos-redesign.md` 3.3; DESIGN_SYSTEM 3.5 "To-dos places"): **Today**,
+**Upcoming**, up to five **projects**, then **All Projects…**. They are children of To-dos, not places of their own:
+
+- A child is drawn as a sidebar row set in under To-dos (`TodoPlaceRows` draws them through `AssistantSidebar`'s own row),
+  and picking one is picking To-dos (`ShellPage.todos`, `ShellRoute.todos`) on that place (`TodoWorkspace.open`). The
+  shaded row is the place shown while To-dos is the page: To-dos itself for All To-dos, else the child; a place whose
+  child is not in sight shades All Projects… for a project, else To-dos.
+- The rules above hold with one addition: To-dos opened for another place starts at its root, never animated, and drops
+  what it kept, which belonged to the place before (`ShellPlaces.enter(fresh:)` on the iPhone shell,
+  `SidebarPageRoots.select(fresh:)` for the Sidebar layout's page; `ShellPlacesTests`, `SidebarPageRootsTests`). The same
+  place picked again is the tab-bar rule as before.
+- The To-dos row brings To-dos back as it was left, on its last place (kept for the app's run), as every place comes
+  back (option 2, and option 3's kept drill-down); where To-dos is the place in front, beside the sidebar or under the
+  drawer and whatever is pushed on it, it is All To-dos, To-dos' root. The page that opens To-dos decides from its own
+  state, as it decides the tab-bar rule (`TodoWorkspace.opening(inFront:)`: `ShellPlaces.current`, the Sidebar layout's
+  root, the classic page).
+- All Projects… is a task: its sheet opens over the drawer and a project picked in it opens after the sheet has gone.
+- The list's title menu ("All To-dos ⌄") is the same places a second way, inside the page: it changes the list in place.

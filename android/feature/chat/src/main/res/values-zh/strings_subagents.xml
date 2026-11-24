@@ -1,9 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="chat_subagent_label">子 Agent</string>
-    <string name="chat_subagent_untitled">子 Agent 任务</string>
-    <string name="chat_subagent_expand_details">展开子 Agent 详情</string>
-    <string name="chat_subagent_collapse_details">收起子 Agent 详情</string>
+    <string name="chat_subagent_label">子智能体</string>
+    <string name="chat_subagent_untitled">子智能体任务</string>
+    <string name="chat_subagent_expand_details">展开子智能体详情</string>
+    <string name="chat_subagent_collapse_details">收起子智能体详情</string>
     <string name="chat_subagent_show_full_result">展开完整结果</string>
     <string name="chat_subagent_hide_full_result">收起结果</string>
     <string name="chat_subagent_status_running">运行中</string>

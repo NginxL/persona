@@ -7,13 +7,12 @@
     <string name="app_show_list">Show list</string>
     <string name="app_tab_settings">Settings</string>
     <string name="app_demo_badge">Demo</string>
-    <string name="app_try_demo">No hub? Try the demo</string>
+    <string name="app_try_demo">Demo</string>
     <string name="app_back">Back</string>
     <string name="app_unavailable_phone_tools">No phone tools in this mode</string>
     <string name="app_demo_no_terminal">The demo has no terminal data</string>
     <string name="app_demo_no_machines">The demo has no machine monitoring data</string>
-    <string name="app_demo_no_knowledge">The demo has no knowledge base data</string>
-    <string name="app_demo_no_voice">The demo has no voice chat</string>
+    <string name="app_page_unavailable">This page isn\'t available right now</string>
     <string name="app_pane_agents_title">Pick a session</string>
     <string name="app_pane_agents_detail">Sessions and terminals on the left open here.</string>
     <string name="app_pane_inbox_title">Pick a message</string>

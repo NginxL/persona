@@ -13,5 +13,6 @@
   "bad_model": "This model isn't available now",
   "safeguards": "The model's safeguards flagged this message",
   "conversation_invalid": "Conversation invalid: its compacted context belongs to another account. Start a new conversation to continue.",
-  "invalid_label": "Invalid conversation"
+  "invalid_label": "Invalid conversation",
+  "images_too_large": "This conversation has too many or too large pictures."
 }

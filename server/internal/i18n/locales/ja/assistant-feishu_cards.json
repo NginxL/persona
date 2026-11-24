@@ -206,5 +206,9 @@
   "board_nudged": "催促済み",
   "board_verdict": "{title}：{verdict}",
   "moved_to_todos": "ToDo に移しました",
-  "model_list_truncated": "一覧は省略されています。すべてのモデルはモデル設定で確認してください。"
+  "model_list_truncated": "一覧は省略されています。すべてのモデルはモデル設定で確認してください。",
+  "by_assistant": "アシスタントが代わりに回答：{how}",
+  "by_default": "既定で選択：{how}",
+  "by_terminal": "ターミナルで決定：{how}",
+  "by_other": "本人以外が回答：{how}"
 }

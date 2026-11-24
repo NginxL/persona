@@ -11,12 +11,6 @@ struct CloudflareAccessFields: View {
     var idPrefix: String
 
     var body: some View {
-        #if os(macOS)
-        TextField(String(localized: "Client ID"), text: $clientID, prompt: Text("Required"))
-            .autocorrectionDisabled()
-            .accessibilityIdentifier(idPrefix + ".id")
-        SecretField(String(localized: "Client Secret"), text: $clientSecret, identifier: idPrefix + ".secret")
-        #else
         LabeledContent {
             TextField(String(localized: "Client ID"), text: $clientID, prompt: Text("Required"))
                 .multilineTextAlignment(.trailing)
@@ -33,7 +27,6 @@ struct CloudflareAccessFields: View {
         } label: {
             Text("Client Secret").lineLimit(1)
         }
-        #endif
     }
 }
 
@@ -113,9 +106,6 @@ struct HubCloudflareAccessPage: View {
             }
         }
         .themedPage()
-        #if os(macOS)
-        .formStyle(.grouped)
-        #endif
         .accessibleConfirmationDialog("Remove Service Token?", isPresented: $clearing, titleVisibility: .visible) {
             Button("Remove Service Token", role: .destructive) {
                 model.setHubAccess(nil, hub: hubID)

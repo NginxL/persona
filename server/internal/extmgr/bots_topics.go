@@ -10,9 +10,11 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/nwverse/persona/server/internal/botport"
+
 	"github.com/nwverse/persona/server/internal/assistantwire"
+	"github.com/nwverse/persona/server/internal/botcard"
 	"github.com/nwverse/persona/server/internal/channel"
-	"github.com/nwverse/persona/server/internal/feishubot"
 	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/rpc"
 )
@@ -145,7 +147,10 @@ var errNoTopicOwner = i18n.Err("hub-bots.topic_needs_owner")
 func (h *Manager) topicChatsPossible(ctx context.Context, appID *string) error {
 	b := &h.bots
 	b.mu.Lock()
-	h.loadBotsLocked(ctx)
+	if err := h.loadBotsLocked(ctx); err != nil {
+		b.mu.Unlock()
+		return err
+	}
 	owner, saved := b.set.Owner != nil, b.set.AppID
 	b.mu.Unlock()
 	if !owner {
@@ -163,7 +168,10 @@ func (h *Manager) topicChatsPossible(ctx context.Context, appID *string) error {
 func (h *Manager) setTopicChats(ctx context.Context, want []BotChat, keepHome bool, mentionEdits map[string]bool) error {
 	b := &h.bots
 	b.mu.Lock()
-	h.loadBotsLocked(ctx)
+	if err := h.loadBotsLocked(ctx); err != nil {
+		b.mu.Unlock()
+		return err
+	}
 	if b.set.Owner == nil {
 		nothing := len(want) == 0 && len(b.set.TopicChats) == 0 // read under the lock
 		b.mu.Unlock()
@@ -247,7 +255,7 @@ const (
 // topicsCmd reads the owner's message as the command that opts a group in or out: /topics or /话题群 (a full-width
 // slash too), alone or with "on" / "off" (关) or "home" (主群 in Chinese), after the @ of the bot that a group
 // message may start with. ok is false for any other text, which is then an ordinary message.
-func topicsCmd(text string, mentions []feishubot.Mention) (cmd string, ok bool) {
+func topicsCmd(text string, mentions []botcard.Mention) (cmd string, ok bool) {
 	t := strings.TrimSpace(text)
 	for stripped := true; stripped; {
 		stripped = false
@@ -289,7 +297,7 @@ func topicsCmd(text string, mentions []feishubot.Mention) (cmd string, ok bool) 
 // botGroupMessage takes a message from a group chat (not the bot's private chat): see the five conditions above, and
 // the owner's "@bot /ai …" from a group that is not on the list (botAIElsewhere). Every one that fails is a plain return:
 // no note, no reaction, nothing in the chat.
-func (h *Manager) botGroupMessage(api *feishubot.Client, set FeishuBotSettings, ev feishubot.MessageEvent, raw json.RawMessage, since time.Time, pass func()) {
+func (h *Manager) botGroupMessage(api botport.Client, set FeishuBotSettings, ev botcard.MessageEvent, raw json.RawMessage, since time.Time, pass func()) {
 	msg := ev.Message
 	if set.Owner == nil || ev.Sender.SenderID.OpenID != set.Owner.OpenID || msg.ChatID == "" {
 		return // not paired, or not the owner: in a group anyone could write to the owner's Persona
@@ -297,12 +305,12 @@ func (h *Manager) botGroupMessage(api *feishubot.Client, set FeishuBotSettings, 
 	// Apply the group's current policy before settings commands or any topic side effect.
 	if i := slices.IndexFunc(set.TopicChats, func(c BotChat) bool { return c.ChatID == msg.ChatID }); i >= 0 && set.TopicChats[i].RequireOwnerMention {
 		botID := h.botOpenID(api)
-		if botID == "" || !slices.ContainsFunc(msg.Mentions, func(m feishubot.Mention) bool { return m.ID.OpenID == botID }) {
+		if botID == "" || !slices.ContainsFunc(msg.Mentions, func(m botcard.Mention) bool { return m.ID.OpenID == botID }) {
 			return
 		}
 	}
 	if msg.MessageType == "text" || msg.MessageType == "post" {
-		content := feishubot.ParseContent(msg.MessageType, msg.Content, msg.Mentions)
+		content := botcard.ParseContent(msg.MessageType, msg.Content, msg.Mentions)
 		if cmd, ok := topicsCmd(content.Text, msg.Mentions); ok && !content.Forward {
 			// The list is changed before the next message is let go: the one right after /topics off must not pass the
 			// gate, and the one right after /topics must.
@@ -339,29 +347,29 @@ func (h *Manager) botGroupMessage(api *feishubot.Client, set FeishuBotSettings, 
 // rich-text message (a merged forward is nothing to run), that @-mentions the bot, whose words, the leading @ of the bot
 // taken off, start with /ai. It is kept as a source (the bot may reply to it, aiSourceReply), audited, and handed to the
 // assistant marked FeishuFromElsewhere. Anything else is dropped without a word, as every message of such a group was.
-func (h *Manager) botAIElsewhere(api *feishubot.Client, set FeishuBotSettings, ev feishubot.MessageEvent, raw json.RawMessage, since time.Time, pass func()) {
+func (h *Manager) botAIElsewhere(api botport.Client, set FeishuBotSettings, ev botcard.MessageEvent, raw json.RawMessage, since time.Time, pass func()) {
 	msg := ev.Message
 	if msg.MessageType != "text" && msg.MessageType != "post" || msg.MessageID == "" {
 		return
 	}
-	content := feishubot.ParseContent(msg.MessageType, msg.Content, msg.Mentions)
+	content := botcard.ParseContent(msg.MessageType, msg.Content, msg.Mentions)
 	if content.Forward {
 		return
 	}
 	// Cheap first, from the text alone: what does not start with /ai (after the @s it starts with) is not asked about the
 	// bot at all, so a group's ordinary messages cost no call.
-	if _, ok := feishubot.AICommand(feishubot.StripLeadingMentions(content.Text, msg.Mentions, nil)); !ok {
+	if _, ok := botcard.AICommand(content.StripLeadingMentions(msg.Mentions, nil)); !ok {
 		return
 	}
 	botID := h.botOpenID(api)
 	if botID == "" {
 		return // the bot cannot tell which @ is its own: nothing is taken
 	}
-	isBot := func(m feishubot.Mention) bool { return m.ID.OpenID == botID }
+	isBot := func(m botcard.Mention) bool { return m.ID.OpenID == botID }
 	if !slices.ContainsFunc(msg.Mentions, isBot) {
 		return
 	}
-	if _, ok := feishubot.AICommand(feishubot.StripLeadingMentions(content.Text, msg.Mentions, isBot)); !ok {
+	if _, ok := botcard.AICommand(content.StripLeadingMentions(msg.Mentions, isBot)); !ok {
 		return
 	}
 	h.takeAISource(msg.ChatID, msg.MessageID, "")
@@ -371,7 +379,7 @@ func (h *Manager) botAIElsewhere(api *feishubot.Client, set FeishuBotSettings, e
 
 // botOpenID is the bot's own open id, which tells its @ from anyone else's: read at start-up, and once more here when
 // that did not work.
-func (h *Manager) botOpenID(api *feishubot.Client) string {
+func (h *Manager) botOpenID(api botport.Client) string {
 	b := &h.bots
 	b.mu.Lock()
 	id := b.info.OpenID
@@ -541,22 +549,6 @@ func (h *Manager) messageChat(id string) string {
 	return b.msgChat.m[id]
 }
 
-// rememberHandedGroup notes a group message handed to the assistant: only a recall of one of these is passed on.
-func (h *Manager) rememberHandedGroup(id string) {
-	b := &h.bots
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	b.handedGroup.put(id, "")
-}
-
-func (h *Manager) handedGroupMessage(id string) bool {
-	b := &h.bots
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	_, ok := b.handedGroup.m[id]
-	return ok
-}
-
 var errBotReplyChat = &rpc.Error{Code: assistantwire.CodeChatDenied, Message: "feishu: a reply goes into the chat of the message it answers, and that chat is not one the bot may send into"}
 
 // checkReplyParent refuses a reply whose parent message is in a chat the bot may not send into: a reply lands in the
@@ -565,14 +557,14 @@ var errBotReplyChat = &rpc.Error{Code: assistantwire.CodeChatDenied, Message: "f
 // chat the bot may use). A parent that is withdrawn or deleted cannot be replied to at all, so the send falls back to
 // the chat the call names (replyOrSend), which botSendChat checked: the chat returned is "" then. A chat that cannot be
 // told is refused. With no parent there is nothing to check.
-func (h *Manager) checkReplyParent(ctx context.Context, api *feishubot.Client, set FeishuBotSettings, replyTo string) (string, error) {
+func (h *Manager) checkReplyParent(ctx context.Context, api botport.Client, set FeishuBotSettings, replyTo string) (string, error) {
 	if replyTo == "" {
 		return "", nil
 	}
 	chat := h.messageChat(replyTo)
 	if chat == "" {
 		items, err := api.Message(ctx, replyTo)
-		if feishubot.MessageGone(err) {
+		if botcard.MessageGone(err) {
 			return "", nil
 		}
 		if err != nil {

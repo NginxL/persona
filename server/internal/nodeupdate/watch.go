@@ -26,6 +26,7 @@ type pending struct {
 	From           string `json:"from"`
 	OldHash        string `json:"old_sha256"`
 	NewHash        string `json:"new_sha256"`
+	Adopted        bool   `json:"adopted,omitempty"` // confirmation only; the executable belongs to another deployment
 	PID            int    `json:"pid"`
 	ProcessStart   string `json:"process_start"`
 	ProcessPrecise string `json:"process_start_precise,omitempty"` // exact instance identity; absent in older markers
@@ -95,10 +96,30 @@ func loadPending(path string) (pending, error) {
 		p.WatchPID, p.WatchStart, p.WatchPrecise = ready.PID, ready.Start, ready.Precise
 	}
 	id, idErr := hex.DecodeString(p.ID)
-	if idErr != nil || len(id) != 16 || filepath.Clean(p.Exe) != p.Exe || filepath.IsAbs(p.Exe) == false || markerPath(p.Exe) != path || p.Backup != backupPath(p.Exe, p.ID) || filepath.Dir(p.Stage) != filepath.Dir(p.Exe) || !strings.HasPrefix(filepath.Base(p.Stage), ".node-update-stage-") || p.PID < 2 || len(p.OldHash) != 64 || len(p.NewHash) != 64 || p.Deadline.IsZero() {
+	if idErr != nil || len(id) != 16 || filepath.Clean(p.Exe) != p.Exe || filepath.IsAbs(p.Exe) == false || markerPath(p.Exe) != path || filepath.Dir(p.Stage) != filepath.Dir(p.Exe) || !strings.HasPrefix(filepath.Base(p.Stage), ".node-update-stage-") || len(p.NewHash) != 64 || p.Deadline.IsZero() {
+		return p, errors.New("invalid node update transaction marker")
+	}
+	if p.Adopted && (p.Backup != "" || p.OldHash != "") ||
+		!p.Adopted && (p.Backup != backupPath(p.Exe, p.ID) || p.PID < 2 || len(p.OldHash) != 64) {
 		return p, errors.New("invalid node update transaction marker")
 	}
 	return p, nil
+}
+
+// A later transaction can replace the confirmation record for an external install.
+// A pending swap still owns rollback and must complete first.
+func checkPendingSwap(exe string) error {
+	p, err := loadPending(markerPath(exe))
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if p.Adopted {
+		return nil
+	}
+	return errors.New("a node update is awaiting confirmation")
 }
 
 // Recover startup before opening sockets. A new version that missed its deadline
@@ -115,6 +136,13 @@ func (m *Manager) recover() error {
 		sum, err := fileHash(m.exe)
 		if err != nil {
 			return err
+		}
+		if p.Adopted {
+			if sum != p.NewHash {
+				return cleanup(p)
+			}
+			_ = os.Remove(p.Stage) // also handles an interruption after saving the marker
+			return m.cleanStaleStages("")
 		}
 		if sum == p.OldHash {
 			// A supervisor may have loaded the new inode just before rollback.
@@ -312,6 +340,9 @@ func WatchManaged(ctx context.Context, path, id string) error {
 	if p.ID != id {
 		return errors.New("node watchdog transaction mismatch")
 	}
+	if p.Adopted {
+		return nil
+	}
 	birth, err := processStart(os.Getpid())
 	if err != nil {
 		return err
@@ -361,6 +392,9 @@ func Watch(ctx context.Context, path, id string, ready io.Writer) error {
 	if p.ID != id {
 		return errors.New("node watchdog transaction mismatch")
 	}
+	if p.Adopted {
+		return nil
+	}
 	if ready != nil {
 		if _, err := ready.Write([]byte{1}); err != nil {
 			return err
@@ -382,7 +416,7 @@ func Watch(ctx context.Context, path, id string, ready io.Writer) error {
 			if err != nil {
 				return err
 			}
-			if current.ID != id {
+			if current.ID != id || current.Adopted {
 				done = true
 				return nil
 			}
@@ -443,6 +477,9 @@ func Watch(ctx context.Context, path, id string, ready io.Writer) error {
 // transaction's own staged build, rechecked through one descriptor right before
 // the swap; an external deployment racing the rollback keeps its file.
 func restore(p pending) error {
+	if p.Adopted {
+		return errSuperseded
+	}
 	sum, err := fileHash(p.Backup)
 	if err != nil {
 		return fmt.Errorf("node rollback backup: %w", err)
@@ -459,7 +496,9 @@ func cleanup(p pending) error {
 	if err := os.Remove(markerPath(p.Exe)); err != nil && !os.IsNotExist(err) {
 		return err
 	}
-	discard(p.Backup) // the watchdog may still run from it
+	if !p.Adopted {
+		discard(p.Backup) // the watchdog may still run from it
+	}
 	_ = os.Remove(p.Stage)
 	removeRetired(filepath.Dir(p.Exe))
 	return syncDir(filepath.Dir(p.Exe))

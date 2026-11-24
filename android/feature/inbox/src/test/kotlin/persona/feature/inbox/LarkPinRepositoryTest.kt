@@ -11,6 +11,7 @@ import persona.core.contracts.api.LarkConversationTransport
 import persona.core.contracts.api.LarkInvalidation
 import persona.core.hub.HubError
 import persona.core.hub.HubFailure
+import persona.core.inbox.*
 
 /** "Pinned messages" through [LarkInboxRepository]: what each hub answer turns into (iOS `LarkChatPinsModel`). */
 class LarkPinRepositoryTest {

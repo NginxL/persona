@@ -26,7 +26,7 @@ func (h *Hub) deviceRoutes(api *http.ServeMux) {
 		d.Locale = string(i18n.Resolve(d.Locale)) // its pushes' language; "" (an older app) is the user's
 		d.CredentialID = principalOf(r.Context()).ID
 		d.Credential = d.CredentialID
-		if err := h.push.register(d); err != nil {
+		if err := h.push.registerContext(r.Context(), d); err != nil {
 			if errors.Is(err, db.ErrPushRegistrationConflict) {
 				writeErr(w, http.StatusConflict, i18n.Err("http-status.conflict"))
 				return

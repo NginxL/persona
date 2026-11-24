@@ -1,8 +1,16 @@
 """android_build_perf.py's arithmetic: the histogram gfxinfo prints, the percentiles and shares read from it, medians,
 the order packages run in, which starts count as cold, and the links a release build is opened with."""
+from contextlib import redirect_stdout
 import importlib.util
+import io
+import json
+import os
 import pathlib
+import subprocess
+import sys
+import tempfile
 import unittest
+from unittest.mock import patch
 
 spec = importlib.util.spec_from_file_location("android_build_perf", pathlib.Path(__file__).with_name("android_build_perf.py"))
 perf = importlib.util.module_from_spec(spec)
@@ -69,6 +77,49 @@ class AndroidBuildPerfTest(unittest.TestCase):
         both = perf.scenarios("server/s-1", None)
         self.assertEqual(both["chat"], "persona://open?tab=agents&machine=server&session=s-1")
         self.assertEqual(list(perf.scenarios("server/s-1", ["chat"])), ["chat"])
+
+    def test_failed_or_incomplete_round_preserves_complete_sample(self):
+        for failure, expected in (
+                ("reset", "adb shell dumpsys failed (exit 1)"),
+                ("swipe", "adb shell input failed (exit 1)"),
+                ("read", "adb shell dumpsys failed (exit 1)"),
+                ("Total frames rendered: 0\nJanky frames: 0", "gfxinfo did not report a usable frame sample"),
+                ("Total frames rendered: 10", "gfxinfo did not report a usable frame sample"),
+                ("Total frames rendered: 10\nJanky frames: 11", "gfxinfo did not report a usable frame sample")):
+            with self.subTest(failure=failure), tempfile.TemporaryDirectory() as directory:
+                out = pathlib.Path(directory) / "out.json"
+                reads = 0
+
+                def adb(command, **kwargs):
+                    nonlocal reads
+                    args = command[4:]
+                    stage, stdout = None, ""
+                    if args == ["wm", "size"]:
+                        stdout = "Physical size: 1080x2400"
+                    elif args[:2] == ["dumpsys", "gfxinfo"] and args[-1] == "reset":
+                        stage = "reset"
+                    elif args[:2] == ["input", "swipe"]:
+                        stage = "swipe"
+                    elif args[:2] == ["dumpsys", "gfxinfo"]:
+                        stage, stdout = "read", failure if reads else GFXINFO
+                    if reads and stage == failure:
+                        if kwargs.get("check"):
+                            raise subprocess.CalledProcessError(1, command)
+                        return subprocess.CompletedProcess(command, 1, "")
+                    reads += stage == "read"
+                    return subprocess.CompletedProcess(command, 0, stdout)
+
+                argv = ["android_build_perf", "synthetic", str(out), "debug=test.app"]
+                with (patch.object(sys, "argv", argv), patch.dict(os.environ, {"CHAT": "", "ONLY": "agents"}),
+                      patch.object(perf, "RUNS", 2), patch.object(perf, "COLD", 0), patch.object(perf.time, "sleep"),
+                      patch.object(perf.subprocess, "run", side_effect=adb), redirect_stdout(io.StringIO())):
+                    with self.assertRaises(SystemExit) as error:
+                        perf.main()
+                    self.assertEqual(str(error.exception), expected)
+                saved = json.loads(out.read_text())["debug/agents"]
+                self.assertEqual(saved["runs"], [{"total": 10, "janky": 2}])
+                self.assertEqual((saved["frames_total"], saved["janky_percent_total"]), (10, 20.0))
+                self.assertEqual(saved["frame_ms"]["frames"], 10)
 
 
 if __name__ == "__main__":

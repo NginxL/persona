@@ -38,7 +38,7 @@ beforeEach(async () => {
   resetManagerChoice(); setRosterDefault("assistant");
   vi.mocked(toast).mockClear();
   host = document.createElement("div"); document.body.append(host); root = createRoot(host);
-  stored = { manager: "assistant", notes: "", agent_tasks: false, inbox_signals: false, main_supervises_own_tasks: false, background_supervisor: "bg" }; writes = []; answer = undefined;
+  stored = { manager: "assistant", notes: "", agent_tasks: false, inbox_signals: false, inbox_todo_forward: false, main_supervises_own_tasks: false, background_supervisor: "bg" }; writes = []; answer = undefined;
   vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const path = String(input).split("?")[0];
     if (path.endsWith("/assistant")) {
@@ -92,4 +92,13 @@ it("has neither the row nor the model link on a hub before it", async () => {
   expect(row()).toBeNull();
   expect(modelLink()).toBeUndefined();
   expect(host.textContent).toContain("Agent follow-up"); // the group's other rows stay
+});
+
+it("toggles inbox_todo_forward off by default and persists only its own field", async () => {
+  await render();
+  const fwdSwitch = host.querySelector<HTMLButtonElement>(`[role="switch"][aria-label="${t("settings-assistantsettings.inbox_todo_forward")}"]`);
+  expect(fwdSwitch?.getAttribute("aria-checked")).toBe("false");
+  await click(fwdSwitch!);
+  expect(writes).toEqual([{ inbox_todo_forward: true }]);
+  expect(fwdSwitch?.getAttribute("aria-checked")).toBe("true");
 });

@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/nwverse/persona/server/internal/botcard"
 	"github.com/nwverse/persona/server/internal/db"
-	"github.com/nwverse/persona/server/internal/feishubot"
 	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/proto"
 )
@@ -93,7 +93,7 @@ func TestWorkbenchOffChangesNothing(t *testing.T) {
 	if js := e.s.startAgentCard(context.Background(), "").JSON(); strings.Contains(js, `"name":"mode"`) {
 		t.Fatalf("/start has a permission field with the workbench off: %s", js)
 	}
-	if _, err := e.s.botPost(context.Background(), "", feishubot.NewCard("t", feishubot.Blue, "t").Markdown("hello"), ""); err != nil {
+	if _, err := e.s.botPost(context.Background(), "", botcard.NewCard("t", botcard.Blue, "t").Markdown("hello"), ""); err != nil {
 		t.Fatal(err)
 	}
 	if js := e.postJSON(-1); strings.Contains(js, `"to":"home"`) {
@@ -162,7 +162,7 @@ func TestWorkbenchButtonOnEveryCard(t *testing.T) {
 	if js := e.postJSON(0); strings.Contains(js, `"to":"home"`) {
 		t.Fatalf("the home card links to itself: %s", js)
 	}
-	card := feishubot.NewCard("t", feishubot.Blue, "t").Markdown("an answer")
+	card := botcard.NewCard("t", botcard.Blue, "t").Markdown("an answer")
 	if _, err := e.s.botPost(context.Background(), "", card, ""); err != nil {
 		t.Fatal(err)
 	}
@@ -174,7 +174,7 @@ func TestWorkbenchButtonOnEveryCard(t *testing.T) {
 	}
 	e.setFeatures(FeishuFeatures{Main: true, Agents: true})
 	_, _ = e.s.feishuFeatures(context.Background())
-	if _, err := e.s.botPost(context.Background(), "", feishubot.NewCard("t", feishubot.Blue, "t").Markdown("later"), ""); err != nil {
+	if _, err := e.s.botPost(context.Background(), "", botcard.NewCard("t", botcard.Blue, "t").Markdown("later"), ""); err != nil {
 		t.Fatal(err)
 	}
 	if js := e.postJSON(-1); strings.Contains(js, `"to":"home"`) {
@@ -183,7 +183,7 @@ func TestWorkbenchButtonOnEveryCard(t *testing.T) {
 }
 
 // buttonPayload finds a button by its localized label anywhere in a card, including a form.
-func buttonPayload(t *testing.T, card *feishubot.Card, label string) map[string]any {
+func buttonPayload(t *testing.T, card *botcard.Card, label string) map[string]any {
 	t.Helper()
 	var root any
 	if err := json.Unmarshal([]byte(card.JSON()), &root); err != nil {
@@ -237,7 +237,7 @@ func behaviorPayload(t *testing.T, button map[string]any, kind string) map[strin
 func TestWorkbenchFooterKeepsNavigationTogether(t *testing.T) {
 	e := newWorkbenchEnv(t, workbenchOnFeatures)
 	t.Run("navigation", func(t *testing.T) {
-		card := feishubot.NewCard("", "", "answer").Note("Main chat").Buttons(feishubot.LinkBtn("Open on web", "https://example.com"))
+		card := botcard.NewCard("", "", "answer").Note("Main chat").Buttons(botcard.LinkBtn("Open on web", "https://example.com"))
 		e.s.workbenchStamp(context.Background(), card)
 		if got := strings.Count(card.JSON(), `"tag":"column_set"`); got != 1 {
 			t.Fatalf("navigation actions occupy %d rows: %s", got, card.JSON())
@@ -265,7 +265,7 @@ func TestWorkbenchFooterKeepsNavigationTogether(t *testing.T) {
 		}
 	})
 	t.Run("callbacks stay independent", func(t *testing.T) {
-		card := feishubot.NewCard("", "", "approval").Buttons(feishubot.Btn("Allow", feishubot.Primary, map[string]any{"allow": true}))
+		card := botcard.NewCard("", "", "approval").Buttons(botcard.Btn("Allow", botcard.Primary, map[string]any{"allow": true}))
 		e.s.workbenchStamp(context.Background(), card)
 		if got := strings.Count(card.JSON(), `"tag":"column_set"`); got != 2 {
 			t.Fatalf("an approval action was merged with navigation: %s", card.JSON())
@@ -276,9 +276,9 @@ func TestWorkbenchFooterKeepsNavigationTogether(t *testing.T) {
 		}
 	})
 	t.Run("mixed actions stay independent", func(t *testing.T) {
-		card := feishubot.NewCard("", "", "approval").Buttons(
-			feishubot.LinkBtn("Open on web", "https://example.com"),
-			feishubot.Btn("Allow", feishubot.Primary, map[string]any{"allow": true}))
+		card := botcard.NewCard("", "", "approval").Buttons(
+			botcard.LinkBtn("Open on web", "https://example.com"),
+			botcard.Btn("Allow", botcard.Primary, map[string]any{"allow": true}))
 		e.s.workbenchStamp(context.Background(), card)
 		if got := strings.Count(card.JSON(), `"tag":"column_set"`); got != 2 {
 			t.Fatalf("a mixed action row was merged with navigation: %s", card.JSON())
@@ -292,8 +292,8 @@ func TestWorkbenchFooterKeepsNavigationTogether(t *testing.T) {
 		}
 	})
 	t.Run("form callbacks stay independent", func(t *testing.T) {
-		card := feishubot.NewCard("", "", "form").Form("approval", nil,
-			feishubot.Submit("Send", feishubot.Primary, "send", map[string]any{"sent": true}))
+		card := botcard.NewCard("", "", "form").Form("approval", nil,
+			botcard.Submit("Send", botcard.Primary, "send", map[string]any{"sent": true}))
 		e.s.workbenchStamp(context.Background(), card)
 		send := buttonPayload(t, card, "Send")
 		if send["form_action_type"] != "submit" {
@@ -305,7 +305,7 @@ func TestWorkbenchFooterKeepsNavigationTogether(t *testing.T) {
 		}
 	})
 	t.Run("size guard", func(t *testing.T) {
-		card := feishubot.NewCard("", "", "large").Markdown(strings.Repeat("x", workbenchStampMost)).Buttons(feishubot.LinkBtn("Open on web", "https://example.com"))
+		card := botcard.NewCard("", "", "large").Markdown(strings.Repeat("x", workbenchStampMost)).Buttons(botcard.LinkBtn("Open on web", "https://example.com"))
 		e.s.workbenchStamp(context.Background(), card)
 		if strings.Contains(card.JSON(), `"to":"home"`) {
 			t.Fatalf("the oversized card gained a workbench button: %d bytes", len(card.JSON()))
@@ -485,7 +485,7 @@ func TestWorkbenchInboxCardFilesAnItem(t *testing.T) {
 	if !strings.Contains(js, `"op":"draft"`) || !strings.Contains(js, `"op":"done"`) {
 		t.Fatalf("the Inbox card's buttons: %s", js)
 	}
-	var a feishubot.CardAction
+	var a botcard.CardAction
 	a.Action.Value = map[string]any{"a": "ib", "op": "done", "id": "lark:f1:1"}
 	a.Context.MessageID = "om_inbox"
 	resp := e.s.botCardAction(context.Background(), &a, "")

@@ -254,7 +254,7 @@ func TestTaskHandoffRespectsNewWorkAndOwnerDecision(t *testing.T) {
 		t.Fatal("an unrelated conversation may not send a handoff for the originating to-do")
 	}
 	f.mu.Lock()
-	f.beforeSend = func() { s.taskWorking(context.Background(), "box", "origin-a") }
+	f.beforeSend = func() { s.taskWorking(context.Background(), "box", "origin-a", startRow{}) }
 	f.mu.Unlock()
 	if _, err := sendHandoffTest(t, s, f, "conv1", a.ID, receiving.ID, head); err == nil || todoNow(s, a.ID).Supervision.State == reviewParked {
 		t.Fatal("a node acknowledgement parked a work round that had already changed")
@@ -263,7 +263,7 @@ func TestTaskHandoffRespectsNewWorkAndOwnerDecision(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s.taskWorking(context.Background(), "box", "origin-a")
+	s.taskWorking(context.Background(), "box", "origin-a", startRow{})
 	second, err := sendHandoffTest(t, s, f, "conv1", a.ID, receiving.ID, strings.Repeat("b", 40))
 	if err != nil {
 		t.Fatal(err)

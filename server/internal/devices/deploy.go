@@ -125,6 +125,7 @@ func (m *Machine) waitDeploy(ctx context.Context, run *deployRun) error {
 // beginDeployLocked starts one outcome wait for every caller that joins this deployment.
 func (m *Machine) beginDeployLocked(phase string) *deployRun {
 	m.deploying, m.deployErr, m.deployPhase = true, "", phase
+	m.deploySource, m.deployVersion = "", ""
 	m.deployRun = &deployRun{done: make(chan struct{})}
 	return m.deployRun
 }
@@ -198,7 +199,10 @@ func (m *Machine) startDeployOf(auto bool) (*deployRun, error) {
 	target := pkg.Version
 	go func() {
 		ctx := m.d.deployContext()
-		bin, err := m.d.fetchPackage(ctx, pkg) // a release's: downloaded and checked first (still "transferring")
+		bin, err := m.fetchDeployment(ctx, pkg) // a release's: downloaded and checked first (still "transferring")
+		if err == nil {
+			err = m.d.CheckDevelopmentTarget(ctx, pkg.development)
+		}
 		if err == nil {
 			err = m.deploy(ctx, bin, target)
 		}
@@ -499,6 +503,11 @@ func (m *Machine) saveDeployOutcome(ctx context.Context, target string, err erro
 		return
 	}
 	record := nodeDeployRecord{Target: target, State: "succeeded", At: time.Now().UTC()}
+	m.mu.Lock()
+	if m.deployVersion == target {
+		record.Source = m.deploySource
+	}
+	m.mu.Unlock()
 	if err != nil {
 		record.State, record.Error = "failed", err.Error()
 	}

@@ -17,6 +17,10 @@ The sources are the docs test_doc_paths.py checks plus the tracked files under S
 catalogs (their text follows the UI strings it translates) and the released files pinned by hash. Names that drifted
 in lines other open work was editing, or inside UI strings, are listed in doc_sections_known.txt (source, doc, name).
 The list only shrinks: a new miss fails, and so does an entry that no longer misses.
+
+Sections move out of the largest docs into domain docs (test_doc_paths.py, DocMoves). A name quoted after the old doc
+also resolves in the docs that took sections out of it, so the citations need not all change in the move. A known
+entry's source also stands for those docs, since the lines with its miss may have moved too.
 """
 from collections import defaultdict
 from pathlib import Path
@@ -57,22 +61,7 @@ LEAD_END = re.compile(r" \(|[.。](?:\s|$)")
 PUNCTUATION = str.maketrans("‘’“”\"–—", "'''''--")
 
 
-def strip_parenthetical(name):
-    """Drop trailing parentheticals, nested ones too: "Pairing (QR (v2))" becomes "Pairing"."""
-    name = name.rstrip()
-    while name.endswith((")", "）")):
-        depth = 0
-        for i in range(len(name) - 1, -1, -1):
-            if name[i] in ")）":
-                depth += 1
-            elif name[i] in "(（":
-                depth -= 1
-                if depth == 0:
-                    break
-        else:
-            return name
-        name = name[:i].rstrip()
-    return name
+strip_parenthetical = test_doc_paths.strip_parenthetical
 
 
 def normalize(name):
@@ -108,6 +97,7 @@ class Docs:
         self.root, self.by_name, self.cache, self.answers = root, defaultdict(list), {}, {}
         for path in paths:
             self.by_name[path.rsplit("/", 1)[-1]].append(path)
+        self.moves = test_doc_paths.DocMoves.read(Path(root), paths)
 
     def candidates(self, written):
         found = self.by_name.get(written.rsplit("/", 1)[-1], [])
@@ -120,9 +110,11 @@ class Docs:
         return self.cache[path]
 
     def has(self, written, name):
-        """None when no such doc is tracked, else whether the name resolves in one of the docs the path can mean."""
+        """None when no such doc is tracked, else whether the name resolves in one of the docs the path can mean or in
+        a doc that took sections out of one of them."""
         if (written, name) not in self.answers:
             paths = self.candidates(written)
+            paths = [doc for path in paths for doc in (path, *self.moves.split_from(path))]
             self.answers[written, name] = any(resolves(name, *self.names(p)) for p in paths) if paths else None
         return self.answers[written, name]
 
@@ -178,16 +170,21 @@ def read_known(path):
             if line and not line.startswith("#")}
 
 
-def compare(misses, known):
-    """The misses not in the known list, and the known entries that no longer miss."""
-    new = [m for m in misses if (m[0], m[2], m[3]) not in known]
-    return new, sorted(known - {(source, written, name) for source, _, written, name in misses})
+def compare(misses, known, moves=None):
+    """The misses not in the known list, and the known entries that no longer miss. With moves (a DocMoves), an
+    entry's source also stands for the docs that took sections out of it."""
+    def sources(source):
+        return [source, *moves.sources_of(source)] if moves else [source]
+
+    new = [m for m in misses if not any((source, m[2], m[3]) in known for source in sources(m[0]))]
+    still = {(each, written, name) for source, _, written, name in misses for each in sources(source)}
+    return new, sorted(known - still)
 
 
 class DocSectionTests(unittest.TestCase):
     def test_quoted_section_names_exist(self):
         misses = unresolved(ROOT, repository_sources(), git_files(ROOT, "*.md"))
-        new, stale = compare(misses, read_known(KNOWN))
+        new, stale = compare(misses, read_known(KNOWN), test_doc_paths.DocMoves.read(ROOT))
         self.assertEqual([], [f"{s}:{n}: {w} \"{name}\"" for s, n, w, name in new],
                          "these names match no heading, **bold** label, <a id> or list item's opening phrase of the "
                          "doc: change each to the section's current heading, or drop the name and keep the path")
@@ -227,6 +224,55 @@ class DocSectionTests(unittest.TestCase):
                               ("case10.go", 1, "docs/sample-guide.md", "Panel kept"),
                               ("case11.go", 1, "docs/sample-guide.md", "旧的配对")], new)
             self.assertEqual([("case0.go", "docs/sample-guide.md", "Gone")], stale)
+
+    def test_names_resolve_in_the_docs_that_took_sections_out_of_a_doc(self):
+        big = "# Big\n\n## Kept\n\n## Moved part\n\nMoved to [part.md](part.md).\n"
+        part = "# Part\n\n## Moved part\n\n### Steps\n\n**Retry**: again\n"
+        later = "<!-- moved-from: docs/protocol/part.md -->\n# Later\n\n## Deeper\n"
+        cases = [  # (source line, reported as a miss once part.md says it took sections out of big.md)
+            ('docs/protocol/big.md "Kept"', False),
+            ('docs/protocol/big.md "Moved part"', False),  # the pointer heading stays in big.md
+            ('docs/protocol/big.md "Steps"', False),
+            ("[big](docs/protocol/big.md) “Retry”", False),
+            ('`big.md` ("Steps")', False),  # a path written from its own directory
+            ('docs/protocol/big.md "Deeper"', False),  # later.md took sections out of part.md in turn
+            ('docs/protocol/big.md "Gone"', True),
+            ('docs/protocol/part.md "Kept"', True),  # a redirect leads from the old doc to the new one only
+        ]
+        markdown = ["docs/protocol/big.md", "docs/protocol/part.md", "docs/protocol/later.md"]
+        with tempfile.TemporaryDirectory(prefix="doc-sections-moved-") as directory:
+            root = Path(directory)
+            (root / "docs/protocol").mkdir(parents=True)
+            (root / "docs/protocol/big.md").write_text(big)
+            (root / "docs/protocol/later.md").write_text(later)
+            # Without its moved-from line, part.md's sections and later.md's after it do not count for big.md.
+            moved_from = "<!-- moved-from: docs/protocol/big.md -->\n"
+            with_marker = {number for number, (_, missed) in enumerate(cases) if missed}
+            for marker, missed in (("", {2, 3, 4, 5, 6, 7}), (moved_from, with_marker)):
+                (root / "docs/protocol/part.md").write_text(marker + part)
+                for number, (line, _) in enumerate(cases):
+                    (root / f"case{number}.go").write_text(f"// see {line}\n")
+                    with self.subTest(marker=marker, line=line):
+                        self.assertEqual(number in missed, bool(unresolved(root, [f"case{number}.go"], markdown)))
+
+    def test_known_entries_follow_their_lines_to_the_doc_that_took_them(self):
+        with tempfile.TemporaryDirectory(prefix="doc-sections-known-") as directory:
+            root = Path(directory)
+            (root / "docs").mkdir()
+            (root / "docs/big.md").write_text("# Big\n\n## Moved part\n\nMoved to [part.md](part.md).\n")
+            (root / "docs/part.md").write_text('<!-- moved-from: docs/big.md "Moved part" -->\n'
+                                               "# Part\n\n## Moved part\n")
+            moves = test_doc_paths.DocMoves.read(root, ["docs/big.md", "docs/part.md"])
+            # A drifted name inside the lines that moved: reported from part.md, listed under big.md.
+            misses = [("docs/part.md", 7, "docs/other.md", "Old name")]
+            known = {("docs/big.md", "docs/other.md", "Old name"), ("docs/big.md", "docs/other.md", "Fixed name")}
+            self.assertEqual(([], [("docs/big.md", "docs/other.md", "Fixed name")]), compare(misses, known, moves))
+            self.assertEqual((misses, sorted(known)), compare(misses, known))
+            # Not the other way round: an entry listed under the new doc does not cover a miss in the old one.
+            self.assertEqual(([("docs/big.md", 3, "docs/other.md", "Old name")],
+                              [("docs/part.md", "docs/other.md", "Old name")]),
+                             compare([("docs/big.md", 3, "docs/other.md", "Old name")],
+                                     {("docs/part.md", "docs/other.md", "Old name")}, moves))
 
     def test_headings_inside_fences_do_not_count(self):
         doc = "\n".join(["# Guide", "```sh", "# a shell comment", "```",

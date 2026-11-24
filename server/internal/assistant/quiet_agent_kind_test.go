@@ -160,7 +160,9 @@ func quietKindNodeCalls(path, launcher string, stored bool) map[string]int {
 	calls := map[string]int{"*/devices.list": 2, "server/session.get": 1, "box/launchers.list": 1,
 		"box/session.start": 1, "box/sessions.list": 1}
 	if path == "adopted" {
-		calls["box/sessions.list"]++
+		// #5732 first reconciles the lost start by its task creation id, then the existing exact-id / heuristic adoption
+		// reads the list once more. The actual Agent kind assertions above remain unchanged.
+		calls["box/sessions.list"] += 2
 	}
 	if launcher == "codex" {
 		calls["box/node.info"] = 1

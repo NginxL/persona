@@ -166,6 +166,36 @@ interface AssistantManagement {
      */
     suspend fun revokeStandingAuthorization(id: String): Unit =
         throw UnsupportedOperationException("Standing authorizations unavailable")
+
+    // Domain spaces (#13500, docs/assistant/health.md "Tracks and kinds"): the default manager's routes, so callers use
+    // forManager(null). The defaults keep transports and fakes written before them compiling.
+    /** Every track, built-in and archived ones included (GET …/tracks); [TracksUnsupported] from an assistant without them. */
+    suspend fun tracks(): List<Track> = throw TracksUnsupported()
+    /** The kinds a track may be of (GET …/track-kinds); empty when the answer has none. */
+    suspend fun trackKinds(): List<TrackKind> = throw UnsupportedOperationException("Track kinds unavailable")
+    /** Creates a space (POST …/tracks); answers it as the hub has it. */
+    suspend fun createTrack(track: TrackCreate): Track = throw UnsupportedOperationException("Tracks unavailable")
+    /** Changes a space (PUT …/tracks/{slug}): only the fields [change] gives; `archived = true` archives it. */
+    suspend fun changeTrack(slug: String, change: TrackChange): Track = throw UnsupportedOperationException("Tracks unavailable")
+    /** A space's SPACE.md (GET …/tracks/{slug}/space-md). */
+    suspend fun spaceMd(slug: String): SpaceMd = throw UnsupportedOperationException("SPACE.md unavailable")
+    /**
+     * Writes SPACE.md's human area (PUT …/space-md); [baseDigest] is the digest of the content the edit started from. A
+     * refusal throws the hub's failure with its status: 409 changed elsewhere, 400 a managed block changed, 503 offline.
+     */
+    suspend fun writeSpaceMd(slug: String, content: String, baseDigest: String): SpaceMd =
+        throw UnsupportedOperationException("SPACE.md unavailable")
+    /** The information categories a conversation holds (GET …/conversations/{id}/categories). */
+    suspend fun conversationCategories(session: SessionKey): ConversationCategories =
+        throw UnsupportedOperationException("Conversation categories unavailable")
+    /** Takes categories away from a conversation or puts removed ones back (PUT …/categories); only the user loosens. */
+    suspend fun changeConversationCategories(session: SessionKey, add: List<String> = emptyList(), remove: List<String> = emptyList()): ConversationCategories =
+        throw UnsupportedOperationException("Conversation categories unavailable")
+    /** What every extension the user decided about may read (GET …/extension-trust); null from an assistant without grants. */
+    suspend fun extensionTrust(): List<ExtensionTrust>? = null
+    /** Sets what extension [id] may read (PUT …/extension-trust/{id}); answers it as the hub kept it. */
+    suspend fun setExtensionTrust(id: String, trust: ExtensionTrust): ExtensionTrust =
+        throw UnsupportedOperationException("Extension trust unavailable")
 }
 
 /** One message a chat was found by (`docs/protocol/protocol.md` "Assistant chat search"). `ranges` are UTF-16 `[start, end)` in [snippet]. */

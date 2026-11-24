@@ -2,7 +2,6 @@ package persona.core.data
 
 import persona.core.contracts.*
 import persona.core.contracts.api.*
-import persona.feature.inbox.*
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.test.*
@@ -11,6 +10,7 @@ import kotlinx.serialization.json.*
 import org.junit.Assert.*
 import org.junit.Test
 import java.nio.file.Files
+import persona.core.inbox.*
 
 /**
  * Recording an Agent hand-off on its item (docs/android/android.md "Hand to AI", design 9) happens after the message is

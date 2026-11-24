@@ -156,10 +156,17 @@ func (s *Service) launcherAlternatives(ctx context.Context, m Device, t PlanTask
 // computer, directory and workspace; its tier goes (it named the launcher before), and so does a start-defaults
 // policy's pick (the task names the launcher now). Its permission mode stays when the launcher runs the same agent
 // as the one that failed (a Codex task in plan mode stays in plan mode), and is settled again for another agent or
-// when it was what Allow all made it; its why says what changed. None, or the launcher the task names itself with no
-// tier and no model, changes nothing.
+// when it was what Allow all made it; its why says what changed. No launcher is a bare retry and changes nothing here.
+// A launcher-only override always selects that launcher's native model default, even when it is the plan's launcher.
+func (s *Service) rememberRetryFrom(ctx context.Context, t *PlanTask, m Device, launcher string) {
+	a := s.launcherAgentOn(ctx, m, launcher)
+	t.RetryFromAgent, t.RetryFromAllowAll = a.agent, a.allowAll()
+}
+
 func (s *Service) retryOn(ctx context.Context, t *PlanTask, m Device, with retryWith) error {
 	name, model := strings.TrimSpace(with.launcher), strings.TrimSpace(with.model)
+	from := s.ranLauncher(ctx, *t)
+	s.rememberRetryFrom(ctx, t, m, from)
 	if name == "" {
 		if model != "" {
 			return planInvalid{i18n.Err("assistant-tasks.retry_model_without_launcher")}
@@ -171,8 +178,8 @@ func (s *Service) retryOn(ctx context.Context, t *PlanTask, m Device, with retry
 	}
 	// Compared with what the failed start ran (ranLauncher), not with the plan's launcher: a task whose tier or
 	// start-defaults policy chose the launcher names none itself, and kept so, it would start on that one again.
-	from := s.ranLauncher(ctx, *t)
-	if name == t.Launcher && t.Tier == "" && model == "" {
+	if name == t.Launcher && t.Tier == "" && model == "" && t.Model == "" {
+		t.LauncherDefaultModel = true
 		return nil
 	}
 	machine := firstNonEmpty(m.Name, m.ID)
@@ -197,6 +204,7 @@ func (s *Service) retryOn(ctx context.Context, t *PlanTask, m Device, with retry
 		}
 	}
 	t.Launcher, t.Model, t.Tier = name, model, ""
+	t.LauncherDefaultModel = model == ""
 	modes := startTakesModes(agent.agent)
 	if !modes {
 		t.Effort = ""

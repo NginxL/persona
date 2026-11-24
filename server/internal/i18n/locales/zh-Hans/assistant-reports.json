@@ -1,4 +1,5 @@
 {
+  "manual_terminal_resume": "请打开 Agent 的终端并点「恢复」。这个决定仍待处理。",
   "title": "任务进展：{n} 件",
   "title_needs": "{n} 件事等你拍板",
   "tag_report": "汇报",
@@ -56,6 +57,8 @@
   "verdict_take": "按推荐来",
   "verdict_taken": "按推荐来，已交给干活的 Agent",
   "decision_handled_in_agent": "已在原会话处理",
+  "decision_superseded": "督办已撤回此确认",
+  "decision_superseded_reason": "督办已撤回此确认：{reason}",
   "verdict_reply_hint": "回复这条：回「OK」就收下；写别的会记进待办的决策，交给原来的 Agent 接着做",
   "verdict_decide_hint": "回复这条：回「OK」就按推荐来；也可以写你的选择。都会记进待办的决策，交给干活的 Agent",
   "verdict_decide_hint_none": "回复这条写你的选择：会记进待办的决策，交给干活的 Agent",
@@ -121,6 +124,8 @@
   "decision_response_explain_first": "先讲清背景",
   "decision_response_noted": "已回复「{response}」：已转给负责它的对话，没有执行任何选项",
   "decision_chosen_noted": "已选：{option}。已记入待办的决定并发给它的 Agent",
+  "decision_chosen_recorded": "已选：{option}。已记入待办的决定",
+  "decision_chosen_for_supervisor": "已选：{option}。已记入待办，供督办处理",
   "verdict_taken_supervisor": "按推荐来，已交给这个任务的督办，没有直接发给 Agent",
   "decision_chosen_supervisor": "已选：{option}。已记入待办的决定并交给它的督办",
   "delivery_verification_unavailable": "任务 {task} 暂不能验收：交付状态暂时无法验证，{pr}（{reason}）。这不代表任务没有完成。请保持当前状态，待验证服务恢复后再次检查；不要仅因无法验证就要求重新合并、部署、搁置或取消。",

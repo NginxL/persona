@@ -123,6 +123,27 @@ class ModelPanelTest {
             }
     }
 
+    @Test fun foldedAliasesSelectSearchAndCanonicalizeOneExistingRow() {
+        val folded = PanelModel("claude-opus-5-5", "Opus 5.5", aliases = listOf("opus", "fable"))
+        val provider = PanelProvider("claude", "claude", "claude", listOf(folded, sonnet), typable = true)
+        val running = PanelState(current = PanelConfig("claude", "OPUS"), recommended = listOf("claude"))
+        val rows = ModelPanel.sections(listOf(provider), running, PanelView.All, "", PanelPrefs()).flatMap { it.rows }
+        assertEquals(1, rows.count { it.current })
+        assertEquals("claude-opus-5-5", rows.single { it.current }.model.id)
+        assertTrue(ModelPanel.matches(provider, folded, "FaBlE"))
+        val found = ModelPanel.sections(listOf(provider), running, PanelView.All, "fable", PanelPrefs()).flatMap { it.rows }
+        assertEquals(listOf("claude-opus-5-5"), found.map { it.model.id })
+        assertTrue("a folded alias is not offered again as a typed id", found.none { it.kind == PanelRow.Kind.Typed })
+
+        val recent = ModelPanel.sections(listOf(provider), PanelState(), PanelView.Recent, "",
+            PanelPrefs().pushRecent(PanelConfig("claude", "fable"))).single().rows.single()
+        assertEquals(PanelConfig("claude", "claude-opus-5-5"), recent.setup)
+        val exact = PanelModel("opus", "Canonical Opus")
+        val both = provider.copy(models = listOf(folded, exact))
+        assertTrue(ModelPanel.runsNow(both, exact, PanelConfig("claude", "opus")))
+        assertFalse("an alias never steals another row's exact id", ModelPanel.runsNow(both, folded, PanelConfig("claude", "opus")))
+    }
+
     @Test fun aListBeingReadShowsItsSpinner() {
         val all = ModelPanel.sections(listOf(claude, work.copy(models = null, loading = true)), state, PanelView.All, "", PanelPrefs())
         assertTrue(all.last().loading)

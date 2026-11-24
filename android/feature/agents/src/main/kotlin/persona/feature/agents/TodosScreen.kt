@@ -1,5 +1,6 @@
 package persona.feature.agents
 
+import persona.feature.chat.SessionModes
 import persona.feature.chat.TodoRestores
 import persona.core.domain.tasks.orphanedLine
 import persona.core.domain.tasks.HoldStep
@@ -21,7 +22,11 @@ import persona.core.domain.tasks.Triage
 import persona.core.domain.tasks.TriageRule
 import persona.core.domain.tasks.TriageSection
 import persona.core.domain.tasks.acceptedAtRest
+import persona.core.domain.tasks.deliveredAwaitingReview
+import persona.core.domain.tasks.shownState
+import persona.core.domain.tasks.waitsForOwner
 import persona.core.domain.tasks.checksAsOpen
+import persona.core.domain.tasks.seenCanFile
 import persona.core.domain.tasks.supersededFailedStarts
 import persona.core.domain.tasks.triageTodos
 import androidx.compose.foundation.shape.CircleShape
@@ -63,6 +68,7 @@ import persona.core.designsystem.icons.PersonaIcons
 import persona.core.designsystem.icons.PhIcons
 import persona.core.domain.answer.askingLine
 import persona.core.domain.answer.firstBySession
+import persona.core.domain.modelShortName
 import persona.core.domain.plainMarkdown
 import persona.core.domain.tasks.TasksStore
 import persona.core.navigation.NewTodoRequests
@@ -109,6 +115,23 @@ fun mostUrgentAgent(todo: Todo, sessionLookup: (SessionKey) -> Session?): TodoMo
     return best
 }
 
+private fun taskLeadAgent(todo: Todo, sessionLookup: (SessionKey) -> Session?): Session? {
+    fun movedAt(session: Session) = listOfNotNull(parseTime(session.updatedAt), parseTime(session.stateSince)).maxOrNull() ?: Instant.EPOCH
+    var lead: Session? = null
+    for (agent in todo.currentAgents) {
+        val candidate = sessionLookup(agent.key) ?: continue
+        val current = lead
+        if (current == null) {
+            lead = candidate
+            continue
+        }
+        val working = candidate.agentState == AgentState.Working
+        val leadWorking = current.agentState == AgentState.Working
+        if (if (working != leadWorking) working else movedAt(candidate) > movedAt(current)) lead = candidate
+    }
+    return lead
+}
+
 @Composable
 fun TodosScreen(
     todos: List<Todo>,
@@ -126,6 +149,8 @@ fun TodosScreen(
     assistant: persona.core.contracts.api.CurrentAssistant? = null,
     /** The hub's direction tree (#4352): the list can then be grouped by direction. Null (an older hub): status only. */
     directions: DirectionTree? = null,
+    /** Computer display names for the task's lead-Agent metadata (#10904). */
+    machines: List<Machine> = emptyList(),
 ) {
     val cards = remember(pending) { pending.firstBySession() }
     var query by rememberSaveable { mutableStateOf("") }
@@ -166,6 +191,7 @@ fun TodosScreen(
 
     val sessionMap = remember(sessions) { sessions.associateBy { it.key } }
     val sessionLookup: (SessionKey) -> Session? = remember(sessionMap) { { key: SessionKey -> sessionMap[key] } }
+    val machineMap = remember(machines) { machines.associateBy { it.id } }
     val hubFeatures = tasks?.features?.collectAsState()
     val seenOn = hubFeatures?.value?.contains("todo_seen") == true
 
@@ -241,7 +267,8 @@ fun TodosScreen(
                     catch (e: Exception) { seenFailed(e) }
                 }
             }
-            feedback?.notice(res.getString(R.string.agents_todo_seen_moved), undo)
+            val moved = if (todo.kind == "concern" && !todo.isDone) R.string.agents_todo_seen_moved_open else R.string.agents_todo_seen_moved
+            feedback?.notice(res.getString(moved), undo)
             try { store.setTodoSeen(todo.id, true, after) }
             catch (e: CancellationException) { throw e }
             catch (e: Exception) { seenFailed(e) }
@@ -448,7 +475,7 @@ fun TodosScreen(
                 val directionRows = if (tree == null) emptyList() else {
                     val placed = triaged.sections.values.flatten()
                         .flatMap { group -> group.members.map { member -> member.id to (member to group.triage.getValue(member.id)) } }.toMap()
-                    tree.todoRows(placed) { (_, triage) -> triage.section == TriageSection.Done }
+                    tree.todoRows(placed) { (_, triage) -> triage.section == TriageSection.Done || triage.section == TriageSection.Cancelled }
                 }
                 if (tree != null) {
                     for ((direction, rows) in directionRows) {
@@ -475,13 +502,14 @@ fun TodosScreen(
                                 relatedOpen = false,
                                 onToggleRelated = {},
                                 sessionLookup = sessionLookup,
+                                machines = machineMap,
                                 cards = cards,
                                 now = now,
                                 onOpen = { onOpenTodo(todo.id) },
                                 onDone = setDone,
                                 onDelete = delete,
                                 onRestore = { restored = restores.restore(todo.id, System.currentTimeMillis()) },
-                                onSeen = if (seenOn && triage.section == TriageSection.JustDone) ({
+                                onSeen = if (seenOn && triage.section == TriageSection.JustDone && todo.seenCanFile) ({
                                     gotIt(todo, triage.last)
                                 }) else null,
                             )
@@ -496,9 +524,12 @@ fun TodosScreen(
                     val rows = sortedRows(rest.rows(section), listSort, zone)
                     if (rows.isEmpty()) continue
                     val folded = isFolded(section)
+                    val awaitingOnly = section == TriageSection.JustDone && rows.all { row ->
+                        row.members.all { row.triage.getValue(it.id).rule == TriageRule.FinishedUnseen }
+                    }
                     item(key = "section:${section.name}") {
                         JSectionHeader(
-                            section.label,
+                            section.label(awaitingOnly),
                             count = rest.listed(section),
                             status = section.status,
                             countTone = section.status ?: Status.Idle,
@@ -519,19 +550,20 @@ fun TodosScreen(
                                 relatedOpen = open,
                                 onToggleRelated = { expanded = if (open) expanded - group.key else expanded + group.key },
                                 sessionLookup = sessionLookup,
+                                machines = machineMap,
                                 cards = cards,
                                 now = now,
                                 onOpen = { onOpenTodo(group.lead.id) },
                                 onDone = setDone,
                                 onDelete = delete,
                                 onRestore = { restored = restores.restore(group.lead.id, System.currentTimeMillis()) },
-                                onSeen = if (seenOn && section == TriageSection.JustDone) ({
+                                onSeen = if (seenOn && section == TriageSection.JustDone && group.lead.seenCanFile) ({
                                     gotIt(group.lead, group.triage.getValue(group.lead.id).last)
                                 }) else null,
                             )
                             if (open) {
                                 for (m in group.members.drop(1)) {
-                                    TodoRelatedLine(m, group.triage.getValue(m.id).section, Modifier.padding(start = Tokens.Space.xxl)) { onOpenTodo(m.id) }
+                                    TodoRelatedLine(m, group.triage.getValue(m.id), Modifier.padding(start = Tokens.Space.xxl)) { onOpenTodo(m.id) }
                                 }
                             }
                         }
@@ -551,7 +583,13 @@ private val TriageSection.label: String @Composable get() = stringResource(when 
     TriageSection.Other -> R.string.agents_todos_section_other
     TriageSection.Shelved -> R.string.agents_todos_section_shelved
     TriageSection.Done -> R.string.agents_todos_done
+    TriageSection.Cancelled -> R.string.agents_todo_cancelled
 })
+
+/** A mixed Just finished section keeps its original name; only a wholly unaccepted-delivery section is awaiting review. */
+@Composable
+private fun TriageSection.label(awaitingReview: Boolean): String =
+    if (this == TriageSection.JustDone && awaitingReview) stringResource(R.string.agents_todos_section_awaiting_review) else label
 
 /** The state colour a section's header borrows (the Board style draws it). */
 private val TriageSection.status: Status? get() = when (this) {
@@ -571,7 +609,7 @@ private fun prLabel(url: String): String {
 
 /** A related to-do under its row's lead (#3206): its title and section, a tap opens it. */
 @Composable
-private fun TodoRelatedLine(todo: Todo, section: TriageSection, modifier: Modifier = Modifier, onOpen: () -> Unit) {
+private fun TodoRelatedLine(todo: Todo, triage: Triage, modifier: Modifier = Modifier, onOpen: () -> Unit) {
     if (todo.kind == "concern") {
         Column(
             modifier.fillMaxWidth().clip(PersonaTheme.shapes.controlShape).clickable(onClick = onOpen).padding(vertical = Tokens.Space.xs),
@@ -583,7 +621,7 @@ private fun TodoRelatedLine(todo: Todo, section: TriageSection, modifier: Modifi
             ) {
                 Text(todo.title, style = PersonaTheme.type.caption, color = PersonaTheme.palette.ink2, maxLines = 1,
                     overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
-                JTag(section.label)
+                JTag(triage.section.label(triage.rule == TriageRule.FinishedUnseen))
             }
             val label = stringResource(R.string.agents_todo_concern)
             JTag(label, Modifier.clearAndSetSemantics { contentDescription = label })
@@ -596,7 +634,7 @@ private fun TodoRelatedLine(todo: Todo, section: TriageSection, modifier: Modifi
         ) {
             Text(todo.title, style = PersonaTheme.type.caption, color = PersonaTheme.palette.ink2, maxLines = 1,
                 overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
-            JTag(section.label)
+            JTag(triage.section.label(triage.rule == TriageRule.FinishedUnseen))
         }
     }
 }
@@ -613,6 +651,7 @@ private fun TodoTriageRow(
     relatedOpen: Boolean,
     onToggleRelated: () -> Unit,
     sessionLookup: (SessionKey) -> Session?,
+    machines: Map<String, Machine>,
     cards: Map<SessionKey, Interaction>,
     now: Instant,
     onOpen: () -> Unit,
@@ -624,9 +663,20 @@ private fun TodoTriageRow(
     val res = agentResources()
     // a failed start waiting on the owner reads open, says why in red, and its checkbox closes it (#3713)
     val finished = !todo.checksAsOpen(triage)
-    val state = todo.state(sessionLookup)
+    val state = todo.shownState(sessionLookup)
     val accepted = triage.rule == TriageRule.Accepted || todo.acceptedAtRest(sessionLookup)
     val urgent = mostUrgentAgent(todo, sessionLookup)
+    val lead = remember(todo, sessionLookup) { taskLeadAgent(todo, sessionLookup) }
+    val leadEffort = SessionModes.effortLabel(lead?.effort, res)?.takeIf(String::isNotEmpty)
+    val agentMetadata = remember(lead, machines, leadEffort) {
+        lead?.let { session ->
+            listOfNotNull(
+                machines[session.machineId]?.displayName ?: session.machineId,
+                modelShortName(session.model).ifBlank { null },
+                leadEffort,
+            ).joinToString(" · ")
+        }
+    }
     val lastMoved = if (triage.last > 0) Instant.ofEpochMilli(triage.last) else todo.updated ?: todo.created
     JSwipeActions(
         start = if (finished) SwipeAction(stringResource(R.string.agents_todo_reopen), PhIcons.ArrowUUpLeft, Status.Working, { onDone(todo, false) })
@@ -649,7 +699,9 @@ private fun TodoTriageRow(
                             },
                         contentAlignment = Alignment.Center,
                     ) {
-                        if (finished) {
+                        if (todo.isCancelled) {
+                            JIcon(PersonaIcons.end, null, size = ContentTokens.statusIcon, selected = true, tint = PersonaTheme.palette.ink3)
+                        } else if (finished) {
                             JIcon(PhIcons.CheckCircle, null, size = ContentTokens.statusIcon, selected = true, tint = PersonaTheme.palette.done.dot)
                         } else {
                             Box(Modifier.size(ContentTokens.statusIcon).border(ContentTokens.optionOutline, PersonaTheme.palette.ink3, CircleShape))
@@ -668,6 +720,9 @@ private fun TodoTriageRow(
                         // an accepted task the hub reopened with more work reads Accepted, not Follow up (#3156)
                         accepted && state != TodoState.Working && state != TodoState.NeedsYou ->
                             JTag(stringResource(R.string.agents_todo_state_accepted), Tone.Positive)
+                        todo.waitsForOwner() -> JTag(stringResource(R.string.agents_todos_section_waiting), status = Status.NeedsYou)
+                        todo.deliveredAwaitingReview(sessionLookup) -> JTag(stringResource(R.string.agents_todos_section_awaiting_review), status = Status.Unread)
+                        todo.isCancelled -> JTag(stringResource(R.string.agents_todo_cancelled))
                         finished && todo.doneBy == "auto" -> JTag(stringResource(R.string.agents_todo_auto_done))
                         finished -> {}
                         // the hub closed it, yet it waits on the owner: not Done (#3713)
@@ -681,7 +736,11 @@ private fun TodoTriageRow(
                     JTag(label, Modifier.padding(start = Tokens.Space.xxl).clearAndSetSemantics { contentDescription = label })
                 }
                 if (finished) {
-                    todo.autoDoneReason?.let { reason ->
+                    todo.cancellationReason?.takeIf { it.isNotBlank() }?.let { reason ->
+                        Text(stringResource(R.string.agents_todo_cancelled_reason, reason), style = PersonaTheme.type.caption,
+                            color = PersonaTheme.palette.ink2, maxLines = 2, overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.padding(start = Tokens.Space.xxl))
+                    } ?: todo.autoDoneReason?.let { reason ->
                         Text(reason, style = PersonaTheme.type.caption, color = PersonaTheme.palette.ink2, maxLines = 2,
                             overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(start = Tokens.Space.xxl))
                     }
@@ -710,7 +769,7 @@ private fun TodoTriageRow(
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.padding(start = Tokens.Space.xxl)
-                            .then(if (url != null) Modifier.clickable { runCatching { links.openUri(url) } } else Modifier),
+                            .then(if (url != null) Modifier.clickable { val _ = runCatching { links.openUri(url) } } else Modifier),
                     )
                 }
                 Row(
@@ -732,14 +791,29 @@ private fun TodoTriageRow(
                                 .padding(horizontal = Tokens.Space.xs),
                         )
                     }
-                    Spacer(Modifier.weight(1f))
+                    if (onSeen != null || triage.section == TriageSection.Shelved || todo.currentAgents.isEmpty()) {
+                        Spacer(Modifier.weight(1f))
+                    }
                     if (onSeen != null) {
                         JTextButton(stringResource(R.string.agents_todo_seen), onSeen)
                     } else if (triage.section == TriageSection.Shelved) {
                         JTextButton(stringResource(R.string.agents_todo_restore), onRestore, icon = PhIcons.ArrowUUpLeft)
                     } else if (!finished && todo.currentAgents.isNotEmpty()) {
-                        Text(pluralStringResource(R.plurals.agents_todo_agents, todo.currentAgents.size, todo.currentAgents.size),
-                            style = PersonaTheme.type.micro, color = PersonaTheme.palette.ink3, maxLines = 1)
+                        Row(Modifier.weight(1f), horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                agentMetadata ?: pluralStringResource(R.plurals.agents_todo_agents, todo.currentAgents.size, todo.currentAgents.size),
+                                style = PersonaTheme.type.micro,
+                                color = PersonaTheme.palette.ink3,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f, fill = false),
+                            )
+                            if (agentMetadata != null && todo.currentAgents.size > 1) {
+                                Spacer(Modifier.width(Tokens.Space.xs))
+                                Text(stringResource(R.string.agents_todo_calendar_more, todo.currentAgents.size - 1),
+                                    style = PersonaTheme.type.micro, color = PersonaTheme.palette.ink3, maxLines = 1)
+                            }
+                        }
                     }
                 }
             }
@@ -760,6 +834,7 @@ internal fun TodoHoldLine(hold: TodoHold, modifier: Modifier = Modifier) {
         HoldUnblock.User -> stringResource(R.string.agents_todo_hold_user)
         HoldUnblock.Agent -> stringResource(R.string.agents_todo_hold_agent)
         HoldUnblock.Other -> stringResource(R.string.agents_todo_hold_other)
+        HoldUnblock.Supervisor -> stringResource(R.string.agents_todo_hold_supervisor)
         null -> null
     }
     Text(

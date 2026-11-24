@@ -1,21 +1,28 @@
 package persona.feature.assistant
 
 import android.graphics.Bitmap
+import android.content.res.Configuration
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.width
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.captureToImage
+import androidx.compose.ui.test.click
+import androidx.compose.ui.test.longClick
 import androidx.compose.ui.test.isSelected
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithContentDescription
@@ -25,9 +32,12 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -40,20 +50,23 @@ import persona.core.contracts.DirectionCounts
 import persona.core.contracts.DirectionTask
 import persona.core.contracts.DirectionTaskState
 import persona.core.contracts.DirectionTree
+import persona.core.contracts.ExternalDirection
 import persona.core.contracts.Session
 import persona.core.contracts.SessionKey
 import persona.core.contracts.api.AssistantSearchHit
+import persona.core.contracts.api.AssistantSnapshot
 import persona.core.contracts.api.LeaderCounts
 import persona.core.designsystem.*
 import persona.core.designsystem.icons.PhIcons
 import java.io.File
 import java.time.Instant
+import kotlinx.coroutines.runBlocking
 
 /**
  * The Persona tab's history drawer drawn on the JVM with Robolectric's native graphics (no emulator), in every style,
  * light and dark: the main conversation first with the home icon, and "More" without "Profile".
- * Assistant details remain available from the Persona toolbar, not settings. Each is written as a PNG to `build/drawer-shots/` (or
- * `-Dpersona.shots=<dir>`) to look at.
+ * Assistant details remain available from the Persona toolbar, not settings. Each is written as a PNG to
+ * `build/drawer-shots/` to look at.
  */
 @RunWith(AndroidJUnit4::class)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
@@ -71,9 +84,29 @@ class AssistantDrawerShotsTest {
         Session(machineId = "hub", sessionId = "r2", title = "周末去哪儿", status = "idle", updatedAt = minutesAgo(90)),
     )
 
+    private val outsideTarget = SessionKey("work-hub", "agent-session-8236")
+    private val conversationDirectionName = "Trip planning"
+    private val boundDirectionName = "Release coordination with a deliberately long human-readable direction name"
+    private val targetlessDirectionName = "Research watch"
+
+    private fun outsideGroups(): ConversationGroups {
+        val real = Session(machineId = "hub", sessionId = "lead-real", title = "Conversation title", status = "idle")
+        val tree = DirectionTree(listOf(
+            Direction("lead-real", conversationDirectionName, counts = DirectionCounts(needsYou = 1)),
+            Direction("dir-bound", boundDirectionName, counts = DirectionCounts(needsYou = 2), running = true,
+                external = ExternalDirection(outsideTarget.machineId, outsideTarget.sessionId)),
+            Direction("dir-targetless", targetlessDirectionName, counts = DirectionCounts(needsYou = 3),
+                external = ExternalDirection()),
+        ))
+        return conversationGroups(AssistantSnapshot(conversations = listOf(real),
+            leaders = listOf("lead-real", "dir-bound", "dir-targetless", "dir-unknown"),
+            directionNames = tree.names, directionTree = tree), "",
+            ConversationWords("新对话", "接力", "接力：%s"))
+    }
+
     private fun out(): File = File(System.getProperty("persona.shots") ?: "build/drawer-shots").also { it.mkdirs() }
 
-    private fun capture(name: String) {
+    private fun capture(name: String): Bitmap {
         rule.waitForIdle()
         val bitmap = rule.onNodeWithTag("shot").captureToImage().asAndroidBitmap()
         val background = bitmap.getPixel(1, 1)
@@ -81,6 +114,7 @@ class AssistantDrawerShotsTest {
         for (y in 0 until bitmap.height step 7) for (x in 0 until bitmap.width step 7) if (bitmap.getPixel(x, y) != background) other++
         assertTrue("$name drew nothing", other > 100)
         File(out(), "$name.png").outputStream().use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
+        return bitmap
     }
 
     @Test fun drawsTheDrawerInEveryStyle() {
@@ -301,6 +335,179 @@ class AssistantDrawerShotsTest {
         rule.onNodeWithText("全部对话（2）").performClick()
         rule.onNodeWithText("整理收件箱").assertExists()
         capture("drawer-all-chats-glass-light")
+    }
+
+    @Test fun outsideDirectionsOpenOnlyCompleteAgentTargetsAndNeverConversationMenus() {
+        val groups = outsideGroups()
+        assertEquals(listOf("lead-real", "dir-bound", "dir-targetless"), groups.directions.map { it.sessionId })
+        var compact by mutableStateOf(true)
+        var active by mutableStateOf<SessionKey?>(null)
+        var shadedPlace by mutableStateOf<String?>(null)
+        var found by mutableStateOf<List<FoundChat>?>(null)
+        var arranger by mutableStateOf<ConversationArranger?>(null)
+        val openedChats = mutableListOf<SessionKey>()
+        val openedAgents = mutableListOf<SessionKey>()
+        rule.setContent {
+            PersonaTheme(darkTheme = false, reduceMotion = true, style = AppStyle.Glass) {
+                CompositionLocalProvider(LocalHomeDrawer provides compact) {
+                    Box(Modifier.width(400.dp).height(1200.dp).background(PersonaTheme.palette.background)) {
+                        AssistantDrawer("", {}, groups, active = active, hasMain = false,
+                            onEnd = {}, onMain = {}, onOpen = { openedChats += it }, onInfo = {}, onNew = {}, onSettings = {},
+                            onArchive = {}, onRename = {}, onDiagnostics = {}, onLeader = {}, onOpenAgent = { openedAgents += it },
+                            found = found, shadedPlace = shadedPlace, arranger = arranger)
+                    }
+                }
+            }
+        }
+        rule.onAllNodesWithContentDescription("对话操作").assertCountEquals(1) // the conversation-backed direction alone
+        rule.onNodeWithText("dir-bound", substring = true).assertDoesNotExist()
+        rule.onNodeWithText(outsideTarget.sessionId, substring = true).assertDoesNotExist()
+        rule.onNodeWithText(boundDirectionName).performTouchInput { click() }
+        assertEquals(listOf(outsideTarget), openedAgents)
+        assertTrue(openedChats.isEmpty())
+        rule.onNodeWithText(targetlessDirectionName).performTouchInput { click() }
+        assertEquals(listOf(outsideTarget), openedAgents)
+        assertTrue(openedChats.isEmpty())
+        rule.onNodeWithText(boundDirectionName).performTouchInput { longClick() }
+        rule.onNodeWithText("拷贝会话 ID").assertDoesNotExist()
+        rule.onNodeWithText(targetlessDirectionName).performTouchInput { longClick() }
+        rule.onNodeWithText("拷贝会话 ID").assertDoesNotExist()
+
+        active = outsideTarget
+        androidx.compose.runtime.snapshots.Snapshot.sendApplyNotifications()
+        rule.waitForIdle()
+        rule.onNodeWithText(boundDirectionName).assertIsSelected()
+        rule.onNodeWithText(targetlessDirectionName).assert(!isSelected())
+
+        // The wide row has its own overflow and long-press code; exercise it independently of compact Glass.
+        compact = false
+        active = null
+        shadedPlace = AssistantSidebarShade.agent(outsideTarget)
+        openedAgents.clear()
+        androidx.compose.runtime.snapshots.Snapshot.sendApplyNotifications()
+        rule.waitForIdle()
+        rule.onAllNodesWithContentDescription("对话操作").assertCountEquals(1)
+        rule.onNodeWithText(boundDirectionName).performTouchInput { click() }
+        assertEquals(listOf(outsideTarget), openedAgents)
+        rule.onNodeWithText(targetlessDirectionName).performTouchInput { click(); longClick() }
+        assertTrue(openedChats.isEmpty())
+        rule.onNodeWithText("拷贝会话 ID").assertDoesNotExist()
+
+        // Manager-backed inline search uses the same outside-row rules and never opens an Assistant conversation.
+        compact = true
+        shadedPlace = null
+        found = groups.directions.map { FoundChat(it, null) }
+        openedAgents.clear()
+        androidx.compose.runtime.snapshots.Snapshot.sendApplyNotifications()
+        rule.waitForIdle()
+        rule.onAllNodesWithContentDescription("对话操作").assertCountEquals(1)
+        rule.onNodeWithText(boundDirectionName).performTouchInput { click() }
+        assertEquals(listOf(outsideTarget), openedAgents)
+        assertTrue(openedChats.isEmpty())
+        rule.onNodeWithText(targetlessDirectionName).performTouchInput { click(); longClick() }
+        assertTrue(openedChats.isEmpty())
+        rule.onNodeWithText("拷贝会话 ID").assertDoesNotExist()
+
+        // Main's Arrange mode is a separate direction-row path: outside rows keep the same routing and no-menu contract.
+        found = null
+        openedAgents.clear()
+        val controller = ConversationArranger(prepare = { {} }, write = { null })
+        runBlocking { controller.start(null) }
+        arranger = controller
+        androidx.compose.runtime.snapshots.Snapshot.sendApplyNotifications()
+        rule.waitForIdle()
+        rule.onNodeWithTag("conversation-arrange-done").assertExists()
+        rule.onAllNodesWithContentDescription("对话操作").assertCountEquals(1)
+        rule.onNodeWithText(targetlessDirectionName).performTouchInput { click(); longClick() }
+        assertTrue(openedChats.isEmpty())
+        assertTrue(openedAgents.isEmpty())
+        rule.onNodeWithText("拷贝会话 ID").assertDoesNotExist()
+        rule.onNodeWithText(boundDirectionName).performTouchInput { click() }
+        assertEquals(listOf(outsideTarget), openedAgents)
+        assertTrue(openedChats.isEmpty())
+        assertFalse(controller.ui.value.arranging)
+    }
+
+    @Test fun mergedSidebarLeavesAgentSelectionToTheActualAgentRow() {
+        val merged = MergedSidebarContent(
+            list = { state, content, footer, _ ->
+                LazyColumn(state = state) {
+                    content()
+                    item { footer() }
+                }
+            },
+            usage = {}, agents = emptyList(), agentMachines = emptyMap(), pinnedAgents = emptySet(),
+            onSearchAgent = {}, agentsInFront = false, showKnowledge = false,
+        )
+        rule.setContent {
+            PersonaTheme(darkTheme = false, reduceMotion = true, style = AppStyle.Glass) {
+                CompositionLocalProvider(LocalHomeDrawer provides true) {
+                    Box(Modifier.width(400.dp).height(1200.dp).background(PersonaTheme.palette.background)) {
+                        AssistantDrawer("", {}, outsideGroups(), active = null, hasMain = false,
+                            onEnd = null, onMain = {}, onOpen = {}, onInfo = {}, onNew = {}, onSettings = {},
+                            onOpenAgent = {}, shadedPlace = AssistantSidebarShade.agent(outsideTarget), merged = merged)
+                    }
+                }
+            }
+        }
+        // The merged Agents list shades the actual Agent root; the direction must not add a second selected row.
+        rule.onNodeWithText(boundDirectionName).assert(!isSelected())
+        rule.onNodeWithText(targetlessDirectionName).assert(!isSelected())
+    }
+
+    @Test fun drawsMixedDirectionsInEveryStyleAppearanceAndTextSize() {
+        val groups = outsideGroups()
+        var style by mutableStateOf(AppStyle.Glass)
+        var dark by mutableStateOf(false)
+        var fontScale by mutableFloatStateOf(1f)
+        rule.setContent {
+            val density = LocalDensity.current
+            val configuration = Configuration(LocalConfiguration.current).apply {
+                this.fontScale = fontScale
+                uiMode = (uiMode and Configuration.UI_MODE_NIGHT_MASK.inv()) or
+                    if (dark) Configuration.UI_MODE_NIGHT_YES else Configuration.UI_MODE_NIGHT_NO
+            }
+            CompositionLocalProvider(LocalDensity provides Density(density.density, fontScale),
+                LocalConfiguration provides configuration) {
+                PersonaTheme(darkTheme = dark, reduceMotion = true, style = style) {
+                    CompositionLocalProvider(LocalHomeDrawer provides (style == AppStyle.Glass)) {
+                        Box(Modifier.testTag("shot").width(400.dp).height(1400.dp).background(PersonaTheme.palette.background)) {
+                            AssistantDrawer("", {}, groups, active = null, hasMain = false,
+                                onEnd = null, onMain = {}, onOpen = {}, onInfo = {}, onNew = {}, onSettings = {},
+                                onOpenAgent = {})
+                        }
+                    }
+                }
+            }
+        }
+        rule.onNodeWithText(conversationDirectionName).assertExists()
+        rule.onNodeWithText(boundDirectionName).assertExists()
+        rule.onNodeWithText(targetlessDirectionName).assertExists()
+        rule.onNodeWithText("等你 1").assertExists()
+        rule.onNodeWithText("等你 2").assertExists()
+        rule.onNodeWithText("等你 3").assertExists()
+        rule.onNodeWithContentDescription("加载中").assertExists()
+        rule.onNodeWithText("dir-unknown", substring = true).assertDoesNotExist()
+        rule.onNodeWithText(outsideTarget.machineId, substring = true).assertDoesNotExist()
+        rule.onNodeWithText(outsideTarget.sessionId, substring = true).assertDoesNotExist()
+        rule.onNodeWithText("/tmp", substring = true).assertDoesNotExist()
+        rule.onNodeWithText("Claude", substring = true).assertDoesNotExist()
+
+        val standard = mutableMapOf<Pair<AppStyle, Boolean>, Bitmap>()
+        for (s in AppStyle.entries) for (d in listOf(false, true)) for (scale in listOf(1f, 2f)) {
+            style = s
+            dark = d
+            fontScale = scale
+            androidx.compose.runtime.snapshots.Snapshot.sendApplyNotifications()
+            rule.waitForIdle()
+            // Only the real conversation has a read state; outside rows show tree counts/running, never a fabricated Seen.
+            rule.onAllNodesWithText("已看").assertCountEquals(if (s == AppStyle.Glass) 0 else 1)
+            val font = if (scale > 1f) "large" else "default"
+            val name = "drawer-directions-outside-${s.name.lowercase()}-${if (d) "dark" else "light"}-$font"
+            val bitmap = capture(name)
+            if (scale == 1f) standard[s to d] = bitmap
+            else assertFalse("large text must change $name", standard.getValue(s to d).sameAs(bitmap))
+        }
     }
 
     // #4352 + #5860: an open 常驻 lead unfolds the hub's one tree — to-dos with their state words (Not started is the quiet

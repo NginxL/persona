@@ -3,6 +3,7 @@ package assistant
 import (
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"github.com/nwverse/persona/server/internal/apierr"
 	"github.com/nwverse/persona/server/internal/i18n"
@@ -85,7 +86,7 @@ func localizeSession(l i18n.Lang, s *proto.Session) {
 	}
 	localizeWorkflows(l, s)
 	localizeSubagents(l, s)
-	s.ReadOnlyReason = claudeLiveText(l, s.ReadOnlyReason)
+	s.ReadOnlyReason = localizeReadOnlyReason(l, s.ReadOnlyReason)
 	s.AttentionReason = claudeLiveText(l, s.AttentionReason)
 	copied := false
 	for i, b := range s.Background {
@@ -191,6 +192,7 @@ var claudeLiveTexts = map[string]string{
 	proto.ReadOnlyClaudeInbox:               "read_only_claude_inbox",
 	proto.AttentionClaudeComputer:           "attention_claude_computer",
 	proto.AttentionClaudeComputerBefore5965: "attention_claude_computer",
+	proto.AttentionClaudeDesktopComputer:    "attention_claude_desktop_computer",
 	proto.AttentionClaudeAnswer:             "attention_claude_answer",
 }
 
@@ -198,6 +200,43 @@ var claudeLiveTexts = map[string]string{
 func claudeLiveText(l i18n.Lang, s string) string {
 	if key, ok := claudeLiveTexts[s]; ok {
 		return tt(l, key)
+	}
+	return s
+}
+
+type localizedKeyArgs struct {
+	key  string
+	args i18n.Args
+}
+
+var codexHistoryReadOnlyTexts = sync.OnceValue(buildCodexHistoryReadOnlyTexts)
+
+func buildCodexHistoryReadOnlyTexts() map[string]localizedKeyArgs {
+	out := map[string]localizedKeyArgs{}
+	add := func(key string, args i18n.Args) {
+		out[i18n.T(i18n.Default, key, args)] = localizedKeyArgs{key: key, args: args}
+	}
+	for _, holder := range []string{"Codex", "app-server"} {
+		add("codex-history.stalled_turn", i18n.Args{"holder": holder})
+	}
+	for _, key := range []string{
+		"codex-history.shared_socket_gone",
+		"codex-history.shared_endpoint_invalid",
+		"codex-history.shared_unreachable",
+		"codex-history.shared_home_mismatch",
+		"codex-history.shared_not_loaded",
+	} {
+		add(key, nil)
+	}
+	return out
+}
+
+func localizeReadOnlyReason(l i18n.Lang, s string) string {
+	if got := claudeLiveText(l, s); got != s {
+		return got
+	}
+	if match, ok := codexHistoryReadOnlyTexts()[s]; ok {
+		return i18n.T(l, match.key, match.args)
 	}
 	return s
 }

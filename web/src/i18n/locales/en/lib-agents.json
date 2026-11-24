@@ -3,6 +3,7 @@
   "setup_disabled": "The extension that provides personal agents has not turned them on: turn them on as its guide says, then restart",
   "setup_no_accounts": "No personal agent accounts connected yet: add Cue or Grok Bot in the Lark gateway's settings",
   "other": "Other",
+  "bot": "Bot",
   "group_date": "Date",
   "group_provider": "Source",
   "group_none": "No grouping",

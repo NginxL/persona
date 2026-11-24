@@ -26,23 +26,6 @@ extension Theme {
             var row: CGFloat, padding: CGFloat, glyph: CGFloat, column: CGFloat, gap: CGFloat, mark: CGFloat, radius: CGFloat
         }
 
-        #if os(macOS)
-        /// The Mac's three sizes, small to large.
-        private static let sizes: [Metrics] = [
-            Metrics(row: 24, padding: 2, glyph: 14, column: 18, gap: 6, mark: 18, radius: 6),
-            Metrics(row: 28, padding: 4, glyph: 16, column: 20, gap: 8, mark: 20, radius: 6),
-            Metrics(row: 32, padding: 4, glyph: 20, column: 24, gap: 8, mark: 24, radius: 8),
-        ]
-
-        /// The system's Sidebar icon size: 1 small, 2 medium (also when unset), 3 large.
-        private static var systemSize: Int {
-            let mode = UserDefaults.standard.integer(forKey: "NSTableViewDefaultSizeMode")
-            return (1...3).contains(mode) ? mode - 1 : 1
-        }
-
-        private static var metrics: Metrics { sizes[systemSize] }
-        #else
         private static let metrics = Metrics(row: 44, padding: 4, glyph: 22, column: 24, gap: 16, mark: 32, radius: 10)
-        #endif
     }
 }

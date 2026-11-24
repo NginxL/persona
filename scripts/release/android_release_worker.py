@@ -95,9 +95,10 @@ def check_history(checkout, previous, sha):
         run(["git", "merge-base", "--is-ancestor", previous, sha], checkout)
 
 
-def build(config, checkout, sha, directory, name=None):
+def build(config, checkout, sha, directory, name=None, release_only=False):
     """Build the unsigned release APK of sha. name is its version name: a version tag's release version
-    (android_tag_release.py), else the main branch's 0.1.<code>-<commit>."""
+    (android_tag_release.py), else the main branch's 0.1.<code>-<commit>. release_only is valid only after
+    the standard sharded CI has already passed every required test on this same source commit."""
     run(["git", "checkout", "--detach", "--force", sha], checkout)
     # The dedicated clone never contains user work. Do not remove its build caches.
     env = dict(os.environ, **config.get("build_environment", {}))
@@ -114,24 +115,27 @@ def build(config, checkout, sha, directory, name=None):
                 and built.get("build_commit") == sha
                 and built.get("unsigned_sha256") == digest(unsigned)):
             return built
-    tests = ["python3", "-m", "unittest", "discover", "-s", "scripts/release", "-p", "test_*android*.py"]
-    run(tests, checkout, env=env)
-    run(["python3", "-m", "unittest", "discover", "-s", "scripts/test",
-         "-p", "test_persona_script_identity.py"], checkout, env=env)
-    run(["python3", "scripts/privacy_check.py"], checkout, env=env)
+    if not release_only:
+        tests = ["python3", "-m", "unittest", "discover", "-s", "scripts/release", "-p", "test_*android*.py"]
+        run(tests, checkout, env=env)
+        run(["python3", "-m", "unittest", "discover", "-s", "scripts/test",
+             "-p", "test_persona_script_identity.py"], checkout, env=env)
+        run(["python3", "scripts/privacy_check.py"], checkout, env=env)
     outputs = checkout / "android/app/build/outputs"
     # The checks and the copy below read these: an APK or R8 output an earlier build left must never pass for this one.
     for stale in (outputs / "apk/release", outputs / "mapping/release"):
         if stale.exists():
             shutil.rmtree(stale)
+    gradle_tasks = ([":app:assembleRelease"] if release_only else
+                    [":core:hub:test", ":feature:settings:testDebugUnitTest",
+                     ":feature:agents:testDebugUnitTest", ":platform:notify:testDebugUnitTest",
+                     ":app:assembleRelease"])
     run(["./gradlew", "--no-daemon", "--console=plain",
          "-PpersonaApplicationId=" + config["application_id"],
          f"-PpersonaVersionCode={code}", "-PpersonaVersionName=" + name,
          # The About page shows the commit this APK is built from: the checkout's full sha, passed explicitly.
          "-PpersonaBuildCommit=" + sha,
-         ":core:hub:test", ":feature:settings:testDebugUnitTest",
-         ":feature:agents:testDebugUnitTest", ":platform:notify:testDebugUnitTest",
-         ":app:assembleRelease"], checkout / "android", env=env)
+         *gradle_tasks], checkout / "android", env=env)
     apk = outputs / "apk/release/app-release-unsigned.apk"
     # R8 keeps only what code references; stop before signing when it dropped something reached by name.
     run(["python3", "scripts/release/check_android_shrink.py", str(apk), str(outputs / "mapping/release")],

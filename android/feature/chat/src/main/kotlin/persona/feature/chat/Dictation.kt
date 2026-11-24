@@ -87,26 +87,181 @@ fun rememberDictation(onHeard: (String) -> Unit, onError: (String) -> Unit, prom
 internal fun rememberComposerDictation(session: SessionKey, state: ChatComposerState, available: Boolean, onNotice: (String) -> Unit) =
     key(session, state) { if (available) rememberDictation(onHeard = state::appendDictation, onError = onNotice) else null }
 
-private fun platformInput(context: Context, onDevice: Boolean, intent: Intent, listener: DictationSession.Listener): DictationSession.Input {
-    val speech = if (onDevice && Build.VERSION.SDK_INT >= 31) SpeechRecognizer.createOnDeviceSpeechRecognizer(context)
-        else SpeechRecognizer.createSpeechRecognizer(context)
-    fun words(results: Bundle?) = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull()?.trim().orEmpty()
-    speech.setRecognitionListener(object : RecognitionListener {
-        override fun onPartialResults(partialResults: Bundle?) = listener.partial(words(partialResults))
-        override fun onResults(results: Bundle?) = listener.result(words(results))
-        override fun onError(error: Int) = listener.failed(error == SpeechRecognizer.ERROR_NO_MATCH || error == SpeechRecognizer.ERROR_SPEECH_TIMEOUT)
-        override fun onReadyForSpeech(params: Bundle?) {}
-        override fun onBeginningOfSpeech() {}
-        override fun onRmsChanged(rmsdB: Float) {}
-        override fun onBufferReceived(buffer: ByteArray?) {}
-        override fun onEndOfSpeech() {}
-        override fun onEvent(eventType: Int, params: Bundle?) {}
-    })
-    return object : DictationSession.Input {
-        override fun start() = speech.startListening(intent)
-        override fun stop() = speech.stopListening()
-        override fun close() { speech.destroy() }
+internal interface SpeechEngine {
+    fun setListener(listener: RecognitionListener)
+    fun startListening(intent: Intent)
+    fun stopListening()
+    fun destroy()
+}
+
+private class PlatformSpeechEngine(private val speech: SpeechRecognizer) : SpeechEngine {
+    override fun setListener(listener: RecognitionListener) = speech.setRecognitionListener(listener)
+    override fun startListening(intent: Intent) = speech.startListening(intent)
+    override fun stopListening() = speech.stopListening()
+    override fun destroy() = speech.destroy()
+}
+
+private fun isLanguageFallbackError(error: Int): Boolean =
+    Build.VERSION.SDK_INT >= 31 &&
+        (error == SpeechRecognizer.ERROR_LANGUAGE_NOT_SUPPORTED || error == SpeechRecognizer.ERROR_LANGUAGE_UNAVAILABLE)
+
+private fun destroyQuietly(engine: SpeechEngine?) {
+    if (engine == null) return
+    try {
+        engine.destroy()
+    } catch (_: RuntimeException) {
     }
+}
+
+private fun platformInput(context: Context, onDevice: Boolean, intent: Intent, listener: DictationSession.Listener): DictationSession.Input =
+    platformInput(
+        onDevice = onDevice && Build.VERSION.SDK_INT >= 31,
+        intent = intent,
+        listener = listener,
+        isDefaultAvailable = { SpeechRecognizer.isRecognitionAvailable(context) },
+        openEngine = { preferOnDevice ->
+            PlatformSpeechEngine(
+                if (preferOnDevice && Build.VERSION.SDK_INT >= 31) SpeechRecognizer.createOnDeviceSpeechRecognizer(context)
+                else SpeechRecognizer.createSpeechRecognizer(context),
+            )
+        },
+    )
+
+internal fun platformInput(
+    onDevice: Boolean,
+    intent: Intent,
+    listener: DictationSession.Listener,
+    isDefaultAvailable: () -> Boolean,
+    openEngine: (onDevice: Boolean) -> SpeechEngine,
+): DictationSession.Input = PlatformDictationInput(onDevice, intent, listener, isDefaultAvailable, openEngine)
+
+private class PlatformDictationInput(
+    onDevice: Boolean,
+    private val intent: Intent,
+    private val listener: DictationSession.Listener,
+    private val isDefaultAvailable: () -> Boolean,
+    private val openEngine: (onDevice: Boolean) -> SpeechEngine,
+) : DictationSession.Input {
+    private var usingOnDevice = onDevice
+    private var fellBack = false
+    private var stopping = false
+    private var closed = false
+    private var current: SpeechEngine? = null
+
+    init {
+        current = if (usingOnDevice) {
+            try {
+                openAndAttach(true)
+            } catch (e: RuntimeException) {
+                if (!isDefaultAvailable()) throw e
+                usingOnDevice = false
+                fellBack = true
+                openAndAttach(false)
+            }
+        } else {
+            openAndAttach(false)
+        }
+    }
+
+    override fun start() {
+        if (closed) return
+        stopping = false
+        val engine = current ?: return
+        try {
+            engine.startListening(intent)
+        } catch (e: RuntimeException) {
+            if (closed || current !== engine) return
+            if (!fallbackToDefault() && !closed) throw e
+        }
+    }
+
+    override fun stop() {
+        if (closed) return
+        stopping = true
+        current?.stopListening()
+    }
+
+    override fun close() {
+        closed = true
+        stopping = false
+        val previous = current
+        current = null
+        destroyQuietly(previous)
+    }
+
+    private fun openAndAttach(preferOnDevice: Boolean): SpeechEngine {
+        val engine = openEngine(preferOnDevice)
+        try {
+            attach(engine)
+        } catch (e: RuntimeException) {
+            destroyQuietly(engine)
+            throw e
+        }
+        return engine
+    }
+
+    private fun attach(engine: SpeechEngine) {
+        engine.setListener(object : RecognitionListener {
+            override fun onPartialResults(partialResults: Bundle?) {
+                if (!closed && current === engine) listener.partial(words(partialResults))
+            }
+            override fun onResults(results: Bundle?) {
+                if (!closed && current === engine) listener.result(words(results))
+            }
+            override fun onError(error: Int) {
+                if (closed || current !== engine) return
+                if (isLanguageFallbackError(error) && (fallbackToDefault() || closed)) return
+                listener.failed(error == SpeechRecognizer.ERROR_NO_MATCH || error == SpeechRecognizer.ERROR_SPEECH_TIMEOUT)
+            }
+            override fun onReadyForSpeech(params: Bundle?) {}
+            override fun onBeginningOfSpeech() {}
+            override fun onRmsChanged(rmsdB: Float) {}
+            override fun onBufferReceived(buffer: ByteArray?) {}
+            override fun onEndOfSpeech() {}
+            override fun onEvent(eventType: Int, params: Bundle?) {}
+        })
+    }
+
+    private fun fallbackToDefault(): Boolean {
+        if (closed || stopping || !usingOnDevice || fellBack || !isDefaultAvailable()) return false
+        usingOnDevice = false
+        fellBack = true
+        val previous = current
+        current = null
+        destroyQuietly(previous)
+        if (closed) return false
+        val next = try {
+            openAndAttach(false)
+        } catch (_: RuntimeException) {
+            return false
+        }
+        if (closed) {
+            destroyQuietly(next)
+            return false
+        }
+        current = next
+        return try {
+            next.startListening(intent)
+            if (closed) {
+                if (current === next) {
+                    current = null
+                    destroyQuietly(next)
+                }
+                false
+            } else {
+                true
+            }
+        } catch (_: RuntimeException) {
+            if (current === next) {
+                current = null
+                destroyQuietly(next)
+            }
+            false
+        }
+    }
+
+    private fun words(results: Bundle?) =
+        results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull()?.trim().orEmpty()
 }
 
 /**

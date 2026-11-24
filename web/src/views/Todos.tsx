@@ -39,16 +39,16 @@ import {
   setDecisionSupersedes,
   supersedeCandidates,
   shownDecisions,
-  formatAgentSource,
-  formatTodoContext,
   isLegacySpacesRouteError,
   makeSessionLookup,
   mostUrgentAgent,
   orphanedLine,
+  responsibleOf,
   sortTodos,
   heldDelivery,
   TODO_TONE_CLASS,
   isAutoDone,
+  isCancelled,
   isOverdue,
   todoDueDay,
   todoDueText,
@@ -69,7 +69,7 @@ import {
 } from "../lib/todos";
 import { todoLook, waitOf, type WaitReason } from "../lib/todo-wait-reason";
 import type { AgentState, Interaction, Launcher, Machine } from "../lib/types";
-import { Button, cx, Dialog, IconButton, Loading, Menu, toast, useMenu } from "../ui/atoms";
+import { Button, cx, Dialog, IconButton, Loading, Menu, Spinner, toast, useMenu } from "../ui/atoms";
 import { contextMenuProps } from "../ui/context-menu";
 import { SHEET_QUERY } from "../ui/overlay";
 import type { MenuAt } from "../ui/menu-model";
@@ -80,9 +80,10 @@ import { FoldAllButton } from "../ui/FoldAllButton";
 import { SESSION_LIST_STYLE } from "../ui/list-metrics";
 import { formatDate, t } from "../i18n";
 import { groupTodosByProject, treeStateLabel, type TodoProjectGroup, type TreeState } from "../lib/todo-tree";
+import { cancellationReason, formatAgentSource, formatTodoContext } from "../lib/todo-details";
 import { directionTitle, groupsByDirection, useDirectionTree, type Direction } from "../lib/direction-tree";
 import { DirectionCountsText } from "./DirectionMarks";
-import { FOLDED_SECTIONS, TRIAGE_SECTIONS, checksAsOpen, countsAsOpen, lastActivity, openMergePRs, supersededFailedStarts, triage, triageTodos, type OwnerNeed, type TriageGroup, type TriageResult, type TriageSection } from "../lib/todo-triage";
+import { FOLDED_SECTIONS, TRIAGE_SECTIONS, checksAsOpen, countsAsOpen, lastActivity, openMergePRs, sectionStartsFolded, supersededFailedStarts, triage, triageTodos, type OwnerNeed, type TriageGroup, type TriageResult, type TriageRule, type TriageSection } from "../lib/todo-triage";
 import { orderWaitGroups } from "../lib/task-wait";
 import { viewDrawOn } from "../features/todos/model/view-gates";
 import { drawnFromView, openAsDrawn } from "../features/todos/model/view-triage";
@@ -122,6 +123,7 @@ import { todoUltracode } from "../lib/ultracode";
 import { UltraMark } from "./chat/Ultracode";
 import { boundThread, threadLine, threadName, todoThreadsOn, unbindTodoThread } from "../lib/todo-thread";
 import { setTodoSeen, todoSeenOn } from "../lib/todo-seen";
+import { seenCanFile } from "../lib/todo-details";
 import { retryKey, retryTask, useFeed } from "../lib/feed";
 import { planTaskOf, retryLauncher, retryOnLauncher } from "../lib/start-retry";
 import { dueOn, duePatch, todoRowMenu } from "./todo-row-menu";
@@ -225,6 +227,7 @@ export function TodosView({
   const [deleting, setDeleting] = useState(false);
   const [retrying, setRetrying] = useState(false);
   const [showDone, setShowDone] = useState(false);
+  const [showCancelled, setShowCancelled] = useState(false);
   const [showReleased, setShowReleased] = useState(false);
   // The calendar (#2029): the address says which mode and day; a click on its empty axis opens New To-Do due there.
   const calendarOn = view === "calendar";
@@ -302,7 +305,11 @@ export function TodosView({
   const matchesSearch = (t: Todo) => {
     const q = search.trim().toLowerCase();
     if (!q) return true;
-    return t.title.toLowerCase().includes(q) || (t.notes ?? "").toLowerCase().includes(q);
+    return (
+      t.title.toLowerCase().includes(q) ||
+      (t.notes ?? "").toLowerCase().includes(q) ||
+      (responsibleOf(t)?.name.toLowerCase().includes(q) ?? false)
+    );
   };
   // a search and the filter narrow the to-dos first; the sections (or the folders) place what is left
   const filterTodo = (t: Todo) => matchesSearch(t) && inFilter(t);
@@ -329,8 +336,7 @@ export function TodosView({
   );
   // Where the status sections place each to-do the search and the filter leave: its row's section (a merged row takes
   // its most urgent member's), and whether it counts as open (countsAsOpen, the header's Not done, its own reading).
-  // The folders and 常驻 split by the same placement, so their Done fold is the Done section to the to-do and every
-  // grouping says one number for it (audit item 12).
+  // Folders and directions share this placement and one number for it; cancelled stays out of both open and Done (#5732).
   const placed = useMemo(() => {
     const row = new Map<string, TriageSection>();
     const open = new Set<string>();
@@ -343,11 +349,18 @@ export function TodosView({
     return { row, open };
   }, [triaged, fromView]);
   const filteredUncompleted = useSteady(
-    useMemo(() => sortTodos(todos.filter((td) => placed.row.has(td.id) && placed.row.get(td.id) !== "done"), lookup), [todos, placed, lookup]),
+    useMemo(() => sortTodos(todos.filter((td) => {
+      const sec = placed.row.get(td.id);
+      return placed.row.has(td.id) && sec !== "done" && sec !== "cancelled";
+    }), lookup), [todos, placed, lookup]),
     sameList,
   );
   const filteredCompleted = useSteady(
     useMemo(() => sortTodos(todos.filter((td) => placed.row.get(td.id) === "done"), lookup), [todos, placed, lookup]),
+    sameList,
+  );
+  const filteredCancelled = useSteady(
+    useMemo(() => sortTodos(todos.filter((td) => placed.row.get(td.id) === "cancelled"), lookup), [todos, placed, lookup]),
     sameList,
   );
   // open todos under the knowledge-base project they are in (#2581), else the one their agents work in (#2526)
@@ -403,7 +416,7 @@ export function TodosView({
   // (`DirectionTree.todoRows`), so a to-do ticked here moves to Just finished rather than out of the list.
   const directionRest = useMemo(() => {
     if (grouping !== "direction" || !byDirection) return [];
-    return TRIAGE_SECTIONS.filter((sec) => sec !== "done")
+    return TRIAGE_SECTIONS.filter((sec) => sec !== "done" && sec !== "cancelled")
       .map((sec) => ({
         sec,
         groups: sortTriageGroups(
@@ -479,13 +492,13 @@ export function TodosView({
     if (requestMode || !split) return undefined;
     if (byStatus) {
       // the first row of an open section; none rather than one that would unfold a folded section (Shelved, Done)
-      for (const sec of TRIAGE_SECTIONS) if (!FOLDED_SECTIONS.has(sec) && triaged.sections[sec].length) return triaged.sections[sec][0].lead;
+      for (const sec of TRIAGE_SECTIONS) if (!sectionStartsFolded(sec, triaged.sections[sec], tick) && triaged.sections[sec].length) return triaged.sections[sec][0].lead;
       return undefined;
     }
-    // by 常驻: the first row shown (a direction's, else an unfolded status section's below them), else the first completed one
-    if (grouping === "direction") return directionSections[0]?.todos[0] ?? directionRest.find((s) => !FOLDED_SECTIONS.has(s.sec))?.groups[0].lead ?? filteredCompleted[0];
-    return filteredUncompleted[0] ?? filteredCompleted[0];
-  }, [activeId, selectedId, todos, filteredUncompleted, filteredCompleted, byStatus, requestMode, split, triaged, grouping, directionSections, directionRest]);
+    // by 常驻: the first row shown (a direction's, else an unfolded status section's below them), else history
+    if (grouping === "direction") return directionSections[0]?.todos[0] ?? directionRest.find((s) => !FOLDED_SECTIONS.has(s.sec))?.groups[0].lead ?? filteredCompleted[0] ?? filteredCancelled[0];
+    return filteredUncompleted[0] ?? filteredCompleted[0] ?? filteredCancelled[0];
+  }, [activeId, selectedId, todos, filteredUncompleted, filteredCompleted, filteredCancelled, byStatus, requestMode, split, triaged, grouping, directionSections, directionRest]);
 
   // The to-do open beside the calendar: the address's, while it is there.
   const selectedTodo = calendarOn && selectedId ? todos.find((td) => td.id === selectedId) : undefined;
@@ -682,10 +695,9 @@ export function TodosView({
             {(todosLoaded || todos.length > 0) && !(todos.length === 0 && todosError) && (
               // a phone's header has the List | Calendar switch to fit (#2029): the counts stay on wider screens
               <span className="text-[12px] whitespace-nowrap text-ink-3 max-sm:hidden" data-testid="todos-summary">
-                {/* one count in every grouping (audit item 12): open as countsAsOpen counts it (the sidebar's badge, the
-                    open ones that need the owner, #11085), the rest as the sections' titles do (a merged row's members
-                    under its section) */}
-                {t(listFilter === "all" ? "todos.summary_triage" : "todos.summary_filtered", { filter: filterLabel(listFilter), open: triageAll.open, parked: sectionSize(triageAll, "parked"), shelved: sectionSize(triageAll, "shelved"), done: sectionSize(triageAll, "done") })}
+                {/* one count in every grouping (audit item 12): open as countsAsOpen counts it, section counts as their
+                    titles do, with Cancelled always separate from Done (#11085, #5732) */}
+                {t(listFilter === "all" ? "todos.summary_triage" : "todos.summary_filtered", { filter: filterLabel(listFilter), open: triageAll.open, parked: sectionSize(triageAll, "parked"), shelved: sectionSize(triageAll, "shelved"), done: sectionSize(triageAll, "done"), cancelled: sectionSize(triageAll, "cancelled") })}
               </span>
             )}
           </div>
@@ -763,6 +775,7 @@ export function TodosView({
                 open={checksAsOpen(selectedTodo, sectionOf.get(selectedTodo.id))}
                 onToggleDone={(open) => toggleDone(selectedTodo, open)}
                 onOpenHandover={() => openHandover()}
+                onOpenTodo={(id) => navigate(calendarRoute(calendarMode, anchor, id))}
                 onDeleteClick={() => askDelete(selectedTodo.id)}
               />
             </div>
@@ -830,7 +843,7 @@ export function TodosView({
               >
                 {todosError}
               </Empty>
-            ) : filteredUncompleted.length === 0 && filteredCompleted.length === 0 ? (
+            ) : (filteredUncompleted.length === 0 || (grouping === "direction" && directionSections.length === 0 && directionUnlisted === 0 && directionRest.length === 0)) && filteredCompleted.length === 0 && filteredCancelled.length === 0 ? (
               offline && todos.length === 0 ? (
                 <OfflineState offline={offline} ring="ring-surface" className="py-14" />
               ) : search.trim() ? (
@@ -875,8 +888,8 @@ export function TodosView({
                     <TodoTriageSection
                       key={sec}
                       section={sec}
-                      // unfinished to-dos start open, above Just finished; Shelved and Done start folded (#5707)
-                      folded={FOLDED_SECTIONS.has(sec)}
+                      // Fresh accepted, ticked and cancelled outcomes stay visible; older history keeps the folded default.
+                      folded={sectionStartsFolded(sec, triaged.sections[sec], tick)}
                       groups={sortTriageGroups(triaged.sections[sec], listSort)}
                       count={sectionSize(triaged, sec)}
                       views={views}
@@ -974,6 +987,26 @@ export function TodosView({
                     )}
                   </div>
                 )}
+                {/* Cancelled Fold: its own outcome and reason, never inside Completed (#5732) */}
+                {filteredCancelled.length > 0 && (
+                  <div className="mt-2 border-t border-line/60 pt-2" data-testid="todos-cancelled-fold">
+                    <button
+                      type="button"
+                      onClick={() => setShowCancelled((v) => !v)}
+                      className="flex h-8 w-full items-center justify-between rounded-control px-2.5 text-xs text-ink-3 transition-colors hover:bg-hover hover:text-ink-2"
+                    >
+                      <span>{t("todos.cancelled_section", { count: filteredCancelled.length })}</span>
+                      <Icon name="chevron" size={12} className={cx("transition-transform duration-200", showCancelled ? "rotate-180" : "")} />
+                    </button>
+                    {showCancelled && (
+                      <div className="flex flex-col gap-1 pt-1">
+                        {filteredCancelled.map((todo) => (
+                          <TodoListItem key={todo.id} todo={todo} view={views.get(todo.id)!} selected={activeTodo?.id === todo.id} onSelect={openFromList} onToggleDone={toggleDone} onMenu={openRowMenu} />
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
               )
             )}
@@ -1016,6 +1049,7 @@ export function TodosView({
               open={checksAsOpen(activeTodo, sectionOf.get(activeTodo.id))}
               onToggleDone={(open) => toggleDone(activeTodo, open)}
               onOpenHandover={() => openHandover()}
+              onOpenTodo={openFromList}
               onDeleteClick={() => askDelete(activeTodo.id)}
             />
           ) : (
@@ -1335,12 +1369,17 @@ const SECTION_TONE: Record<TriageSection, string> = {
   other: "text-ink-2",
   shelved: "text-ink-3",
   done: "text-ink-3",
+  cancelled: "text-ink-3",
 };
 
-/** A section's title: the three that are agent states take the state names (lib/state-labels.ts). */
-function sectionTitle(section: TriageSection): string {
+/** A section's title: agent states share the state names; only a section made entirely of unaccepted deliveries uses
+ *  the awaiting-review wording. */
+function sectionTitle(section: TriageSection, rules: readonly TriageRule[]): string {
   if (section === "waiting") return stateName("needs_you");
   if (section === "working") return stateName("working");
+  if (section === "just_done" && rules.length > 0 && rules.every((rule) => rule === "finished_unseen")) {
+    return t("todos.section_awaiting_review");
+  }
   if (section === "just_done") return stateName("just_finished");
   return t(`todos.section_${section}`);
 }
@@ -1377,11 +1416,12 @@ const TodoTriageSection = memo(function TodoTriageSection({
 }) {
   const holds = groups.some((g) => g.members.some((m) => m.id === selectedId));
   const [folded, toggle] = useFolded(`todos-section:${section}`, foldedFirst, { follow: true, holds });
+  const title = sectionTitle(section, groups.flatMap((g) => [...g.triage.values()].map((t) => t.rule)));
   return (
     <section className="mt-1 first:mt-0" data-testid="todo-section" data-section={section} data-count={groups.length} data-todos={count}>
       <button type="button" aria-expanded={!folded} onClick={toggle} className="flex h-8 w-full min-w-0 items-center gap-1.5 rounded-control px-2 text-left text-[12px] hover:bg-hover">
         <Icon name="chevron" size={10} stroke={2.4} className="shrink-0 text-ink-3 opacity-60 transition-transform" style={{ transform: folded ? "rotate(-90deg)" : "none" }} />
-        <span className={cx("min-w-0 flex-1 truncate font-semibold whitespace-nowrap", SECTION_TONE[section])}>{sectionTitle(section)}</span>
+        <span className={cx("min-w-0 flex-1 truncate font-semibold whitespace-nowrap", SECTION_TONE[section])}>{title}</span>
         {folded && <OwnerMarkCount count={ownerCount(groups.flatMap((g) => g.members), views)} />}
         <span className="shrink-0 text-[11px] text-ink-3 tabular-nums">{count}</span>
       </button>
@@ -1680,6 +1720,7 @@ const TodoListItem = memo(function TodoListItem({
   // its steps as the hub counts them (#11858, lib/todo-steps.ts): in place of Not started, or after its Agent count
   const steps = stepsWords(todo, status);
   const held = heldDelivery(todo);
+  const responsible = responsibleOf(todo);
   const thread = useStore((s) => todoThreadsOn(s.features)) ? boundThread(todo) : undefined;
   // a failed start still waiting on the owner reads open, not done, with why it did not start (#3713), in every grouping
   const open = checksAsOpen(todo, section ?? view.section);
@@ -1770,13 +1811,27 @@ const TodoListItem = memo(function TodoListItem({
               <span className="shrink-0 whitespace-nowrap text-ink-3" data-testid="todo-steps">{steps.after}</span>
             </>
           )}
+          {responsible && (
+            <>
+              <span className="text-ink-3">·</span>
+              <span
+                data-testid="todo-responsible"
+                data-kind={responsible.kind}
+                title={t("todos.responsible_label", { name: responsible.name })}
+                className="inline-flex min-w-0 items-center gap-1 truncate text-ink-2"
+              >
+                <Icon name={responsible.kind === "person" ? "person" : "terminal"} size={11} stroke={2} className="shrink-0 text-ink-3" />
+                <span className="truncate">{responsible.name}</span>
+              </span>
+            </>
+          )}
           {/* its steps were handed out: what is next once they are all closed, else nothing about handing it over */}
           {!todo.done_at && activeCount === 0 && (steps?.tail !== undefined ? (
             steps.tail && <span className="truncate text-ink-3" data-testid="todo-steps-next">· {steps.tail}</span>
-          ) : (
+          ) : !responsible ? (
             <span className="truncate text-ink-3">· {t("todos.not_handed")}</span>
-          ))}
-          {(section ?? view.section) === "just_done" && onSeen ? (
+          ) : null)}
+          {(section ?? view.section) === "just_done" && seenCanFile(todo) && onSeen ? (
             <span className="ml-auto flex shrink-0 items-center gap-1.5">
               {!todo.done_at && <ReviewBadge todo={todo} />}
               <SeenButton onClick={() => onSeen(todo.id)} />
@@ -1796,7 +1851,10 @@ const TodoListItem = memo(function TodoListItem({
         {/* Why its agent did not start, while it waits on the owner (DESIGN_SYSTEM 5.6: what failed, in red) */}
         {failedOpen && <div className="mt-1 truncate text-[11.5px] text-red" data-testid="todo-start-failed">{t("todos.start_failed", { error: todo.start_error ?? "" })}</div>}
 
-        {/* Why the hub closed it */}
+        {/* Why it was cancelled, or why the legacy hub auto-closed it */}
+        {isCancelled(todo) && cancellationReason(todo) && (
+          <div className="mt-1 truncate text-xs text-ink-3" data-testid="todo-cancelled-reason">{cancellationReason(todo)}</div>
+        )}
         {isAutoDone(todo) && todo.done_reason && (
           <div className="mt-1 truncate text-[11.5px] text-ink-3">{todo.done_reason}</div>
         )}
@@ -1806,7 +1864,7 @@ const TodoListItem = memo(function TodoListItem({
           <div className="mt-1 truncate text-[11.5px] text-ink-3">
             <span className="font-medium text-orange">{t(`todos.delivery_${held.state}`)}</span>
             {held.gate && <> · {t("todos.delivery_gate", { gate: held.gate })}</>}
-            {held.unblock && ["user", "agent", "other"].includes(held.unblock) && <> · {t(`todos.unblock_${held.unblock}`)}</>}
+            {held.unblock && ["user", "agent", "other", "supervisor"].includes(held.unblock) && <> · {t(`todos.unblock_${held.unblock}`)}</>}
           </div>
         )}
 
@@ -1832,10 +1890,10 @@ const TodoListItem = memo(function TodoListItem({
   );
 });
 
-/** Got it on a Just finished row (#5707): files it under Done at once. A small capsule at the end of the status line,
- *  under the time (#6578), so the row is as tall as any other: its 20 px hang over the 18 px line (the negative margin
- *  keeps them out of the line's height), and `touch-hit` gives a finger 44 px. Its press stays its own and never opens
- *  the row. */
+/** Got it on an ordinary, unsupervised Delivered · awaiting review row (#5707): files it under Done at once. A small
+ * capsule at the end of the status line, under the time (#6578), so the row is as tall as any other: its 20 px hang
+ * over the 18 px line (the negative margin keeps them out of the line's height), and `touch-hit` gives a finger 44 px.
+ * Its press stays its own and never opens the row. Supervised work and unaccepted deliveries get no such receipt. */
 function SeenButton({ onClick }: { onClick: () => void }) {
   return (
     <button
@@ -2155,8 +2213,10 @@ function AutoReviewResult({ sup }: { sup: Supervision }) {
 }
 
 const TODO_IMAGE_LIMIT = 50;
-const TODO_IMAGE_MAX_BYTES = 1024 * 1024;
 const TODO_IMAGE_PARALLEL = 3;
+
+/** A picture picked for a new to-do and still being made ready to go with it (NewTodoDialog). */
+type PreparingImage = { id: string; name: string; file: File };
 
 type TodoImageEntry = {
   id: string;
@@ -2317,6 +2377,7 @@ function TodoDetail({
   open,
   onToggleDone,
   onOpenHandover,
+  onOpenTodo,
   onDeleteClick,
 }: {
   todo: Todo;
@@ -2333,6 +2394,7 @@ function TodoDetail({
   /** Closes it when `open`, reopens it otherwise: the row's checkbox. */
   onToggleDone: (open: boolean) => void;
   onOpenHandover: () => void;
+  onOpenTodo: (id: string) => void;
   onDeleteClick: () => void;
 }) {
   const title = useTodoField({
@@ -2403,6 +2465,7 @@ function TodoDetail({
   const look = todoLook(todo, status, waitOf(todo, status, lookup));
   // its steps as the hub counts them (#11858), as its row says them
   const steps = stepsWords(todo, status);
+  const responsible = responsibleOf(todo);
   // The to-do's own PR, parsed once here (the list row and the repository section's fallback share it).
   const legacyPR = prLink(todo.pr_url);
   const toneClass = {
@@ -2481,6 +2544,20 @@ function TodoDetail({
         )}
         <span className="text-ink-3">·</span>
         <span>{t("todos.agent_count", { count: activeAgents.length })}</span>
+        {responsible && (
+          <>
+            <span className="text-ink-3">·</span>
+            <span
+              data-testid="todo-detail-responsible"
+              data-kind={responsible.kind}
+              title={t("todos.responsible_label", { name: responsible.name })}
+              className="inline-flex min-w-0 items-center gap-1 text-ink-2"
+            >
+              <Icon name={responsible.kind === "person" ? "person" : "terminal"} size={12} stroke={2} className="shrink-0 text-ink-3" />
+              <span className="truncate">{responsible.name}</span>
+            </span>
+          </>
+        )}
         {steps?.after && (
           <>
             <span className="text-ink-3">·</span>
@@ -2490,6 +2567,11 @@ function TodoDetail({
         <span className="text-ink-3">·</span>
         <span>{t("todos.created_at", { time: clock(todo.created_at) })}</span>
       </div>
+      {isCancelled(todo) && cancellationReason(todo) && (
+        <p className="mt-2 text-xs leading-[1.6] text-ink-3" data-testid="todo-detail-cancelled-reason">
+          {t("todos.cancelled_reason", { reason: cancellationReason(todo) })}
+        </p>
+      )}
       {failedStart && (
         <p className="mt-2 text-meta leading-[1.6] text-red" data-testid="todo-detail-start-failed">
           {t("todos.start_failed", { error: todo.start_error ?? "" })}
@@ -2518,7 +2600,7 @@ function TodoDetail({
       <ReviewChecklist todo={todo} lookup={lookup} />
       {todo.brief && (
         <Suspense fallback={null}>
-          <TaskBriefHistory todo={todo} />
+          <TaskBriefHistory todo={todo} onOpenTodo={onOpenTodo} />
         </Suspense>
       )}
       <LatestReport todo={todo} />
@@ -2547,12 +2629,14 @@ function TodoDetail({
       <TodoImages todo={todo} owner={owner} />
 
       <TodoRepositoryBindings key={`${owner}:${todo.manager ?? defaultManager()}:${todo.id}`} manager={todo.manager ?? defaultManager()} owner={owner} todoId={todo.id}
-        legacyPRs={legacyPR ? [legacyPR] : []} version={todo.updated_at} />
+        prStatus={todo.pr_status} otherPRs={todo.other_prs} legacyPRs={legacyPR ? [legacyPR] : []} version={todo.updated_at} />
       <PageBoundary page="workspace-naming">
         <Suspense fallback={<Loading />}>
           <WorkspaceNaming manager={todo.manager ?? defaultManager()} owner={owner} todoId={todo.id} />
         </Suspense>
       </PageBoundary>
+
+      <ResponsibleSection todo={todo} machines={machines} />
 
       <ThreadSection todo={todo} />
 
@@ -2605,7 +2689,7 @@ function TodoDetail({
 
         {activeAgents.length === 0 ? (
           <div className="rounded-control border border-dashed border-line p-6 text-center text-[13px] text-ink-3">
-            {open ? t("todos.no_agents") : t("todos.no_agents_done")}
+            {open ? (responsible ? t("todos.no_agents_responsible", { name: responsible.name }) : t("todos.no_agents")) : t("todos.no_agents_done")}
           </div>
         ) : (
           <div className="flex flex-col gap-2">
@@ -2788,6 +2872,83 @@ function TodoDetail({
         )}
         <Button tone="secondary" icon="check" onClick={() => onToggleDone(open)} className="h-8.5 px-3 text-[13px] whitespace-nowrap">
           {open ? t("todos.complete") : t("todos.reopen")}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+// ── Responsible party (#12712) ───────────────────────────────
+
+/**
+ * The external responsible party (long-running session or person) when one is recorded on the to-do (#12712).
+ * Renders nothing when unset so to-dos without a responsible party stay unchanged.
+ */
+function ResponsibleSection({ todo, machines }: { todo: Todo; machines: Machine[] }) {
+  const responsible = responsibleOf(todo);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    setBusy(false);
+  }, [todo.id]);
+
+  if (!responsible) return null;
+
+  const machineName = responsible.machine_id
+    ? machines.find((m) => m.id === responsible.machine_id)?.name || responsible.machine_id
+    : undefined;
+  const hint = [machineName, responsible.session_id].filter(Boolean).join(" · ");
+
+  const clear = async () => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      await updateTodo(todo.id, { responsible: null });
+      await refreshTodos();
+      toast(t("todos.responsible_cleared"), "ok");
+    } catch (e) {
+      toast(t("todos.responsible_clear_failed", { error: errorText(e) }), "error");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="mt-6" data-testid="todo-responsible-section">
+      <div className="mb-2 text-xs font-medium tracking-[0.04em] text-ink-3 uppercase">
+        {t("todos.responsible_section")}
+      </div>
+      <div className="flex items-center justify-between gap-3 rounded-control border border-line bg-canvas p-3">
+        <div className="min-w-0 flex-1">
+          <div className="flex min-w-0 items-center gap-2 text-sm font-semibold text-ink">
+            <span className="shrink-0 text-ink-3">
+              <Icon name={responsible.kind === "person" ? "person" : "terminal"} size={14} />
+            </span>
+            <span data-testid="todo-responsible-name" className="truncate">
+              {responsible.name}
+            </span>
+            <span
+              data-testid="todo-responsible-kind"
+              className="shrink-0 whitespace-nowrap rounded bg-hover px-1.5 py-0.5 text-xs font-normal text-ink-3"
+            >
+              {t(`todos.responsible_kind_${responsible.kind}`)}
+            </span>
+          </div>
+          {hint && (
+            <div data-testid="todo-responsible-hint" className="mt-0.5 truncate pl-5.5 text-xs text-ink-3">
+              {hint}
+            </div>
+          )}
+        </div>
+        <Button
+          tone="quiet"
+          busy={busy}
+          disabled={busy}
+          title={t("todos.responsible_clear_label", { name: responsible.name })}
+          className="shrink-0 whitespace-nowrap px-2 py-1 text-xs text-ink-3 hover:bg-red-tint/50 hover:text-red"
+          onClick={() => void clear()}
+        >
+          {t("todos.responsible_clear")}
         </Button>
       </div>
     </div>
@@ -3207,6 +3368,11 @@ function NewTodoDialog({
   const [attachments, setAttachments] = useState<LocalAttachment[]>([]);
   const imagesSupported = useStore((s) => s.features.includes("todo_images"));
   const keptAttachments = useRef<LocalAttachment[]>([]);
+  // pictures picked and still being made ready (lib/todo-image.ts, #13797), in the order picked; the tray shows them by
+  // name until they are
+  const [preparing, setPreparing] = useState<PreparingImage[]>([]);
+  const queued = useRef<PreparingImage[]>([]);
+  const pumping = useRef(false);
   const operationId = useRef(uuid());
   const operationKey = useRef("");
   const imageInput = useRef<HTMLInputElement>(null);
@@ -3218,12 +3384,17 @@ function NewTodoDialog({
   const duplicateLinks = repositoryBindings ? repositoryDuplicateLink(cleanBindings, repositoryIdentities) : false;
   const bindingsValid = !repositoryBindings || validRepositoryDraft(cleanBindings, repositoryIdentities);
 
-  useEffect(() => () => releaseAttachments(keptAttachments.current), []);
+  useEffect(() => () => {
+    queued.current = [];
+    releaseAttachments(keptAttachments.current);
+  }, []);
   useEffect(() => {
     if (!open) return;
     operationId.current = uuid();
     operationKey.current = "";
     setFailure("");
+    queued.current = [];
+    setPreparing([]);
     releaseAttachments(keptAttachments.current);
     keptAttachments.current = [];
     setAttachments([]);
@@ -3242,6 +3413,8 @@ function NewTodoDialog({
   }, [open, slot]);
 
   const discardImages = () => {
+    queued.current = [];
+    setPreparing([]);
     releaseAttachments(keptAttachments.current);
     keptAttachments.current = [];
     setAttachments([]);
@@ -3253,10 +3426,10 @@ function NewTodoDialog({
   };
   const addImages = (files: FileList | File[]) => {
     if (creating.current) return;
-    const picked: LocalAttachment[] = [];
+    const picked: PreparingImage[] = [];
     let problem = "";
     for (const file of Array.from(files)) {
-      if (keptAttachments.current.length + picked.length >= TODO_IMAGE_LIMIT) {
+      if (keptAttachments.current.length + queued.current.length + picked.length >= TODO_IMAGE_LIMIT) {
         problem = t("todos.images_limit", { max: TODO_IMAGE_LIMIT });
         break;
       }
@@ -3264,25 +3437,48 @@ function NewTodoDialog({
         problem = t("todos.image_type", { name: file.name });
         continue;
       }
-      if (file.size > TODO_IMAGE_MAX_BYTES) {
-        problem = t("todos.image_too_big", { name: file.name });
-        continue;
-      }
-      try {
-        picked.push(pickAttachment(file));
-      } catch (error) {
-        problem = errorText(error);
-      }
-    }
-    if (picked.length) {
-      const next = [...keptAttachments.current, ...picked];
-      keptAttachments.current = next;
-      setAttachments(next);
+      picked.push({ id: uuid(), name: file.name || "image.png", file });
     }
     setFailure(problem);
+    if (!picked.length) return;
+    queued.current = [...queued.current, ...picked];
+    setPreparing(queued.current);
+    void prepareQueued();
+  };
+  /** Makes the queued pictures ready one at a time (a large one is decoded whole, so never several at once). One removed
+   *  meanwhile, or picked before the dialog closed, is dropped when it is done; one that cannot be made ready says so
+   *  under the others, which stay, as does the draft. */
+  const prepareQueued = async () => {
+    if (pumping.current) return;
+    pumping.current = true;
+    try {
+      for (let next = queued.current[0]; next; next = queued.current[0]) {
+        let done: { file: File } | { error: string };
+        try {
+          const { prepareTodoImage } = await import("../lib/todo-image");
+          done = await prepareTodoImage(next.file);
+        } catch (error) {
+          done = { error: errorText(error) };
+        }
+        if (queued.current[0] !== next) continue;
+        queued.current = queued.current.slice(1);
+        setPreparing(queued.current);
+        if ("error" in done) {
+          const error = done.error;
+          setFailure((shown) => (shown ? `${shown}\n${error}` : error));
+          continue;
+        }
+        keptAttachments.current = [...keptAttachments.current, pickAttachment(done.file)];
+        setAttachments(keptAttachments.current);
+      }
+    } finally {
+      pumping.current = false;
+    }
   };
   const removeImage = (id: string) => {
     if (creating.current) return;
+    queued.current = queued.current.filter((image) => image.id !== id);
+    setPreparing(queued.current);
     releaseAttachments(keptAttachments.current.filter((image) => image.id === id));
     const next = keptAttachments.current.filter((image) => image.id !== id);
     keptAttachments.current = next;
@@ -3302,7 +3498,7 @@ function NewTodoDialog({
 
   const submit = async (e?: React.FormEvent) => {
     e?.preventDefault();
-    if (!title.trim() || creating.current || !bindingsValid || !repositoryContext.isCurrent()) return;
+    if (!title.trim() || creating.current || queued.current.length || !bindingsValid || !repositoryContext.isCurrent()) return;
     if (keptAttachments.current.length > 0 && !imagesSupported) {
       setFailure(t("lib-todos.images_unsupported"));
       return;
@@ -3421,13 +3617,19 @@ function NewTodoDialog({
               e.currentTarget.value = "";
             }}
           />
-          <Button tone="quiet" icon="plus" className="touch-hit whitespace-nowrap" disabled={busy || attachments.length >= TODO_IMAGE_LIMIT} onClick={() => imageInput.current?.click()}>
+          <Button tone="quiet" icon="plus" className="touch-hit whitespace-nowrap" disabled={busy || attachments.length + preparing.length >= TODO_IMAGE_LIMIT} onClick={() => imageInput.current?.click()}>
             {t("todos.add_images")}
           </Button>
           <p className="mt-1 text-submeta text-ink-3">{t("todos.images_hint", { max: TODO_IMAGE_LIMIT })}</p>
-          {attachments.length > 0 && (
+          {attachments.length + preparing.length > 0 && (
             <div className="mt-2">
-              <AttachmentTray attachments={attachments} onRemove={busy ? undefined : removeImage} />
+              <AttachmentTray attachments={[...attachments, ...preparing]} onRemove={busy ? undefined : removeImage} />
+              {preparing.length > 0 && (
+                <p role="status" data-testid="todo-images-preparing" className="mt-1.5 flex items-center gap-1.5 text-submeta text-ink-3">
+                  <Spinner />
+                  {t("todos.images_preparing", { count: preparing.length })}
+                </p>
+              )}
             </div>
           )}
         </div>
@@ -3435,13 +3637,13 @@ function NewTodoDialog({
 
         <NewTodoRepositoryBindings context={repositoryContext} value={repositoryBindings} onChange={setRepositoryBindings} pending={busy} onCatalog={setRepositoryCatalog} />
         {!bindingsValid && <p role="alert" className="text-submeta text-red">{t(duplicateLinks ? "task-repositories.duplicate_link" : "task-repositories.draft_invalid")}</p>}
-        {failure && <p role="alert" className="text-meta text-red">{failure}</p>}
+        {failure && <p role="alert" className="whitespace-pre-line text-meta text-red">{failure}</p>}
 
         <div className="mt-2 flex justify-end gap-2">
           <Button tone="secondary" disabled={busy} onClick={cancel}>
             {t("common.cancel")}
           </Button>
-          <Button tone="accent" type="submit" disabled={!title.trim() || busy || !bindingsValid} busy={busy}>
+          <Button tone="accent" type="submit" disabled={!title.trim() || busy || preparing.length > 0 || !bindingsValid} busy={busy}>
             {busy && attachments.length > 0 ? t("todos.images_uploading") : t("todos.create")}
           </Button>
         </div>

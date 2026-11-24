@@ -91,6 +91,7 @@ func PairWithSSH(ctx context.Context, raw, machine, name, path string, ssh *SSH,
 	}
 	if existing, err := Read(path); err == nil {
 		c.Proxy = existing.Proxy // set before pairing (persona-link proxy, pair --proxy): pairing goes through it too
+		c.ProxyAlways = existing.ProxyAlways
 	}
 	if c.Machine != "" && machine != "" && machine != c.Machine {
 		return nil, newTextError("link-errors.pair_machine_mismatch", nil, i18n.Args{"expected": strconv.Quote(c.Machine), "actual": strconv.Quote(machine)})
@@ -109,6 +110,9 @@ func PairWithSSH(ctx context.Context, raw, machine, name, path string, ssh *SSH,
 		norm, err := NormalizeSSH(ssh.Server, ssh.Target, ssh.Always, c.Endpoints)
 		if err != nil {
 			return nil, err
+		}
+		if norm.Always && c.ProxyAlways { // as SetSSH: only one route can be the only one
+			return nil, ErrSSHAlwaysProxyAlways
 		}
 		c.SSH = norm
 	}
@@ -197,7 +201,7 @@ func PairWithSSH(ctx context.Context, raw, machine, name, path string, ssh *SSH,
 
 	// The link's routes, in its order (routeOrder). A hub that answered (refused the pairing, or has another key) ends
 	// it there.
-	p, eps, perr := proxied(&c)
+	p, eps, perr := proxyRoute(&c)
 	got, err := tryRoutes(routeOrder(&c, p != nil || perr != nil, ""), func(kind string) (redeemed, error) {
 		switch kind {
 		case KindSSH:
@@ -226,7 +230,7 @@ func PairWithSSH(ctx context.Context, raw, machine, name, path string, ssh *SSH,
 		keep := c
 		keep.Endpoints = append(manual, c.Endpoints...)
 		keep.SSH = cloneSSH(c.SSH)
-		keep.Proxy = old.Proxy // the computer's network setting, not the pairing's
+		keep.Proxy, keep.ProxyAlways = old.Proxy, old.ProxyAlways // the computer's network setting, not the pairing's
 		// Pairing with a hub's link means dialing it; what passive mode had stays for switching back.
 		keep.Mode, keep.Passive = ModeActive, old.Passive
 		*old = keep

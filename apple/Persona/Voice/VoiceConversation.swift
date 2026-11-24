@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import os
 
 // One voice call bound to one conversation (docs/assistant/voice.md 6.3): the socket to the hub's voice extension, the frames,
 // the captions, the runs it handed over, and the audio. The state lives here and in `VoiceCalls`, not in AppModel or
@@ -80,6 +81,17 @@ nonisolated enum VoiceEnd: Equatable, Sendable {
         switch self {
         case .user, .left, .replaced: true
         default: false
+        }
+    }
+
+    /// How the call's log names it: the case, a refused status, a failure's code; never the extension's message or why a
+    /// model is unavailable.
+    var logWord: String {
+        switch self {
+        case .rejected(let status): "rejected (\(status))"
+        case .failed(let code, _): "failed (\(code.map { String(describing: $0) } ?? "no code"))"
+        case .modelUnavailable: "modelUnavailable"
+        default: String(describing: self)
         }
     }
 }
@@ -229,6 +241,10 @@ struct VoiceDeps {
 }
 
 @MainActor @Observable final class VoiceConversation {
+    /// The call's connection and cut-offs (#13963), beside the audio's own lines (`PhoneVoiceAudio`, same category), so one
+    /// exported log tells a link that falls behind from a voice that was cut off or a connection that went.
+    nonisolated static let log = Logger(subsystem: "persona", category: "voice")
+
     let key: SessionKey
     let surface: VoiceSurface
     let extensionID: String
@@ -343,6 +359,13 @@ struct VoiceDeps {
     @ObservationIgnored private var formatOnResume: VoiceAudioFormat?
     /// The voice's levels reach `levels` (the orb's): not while the app is in the background, where nobody sees them.
     @ObservationIgnored private var levelsShown = true
+    /// For the log (#13963): when this connection said `ready`, when the last one went, and when the extension last cut
+    /// the voice off (its `clear`), until the user's next caption.
+    @ObservationIgnored private var readyAt: Date?
+    @ObservationIgnored private var droppedAt: Date?
+    @ObservationIgnored private var cutAt: Date?
+    /// A user caption this long (ms) after a cut-off is logged as following it; a later one is the next thing they said.
+    private static let cutCaptionWithin = 10_000
     /// The app's word on the bound conversation (`deps.session`) is not kept up to date: in the background the app's
     /// socket to the hub is closed (`AppModel.suspendLinks`), so the state it last said (working, perhaps) may long be
     /// over while this call goes on there (#9887). The idle rule takes the voice connection's own word then (`targetBusy`).
@@ -439,6 +462,10 @@ struct VoiceDeps {
     /// Ends the call: the socket, the microphone and the player go, the screen may lock again.
     func end(_ reason: VoiceEnd) {
         guard !phase.isEnded else { return }
+        Self.log.notice("voice: the call ended: \(reason.logWord, privacy: .public)")
+        readyAt = nil
+        droppedAt = nil
+        cutAt = nil
         epoch += 1
         for task in timers.values { task.cancel() }
         timers = [:]
@@ -557,6 +584,7 @@ struct VoiceDeps {
     /// Interrupt Voice: stops what the voice says (never the agent). What was queued is dropped here at once.
     func interruptSpeech() {
         guard ready, let socket else { return }
+        Self.log.notice("voice: Interrupt tapped while the voice \(self.playing ? "played" : "was quiet", privacy: .public)")
         socket.send(text: VoiceMessage.interrupt)
         audio?.clear()
         lastActivity = deps.clock.now
@@ -644,6 +672,7 @@ struct VoiceDeps {
 
     private func connect() {
         guard let api = deps.api() else { return end(.noHub) }
+        Self.log.notice("voice: connecting\(self.attempt == 0 ? "" : ", try \(self.attempt)", privacy: .public)")
         generation += 1
         let generation = generation
         ready = false
@@ -668,6 +697,8 @@ struct VoiceDeps {
     /// A new connection now, not counted as a reconnect (another voice or model).
     private func reopen() {
         guard !phase.isEnded, audio != nil else { return }
+        Self.log.notice("voice: a new connection for another voice, model or setting")
+        readyAt = nil
         timers["ready"]?.cancel()
         timers["retry"]?.cancel()
         socket?.close()
@@ -700,6 +731,7 @@ struct VoiceDeps {
     /// handshake the hub refused for good is not tried again.
     private func dropped(_ close: VoiceSocketClose, generation: Int) {
         guard generation == self.generation, !phase.isEnded else { return }
+        logDrop(close)
         timers["ready"]?.cancel()
         ready = false
         if connected { connected = false }
@@ -718,6 +750,25 @@ struct VoiceDeps {
             guard me.generation == generation, !me.phase.isEnded else { return }
             me.connect()
         }
+    }
+
+    /// The connection went (`dropped`): after how long, why, and what comes next. Its close reason is the socket's error or
+    /// the hub's word, which the exported log scrubs as it does every line.
+    private func logDrop(_ close: VoiceSocketClose) {
+        let now = deps.clock.now
+        let up = readyAt.map { "after \(Int(now.timeIntervalSince($0).rounded())) s up" } ?? "before it was ready"
+        readyAt = nil
+        droppedAt = droppedAt ?? now
+        let next: String
+        if let status = close.status, refusedForGood(status) {
+            next = "refused for good"
+        } else if attempt + 1 <= Self.retryDelays.count || meeting != nil {
+            next = "trying again, try \(attempt + 1)"
+        } else {
+            next = "giving up"
+        }
+        let status = close.status.map { "status \($0), " } ?? ""
+        Self.log.notice("voice: the connection went \(up, privacy: .public) (\(status, privacy: .public)\(close.reason ?? "no reason", privacy: .public)); \(next, privacy: .public)")
     }
 
     /// Whether a refused handshake ends the call: 401 (the token) and 403 (an answer-only device) always. A 404 only
@@ -745,6 +796,11 @@ struct VoiceDeps {
         case .ready(let r):
             becomeReady(r)
         case .clear:
+            // The extension's word: the user cut in (its energy rule or the upstream's), or its upstream reconnected. On
+            // the loudspeaker the voice's own echo can pass for the user (#13963): the audio's line says where it played,
+            // and whether the user's caption followed says which it was.
+            Self.log.notice("voice: the extension cut the voice off while it \(self.playing ? "played" : "was quiet", privacy: .public) (echo cancellation \(self.audio?.cancelsEcho ?? false, privacy: .public))")
+            cutAt = deps.clock.now
             audio?.clear()
         case .transcript(let t):
             caption(t)
@@ -799,6 +855,14 @@ struct VoiceDeps {
             format = wanted
         }
         Self.formats[Self.formatKey(key.group, extensionID)] = wanted
+        let now = deps.clock.now
+        if let droppedAt {
+            Self.log.notice("voice: connected again \(Int(now.timeIntervalSince(droppedAt).rounded()), privacy: .public) s after the connection went, on try \(self.attempt, privacy: .public) (in \(r.inputRate, privacy: .public) Hz, out \(r.outputRate, privacy: .public) Hz)")
+        } else {
+            Self.log.notice("voice: connected (in \(r.inputRate, privacy: .public) Hz, out \(r.outputRate, privacy: .public) Hz)")
+        }
+        readyAt = now
+        droppedAt = nil
         ready = true
         if !connected { connected = true }
         everReady = true
@@ -839,6 +903,14 @@ struct VoiceDeps {
             lastAnswer = said
         }
         lastActivity = deps.clock.now
+        if t.role == VoiceLine.user, let cut = cutAt {
+            // A real cut-in is the user's words, captioned about a second after they stop; none soon after points to echo.
+            cutAt = nil
+            let after = Int((lastActivity.timeIntervalSince(cut) * 1000).rounded())
+            if after <= Self.cutCaptionWithin {
+                Self.log.notice("voice: the user's caption came \(after, privacy: .public) ms after the extension cut the voice off")
+            }
+        }
         if t.role == VoiceLine.user {
             // Thinking once the owner's words are final (once for each line), unless the voice already began to answer
             // them (a late caption goes before that answer: `before`); not while they still come.

@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"reflect"
 	"slices"
 	"strconv"
 	"strings"
@@ -86,10 +87,10 @@ func (s *Service) toolAgentInterrupt(ctx context.Context, machine, self string, 
 	if then != "" {
 		summary += "\n\n" + then
 	}
-	if ok, err := s.confirmOutbound(ctx, machine, self, "agent_interrupt", summary, args); err != nil {
+	if ok, outcome, err := s.confirmOutbound(ctx, machine, self, "agent_interrupt", then, summary, args); err != nil {
 		return "", err
 	} else if !ok {
-		return "The user declined on the phone: the agent goes on as it was.", nil
+		return outboundNotDone(outcome, "The user declined on the phone: the agent goes on as it was.", "the agent goes on as it was"), nil
 	}
 	// Again after the phone: the agent may have become another conversation's task while the user was asked.
 	if err := s.exitAllowed(ctx, self, am, c, then, 0); err != nil {
@@ -199,22 +200,27 @@ func (s *Service) interruptLanded(ctx context.Context, machine, id string) bool 
 
 // ---- agent_supervise ----
 
-// toolAgentSupervise takes agent machine/session under the main conversation's supervision: a task of it already
+// toolAgentSupervise takes agent machine/session under the supervision of conversation self, the main conversation or a
+// direction's lead (within leadTakeAllowed, #12953): a task of it already
 // gets the new done_when / expect_minutes; an agent of no task becomes one (a todo of this conversation with the
-// agent on it, as quietAgentTask makes); another conversation's task, or the user's own todo, stays theirs.
+// agent on it, as an answered agent_start makes); another conversation's task, or the user's own todo, stays theirs.
 func (s *Service) toolAgentSupervise(ctx context.Context, self string, args json.RawMessage) (string, error) {
 	var a struct {
 		Machine       string   `json:"machine"`
 		SessionID     string   `json:"session_id"`
 		Title         string   `json:"title"`
+		Role          string   `json:"role"`
 		DoneWhen      []string `json:"done_when"`
 		ExpectMinutes int      `json:"expect_minutes"`
 	}
 	if err := json.Unmarshal(args, &a); err != nil {
 		return "", fmt.Errorf("arguments: %v", err)
 	}
-	if !s.isMain(ctx, self) {
-		return "", fmt.Errorf("only the main conversation supervises agents: from here, talk to it with agent_send")
+	if !s.supervises(ctx, self) {
+		return "", fmt.Errorf("only the main conversation and a direction's lead supervise agents: from here, send it without a task")
+	}
+	if a.Role != "" && a.Role != roleLeader {
+		return "", errors.New(`role must be "leader" or omitted for a worker`)
 	}
 	am, c, err := s.findAgent(ctx, a.Machine, a.SessionID)
 	if err != nil {
@@ -223,16 +229,33 @@ func (s *Service) toolAgentSupervise(ctx context.Context, self string, args json
 	if c.Assistant {
 		return "", fmt.Errorf("that is an assistant conversation, not a coding agent")
 	}
-	todo, made, err := s.adoptAgent(ctx, self, am, c, a.Title, "", i18n.T(s.lang(ctx), "assistant-tasks.adopt_notes",
-		i18n.Args{"agent": agentLabel(c), "machine": am.Name, "cwd": c.Cwd}), a.DoneWhen, a.ExpectMinutes, true)
+	if err := s.leadTakeAllowed(ctx, self, am, c); err != nil {
+		return "", fmt.Errorf("%w. Nothing changed", err)
+	}
+	if err := s.leaderOnWorkMachine(&PlanTask{Role: a.Role}, am); err != nil {
+		return "", err
+	}
+	todo, made, err := s.adoptAgentFor(ctx, self, self, am, c, a.Title, "", i18n.T(s.lang(ctx), "assistant-tasks.adopt_notes",
+		i18n.Args{"agent": agentLabel(c), "machine": am.Name, "cwd": c.Cwd}), a.DoneWhen, a.ExpectMinutes, adoptionOptions{update: true, role: a.Role})
 	if err != nil {
 		return "", err
+	}
+	if made {
+		s.taskCard(ctx, self, todo.ID, wakeActive)
+	}
+	if a.Role == roleLeader {
+		entry := s.adoptedTaskEntry(ctx, am.ID, c)
+		note := strings.Join([]string{prompts.RenderTaskHandoff(entry), prompts.RenderTaskLeader(prompts.TaskLeader{Terminal: entry.Terminal()})}, "\n\n")
+		params := map[string]any{"session_id": c.SessionID, "text": note, "client_msg_id": "leader-note:" + todo.ID}
+		if err := s.call(ctx, am.ID, DeviceSessionSendOnce, params, nil); err != nil {
+			return "", fmt.Errorf("task %s has its leader, but delivery of the leader instructions was not confirmed: %w. Retry agent_supervise with the same role", todo.ID, err)
+		}
+		return fmt.Sprintf("%s leads task %s (%q), supervised by %s. Its leader instructions were sent. done_when %s.", agentLabel(c), todo.ID, todo.Title, s.conversationWords(ctx, todo.Supervision.Supervisor), criteriaWords(nil, todo.Supervision)), nil
 	}
 	if !made {
 		return fmt.Sprintf("%s already works for your task %s (%q): you supervise it, done_when %s.", agentLabel(c), todo.ID, todo.Title,
 			criteriaWords(nil, todo.Supervision)), nil
 	}
-	s.taskCard(ctx, self, todo.ID, wakeActive)
 	return fmt.Sprintf("%s on %s is now your task %s (%q, its card is in the conversation): %s. done_when %s. The agent was not told: "+
 		"if it should work to these criteria or report to its supervisor (report_to_supervisor), tell it with agent_send.",
 		agentLabel(c), am.Name, todo.ID, todo.Title, s.followUpWords(ctx, self), criteriaWords(nil, todo.Supervision)), nil
@@ -255,6 +278,18 @@ func (s *Service) adoptAgent(ctx context.Context, self string, am Device, c prot
 // (assistantsConversation, #10801).
 func (s *Service) adoptAgentAs(ctx context.Context, self string, am Device, c proto.Session, title, prompt, notes string, doneWhen []string,
 	expect int, update, quiet bool) (Todo, bool, error) {
+	return s.adoptAgentFor(ctx, self, self, am, c, title, prompt, notes, doneWhen, expect, adoptionOptions{update: update, quiet: quiet})
+}
+
+type adoptionOptions struct {
+	update, quiet bool
+	role          string
+}
+
+// adoptAgentFor is adoptAgentAs with the todo's origin and supervisor kept separate (#5732). A side conversation
+// keeps its dispatch origin while the main conversation supervises the new task.
+func (s *Service) adoptAgentFor(ctx context.Context, self, supervisor string, am Device, c proto.Session, title, prompt, notes string, doneWhen []string,
+	expect int, opts adoptionOptions) (Todo, bool, error) {
 	if s.assistantsConversation(ctx, am.ID, c) {
 		return Todo{}, false, errors.New("that is an assistant conversation, not a coding agent")
 	}
@@ -269,11 +304,16 @@ func (s *Service) adoptAgentAs(ctx context.Context, self string, am Device, c pr
 		if err := othersTask(c, t, self); err != nil {
 			return Todo{}, false, err
 		}
-		if !update {
+		if opts.role == roleLeader {
+			if _, _, leads := s.leaderTask(ctx, am.ID, c.SessionID); !leads {
+				return Todo{}, false, fmt.Errorf("the Agent already works on open task %s as a worker; the leader role is assigned when adopting an Agent on no open task", t.ID)
+			}
+		}
+		if !opts.update {
 			return t, false, nil
 		}
 		// Its criteria change only through the brief's log (task_brief_scope.go): the same rules as task_scope.
-		v, err := s.rescope(ctx, t, self, "agent_supervise", doneWhen, expect)
+		v, err := s.rescope(ctx, t, self, supervisor, "agent_supervise", doneWhen, expect)
 		if err != nil {
 			return Todo{}, false, err
 		}
@@ -281,27 +321,60 @@ func (s *Service) adoptAgentAs(ctx context.Context, self string, am Device, c pr
 		s.restage(ctx, t.ID, nil) // by its new criteria; a read-only start still holds
 		return t, false, nil
 	}
+	// Adoption does not start the Agent with a read-only constraint.
+	if opts.role == roleLeader && len(doneWhen) == 0 {
+		return Todo{}, false, errors.New("a writable task leader needs done_when with at least one checkable result")
+	}
+	previous, continuing := s.closedTodoOfAgent(am.ID, c.SessionID)
+	// Only an explicit adoption/takeover continues the closed card's brief. A newly titled agent_send task is new work,
+	// even when it reuses the same Agent; it must not rewrite the old card's scope or lineage (#5732).
+	continuing = continuing && opts.update
+	if continuing {
+		if succ, ok := s.openSuccessor(previous.ID); ok {
+			return Todo{}, false, errContinued(previous.ID, succ)
+		}
+	}
 	title, retitle := s.adoptedTitle(ctx, c, title, prompt)
-	todo, err := s.newTodo(ctx, title, notes, self, "", quiet || s.quietTask(ctx, self))
+	todo, err := s.newTodo(ctx, title, notes, self, "", opts.quiet || s.quietTask(ctx, self))
 	if err != nil {
 		return Todo{}, false, err
 	}
 	if retitle {
 		s.nameTodoLater(ctx, todo.ID, title, cmp.Or(strings.TrimSpace(prompt), title))
 	}
-	v, _, err := s.updateSupervision(ctx, todo.ID, func(v *Supervision) bool {
-		v.Supervisor, v.DoneWhen, v.ExpectMinutes = self, doneWhen, expect
-		return true
-	})
-	if err != nil {
-		s.dropAdoption(ctx, todo.ID, err)
-		return Todo{}, false, fmt.Errorf("supervise it: %w", err)
+	var v Supervision
+	var rollback *continuationRollback
+	if continuing {
+		// A takeover inherits the brief and changes its scope before any ledger or Agent link is committed. A rejected
+		// risky criterion therefore aborts the whole adoption instead of surviving in an unapproved open card (#5732).
+		v, rollback, err = s.continueBriefFor(ctx, self, supervisor, previous, todo, notes, doneWhen, expect)
+		if err != nil {
+			s.dropContinuation(ctx, todo.ID, rollback, err)
+			return Todo{}, false, fmt.Errorf("continue the previous task: %w", err)
+		}
+	} else {
+		v, _, err = s.updateSupervision(ctx, todo.ID, func(v *Supervision) bool {
+			v.Supervisor, v.DoneWhen, v.ExpectMinutes = supervisor, doneWhen, expect
+			if s.isLeader(ctx, supervisor) {
+				v.SupervisorSource = "plan"
+			}
+			return true
+		})
+		if err != nil {
+			s.dropAdoption(ctx, todo.ID, err)
+			return Todo{}, false, fmt.Errorf("supervise it: %w", err)
+		}
+		s.briefFor(ctx, s.callerOrigin(ctx, self), todo, doneWhen, expect) // before its agent is linked (task_brief.go)
 	}
 	s.restage(ctx, todo.ID, nil)
 	todo.Supervision = &v
-	s.briefFor(ctx, s.callerOrigin(ctx, self), todo, doneWhen, expect) // before its agent is linked (task_brief.go)
-	if err := s.linkTodoAgent(ctx, todo.ID, am.ID, c.SessionID, title, c.Cwd, c.Agent); err != nil {
-		s.dropAdoption(ctx, todo.ID, err)
+	source, via := (PlanTask{Role: opts.role}).linkSource()
+	if err := s.linkTodoAgentWithSource(ctx, todo.ID, am.ID, c.SessionID, title, c.Cwd, c.Agent, "", source, via); err != nil {
+		if continuing {
+			s.dropContinuation(ctx, todo.ID, rollback, err)
+		} else {
+			s.dropAdoption(ctx, todo.ID, err)
+		}
 		return Todo{}, false, fmt.Errorf("link the agent: %w", err)
 	}
 	s.logf("adopt %s on %s → task %s", short(c.SessionID), am.ID, todo.ID)
@@ -318,6 +391,55 @@ func othersTask(c proto.Session, t Todo, self string) error {
 		return fmt.Errorf("%s works for task %q (%s) of another conversation: it stays that conversation's", agentLabel(c), t.Title, t.ID)
 	}
 	return nil
+}
+
+// leadTakeAllowed is the boundary within which conversation self, a direction's lead, takes agent c of machine am
+// under its own supervision (agent_send with a task, also when resuming it, and agent_supervise; #12953), so a lead
+// does its own work without the main conversation sending for it. The main conversation is not limited here.
+//
+//   - An agent on an open task stays that task's: another conversation's or the user's own (named, with whose it is);
+//     one on self's own task goes on under it, as from the main conversation.
+//   - An agent on no open task (its earlier task, of any direction, is closed) becomes a new task of self; the closed
+//     to-do and its supervisor are left as they are. Moving an open task between supervisors stays agent_transfer's.
+//   - An agent waiting for the user (a question, plan, permission or dialog) is the user's to answer first.
+//   - An agent busy on work no task tracks that Persona did not start (a terminal the user opened) may be the user's
+//     own run: not taken until it is idle. One Persona started (the lead's own agent_start) is taken as it runs.
+func (s *Service) leadTakeAllowed(ctx context.Context, self string, am Device, c proto.Session) error {
+	if s.isMain(ctx, self) || !s.isLeader(ctx, self) {
+		return nil
+	}
+	if c.State == proto.StateNeedsYou || c.PendingInteractions > 0 {
+		return fmt.Errorf("%s is waiting for the user (a question, plan, permission or dialog): it is theirs to answer first", agentLabel(c))
+	}
+	if err := s.ensureTodosLoaded(ctx); err != nil {
+		return err
+	}
+	if t, ok := s.openTodoOfAgent(am.ID, c.SessionID); ok {
+		if t.Origin == "" {
+			return othersTask(c, t, self)
+		}
+		if sup := cmp.Or(supervisorOf(t), t.Origin); sup != self && t.Origin != self {
+			return fmt.Errorf("%s works for task %q (%s), supervised by %s: it stays theirs until that task is closed or "+
+				"its supervisor hands it over", agentLabel(c), t.Title, t.ID, s.conversationWords(ctx, sup))
+		}
+		return nil
+	}
+	if !stoppedAgent(c) && c.Status == proto.StatusWorking && !c.StartedByPersona {
+		return fmt.Errorf("%s is busy on work no task tracks that Persona did not start (it may be the user's own run): send "+
+			"it without task, or wait until it is idle", agentLabel(c))
+	}
+	return nil
+}
+
+// conversationWords names conversation id in a refusal: the main conversation, a direction's lead, or the conversation.
+func (s *Service) conversationWords(ctx context.Context, id string) string {
+	switch {
+	case s.isMain(ctx, id):
+		return "the main conversation (" + id + ")"
+	case s.isLeader(ctx, id):
+		return "the direction lead " + id
+	}
+	return "conversation " + id
 }
 
 // ---- agent_send with a task ----
@@ -356,25 +478,25 @@ func (t sendTask) none() bool {
 // handedTask is the task agent_send with a task put the agent on: made now, or self's own that it worked for already
 // (then task's criteria are written once the text went: a send that fails changes nothing).
 type handedTask struct {
-	todo Todo
-	made bool
-	self string
-	task sendTask
+	todo       Todo
+	made       bool
+	self       string
+	supervisor string
+	task       sendTask
 	// wake: its card's (taskCard), wakeResumed when the agent was closed and the message resumes it
 	wake string
 	run  SessionRef // the agent the text goes to, which its routed line names (#10465)
 }
 
-// sendTaskAllowed refuses agent_send's task before anything is sent: only the main conversation supervises; an agent
-// working for the user's own todo or another conversation's task stays theirs; one on a task of self's with another
-// title would put other work under that task (it is not, so it is not lost when that task is closed); and /exit is no
-// work. A plain agent_send still goes in each case.
+// sendTaskAllowed refuses agent_send's task before anything is sent: an agent working for the user's own todo or
+// another conversation's task stays theirs; one on a task of self's with another title would put other work under
+// that task; and /exit is no work. Any conversation may hand work out, with main supervising it (#5732).
 func (s *Service) sendTaskAllowed(ctx context.Context, self string, am Device, c proto.Session, task sendTask, text string) error {
-	if !s.isMain(ctx, self) {
-		return fmt.Errorf("only the main conversation hands out tasks: send it without task")
-	}
 	if exitText(text) {
 		return fmt.Errorf("%s closes the agent, it hands it no work: send it without task", strings.TrimSpace(text))
+	}
+	if err := s.leadTakeAllowed(ctx, self, am, c); err != nil {
+		return fmt.Errorf("%w; nothing was sent", err)
 	}
 	if err := s.ensureTodosLoaded(ctx); err != nil {
 		return err
@@ -462,7 +584,12 @@ func (s *Service) adoptedTitle(ctx context.Context, c proto.Session, given, prom
 // todo's notes, and its title when task has none. An agent on a task of self's stays on it, unchanged until the send.
 func (s *Service) handTask(ctx context.Context, self string, am Device, c proto.Session, task sendTask, text string) (*handedTask, error) {
 	// Decided under adoptMu (adoptAgent): another hand-off may have put the agent on a task since sendTaskAllowed.
-	todo, made, err := s.adoptAgent(ctx, self, am, c, task.Title, text, text, task.DoneWhen, task.ExpectMinutes, false)
+	// The calling direction lead owns its hand-off; ordinary side conversations use main.
+	supervisor := s.settings(ctx).Main
+	if s.isLeader(ctx, self) {
+		supervisor = self
+	}
+	todo, made, err := s.adoptAgentFor(ctx, self, supervisor, am, c, task.Title, text, text, task.DoneWhen, task.ExpectMinutes, adoptionOptions{})
 	if err != nil {
 		return nil, fmt.Errorf("%w; nothing was sent", err)
 	}
@@ -471,12 +598,12 @@ func (s *Service) handTask(ctx context.Context, self string, am Device, c proto.
 		if c.Status == proto.StatusOffline || stoppedAgent(c) { // closed: the send (or its resume, #8099) starts it first
 			wake = wakeResumed
 		}
-		return &handedTask{todo: todo, made: true, self: self, wake: wake, run: SessionRef{MachineID: am.ID, SessionID: c.SessionID}}, nil
+		return &handedTask{todo: todo, made: true, self: self, supervisor: supervisor, wake: wake, run: SessionRef{MachineID: am.ID, SessionID: c.SessionID}}, nil
 	}
 	if err := otherWork(c, todo, task); err != nil {
 		return nil, err
 	}
-	return &handedTask{todo: todo, self: self, task: task, run: SessionRef{MachineID: am.ID, SessionID: c.SessionID}}, nil
+	return &handedTask{todo: todo, self: self, supervisor: supervisor, task: task, run: SessionRef{MachineID: am.ID, SessionID: c.SessionID}}, nil
 }
 
 // sent: the text went. A task made for it gets its card in the conversation; one it was on already gets task's
@@ -489,10 +616,13 @@ func (h *handedTask) sent(ctx context.Context, s *Service, text string) string {
 	refused := ""
 	if h.made {
 		s.taskCard(ctx, h.self, h.todo.ID, h.wake)
+		if h.todo.Supervision != nil && h.todo.Supervision.Supervisor != "" && h.todo.Supervision.Supervisor != h.self {
+			s.taskCard(ctx, h.todo.Supervision.Supervisor, h.todo.ID, h.wake)
+		}
 	} else {
 		doneWhen, expect := cleanDoneWhen(h.task.DoneWhen), max(0, min(h.task.ExpectMinutes, 24*60))
-		s.releaseHold(ctx, h.todo.ID)                                            // the supervisor sent its agent on: follow-ups go again (decision.go)
-		v, err := s.rescope(ctx, h.todo, h.self, "agent_send", doneWhen, expect) // through the brief's log, as task_scope
+		s.releaseHold(ctx, h.todo.ID)                                                          // the supervisor sent its agent on: follow-ups go again (decision.go)
+		v, err := s.rescope(ctx, h.todo, h.self, h.supervisor, "agent_send", doneWhen, expect) // through the brief's log, as task_scope
 		if err != nil {
 			s.logf("task %s: supervision: %v", h.todo.ID, err)
 			refused = " Its done_when was NOT changed: " + err.Error()
@@ -560,6 +690,56 @@ type taskCardBody struct {
 	Wake string `json:"wake,omitempty"`
 }
 
+// dropContinuation closes an aborted takeover and removes only its own brief link and scope event. Every current or
+// snapshot member follows the latest restored brief; a revision recheck prevents a stale brief read from overwriting a
+// newer scope. Review fields are restored only when the before/after/current evidence attributes them to this abort.
+func (s *Service) dropContinuation(ctx context.Context, id string, rollback *continuationRollback, why error) {
+	ctx = context.WithoutCancel(ctx) // the caller may have left exactly when its Agent link failed; cleanup still has to commit
+	if rollback == nil {
+		s.dropAdoption(ctx, id, why)
+		return
+	}
+	if err := s.unlinkTaskBrief(ctx, id, rollback.eventID); err != nil {
+		why = errors.Join(why, fmt.Errorf("take back the continuation: %w", err))
+	}
+	// A member added after the before snapshot is included too. A member without a ledger still gets none: its later
+	// dispatch reads the restored brief instead of having a ledger invented by cleanup.
+	targets := map[string]bool{}
+	for todoID := range rollback.before {
+		targets[todoID] = true
+	}
+	for _, todoID := range s.briefTodos(rollback.brief) {
+		targets[todoID] = true
+	}
+	for todoID := range targets {
+		for {
+			brief, revision, ok := s.briefSnapshotByID(rollback.brief)
+			if !ok {
+				break
+			}
+			_, _, err := s.updateSupervisionGuarded(ctx, todoID, func(t Todo) bool {
+				return t.DoneAt == nil && t.Supervision != nil
+			}, func(v *Supervision) bool {
+				desired := rollback.restoredLedger(todoID, v, brief, s.supervise.roundEpochs[todoID])
+				if reflect.DeepEqual(v, desired) {
+					return false
+				}
+				*v = *desired
+				return true
+			})
+			if err != nil {
+				why = errors.Join(why, fmt.Errorf("restore task %s after the continuation: %w", todoID, err))
+				break
+			}
+			_, currentRevision, ok := s.briefSnapshotByID(rollback.brief)
+			if !ok || currentRevision == revision {
+				break
+			}
+		}
+	}
+	s.dropAdoption(ctx, id, why)
+}
+
 // dropAdoption closes the todo an adoption made when the agent could not be put on it (why), so no empty task stays.
 func (s *Service) dropAdoption(ctx context.Context, id string, why error) {
 	s.logf("adopt: task %s: %v", id, why)
@@ -578,6 +758,30 @@ func (s *Service) openTodoOfAgent(mid, sid string) (Todo, bool) {
 		return Todo{}, false
 	}
 	return copyTodoLocked(t), true
+}
+
+// closedTodoOfAgent is the latest assistant task this agent carried before its new card. It supplies the source of a
+// take-over; a user's manual to-do is never adopted into assistant history (#5732).
+func (s *Service) closedTodoOfAgent(mid, sid string) (Todo, bool) {
+	s.todos.mu.RLock()
+	defer s.todos.mu.RUnlock()
+	var best Todo
+	found := false
+	for _, t := range s.todos.todos {
+		if t.DoneAt == nil || t.Origin == "" {
+			continue
+		}
+		for _, a := range t.Agents {
+			if a.MachineID != mid || a.SessionID != sid {
+				continue
+			}
+			if !found || t.DoneAt.After(*best.DoneAt) || t.DoneAt.Equal(*best.DoneAt) && t.UpdatedAt.After(best.UpdatedAt) {
+				best, found = copyTodoLocked(t), true
+			}
+			break
+		}
+	}
+	return best, found
 }
 
 // criteriaWords is done_when as the tool's answer says it: the new list, else the ledger's, else that there is none.
@@ -786,9 +990,13 @@ func (s *Service) reportToSupervisor(ctx context.Context, machine, session strin
 		step = min(step, steps)
 	}
 	// A task leader's worker has no owner briefing to wait for: its report goes to the leader at once, urgent or not.
-	notUrgent := a.Urgent != nil && !*a.Urgent && !s.agentSupervised(t)
+	// Immersive attention mode takes a question that set no urgent and is not about the matter in focus as one that
+	// can wait (attention.go); an explicit urgent:true always goes at once.
+	saidLater := a.Urgent != nil && !*a.Urgent
+	byMode := a.Urgent == nil && a.Kind == upReportQuestion && s.attentionDefersQuestion(ctx, t, machine, session)
+	notUrgent := (saidLater || byMode) && !s.agentSupervised(t)
 	if notUrgent && a.Kind == upReportQuestion {
-		answer, queued := s.reportLater(ctx, t, machine, session, text, evidence, now)
+		answer, queued := s.reportLater(ctx, t, machine, session, text, evidence, byMode, now)
 		if queued {
 			return answer, nil
 		}
@@ -806,8 +1014,21 @@ func (s *Service) reportToSupervisor(ctx context.Context, machine, session strin
 // reportLater keeps a question the agent said can wait without waking its supervisor. An active reporting conversation
 // gets the deferred report in its own feed, never the main briefing queue. Otherwise the question waits in the queue of
 // questions for the next briefing (later.go). queued false: it could not be kept (no morning or evening briefing would
-// list it, or the queue is full), and the answer says why; the report then goes as an urgent one.
-func (s *Service) reportLater(ctx context.Context, t Todo, machine, session, text string, evidence []string, now time.Time) (answer string, queued bool) {
+// list it, or the queue is full), and the answer says why; the report then goes as an urgent one. byMode: the agent
+// set no urgent and immersive attention mode deferred it, so the answers speak of the mode, not of urgent:false, and
+// tell the agent to ask again with urgent:true when it is blocked.
+func (s *Service) reportLater(ctx context.Context, t Todo, machine, session, text string, evidence []string, byMode bool, now time.Time) (answer string, queued bool) {
+	// notKept is the prefix when the question could not be kept: it goes as an urgent one after all.
+	notKept := func(why string) string {
+		if byMode {
+			return "" // it goes as usual: the agent asked nothing special, so there is nothing to explain
+		}
+		return "urgent:false was ignored: " + why + ", so it is sent as an urgent question. "
+	}
+	retry := "If you cannot go on without the answer, ask it again without urgent:false."
+	if byMode {
+		retry = "The user is in a focus block on other work. If you cannot go on without the answer, ask it again with urgent:true."
+	}
 	if t.Supervision != nil && t.Supervision.Supervisor == t.Origin {
 		if _, reporting := s.reporterOf(ctx, t.Origin); reporting {
 			if s.reporterStopped(ctx, t.Origin) {
@@ -816,19 +1037,19 @@ func (s *Service) reportLater(ctx context.Context, t Todo, machine, session, tex
 			body := reportBody{Kind: upReportQuestion, Text: text, Evidence: evidence, Later: true}
 			if _, err := s.appendFeed(ctx, t.Origin, feedReport, t.ID, body); err != nil {
 				s.logf("task %s: reporting question feed: %v", t.ID, err)
-				return "urgent:false was ignored: the reporting conversation could not keep the question, so it is sent as an urgent question. ", false
+				return notKept("the reporting conversation could not keep the question"), false
 			}
 			s.logf("task %s: %s reports a question deferred in its reporting conversation", t.ID, short(session))
 			return "Queued without waking your reporting conversation; it can answer there when it next runs. Go on with other work. " +
-				"If you cannot go on without an answer, ask it again without urgent:false.", true
+				retry, true
 		}
 	}
 	if !s.laterBriefed(ctx) {
-		return "urgent:false was ignored: no morning or evening briefing is switched on to list it, so it is sent as an urgent question. ", false
+		return notKept("no morning or evening briefing is switched on to list it"), false
 	}
 	_, ok, again := s.laterQueue(ctx, t.ID, machine, session, text, now)
 	if !ok {
-		return "urgent:false was ignored: the queue of questions that can wait could not take it, so it is sent as an urgent question. ", false
+		return notKept("the queue of questions that can wait could not take it"), false
 	}
 	if again {
 		return "Already queued: the owner sees this question in the next morning or evening briefing. Go on with other work.", true
@@ -839,7 +1060,7 @@ func (s *Service) reportLater(ctx context.Context, t Todo, machine, session, tex
 	}
 	s.logf("task %s: %s reports a question that can wait", t.ID, short(session))
 	return "Queued: the owner sees it in the next morning or evening briefing, under \"Can wait\", and answers it in your chat when they get to it. " +
-		"Nobody is woken and nobody answers right away: go on with other work. If you cannot go on without the answer, ask it again without urgent:false.", true
+		"Nobody is woken and nobody answers right away: go on with other work. " + retry, true
 }
 
 // reportNow sends a report to the supervisor of task t as a signal, and shows it in its conversation.
@@ -850,6 +1071,9 @@ func (s *Service) reportNow(ctx context.Context, t Todo, machine, session, kind,
 	s.progressReported(machine, session, len(evidence), step, now) // evidence or a later step is progress (supervise_progress.go)
 	g := superviseSignal{Todo: t.ID, Kind: sigReport, Key: now.UTC().Format(time.RFC3339Nano), At: now, Machine: machine,
 		Session: session, Report: kind, Detail: text, Evidence: evidence, Step: step, Steps: steps, SourcePermission: devicewire.SourcePermissionFrom(ctx)}
+	if kind != upReportProgress && s.reportsMidTurn(ctx, machine, session) {
+		g.NotBefore = now.Add(reportStopHold) // it waits for its Agent's stop, to go out with it (releaseReportsLocked)
+	}
 	if !s.deliverReportingReport(ctx, t, g) {
 		s.signal(g)
 	}
@@ -878,6 +1102,16 @@ func (s *Service) reportNow(ctx context.Context, t Todo, machine, session, kind,
 	}
 	return "Sent to your supervisor: it reads it within minutes and answers you by message. Don't wait idle for it if there is " +
 		"other work in the task; stop when you cannot go on.", nil
+}
+
+// reportsMidTurn: the Agent that reports is in the middle of a turn, so the turn's end signal follows its report
+// (reportStopHold). One that is not working, or not known, has no stop coming: its report goes out as it always did.
+func (s *Service) reportsMidTurn(ctx context.Context, machine, session string) bool {
+	if machine == "" || session == "" || s.noReportHold {
+		return false
+	}
+	c, ok := s.session(ctx, machine, session)
+	return ok && c.State == proto.StateWorking
 }
 
 // deliverReportingReport sends g to an active reporting conversation through the same notice path as its quiet tasks:

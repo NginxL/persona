@@ -27,6 +27,11 @@ type UsageWindow struct {
 	Group string `json:"group,omitempty"`
 	Title string `json:"title,omitempty"`
 	Note  string `json:"note,omitempty"`
+	// ProtectPercent is the used percentage at which the source stops sending work to this account for this window (an
+	// account-pool gateway's quota protection line; it can differ per account and per window). Set by a usage extension
+	// only, 0 to 100; nil when the source did not say. A client draws a marker on the window's bar at that percentage
+	// and ignores the field when it is absent or unknown to it.
+	ProtectPercent *float64 `json:"protect_percent,omitempty"`
 }
 
 // UsageBalance is a prepaid account's remaining amount as its provider reports it (#11825), for a provider that has
@@ -80,6 +85,20 @@ type UsageAccount struct {
 	// Ref is the account's identity at its gateway ("<source id>:<account id>"), when the source has one. Hub-internal:
 	// it is never sent out. Two samples with refs from one source but different accounts are never merged.
 	Ref string `json:"-"`
+	// BalanceCredential is a non-secret digest of the resolved credential a prepaid balance was read with (#11825),
+	// empty when the key could not be opened or resolved. The usage manager keeps it to tell a replaced or rotated key
+	// from the one the last amount was read with, so another account's amount is never shown as this credential's last
+	// known balance. Hub-internal: never sent out.
+	BalanceCredential string `json:"-"`
+	// BalanceSealedCredential is a non-secret digest of the launcher's sealed credential material (#11825). Tracked
+	// separately from BalanceCredential so a temporary open/resolution failure of unchanged sealed material (such as a
+	// locked vault behind an op:// reference) keeps the last amount marked stale, while replacing the sealed material
+	// clears it even if the replacement cannot be opened. Hub-internal: never sent out.
+	BalanceSealedCredential string `json:"-"`
+	// BalanceSkipped is true when the poll's overall deadline ended before this launcher got a full attempt (#11825).
+	// The usage manager keeps whatever state it already had instead of marking the launcher unreachable or removing it.
+	// Hub-internal: never sent out.
+	BalanceSkipped bool `json:"-"`
 	// CodexAccountKey is the node's digest of the upstream account ID, used only by the usage manager.
 	CodexAccountKey string `json:"-"`
 	// Pass: a usage extension's row (usagesource.FromExtension), drawn exactly as the extension sent it and never merged

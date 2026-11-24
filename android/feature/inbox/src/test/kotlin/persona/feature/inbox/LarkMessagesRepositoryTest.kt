@@ -13,6 +13,7 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import persona.core.contracts.api.InboxAssistantTransport
+import persona.core.inbox.*
 
 class LarkMessagesRepositoryTest {
     private class Transport : InboxAssistantTransport {

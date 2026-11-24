@@ -1,6 +1,4 @@
-#if canImport(UIKit)
 import UIKit
-#endif
 
 // Typing straight into the terminal: the screen view takes the keyboard (UITextInput, so input methods with a
 // composition — pinyin — and dictation work), and every key becomes a key press for herdr. Nothing is kept here but
@@ -108,7 +106,6 @@ nonisolated enum TerminalKeyBytes {
     }
 }
 
-#if os(iOS) || os(visionOS)
 /// A position in the composition (UTF-16 offset); the "document" the input method sees is only that.
 final class TermTextPosition: UITextPosition {
     let offset: Int
@@ -286,4 +283,3 @@ extension TerminalScrollView: UITextInput {
         onInput?(.key(name))
     }
 }
-#endif

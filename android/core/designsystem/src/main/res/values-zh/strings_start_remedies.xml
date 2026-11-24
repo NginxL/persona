@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="designsystem_start_code_launcher_terminal">%1$s 在这台电脑的终端里开不起来</string>
+    <string name="designsystem_start_code_worktree_path_taken">上次没开起来时留下的工作区还占着位置</string>
+    <string name="designsystem_use_launcher_instead">改用 %1$s</string>
+    <string name="designsystem_retry_launcher_unsupported">hub 还不能换启动器重试，请先更新 hub 上的 Persona，或者直接重试</string>
+
+    <string name="designsystem_shell_question_label">回答终端里的提问</string>
+    <string name="designsystem_shell_question_asking">电脑的终端在问：“%1$s”</string>
+    <string name="designsystem_shell_question_hint">选一个回答，Agent 就会在那个标签里启动。</string>
+    <string name="designsystem_shell_question_hint_secret">它在要密码，Persona 不会从这里输入密码。可以在这里取消，或者去电脑上输入。</string>
+    <string name="designsystem_shell_question_hint_ssh">要不要信任新的主机密钥，需要在电脑上决定；在这里只能拒绝。</string>
+    <string name="designsystem_shell_question_kept_until">标签会留到 %1$s。</string>
+    <string name="designsystem_shell_choice_enter">回车</string>
+    <string name="designsystem_shell_choice_enter_yes">回车（是）</string>
+    <string name="designsystem_shell_choice_enter_no">回车（否）</string>
+    <string name="designsystem_shell_choice_cancel">取消（Ctrl-C）</string>
+    <string name="designsystem_shell_choice_yes">是</string>
+    <string name="designsystem_shell_choice_no">否</string>
+    <string name="designsystem_shell_choice_key_yes">是（%1$s）</string>
+    <string name="designsystem_shell_choice_key_no">否（%1$s）</string>
+    <string name="designsystem_shell_choice_key">按 %1$s</string>
+    <string name="designsystem_shell_choice_update_yes">更新（%1$s）</string>
+    <string name="designsystem_shell_choice_update_no">暂不（%1$s）</string>
+    <string name="designsystem_shell_choice_compinit_yes">仍然继续（%1$s）</string>
+    <string name="designsystem_shell_choice_compinit_no">停止 compinit（%1$s）</string>
+    <string name="designsystem_shell_choice_newuser_quit">暂不（%1$s）</string>
+    <string name="designsystem_shell_choice_newuser_empty">创建空的 .zshrc（%1$s）</string>
+    <string name="designsystem_shell_choice_p10k_quit">退出向导（%1$s）</string>
+    <string name="designsystem_shell_choice_rvm_no">不信任（%1$s）</string>
+    <string name="designsystem_shell_choice_rvm_cancel">取消（%1$s）</string>
+</resources>

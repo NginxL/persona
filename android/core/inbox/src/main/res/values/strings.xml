@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- English is the fallback (docs/protocol/i18n.md); values-zh and values-ja hold the same keys. The Inbox model's own words: failure lines, mute and rule choices. -->
+<resources>
+    <string name="inbox_mute_chat">Mute this conversation</string>
+    <string name="inbox_mute_repo">Mute this repository</string>
+    <string name="inbox_mute_sender">Mute this sender</string>
+    <string name="inbox_policy_tier_action">Always Needs you</string>
+    <string name="inbox_policy_tier_fyi">FYI</string>
+    <string name="inbox_policy_tier_noise">Collapsed</string>
+    <string name="inbox_policy_tier_none">Leave to triage</string>
+    <string name="inbox_policy_twin_first">AI twin first</string>
+    <string name="inbox_policy_twin_never">Never AI twin</string>
+    <string name="inbox_policy_twin_none">As set</string>
+    <string name="inbox_lark_card_partial">Part of the card isn\'t shown</string>
+    <string name="inbox_lark_content_unsupported">This content can\'t be shown yet</string>
+    <string name="inbox_lark_image_unavailable">Image not available</string>
+    <string name="inbox_lark_incomplete">Message history isn\'t fully synced yet</string>
+    <string name="inbox_lark_messages_failed">Couldn\'t load messages. Try again.</string>
+    <string name="inbox_lark_not_paired">Pair with a hub first</string>
+    <string name="inbox_lark_thread_failed">Couldn\'t load replies. Try again.</string>
+    <string name="inbox_mute_tag_chat">Conversation</string>
+    <string name="inbox_mute_tag_repo">Repository</string>
+    <string name="inbox_mute_tag_sender">Sender</string>
+    <string name="inbox_lark_emoji_beer">Beer</string>
+    <string name="inbox_lark_emoji_cake">Cake</string>
+    <string name="inbox_lark_emoji_clap">Clap</string>
+    <string name="inbox_lark_emoji_coffee">Coffee</string>
+    <string name="inbox_lark_emoji_cry">Cry</string>
+    <string name="inbox_lark_emoji_done">Done</string>
+    <string name="inbox_lark_emoji_fire">Fire</string>
+    <string name="inbox_lark_emoji_fist">Fist bump</string>
+    <string name="inbox_lark_emoji_heart">Heart</string>
+    <string name="inbox_lark_emoji_jiayi">+1</string>
+    <string name="inbox_lark_emoji_laugh">Laugh</string>
+    <string name="inbox_lark_emoji_muscle">Keep it up</string>
+    <string name="inbox_lark_emoji_ok">OK</string>
+    <string name="inbox_lark_emoji_party">Party</string>
+    <string name="inbox_lark_emoji_rose">Rose</string>
+    <string name="inbox_lark_emoji_shake">Handshake</string>
+    <string name="inbox_lark_emoji_smile">Smile</string>
+    <string name="inbox_lark_emoji_surprised">Surprised</string>
+    <string name="inbox_lark_emoji_thinking">Thinking</string>
+    <string name="inbox_lark_emoji_thumbsup">Thumbs up</string>
+    <string name="inbox_lark_emoji_wave">Bye</string>
+</resources>

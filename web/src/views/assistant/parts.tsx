@@ -57,9 +57,11 @@ export function Field({ label, note, children, error }: { label: React.ReactNode
 }
 
 /** A section heading inside a dialog or a page column. */
-export function SectionTitle({ children, right }: { children: React.ReactNode; right?: React.ReactNode }) {
+/** `center`: the right side is a control (a small button), centred on the title's line rather than sitting on its
+ *  baseline like a count. */
+export function SectionTitle({ children, right, center }: { children: React.ReactNode; right?: React.ReactNode; center?: boolean }) {
   return (
-    <div className="mb-1.5 flex items-end gap-2 px-1">
+    <div className={`mb-1.5 flex ${center ? "items-center" : "items-end"} gap-2 px-1`}>
       <h2 className="flex-1 text-[12px] font-medium text-ink-3">{children}</h2>
       {right}
     </div>

@@ -60,6 +60,8 @@ import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import persona.feature.inbox.*
 import persona.feature.settings.demoSettingsServices
+import persona.core.inbox.*
+import persona.feature.inbox.InboxRepository
 
 /** Acceptance tests use the production shell, decorators, navigator, pages and Back dispatcher. */
 @RunWith(AndroidJUnit4::class)

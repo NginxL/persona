@@ -287,6 +287,12 @@
     <string name="chat_source_unknown">Source</string>
     <string name="chat_source_expand">Show more</string>
     <string name="chat_source_collapse">Show less</string>
+    <string name="chat_bubble_show_more">Show more</string>
+    <string name="chat_bubble_show_less">Show less</string>
+    <string name="chat_card_height_label">Card height</string>
+    <string name="chat_card_height_toggle">Toggle tallest or default height</string>
+    <string name="chat_card_height_taller">Make card taller</string>
+    <string name="chat_card_height_shorter">Make card shorter</string>
     <string name="chat_injected_open_task">Open task</string>
     <string name="chat_injected_view_request">View the task\'s request</string>
     <string name="chat_read_only_history">This past session is read-only. Continue it first</string>
@@ -514,6 +520,8 @@
     <string name="chat_turn_fix_model_route">Model not connected: this model can\'t be used</string>
     <string name="chat_turn_fix_model_route_launcher">Model not connected: this model isn\'t available on %1$s</string>
     <string name="chat_turn_fix_model_route_detail">The model name is wrong, or the model isn\'t available right now; try another one.</string>
+    <string name="chat_turn_fix_tool_search_unsupported">Model not connected: this gateway can\'t load tools on demand</string>
+    <string name="chat_turn_fix_tool_search_unsupported_detail">Try again.</string>
     <string name="chat_turn_fix_action">Fix it</string>
     <string name="chat_slash_saved_prompts">Saved Prompts</string>
 </resources>

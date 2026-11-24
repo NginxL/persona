@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="designsystem_start_code_launcher_terminal">%1$s can\'t start in this computer\'s terminal</string>
+    <string name="designsystem_start_code_worktree_path_taken">A workspace from an earlier try is still in the way</string>
+    <string name="designsystem_use_launcher_instead">Use %1$s instead</string>
+    <string name="designsystem_retry_launcher_unsupported">This hub can\'t start it on another launcher yet. Update Persona on the hub, or Retry.</string>
+
+    <string name="designsystem_shell_question_label">Answer the terminal\'s question</string>
+    <string name="designsystem_shell_question_asking">Your computer\'s terminal is asking: “%1$s”</string>
+    <string name="designsystem_shell_question_hint">Pick an answer and the agent starts in that tab.</string>
+    <string name="designsystem_shell_question_hint_secret">It\'s asking for a password, which Persona never types from here. Cancel it, or type it on the computer.</string>
+    <string name="designsystem_shell_question_hint_ssh">Whether to trust a new host key is decided on the computer; from here you can say no.</string>
+    <string name="designsystem_shell_question_kept_until">The tab stays open until %1$s.</string>
+    <string name="designsystem_shell_choice_enter">Enter</string>
+    <string name="designsystem_shell_choice_enter_yes">Enter (yes)</string>
+    <string name="designsystem_shell_choice_enter_no">Enter (no)</string>
+    <string name="designsystem_shell_choice_cancel">Cancel (Ctrl-C)</string>
+    <string name="designsystem_shell_choice_yes">Yes</string>
+    <string name="designsystem_shell_choice_no">No</string>
+    <string name="designsystem_shell_choice_key_yes">Yes (%1$s)</string>
+    <string name="designsystem_shell_choice_key_no">No (%1$s)</string>
+    <string name="designsystem_shell_choice_key">Press %1$s</string>
+    <string name="designsystem_shell_choice_update_yes">Update (%1$s)</string>
+    <string name="designsystem_shell_choice_update_no">Not now (%1$s)</string>
+    <string name="designsystem_shell_choice_compinit_yes">Continue anyway (%1$s)</string>
+    <string name="designsystem_shell_choice_compinit_no">Stop compinit (%1$s)</string>
+    <string name="designsystem_shell_choice_newuser_quit">Not now (%1$s)</string>
+    <string name="designsystem_shell_choice_newuser_empty">Create an empty .zshrc (%1$s)</string>
+    <string name="designsystem_shell_choice_p10k_quit">Quit the wizard (%1$s)</string>
+    <string name="designsystem_shell_choice_rvm_no">Don\'t trust (%1$s)</string>
+    <string name="designsystem_shell_choice_rvm_cancel">Cancel (%1$s)</string>
+</resources>

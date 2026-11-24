@@ -12,20 +12,13 @@ final class AssistantTrayActivityUITests: XCTestCase {
         app.launchArguments = ["-pairURL", pair, "-tab", "assistant", "-dev.openChat", "",
                                "-openAssistant", "server/b2e4d6f8-0000-4000-8000-000000000001",
                                "-AppleLanguages", "(zh-Hans)", "-AppleLocale", "zh_CN"]
-        #if os(macOS)
-        app.launchArguments += ["-macWindowSize", "1280x900", "-macAppearance", env["PERSONA_SHOTS_APPEARANCE"] ?? "light"]
-        #endif
         app.launchPinned()
         let running = app.buttons["action-bar.running"]
         XCTAssertTrue(running.waitForExistence(timeout: 30), app.debugDescription)
         let ready = NSPredicate(format: "label CONTAINS '4'")
         expectation(for: ready, evaluatedWith: running)
         waitForExpectations(timeout: 30)
-        #if os(macOS)
-        running.click()
-        #else
         running.tap()
-        #endif
         let rows = app.buttons.matching(identifier: "action-tray.task")
         XCTAssertTrue(rows.firstMatch.waitForExistence(timeout: 10), app.debugDescription)
         XCTAssertEqual(rows.count, 4, app.debugDescription)
@@ -44,11 +37,7 @@ final class AssistantTrayActivityUITests: XCTestCase {
         XCTAssertEqual(app.descendants(matching: .any).matching(identifier: "action-tray.waiting-mark").count, 1, app.debugDescription)
         if let directory = env["PERSONA_SHOTS"] {
             let appearance = env["PERSONA_SHOTS_APPEARANCE"] ?? "light"
-            #if os(macOS)
-            let platform = "mac"
-            #else
             let platform = "iphone"
-            #endif
             let path = "\(directory)/\(platform)-\(appearance)-activity.png"
             try app.screenshot().pngRepresentation.write(to: URL(fileURLWithPath: path))
         }

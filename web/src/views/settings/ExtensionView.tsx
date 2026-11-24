@@ -7,12 +7,12 @@
 // extension; extension_ui {invalidate} draws the view on screen again (one off screen when it comes back). A view with
 // refresh_after is drawn again while it is on screen. Logic in lib/extension-ui.ts.
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
-import { ApiError, credentialOwner, errorText, getToken } from "../../lib/api";
+import { ApiError, credentialOwner, errorText, getToken, onCredentialChange } from "../../lib/api";
 import { extIdOf } from "../../lib/extension-api";
 import { openLink } from "../../lib/links";
 import {
-  actUI, fieldValues, isUnsupported, numberProblem, outcome, pushPage, refreshDelay, renderUI, submitValues, uiPlaces, UI_VERSION,
-  type UIAction, type UIContext, type UIItem, type UIMore, type UIPage, type UIPlace, type UIPush, type UITabs, type UIView,
+  actUI, fieldValues, isReservedUI, isUnsupported, numberProblem, outcome, pushPage, refreshDelay, renderUI, submitValues, uiPlaces, UI_VERSION,
+  type UIAction, type UIContext, type UIFilter, type UIItem, type UIMore, type UIPage, type UIPlace, type UIPush, type UISearch, type UITabs, type UIView,
 } from "../../lib/extension-ui";
 import { navigate } from "../../lib/router";
 import { isResumed } from "../../lib/reconnect";
@@ -20,6 +20,7 @@ import { appSocketReady, onAppSocket, onHubEvent } from "../../lib/store";
 import { wideView } from "../../lib/code-view";
 import { INERT, ViewSections } from "../extensions/ViewBody";
 import { Button, cx, Dialog, Loading, Spinner, toast } from "../../ui/atoms";
+import { NATIVE, NativeTabs } from "../../ui/ExtensionNative";
 import { keepLoaded, patchView } from "../../lib/code-review";
 import { KeysHelp, ReviewBar, ReviewKeys, ReviewProvider, ReviewToolbar, reviewing } from "../extensions/DiffReview";
 import { Icon } from "../../ui/icons";
@@ -31,11 +32,12 @@ import { defaultKnown, defaultManager, otherManager, useKnownDefault, useLinkMan
 import { keepView, NATIVE_UI_VERSION, readKeptView } from "../../lib/extension-view-cache";
 import type { UIRowControl } from "../../lib/extension-ui-v6";
 import { currentLanguage, t } from "../../i18n";
+import { HEALTH_INTAKE_UI } from "../../lib/health-intake-ui";
 import { SUBSCRIPTIONS_UI } from "../../lib/subscriptions-ui";
 import { ExtensionOwnerScope } from "../../lib/extension-owner";
 
 const inputClass =
-  "h-8 w-full rounded-control bg-field px-2.5 text-[12.5px] text-ink shadow-inset-field outline-none placeholder:text-ink-3 focus:shadow-[inset_0_0_0_1px_var(--accent)] disabled:opacity-60";
+  "h-8 w-full rounded-control bg-field px-2.5 text-meta text-ink shadow-inset-field outline-none placeholder:text-ink-3 focus:shadow-[inset_0_0_0_1px_var(--accent)] disabled:opacity-60";
 
 /**
  * Draws again while the view is on screen (docs/extensions/extensions.md "Refresh"): `delay` ms after it was last drawn, never while the
@@ -68,9 +70,11 @@ function useRefresh(delay: number, drawnAt: number, draw: () => void) {
  * extension_ui {invalidate} for this extension (and this ui, or all of its): `draw` now when the page is visible, else
  * once it is visible again. At most once a second.
  */
-function useInvalidate(extension: string, ui: string, draw: () => void) {
+function useInvalidate(extension: string, ui: string, draw: () => void, skipHello?: () => boolean) {
   const drawRef = useRef(draw);
   drawRef.current = draw;
+  const skipHelloRef = useRef(skipHello);
+  skipHelloRef.current = skipHello;
   useEffect(() => {
     let dirty = false;
     let last = 0;
@@ -98,8 +102,10 @@ function useInvalidate(extension: string, ui: string, draw: () => void) {
     });
     // the subscription pages (#2041): a subscription saved, run or deleted anywhere draws them again
     const offSubscription = extension === SUBSCRIPTIONS_UI ? onHubEvent("subscription", () => now()) : () => {};
+    // the health pages (#13176): a record logged or undone anywhere, or a goal saved, draws them again
+    const offIntake = extension === HEALTH_INTAKE_UI ? onHubEvent("health_intake", () => now()) : () => {};
     // a reconnect the hub could not resume: an invalidate missed meanwhile is not replayed (#4954)
-    const offHello = onHubEvent("hello", (msg) => !isResumed(msg) && now());
+    const offHello = onHubEvent("hello", (msg) => !isResumed(msg) && !skipHelloRef.current?.() && now());
     const shown = () => {
       if (dirty && document.visibilityState === "visible") now();
     };
@@ -107,6 +113,7 @@ function useInvalidate(extension: string, ui: string, draw: () => void) {
     return () => {
       off();
       offSubscription();
+      offIntake();
       offHello();
       clearTimeout(timer);
       document.removeEventListener("visibilitychange", shown);
@@ -144,6 +151,17 @@ export function pageHref(extension: string, ui: string, state?: string): string 
  * (`open`, the default for a card and a section inside another page). `state`: the first page's state (a full page opened by a push).
  */
 const HELLO_NEGOTIATION_MS = 5000;
+const NOOP = () => {};
+// Pages that fell back from the native UI stream to HTTP in this session: reopen over HTTP immediately instead of
+// repeating the stream-open round-trip (cleared on credential changes or extension lifecycle updates).
+const httpFallbacks = new Set<string>();
+let fallbackResetWired = false;
+function wireFallbackReset() {
+  if (fallbackResetWired) return;
+  fallbackResetWired = true;
+  if (typeof onCredentialChange === "function") onCredentialChange(() => httpFallbacks.clear());
+  if (typeof onHubEvent === "function") onHubEvent("extensions", () => httpFallbacks.clear());
+}
 // The native stream page and its schema validator are a chunk of their own: most pages are drawn over HTTP and never need it.
 const NativeExtensionUI = lazyPage(() => import("./NativeExtensionUI").then((m) => m.NativeExtensionUI));
 export function ExtensionUI({ remember, ...props }: Parameters<typeof LegacyExtensionUI>[0] & {
@@ -160,60 +178,84 @@ export function ExtensionUI({ remember, ...props }: Parameters<typeof LegacyExte
   const negotiated = useRef(false);
   const [legacyNegotiation, setLegacyNegotiation] = useState(false);
   if (ready) negotiated.current = true;
-  const waitingHello = !props.embedded && !props.compact && typeof localStorage !== "undefined" && !!getToken() && !ready && !negotiated.current;
-  useEffect(() => {
-    if (!waitingHello || legacyNegotiation) return;
-    const timer = setTimeout(() => setLegacyNegotiation(true), HELLO_NEGOTIATION_MS);
-    return () => clearTimeout(timer);
-  }, [waitingHello, legacyNegotiation]);
   // System/embedded slots remain full fitted snapshots. Old hubs keep the exact existing component.
   // Another manager's extension draws over HTTP, which names its manager on each request (docs/assistant/managers.md "Clients").
   // The subscription pages (#2041) are the manager's, drawn over HTTP only.
-  const http = legacyNegotiation || !supported || props.embedded || props.compact || otherManager(props.manager) || props.extension === SUBSCRIPTIONS_UI;
+  const baseHttp = legacyNegotiation || !supported || props.embedded || props.compact || otherManager(props.manager) || isReservedUI(props.extension);
   // The page's last view, until it is drawn again: one drawn with a UI version it may be drawn with now (before the hello
   // either; over the socket also HTTP's, which a page the socket cannot draw falls back to) by the default's extension
   // (before the roster, the last one drawn).
   const page = remember ? JSON.stringify([props.extension, props.ui, props.state ?? "", currentLanguage()]) : "";
-  const httpOnly = known && http;
+  const httpOnly = known && baseHttp;
   const kept = useMemo(() => {
     if (!page) return null;
     const [extension, ui, state, language] = JSON.parse(page) as string[];
     return readKeptView({ extension, ui, state, language }, httpOnly ? [UI_VERSION] : [NATIVE_UI_VERSION, UI_VERSION], defaultId || undefined);
   }, [page, httpOnly, defaultId]);
-  const placeholder = kept ? <KeptView view={kept.view} native={kept.key.version === NATIVE_UI_VERSION} compact={props.compact} onWide={props.onWide} /> : undefined;
-  const onView = useCallback((view: UIView, version: number, manager = defaultKnown() ? defaultManager() : "") => {
+  // Pages whose last render used HTTP (cached with UI_VERSION) or that already fell back to HTTP in this session start
+  // their HTTP render immediately instead of waiting for WebSocket hello, GET /managers, and a failing stream probe.
+  const fallbackKey = JSON.stringify([owner, group, props.extension, props.ui]);
+  const knownHttp = kept?.key.version === UI_VERSION || httpFallbacks.has(fallbackKey);
+  const mountKey = JSON.stringify([owner, group, props.extension, props.ui, props.state ?? "", props.manager ?? ""]);
+  const httpLocked = useRef("");
+  const lockedHttp = httpLocked.current === mountKey;
+  const http = lockedHttp || baseHttp || knownHttp;
+  const waitingHello = !lockedHttp && !knownHttp && !props.embedded && !props.compact && typeof localStorage !== "undefined" && !!getToken() && !ready && !negotiated.current;
+  useEffect(() => {
+    if (!waitingHello || legacyNegotiation) return;
+    const timer = setTimeout(() => setLegacyNegotiation(true), HELLO_NEGOTIATION_MS);
+    return () => clearTimeout(timer);
+  }, [waitingHello, legacyNegotiation]);
+  const placeholder = kept ? <KeptView view={kept.view} native={kept.key.version === NATIVE_UI_VERSION} compact={props.compact} bare={props.bare} title={props.title} onWide={props.onWide} /> : undefined;
+  const onView = useCallback((view: UIView, version: number, manager = defaultId || (defaultKnown() ? defaultManager() : "")) => {
     if (!page || !manager) return;
     const [extension, ui, state, language] = JSON.parse(page) as string[];
     keepView({ extension, ui, state, language, version, manager }, view);
-  }, [page]);
+  }, [page, defaultId]);
+  const onLegacyFallback = useCallback(() => {
+    wireFallbackReset();
+    httpFallbacks.add(fallbackKey);
+  }, [fallbackKey]);
   const keeps = page ? { placeholder, onView } : {};
   // Bound initial negotiation when HTTP works but WebSocket upgrades do not. Once HTTP
   // mounts, retain it even if a late hello arrives: never allocate a second source page.
   if (waitingHello && !legacyNegotiation) return placeholder ?? <Loading />;
-  if (http) return <LegacyExtensionUI {...props} {...keeps} />;
+  if (http) {
+    httpLocked.current = mountKey;
+    return <LegacyExtensionUI {...props} {...keeps} />;
+  }
   return (
     <PageBoundary page={`extension:${props.extension}/${props.ui}`}>
       <Suspense fallback={placeholder ?? <Loading />}>
-        <NativeExtensionUI key={JSON.stringify([owner, group, props.extension, props.ui, props.state ?? ""])} {...props} {...keeps} legacy={(page) => <LegacyExtensionUI {...page} />} />
+        <NativeExtensionUI key={JSON.stringify([owner, group, props.extension, props.ui, props.state ?? ""])} {...props} {...keeps} onLegacyFallback={onLegacyFallback} legacy={(page) => <LegacyExtensionUI {...page} />} />
       </Suspense>
     </PageBoundary>
   );
 }
 
 /** The page's last view while its extension draws it again (docs/web/web.md "Extension pages on reload"): as it was, as
- *  wide, but nothing in it can be pressed or focused, and a quiet "Updating" in the page's top margin, so nothing moves
- *  when the drawing replaces it. `native`: drawn over the socket, which titles the page itself. `compact`: a card's
- *  (#11091), its sections laid out as the drawing's own in the card's column (`contents`), "Updating" for screen readers
- *  only: the card's heading marks it (OverviewCard, by `data-kept-view`). */
-function KeptView({ view, native, compact, onWide }: { view: UIView; native: boolean; compact?: boolean; onWide?: (wide: boolean) => void }) {
+ *  wide, with its View-level tabs, search and filter intact, but nothing in it can be pressed or focused, and a quiet
+ *  "Updating" in the page's top margin, so nothing moves when the drawing replaces it. `native`: drawn over the socket,
+ *  which titles the page itself. `compact`: a card's (#11091), its sections laid out as the drawing's own in the card's
+ *  column (`contents`), "Updating" for screen readers only: the card's heading marks it (OverviewCard, by `data-kept-view`). */
+function KeptView({ view, native, compact, bare, title, onWide }: { view: UIView; native: boolean; compact?: boolean; bare?: boolean; title?: string; onWide?: (wide: boolean) => void }) {
   const wide = wideView(view);
   useEffect(() => onWide?.(wide), [wide, onWide]);
+  const values = useMemo(() => fieldValues(view), [view]);
+  const first = view.sections[0]?.items[0];
+  const titled = view.title || title;
+  const heading = first?.type === "header" && first.title === titled ? undefined : titled;
+  const filterValue = view.filter ? view.filter.value ?? view.filter.choices[0]?.value ?? "" : "";
   if (compact)
     return (
       <div className="contents" data-kept-view>
         <p role="status" className="sr-only">{t("settings-extensionview.updating")}</p>
         <div inert aria-busy="true" className="contents">
-          <ViewSections view={view} compact {...INERT} />
+          {view.tabs && <Tabs tabs={view.tabs} value={view.tabs.value} busy="" onChoose={NOOP} />}
+          {(view.search || view.filter) && (
+            <SearchFilterBar search={view.search} filter={view.filter} query={view.search?.value ?? ""} filterValue={filterValue} compact busy="" onQuery={NOOP} onFilter={NOOP} />
+          )}
+          <ViewSections view={view} compact {...INERT} values={values} />
         </div>
       </div>
     );
@@ -223,9 +265,50 @@ function KeptView({ view, native, compact, onWide }: { view: UIView; native: boo
         <Spinner size={10} />
         {t("settings-extensionview.updating")}
       </p>
-      <div inert aria-busy="true" className={native ? "flex min-w-0 flex-col gap-4 text-sm text-ink" : "flex flex-col gap-6"}>
-        {native && view.title !== undefined && <h2 className="text-xl font-semibold text-ink">{view.title}</h2>}
-        <ViewSections view={view} {...INERT} />
+      <div inert aria-busy="true" className={native ? NATIVE.page : "flex flex-col gap-6"}>
+        {native ? (
+          <>
+            {view.title !== undefined && <h2 className="text-xl font-semibold text-ink">{view.title}</h2>}
+            {view.tabs && <NativeTabs name={view.tabs.name} items={view.tabs.items} value={view.tabs.value} disabled onChoose={NOOP} />}
+            {(view.search || view.filter) && (
+              <div className="flex flex-wrap items-center gap-2">
+                {view.search && (
+                  <input
+                    type="search"
+                    aria-label={view.search.placeholder ?? t("settings-extensionview.search")}
+                    placeholder={view.search.placeholder}
+                    className={NATIVE.field}
+                    value={view.search.value ?? ""}
+                    disabled
+                    onChange={NOOP}
+                  />
+                )}
+                {view.filter && (
+                  <select aria-label={view.filter.title ?? view.filter.name} className={NATIVE.field} value={filterValue} disabled onChange={NOOP}>
+                    {view.filter.choices.map((it) => (
+                      <option key={it.value} value={it.value}>
+                        {it.title ?? it.value}
+                      </option>
+                    ))}
+                  </select>
+                )}
+              </div>
+            )}
+          </>
+        ) : (
+          <>
+            {!bare && heading && (
+              <div className="flex items-center gap-2 px-1">
+                <h2 className="min-w-0 flex-1 truncate text-card-title font-semibold text-ink">{heading}</h2>
+              </div>
+            )}
+            {view.tabs && <Tabs tabs={view.tabs} value={view.tabs.value} busy="" onChoose={NOOP} />}
+            {(view.search || view.filter) && (
+              <SearchFilterBar search={view.search} filter={view.filter} query={view.search?.value ?? ""} filterValue={filterValue} busy="" onQuery={NOOP} onFilter={NOOP} />
+            )}
+          </>
+        )}
+        <ViewSections view={view} {...INERT} values={values} />
       </div>
     </div>
   );
@@ -301,8 +384,10 @@ export function LegacyExtensionUI({
   // whose number is not the latest any more is older than what was asked since (a press, another page, the next search)
   // and is not drawn, nor its error shown (#4931).
   const asked = useRef(0);
+  const inFlightRef = useRef(false);
   const load = useCallback((keep?: boolean) => {
     const mine = ++asked.current;
+    inFlightRef.current = true;
     setLoading(true);
     renderUI(extension, top.ui, context, stateRef.current, manager)
       .then((v) => mine === asked.current && show(v, keep === true))
@@ -316,7 +401,10 @@ export function LegacyExtensionUI({
           setDrawnAt(Date.now()); // a failed refresh waits a whole interval too
         }
       })
-      .finally(() => setLoading(false));
+      .finally(() => {
+        if (mine === asked.current) inFlightRef.current = false;
+        setLoading(false);
+      });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [extension, pageKey, ctxKey, manager]);
   // a new page (pushed, popped, another one): its own state, a fresh view
@@ -343,9 +431,15 @@ export function LegacyExtensionUI({
   useRefresh(active ? refreshDelay(view) : 0, drawnAt, () => {
     if (!busy) load(true);
   });
-  useInvalidate(extension, top.ui, () => {
-    if (active && !busy) load(true);
-  });
+  useInvalidate(
+    extension,
+    top.ui,
+    () => {
+      if (active && !busy) load(true);
+    },
+    // Skip the initial non-resumed hello while the first draw started before hello is already in flight.
+    () => !drawnRef.current && inFlightRef.current,
+  );
   const drawnFor = useRef(revision);
   useEffect(() => {
     if (drawnFor.current === revision) return;
@@ -565,7 +659,7 @@ export function LegacyExtensionUI({
   if (unsupported) {
     if (embedded || compact) return null;
     const nothing = (
-      <p className="rounded-card bg-surface px-4 py-6 text-center text-[12.5px] text-ink-3 shadow-card">{t("settings-extensionview.nothing_here")}</p>
+      <p className="rounded-card bg-surface px-4 py-6 text-center text-meta text-ink-3 shadow-card">{t("settings-extensionview.nothing_here")}</p>
     );
     // a pushed page that has nothing still goes back to the page below
     return back ? <div className="flex flex-col gap-6">{back}{nothing}</div> : nothing;
@@ -581,7 +675,7 @@ export function LegacyExtensionUI({
       {back}
       {!light && (!bare || depth > 1) && heading && (
         <div className="flex items-center gap-2 px-1">
-          <h2 className="min-w-0 flex-1 truncate text-[15px] font-semibold text-ink">{heading}</h2>
+          <h2 className="min-w-0 flex-1 truncate text-card-title font-semibold text-ink">{heading}</h2>
           {loading && view && <Spinner />}
         </div>
       )}
@@ -599,43 +693,20 @@ export function LegacyExtensionUI({
         />
       )}
       {view && (view.search || view.filter) && (
-        <div className={cx("flex items-center gap-2", compact ? "px-4" : "px-0")}>
-          {view.search && (
-            <label className="relative min-w-0 flex-1">
-              <Icon name="search" size={13} className="pointer-events-none absolute top-1/2 left-2.5 -translate-y-1/2 text-ink-3" />
-              <input
-                type="search"
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                placeholder={view.search.placeholder || t("settings-extensionview.search")}
-                aria-label={view.search.placeholder || t("settings-extensionview.search")}
-                spellCheck={false}
-                autoComplete="off"
-                className={cx(inputClass, "pl-8")}
-              />
-            </label>
-          )}
-          {view.filter && (
-            <select
-              aria-label={view.filter.title || view.filter.name}
-              value={values[view.filter.name] ?? view.filter.value ?? view.filter.choices[0]?.value ?? ""}
-              disabled={!!busy}
-              onChange={(e) => {
-                const f = view.filter!;
-                setValues((x) => ({ ...x, [f.name]: e.target.value }));
-                void run(f.action, { ...listValues(), [f.name]: e.target.value });
-              }}
-              className={cx(inputClass, "w-auto max-w-[200px] shrink-0")}
-            >
-              {view.filter.choices.map((c) => (
-                <option key={c.value} value={c.value}>
-                  {c.title || c.value}
-                </option>
-              ))}
-            </select>
-          )}
-          {busy && <Spinner />}
-        </div>
+        <SearchFilterBar
+          search={view.search}
+          filter={view.filter}
+          query={query}
+          filterValue={view.filter ? values[view.filter.name] ?? view.filter.value ?? view.filter.choices[0]?.value ?? "" : ""}
+          compact={compact}
+          busy={busy}
+          onQuery={setQuery}
+          onFilter={(next) => {
+            const f = view.filter!;
+            setValues((x) => ({ ...x, [f.name]: next }));
+            void run(f.action, { ...listValues(), [f.name]: next });
+          }}
+        />
       )}
       {!view && !error && (placeholder ?? (
         <div className={cx(compact ? "px-4 py-3" : embedded ? "py-2" : "rounded-card bg-surface px-4 py-3 shadow-card")}>
@@ -644,7 +715,7 @@ export function LegacyExtensionUI({
       ))}
       {error && compact && (
         <div className="flex items-center gap-2 px-4 py-2.5">
-          <p className="min-w-0 flex-1 truncate text-[12px] text-red" title={error}>
+          <p className="min-w-0 flex-1 truncate text-label text-red" title={error}>
             {view ? t("settings-extensionview.update_failed_inline", { error }) : t("settings-extensionview.draw_failed_inline", { error })}
           </p>
           <Button tone="quiet" icon="retry" busy={loading} onClick={() => load()}>
@@ -657,8 +728,8 @@ export function LegacyExtensionUI({
           <span className="flex size-9 items-center justify-center rounded-[10px] bg-red-tint text-red">
             <Icon name="extension" size={16} />
           </span>
-          <p className="text-[13px] font-medium text-ink">{view ? t("settings-extensionview.update_failed") : t("settings-extensionview.draw_failed")}</p>
-          <p className="max-w-[420px] text-[12px] leading-relaxed break-words text-ink-3 select-text">{error}</p>
+          <p className="text-meta font-medium text-ink">{view ? t("settings-extensionview.update_failed") : t("settings-extensionview.draw_failed")}</p>
+          <p className="max-w-[420px] text-label leading-relaxed break-words text-ink-3 select-text">{error}</p>
           <Button tone="secondary" icon="retry" busy={loading} onClick={() => load()}>
             {t("settings-extensionview.retry")}
           </Button>
@@ -717,9 +788,53 @@ export function LegacyExtensionUI({
             </>
           }
         >
-          <p className="text-[13px] leading-relaxed whitespace-pre-line break-words text-ink-2">{confirming.action.confirm}</p>
+          <p className="text-meta leading-relaxed whitespace-pre-line break-words text-ink-2">{confirming.action.confirm}</p>
         </Dialog>
       )}
+    </div>
+  );
+}
+
+/** A view's search box and filter bar (UI version 3): shared between live and cached views so refresh swaps only data. */
+function SearchFilterBar({
+  search, filter, query, filterValue, compact, busy, onQuery, onFilter,
+}: {
+  search?: UISearch; filter?: UIFilter; query: string; filterValue: string; compact?: boolean; busy: string;
+  onQuery: (v: string) => void; onFilter: (v: string) => void;
+}) {
+  return (
+    <div className={cx("flex items-center gap-2", compact ? "px-4" : "px-0")}>
+      {search && (
+        <label className="relative min-w-0 flex-1">
+          <Icon name="search" size={13} className="pointer-events-none absolute top-1/2 left-2.5 -translate-y-1/2 text-ink-3" />
+          <input
+            type="search"
+            value={query}
+            onChange={(e) => onQuery(e.target.value)}
+            placeholder={search.placeholder || t("settings-extensionview.search")}
+            aria-label={search.placeholder || t("settings-extensionview.search")}
+            spellCheck={false}
+            autoComplete="off"
+            className={cx(inputClass, "pl-8")}
+          />
+        </label>
+      )}
+      {filter && (
+        <select
+          aria-label={filter.title || filter.name}
+          value={filterValue}
+          disabled={!!busy}
+          onChange={(e) => onFilter(e.target.value)}
+          className={cx(inputClass, "w-auto max-w-[200px] shrink-0")}
+        >
+          {filter.choices.map((c) => (
+            <option key={c.value} value={c.value}>
+              {c.title || c.value}
+            </option>
+          ))}
+        </select>
+      )}
+      {busy && <Spinner />}
     </div>
   );
 }
@@ -739,12 +854,12 @@ function Tabs({ tabs, value, busy, onChoose }: { tabs: UITabs; value: string; bu
             disabled={!!busy && !on}
             onClick={() => onChoose(it.value)}
             className={cx(
-              "relative flex h-9 shrink-0 items-center gap-1.5 px-3 text-[13px] whitespace-nowrap transition-colors",
+              "relative flex h-9 shrink-0 items-center gap-1.5 px-3 text-meta whitespace-nowrap transition-colors",
               on ? "font-semibold text-ink" : "text-ink-3 enabled:hover:text-ink",
             )}
           >
             {it.title || it.value}
-            {it.badge && <span className="rounded-full bg-field px-1.5 text-[11px] leading-[18px] font-medium text-ink-2 tabular-nums">{it.badge}</span>}
+            {it.badge && <span className="rounded-full bg-field px-1.5 text-[length:var(--extension-meta-size)] leading-[18px] font-medium text-ink-2 tabular-nums">{it.badge}</span>}
             {busy === tabs.action.id && on && <Spinner size={10} />}
             {on && <span className="absolute inset-x-2 -bottom-px h-[2px] rounded-full bg-accent" />}
           </button>
@@ -786,7 +901,7 @@ function LauncherSection({ place, launcher, machine }: { place: UIPlace; launche
   if (gone) return null;
   return (
     <div data-extension-section={`${place.extension}/${place.id}`}>
-      <div className="mb-1 flex items-center gap-1.5 text-[11.5px] font-medium text-ink-3">
+      <div className="mb-1 flex items-center gap-1.5 text-submeta font-medium text-ink-3">
         <Icon name="extension" size={11} className="shrink-0" />
         {place.title}
       </div>

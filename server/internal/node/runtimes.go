@@ -79,6 +79,9 @@ type runtimeHello struct {
 		// policy channel (separate from user messages) on session.start and session.send, and fails closed
 		// (assistant_supervision_runtime) when a nonempty policy cannot be applied (#11173).
 		SupervisionPolicy bool `json:"supervision_policy"`
+		// AssistantEnvironment: the local runtime applies the generic, non-proxied Assistant process environment
+		// only to dedicated Assistant workers, including replacements, and never to shared ordinary-Agent workers.
+		AssistantEnvironment bool `json:"assistant_environment"`
 		// Execution reports the actual per-session execution environment via session.execution.
 		Execution bool `json:"execution"`
 		// Modes: the phone's permission mode and effort for its sessions go to it (session.modes).
@@ -203,6 +206,14 @@ func (h *runtimeConn) supervisionPolicy() bool {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	return h.hello.Caps.Assistant && h.hello.Caps.SupervisionPolicy
+}
+
+// assistantEnvironment permits local, dedicated-worker runtimes to opt into the generic non-proxied environment.
+// A daemon can be on another computer, where local command paths and credentials must not be sent.
+func (h *runtimeConn) assistantEnvironment() bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.hello.Caps.Assistant && h.hello.Caps.AssistantEnvironment && h.daemon == ""
 }
 
 // label is what the apps call the runtime.

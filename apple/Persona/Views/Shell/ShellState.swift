@@ -16,10 +16,8 @@ import SwiftUI
     let drawer = AssistantDrawer()
     /// Assistant and Agents side by side: a drag sideways moves from one to the other (`ShellPager`).
     let pager = ShellPager()
-    #if os(iOS) || os(visionOS)
     /// The status row's link state and toasts (`ShellStatusRow`).
     let notices = ShellNotices()
-    #endif
     /// The page in front: 0 = Assistant, 1 = Agents, 2 = optional Messages.
     private(set) var page = 0
     /// Agents is built the first time it is selected or dragged in (TabView builds a tab when shown), then kept. Not
@@ -76,15 +74,11 @@ import SwiftUI
     }
 
     static func tab(for page: Int) -> AppTab {
-        #if os(iOS) || os(visionOS)
         if page == 2 { return .feishu }
-        #endif
         return page == 1 ? .chats : .assistant
     }
     static func index(for tab: AppTab) -> Int {
-        #if os(iOS) || os(visionOS)
         if tab == .feishu { return 2 }
-        #endif
         return tab == .chats ? 1 : 0
     }
 
@@ -97,20 +91,16 @@ import SwiftUI
         self.model = model
         model.tabRouter = self
         route(model.selectedTab, in: model)
-        #if os(iOS) || os(visionOS)
         // The status row takes the link's state as it is set, like the tab (the toasts float, `ToastWindow`).
         model.connection.onShown = { [weak notices] in notices?.linkChanged($0) }
         notices.linkChanged(model.connection.shown)
-        #endif
     }
 
     func detach(from model: AppModel) {
         // Only while this shell is still the one on screen: a new one may have taken over already.
         guard model.tabRouter === self else { return }
         model.tabRouter = nil
-        #if os(iOS) || os(visionOS)
         model.connection.onShown = nil
-        #endif
     }
 
     /// `p` in front (0 = Assistant, 1 = Agents): the switch, a drag that settled there, a route. The strip slides there and
@@ -139,9 +129,7 @@ import SwiftUI
         switch t {
         case .assistant: select(0)
         case .chats: select(1)
-        #if os(iOS) || os(visionOS)
         case .feishu: select(pager.pageCount > 2 ? 2 : 0)
-        #endif
         case .mail:
             show(.inbox)
             select(0)
@@ -165,6 +153,8 @@ enum ShellPage: Hashable, Sendable {
     /// The Sidebar layout (#6332): the conversation itself, nothing over it (its row picked, or a route to Persona), and
     /// Messages (the Lark chats, the Separate layout's third page or tab) beside the sidebar.
     case conversation, messages
+    /// A domain space (#13500): its latest conversation, else its home; and the new space form.
+    case space(String), newSpace
 }
 
 /// What the Assistant page pushes by value for the shell (the inbox and the machines push values of their own on top).

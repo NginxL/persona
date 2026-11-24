@@ -32,5 +32,12 @@
   "direction_working": "Doing",
   "direction_needs_you": "Needs you",
   "direction_stuck": "Stuck",
-  "direction_planned": "Not started"
+  "direction_planned": "Not started",
+  "bg_stalled_minutes_one": "Background command quiet for {count} min",
+  "bg_stalled_minutes_other": "Background commands quiet for {count} min",
+  "bg_stalled_hours_one": "Background command quiet for {count} hr",
+  "bg_stalled_hours_other": "Background commands quiet for {count} hr",
+  "bg_stalled_days_one": "Background command quiet for {count} day",
+  "bg_stalled_days_other": "Background commands quiet for {count} days",
+  "bg_stalled_hint": "Its background commands have used no CPU and written no output for a while, so they may be stuck. It still counts as Working: a running tool is work, and whether to stop it is up to you."
 }

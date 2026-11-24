@@ -9,6 +9,7 @@ import { credentialOwner, enc, errorText } from "../../lib/api";
 import { endInteraction, getState, useStore } from "../../lib/store";
 import { apiOp } from "../../lib/ops";
 import { listManagers } from "../../lib/managers";
+import { confirmedDefaultManager, onDefaultManager } from "../../lib/manager-choice";
 import { uuid } from "../../lib/format";
 import { navigate } from "../../lib/router";
 import { openLink } from "../../lib/links";
@@ -21,22 +22,32 @@ import { NATIVE_UI_VERSION } from "../../lib/extension-view-cache";
 
 type Props = Parameters<typeof LegacyExtensionUI>[0];
 type Page = { key: string; ui: string; state?: string; title?: string; legacy?: boolean };
-export function NativeExtensionUI(props: Props & { legacy: (props: Props) => ReactNode }) {
-  const [manager, setManager] = useState<string>();
+export function NativeExtensionUI(props: Props & { legacy: (props: Props) => ReactNode; onLegacyFallback?: () => void }) {
+  const [manager, setManager] = useState<string | undefined>(() => confirmedDefaultManager());
   const [unavailable, setUnavailable] = useState(false);
   const [stack, setStack] = useState<Page[]>(() => [{ key: uuid(), ui: props.ui, state: props.state, title: props.title }]);
   const stackRef = useRef(stack); stackRef.current = stack;
   const historied = props.history ?? (props.pages !== "open");
   useEffect(() => {
+    if (manager) return;
     let live = true;
     const owner = credentialOwner();
+    // Accept the shared roster default if watchRoster() resolves it first, without waiting on a duplicate GET /managers.
+    const off = onDefaultManager(() => {
+      if (!live) return;
+      const confirmed = confirmedDefaultManager();
+      if (credentialOwner() === owner && confirmed) {
+        live = false;
+        setManager(confirmed);
+      }
+    });
     void listManagers().then((roster) => {
       if (!live) return;
       if (credentialOwner() === owner && roster.default) setManager(roster.default);
       else setUnavailable(true);
     }).catch(() => { if (live) setUnavailable(true); });
-    return () => { live = false; };
-  }, []);
+    return () => { live = false; off(); };
+  }, [manager]);
   useEffect(() => {
     if (!historied) return;
     const pop = (event: PopStateEvent) => {
@@ -64,11 +75,11 @@ export function NativeExtensionUI(props: Props & { legacy: (props: Props) => Rea
   if (!manager) return props.placeholder ?? <Loading />;
   // only the first page has a last view (ExtensionUI's `remember`)
   return <>{stack.map((page, index) => <div key={page.key} hidden={index !== stack.length - 1}>
-    <ConnectedPage {...props} placeholder={index ? undefined : props.placeholder} onView={index ? undefined : props.onView} page={page} manager={manager} active={index === stack.length - 1} push={(p, legacy) => push(page.key, p, legacy)} pop={() => pop(page.key)}
+    <ConnectedPage {...props} placeholder={index ? undefined : props.placeholder} onView={index ? undefined : props.onView} onLegacyFallback={index ? undefined : props.onLegacyFallback} page={page} manager={manager} active={index === stack.length - 1} push={(p, legacy) => push(page.key, p, legacy)} pop={() => pop(page.key)}
       back={index > 0 ? stack[index - 1].title || t("settings-extensionview.back") : undefined} />
   </div>)}</>;
 }
-function ConnectedPage(props: Props & { legacy: (props: Props) => ReactNode; page: Page; manager: string; active: boolean; push: (p: UIPush, legacy?: boolean) => void; pop: () => void; back?: string }) {
+function ConnectedPage(props: Props & { legacy: (props: Props) => ReactNode; onLegacyFallback?: () => void; page: Page; manager: string; active: boolean; push: (p: UIPush, legacy?: boolean) => void; pop: () => void; back?: string }) {
   const [adapter, setAdapter] = useState<AppUIStreamPage>();
   const [fallback, setFallback] = useState(!!props.page.legacy);
   const callbacks = useRef(props); callbacks.current = props;
@@ -98,7 +109,11 @@ function ConnectedPage(props: Props & { legacy: (props: Props) => ReactNode; pag
     revision.current = props.revision;
     adapter?.session.refresh();
   }, [props.revision, adapter]);
-  useEffect(() => { if (fallback) adapter?.dispose(); }, [fallback, adapter]);
+  useEffect(() => {
+    if (!fallback) return;
+    adapter?.dispose();
+    props.onLegacyFallback?.();
+  }, [fallback, adapter, props.onLegacyFallback]);
   const confirm = useCallback((action: Action, _displayed: unknown, _value: UIStreamValue) => new Promise<boolean>((finish) => {
     confirmationRef.current?.finish(false); setConfirmation({ action, finish });
   }), []);

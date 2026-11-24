@@ -27,6 +27,7 @@ var inboxReadOnlyPhoneTools = map[string]bool{
 	"phone_contacts_search": true, "phone_calendar_events": true, "phone_reminders_list": true,
 	"phone_location_current": true, "phone_location_search": true, "phone_maps_search_nearby": true, "phone_maps_route": true,
 	"phone_health_summary": true, "phone_workouts_recent": true, "phone_workout_detail": true,
+	"phone_health_types": true, "phone_health_samples": true, "phone_health_sources": true,
 	"phone_photos_recent": true, "phone_photo_get": true, "phone_device_info": true, "phone_clipboard_get": true,
 	"phone_alarms_list": true, "phone_shortcuts_list": true, "phone_music_snapshot": true, "phone_home_list": true,
 	"phone_notifications_list": true, "phone_write_queue_list": true,

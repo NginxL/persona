@@ -219,7 +219,7 @@ The nodes sample on the same wall-clock tick, so one writer stores a tick's samp
 It writes once every machine that sent in the last 30 seconds has sent this tick's, at most 2 seconds after the first (a single machine's sample is written at once); one machine's bad sample does not cost the others theirs.
 Samples wait in a queue of 1024; when Postgres is that far behind, a sample is dropped with a log line. A stopping manager still writes what it has, for at most 2 seconds.
 
-The main assistant's read-only `machines_list` tool combines the trusted machine list with the manager's last system information and sample, working agent count, recent failing launchers and node version status. It reports the list's completeness and excluded count; machines that belong to another manager or are not trusted are not exposed. Connection, session and launcher records have separate availability: an empty failure list means no recent failure is recorded, not that every launcher was checked. Values whose source is missing, ambiguous, offline, stale or has a future timestamp are null with a reason. Samples over 30 seconds old retain their age but are not current; a sample from before the current connection is not current either. System information is the last reported information and may persist while offline; memory and disk availability follow the collection definitions above, and disk is an aggregate rather than necessarily the work directory's filesystem. Node builds that differ cannot be ordered by their identifiers, so a different build alone is not called outdated. The tool returns facts without ranking machines.
+The main assistant's read-only `machines_list` tool combines the trusted machine list with the manager's last system information and sample, working agent count, recent failing launchers and node version status. It reports the list's completeness and excluded count; machines that belong to another manager or are not trusted are not exposed. Connection, session and launcher records have separate availability: an empty failure list means no recent failure is recorded, not that every launcher was checked. Values whose source is missing, ambiguous, offline, stale or has a future timestamp are null with a reason. Samples over 30 seconds old retain their age but are not current; a sample from before the current connection is not current either. System information is the last reported information and may persist while offline; memory and disk availability follow the collection definitions above, and disk is an aggregate rather than necessarily the work directory's filesystem. Node builds that differ cannot be ordered by their identifiers, so a different build alone is not called outdated. A machine whose link is up but whose node has sent no sample for 3 minutes (counted from the later of the last sample and the current connection) is `unresponsive`, not `online`, with a `state_reason` giving `no_recent_report` and the age of the last report; `agents_list` names such machines in an "unresponsive machines" line. The tool returns facts without ranking machines.
 
 The assistant-only `machine_redeploy` tool accepts a machine ID or an exact, unambiguous display name. Name selection requires a complete machine inventory; an ID remains valid when the list is incomplete. It invokes the same explicit `Machine.startDeploy` operation as `POST /api/v1/machines/{mid}/deploy`, waits for that job's outcome and returns success or the failure reason. The app's route remains asynchronous. Canceling the tool's wait does not cancel the deployment or change its card phases, persisted outcome or notifications; an unconfirmed wait is not reported as a failed deployment. A call cannot target the machine running its own conversation, because the update waits for that conversation to become idle; use a conversation on another machine instead.
 Every minute `metricsLoop`:
@@ -503,6 +503,37 @@ the accepted answer with pushed/read machine snapshots. Settled attempts expire 
 automatically, while a new explicit confirmation may follow the hub's unchanged eligibility. `MachineLinkSwitchView` is the
 advanced-detail card; its expected-disconnect guard also suppresses the ordinary offline explanation and Reconnect while the switch
 runs (#10671).
+
+## Opt-in machine-ops skill and read-only ops CLI / MCP (#13053)
+
+**Audience:** power users and coding Agents troubleshooting a machine's local health. Everyday Assistant conversations remain untouched unless the user explicitly opts in: neither the default Assistant system prompt nor the default `personad mcp` tool list changes (`TestPromptSizeRatchet` and `TestGoldenMCPTools` stay unchanged).
+
+| Part | Code |
+| --- | --- |
+| Read-only local facade over the five diagnostic domains | `server/internal/node/machine_ops.go` |
+| Read-only ops CLI and on-demand stdio MCP server (`personad ops` / `persona-node ops`) | `server/internal/machineops/` (`ops.go`, `cli.go`, `mcp.go`) |
+| Opt-in built-in skill (`persona-machine-ops`) and managed installer | `server/internal/assistantskills/builtin/persona-machine-ops/` (`SKILL.md`, `ops.sh`, `references/*.md`), `server/internal/assistantskills/embed.go` |
+
+### Read-only domains covered (#12349–#12353)
+
+Both `personad ops <subcommand>` (also available on `persona-node ops`) and the on-demand stdio MCP server `personad ops mcp` expose strictly the same eight read-only operations:
+
+| Domain | CLI subcommand | MCP tool (`personad ops mcp`) | Underlying collector |
+| --- | --- | --- | --- |
+| Storage mounts (#12349) | `ops storage` | `machine_ops_storage` | `server/internal/node/machine_storage.go` (`statfs` only) |
+| Storage hotspots (#12349) | `ops hotspots [--timeout-ms N] [--max-depth N]` | `machine_ops_storage_hotspots` | `server/internal/node/machine_storage.go` (allowlisted categories, bounded walk) |
+| Toolchain profile (#12350) | `ops toolchain [--refresh]` | `machine_ops_toolchain` | `server/internal/node/machine_toolchain.go` (redacted env, 60 s cache) |
+| Network and proxy (#12351) | `ops network` | `machine_ops_network` | `server/internal/node/machine_network.go` (fixed targets, redacted proxy credentials) |
+| Listening ports (#12352) | `ops ports [--protocol tcp\|udp]` | `machine_ops_ports` | `server/internal/node/machine_procs.go` (redacted command lines) |
+| Running processes (#12352) | `ops processes [--sort cpu\|memory\|uptime] [--query TEXT] [--orphan-only] [--limit N]` | `machine_ops_processes` | `server/internal/node/machine_procs.go` (orphan heuristics, protection flags) |
+| Services and containers (#12353) | `ops services` | `machine_ops_services` | `server/internal/node/machine_services.go` (user systemd/launchd + Docker) |
+| Bounded service logs (#12353) | `ops service-logs --kind systemd\|launchd\|docker --id <id> [--lines N]` | `machine_ops_service_logs` | `server/internal/node/machine_services.go` (validated ID, `[1, 500]` lines, 64 KiB cap) |
+
+### Opt-in and safety boundaries
+
+- **Opt-in skill installation:** `persona-machine-ops` is off by default (`Selection{MachineOps: false}`, omitted from `ForAgents`). Install or inspect it explicitly with `personad ops skill install [--dir <skills-dir>]`, `personad ops skill status`, and `personad ops skill uninstall`. By default it installs into `~/.persona/skills/persona-machine-ops` (visible in Settings › Skills) and tracks a managed digest so user-authored or locally edited skills are never overwritten or removed.
+- **Zero default prompt overhead:** `personad ops mcp` is a standalone stdio MCP server (`serverInfo.name = "persona-machine-ops"`) started only on demand by sessions that explicitly attach it. Default `personad mcp` and `CLAUDE.md` / `AGENTS.md` add zero tools and zero prompt bytes.
+- **Read-only boundary:** Mutating machine operations (`machine.storage.cleanup`, `machine.process.kill`, `machine.service_action`) and human-only Web UI file management (`#12354` / `#12403`) are never exposed on `node.MachineOps`, `personad ops`, or `personad ops mcp`.
 
 ## API
 

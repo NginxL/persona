@@ -31,14 +31,16 @@ struct SheetCloseTests {
     private static let trailing: Set = ["confirmationAction", "topBarTrailing", "primaryAction"]
 
     static func counts() throws -> [String: [String: Int]] {
-        let root = here.deletingLastPathComponent().appending(path: "Persona")
         var out: [String: [String: Int]] = [:]
-        let files = FileManager.default.enumerator(at: root, includingPropertiesForKeys: nil)?
-            .compactMap { $0 as? URL }
-            .filter { $0.pathExtension == "swift" && $0.lastPathComponent != home } ?? []
-        for url in files {
-            let c = count(iPhoneSource(try String(contentsOf: url, encoding: .utf8)))
-            if !c.isEmpty { out["Persona/\(url.path.components(separatedBy: "/Persona/").last!)"] = c }
+        // The app's own sources and its feature modules' (apple/Modules, docs/apple/ios.md "Modules").
+        for dir in ["Persona", "Modules"] {
+            let files = FileManager.default.enumerator(at: here.deletingLastPathComponent().appending(path: dir), includingPropertiesForKeys: nil)?
+                .compactMap { $0 as? URL }
+                .filter { $0.pathExtension == "swift" && $0.lastPathComponent != home } ?? []
+            for url in files {
+                let c = count(iPhoneSource(try String(contentsOf: url, encoding: .utf8)))
+                if !c.isEmpty { out["\(dir)/\(url.path.components(separatedBy: "/\(dir)/").last!)"] = c }
+            }
         }
         return out
     }

@@ -8,6 +8,7 @@ import android.webkit.WebSettings
 import android.widget.FrameLayout
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import androidx.webkit.WebViewFeature
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -299,9 +300,50 @@ class ChatWebViewPoolTest {
         assertTrue(fresh.settings.domStorageEnabled)
         assertFalse(fresh.settings.allowFileAccess)
         assertFalse(fresh.settings.allowContentAccess)
+        assertEquals(WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE, fresh.settings.mixedContentMode)
         assertEquals(WebSettings.LOAD_DEFAULT, fresh.settings.cacheMode)
+        assertTrue(fresh.settings.useWideViewPort)
+        assertTrue(fresh.settings.loadWithOverviewMode)
+        assertTrue(fresh.settings.supportZoom())
+        assertTrue(fresh.settings.builtInZoomControls)
+        assertFalse(fresh.settings.displayZoomControls)
+        assertFalse(fresh.isForceDarkAllowed)
+        assertFalse(fresh.settings.isAlgorithmicDarkeningAllowed)
         // Robolectric always answers false here and does not record the setter; the device scene checks real cookies.
         assertEquals("session=kept", CookieManager.getInstance().getCookie(link))
+    }
+
+    @Test fun linkCardWebViewMatchesChromeViewportZoomMixedContentAndDarkeningDefaults() {
+        val view = pool.acquire(link) as RecordingWebView
+        val settings = view.settings
+
+        assertTrue(settings.useWideViewPort)
+        assertTrue(settings.loadWithOverviewMode)
+        assertEquals(WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE, settings.mixedContentMode)
+        assertEquals(WebSettings.LOAD_DEFAULT, settings.cacheMode)
+        assertTrue(settings.supportZoom())
+        assertTrue(settings.builtInZoomControls)
+        assertFalse(settings.displayZoomControls)
+        assertFalse(view.isForceDarkAllowed)
+        assertFalse(settings.isAlgorithmicDarkeningAllowed)
+    }
+
+    @Test fun algorithmicDarkeningIsExplicitlyDisabledWhenFeatureIsSupported() {
+        val calls = mutableListOf<Pair<WebSettings, Boolean>>()
+        val darkeningPool = ChatWebViewPool(
+            context = context,
+            features = ChatWebFeatures { it == WebViewFeature.ALGORITHMIC_DARKENING },
+            viewFactory = { RecordingWebView(it) },
+            setAlgorithmicDarkening = { settings, allowed -> calls += settings to allowed },
+        )
+        try {
+            val view = darkeningPool.acquire(link) as RecordingWebView
+            assertEquals(listOf(view.settings to false), calls)
+            assertFalse(view.isForceDarkAllowed)
+            assertFalse(view.settings.isAlgorithmicDarkeningAllowed)
+        } finally {
+            darkeningPool.destroy()
+        }
     }
 
     @Test fun defaultCacheModeFollowsHttpHeadersWhileForgetKeepsNoCache() {

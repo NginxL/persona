@@ -167,7 +167,10 @@ review/comment publication. A human approval records human-sourced semantic evid
 (verification and privacy scan, linked issue, mergeability, exact-head/base re-read, the change-request merge block);
 it never merges by itself. A human `CHANGES_REQUESTED` or comment-only head parks without AI review and without
 merging until a new head or a new human state resolves it. Bot/GitHub App reviews never count, and reviews on older
-heads never carry over. See `docs/operations/pr-review-automation.md`, "Respect human reviews on the exact head".
+heads never carry over. Human-sourced evidence is reclassified before a same-head resume or merge retry: a later
+comment or change request parks, while a dismissal restores the normal AI review. A restart before verification is
+recorded still runs verification; valid exact-head verification evidence is reused. See
+`docs/operations/pr-review-automation.md`, "Respect human reviews on the exact head".
 Do not enable the switch in a live configuration without the documented offline `--migrate-config` step; that
 migration preserves existing evidence because the switch is outside the repository-policy fingerprint.
 

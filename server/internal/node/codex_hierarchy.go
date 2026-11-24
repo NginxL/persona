@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -118,24 +119,38 @@ func (n *Node) decorateCodexSessionIn(s *proto.Session, src codexSource, legacy 
 	s.AgentName, s.AgentSurface = "Codex App", transcript.SurfaceDesktop
 	app := pass.appState(src.home)
 	s.SpaceKind = "codex_app"
+	chat := src.thread
+	if s.IsSubagent {
+		chat = firstNonEmpty(origin.root, s.ParentThreadID, chat)
+	}
 	cwd := s.Cwd
-	if pid, _ := app.project(src.thread, cwd); pid != "" {
+	if pid, _ := app.project(chat, cwd); pid != "" {
 		project := app.projects[pid]
-		if len(project.RootPaths) == 1 {
+		if len(project.RootPaths) == 1 && filepath.IsAbs(project.RootPaths[0]) {
 			cwd = project.RootPaths[0]
 		}
 	}
 	s.RepoRoot = codexProjectRoot(cwd, projects)
+	if app != nil && !app.inNoProject(chat) {
+		if pid := app.assigned[chat]; pid != "" {
+			if p, ok := app.projects[pid]; ok {
+				s.SpaceID = codexDesktopProjectID(src.home, pid)
+				s.SpaceName = strings.TrimSpace(p.Name)
+				if s.SpaceName == "" && s.RepoRoot != "" {
+					s.SpaceName = filepath.Base(s.RepoRoot)
+				}
+				s.SpaceName = firstNonEmpty(s.SpaceName, "Codex project")
+				s.SpaceIndex = int32(slices.Index(app.order, pid) + 1)
+				return
+			}
+		}
+	}
 	// A chat the App keeps in no project (projectless-thread-ids) is under "Codex chats", as the App's sidebar lists it
 	// and placeCodexDesktop placed it, whatever folder the App made for it (~/Documents/Codex/<date>/<name>): by its
 	// folder it was a project of its own. A subagent goes by its chat: resolveCodexHierarchy gives it its chat's place,
 	// but not when the chat is not listed (archived in the App, or read from its database without sqlite3).
 	// A project is named as the App names it when its folder is the repository's root (folderName), else by the folder,
 	// and numbered by its place in the App's sidebar (space_index, folderPlace; 0, none, for any other).
-	chat := src.thread
-	if s.IsSubagent {
-		chat = firstNonEmpty(origin.root, s.ParentThreadID, chat)
-	}
 	if s.RepoRoot != "" && !app.inNoProject(chat) {
 		s.SpaceID, s.SpaceName = projectSpace+s.RepoRoot, firstNonEmpty(app.folderName(s.RepoRoot), filepath.Base(s.RepoRoot))
 		s.SpaceIndex = int32(app.folderPlace(s.RepoRoot))

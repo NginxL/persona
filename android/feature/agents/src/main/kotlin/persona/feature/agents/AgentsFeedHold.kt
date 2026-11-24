@@ -82,7 +82,13 @@ internal class AgentsFeedView(
  * under. The screen's own scrolls (the jump to the latest) hold nothing.
  */
 @Composable
-internal fun rememberAgentsFeed(latest: AgentsPageState, needsYou: (AgentsPageState) -> Set<String>, scope: List<Any?>, list: LazyListState): AgentsFeedView {
+internal fun rememberAgentsFeed(
+    latest: AgentsPageState,
+    needsYou: (AgentsPageState) -> Set<String>,
+    scope: List<Any?>,
+    list: LazyListState,
+    onProgrammaticScroll: () -> Unit = {},
+): AgentsFeedView {
     val feed = remember { AgentsFeed() }
     val frozen = feed.frozen
     val holds = remember(frozen, latest, scope, feed.revision) { frozen != null && holdsAgainst(frozen, latest, scope) }
@@ -92,6 +98,7 @@ internal fun rememberAgentsFeed(latest: AgentsPageState, needsYou: (AgentsPageSt
     val latestNow by rememberUpdatedState(latest)
     val scopeNow by rememberUpdatedState(scope)
     val needsYouNow by rememberUpdatedState(needsYou)
+    val onProgrammaticScrollNow by rememberUpdatedState(onProgrammaticScroll)
     val markOf = remember { { page: AgentsPageState -> agentsFeedMark(page, needsYouNow(page)) } }
 
     // A hold that no longer applies lets go for good, or a later push would find it again; a list still moving holds anew.
@@ -134,6 +141,7 @@ internal fun rememberAgentsFeed(latest: AgentsPageState, needsYou: (AgentsPageSt
         feed.land(latestNow, scopeNow, holdAgain = false)
         scroll.launch {
             try {
+                onProgrammaticScrollNow()
                 if (reduceMotion) list.scrollToItem(0) else list.animateScrollToItem(0)
             } finally {
                 feed.endProgrammatic()

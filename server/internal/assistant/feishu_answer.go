@@ -3,7 +3,7 @@ package assistant
 import (
 	"net/url"
 
-	"github.com/nwverse/persona/server/internal/feishubot"
+	"github.com/nwverse/persona/server/internal/botcard"
 	"github.com/nwverse/persona/server/internal/i18n"
 )
 
@@ -15,7 +15,7 @@ const answerCardMaxBytes = 28000
 
 // botAnswerCard is one card of an answer and what is sent instead when Feishu refuses it.
 type botAnswerCard struct {
-	card     *feishubot.Card
+	card     *botcard.Card
 	fallback string
 }
 
@@ -30,10 +30,10 @@ func answerCards(l i18n.Lang, name func(*url.URL) string, answer string, quiet b
 	}
 	// Charts (persona-card) become numbers over the whole answer before it is cut into cards: cut first, a chart
 	// longer than one card would read as nothing and leave an empty card.
-	a := feishubot.RenderAnswerWith(feishubot.PersonaCards(answer), botAnswerPiece, botAnswerCards, name)
+	a := botcard.RenderAnswerWith(botcard.PersonaCards(answer), botAnswerPiece, botAnswerCards, name)
 	out := make([]botAnswerCard, len(a.Parts))
 	for i, p := range a.Parts {
-		build := func(panelSteps int) *feishubot.Card {
+		build := func(panelSteps int) *botcard.Card {
 			c := p.Card(answer)
 			if i == 0 && steps != nil {
 				addProcessPanel(l, c, steps, panelSteps)

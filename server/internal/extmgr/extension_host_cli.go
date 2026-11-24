@@ -9,8 +9,10 @@ import (
 	"sync"
 	"time"
 
+	"github.com/nwverse/persona/server/internal/cliport"
+	"github.com/nwverse/persona/server/internal/cliwire"
+
 	"github.com/nwverse/persona/server/internal/extension"
-	larkcliadapter "github.com/nwverse/persona/server/internal/larkcli"
 	"github.com/nwverse/persona/server/internal/rpc"
 )
 
@@ -26,9 +28,9 @@ const (
 type hostCLI interface {
 	CheckVersion(ctx context.Context) error
 	Version(ctx context.Context) (string, error)
-	AuthStatus(ctx context.Context) (larkcliadapter.AuthStatus, error)
-	ListChats(ctx context.Context, limit int) (larkcliadapter.ChatList, error)
-	ListMessages(ctx context.Context, chatID, thread, before string, limit int) (larkcliadapter.MessagePage, error)
+	AuthStatus(ctx context.Context) (cliwire.AuthStatus, error)
+	ListChats(ctx context.Context, limit int) (cliwire.ChatList, error)
+	ListMessages(ctx context.Context, chatID, thread, before string, limit int) (cliwire.MessagePage, error)
 	SearchLimit(ctx context.Context, kind, query string, limit int) (json.RawMessage, error)
 }
 
@@ -80,6 +82,13 @@ func (h *Manager) hostCLI(ctx context.Context, id string, spec extension.HostInt
 	if h.cfg.Lark.CLI == nil || !h.cfg.Lark.CLI.Extensions {
 		return nil, &rpc.Error{Code: extension.CodePermissionDenied, Message: "host CLI: integration is not enabled by the manager"}
 	}
+	profile, err := h.larkCLIExecutionProfile(ctx)
+	if err != nil {
+		return nil, publicHostCLIError(err)
+	}
+	if !cliport.Available() { // a build without the lark module: as if lark-cli were not installed
+		return nil, publicHostCLIError(cliwire.NewError(cliwire.KindNotInstalled, cliport.ErrUnavailable))
+	}
 	h.hostCLIMu.Lock()
 	if h.hostCLIState == nil {
 		h.hostCLIState = &hostCLIState{}
@@ -87,7 +96,7 @@ func (h *Manager) hostCLI(ctx context.Context, id string, spec extension.HostInt
 	state := h.hostCLIState
 	h.hostCLIMu.Unlock()
 	version, err := state.current(ctx, func() hostCLI {
-		return larkcliadapter.New(larkcliadapter.Config{Bin: h.cfg.Lark.CLI.Bin, Profile: h.effectiveLarkCLIProfile(ctx), Timeout: 15 * time.Second})
+		return cliport.NewRunner(cliwire.Config{Bin: h.cfg.Lark.CLI.Bin, Profile: profile, Timeout: 15 * time.Second, ResolveProfile: h.larkCLIExecutionProfile})
 	})
 	if err != nil {
 		return nil, publicHostCLIError(err)
@@ -204,18 +213,18 @@ func publicHostCLIError(err error) error {
 	if err == nil {
 		return nil
 	}
-	kind := larkcliadapter.KindOf(err)
-	var adapterErr *larkcliadapter.Error
+	kind := cliwire.KindOf(err)
+	var adapterErr *cliwire.Error
 	_ = errors.As(err, &adapterErr)
 	code := hostCLIUnavailable
 	switch kind {
-	case larkcliadapter.KindNotInstalled, larkcliadapter.KindUnsupportedVersion:
+	case cliwire.KindNotInstalled, cliwire.KindUnsupportedVersion:
 		code = extension.CodeUnsupported
-	case larkcliadapter.KindNotLoggedIn, larkcliadapter.KindExpired, larkcliadapter.KindMissingPermission:
+	case cliwire.KindNotLoggedIn, cliwire.KindExpired, cliwire.KindMissingPermission:
 		code = extension.CodePermissionDenied
-	case larkcliadapter.KindRateLimited:
+	case cliwire.KindRateLimited:
 		code = hostCLIRateLimited
-	case larkcliadapter.KindTimeout:
+	case cliwire.KindTimeout:
 		code = extension.CodeTimeout
 	}
 	return &rpc.Error{Code: code, Message: "host CLI: " + string(kind)}

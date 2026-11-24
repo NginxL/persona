@@ -153,7 +153,7 @@ describe("New agent: presets (#2225)", () => {
     tiers = [{ name: "deepest", launcher: "fast", model: "m-review", effort: "max" }];
     await open();
     await pick("preset:deepest");
-    expect(hint()?.textContent).toBe("这里用不上：最高，会按启动器或模型自己的设置运行。");
+    expect(hint()?.textContent).toBe("这里用不上：Max，会按启动器或模型自己的设置运行。");
     act(() => button("启动").click());
     expect(launched[0]).toMatchObject({ launcher: "fast", model: "m-review" });
     expect(launched[0]?.effort).toBeUndefined();

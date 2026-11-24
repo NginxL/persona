@@ -74,7 +74,7 @@ class Inventory:
         n = result.bytes["tool_results"]
         self.bytes.update(result.bytes)
         self.counts.update(result.counts)
-        if self.largest is None or n > self.largest["bytes"]:
+        if result.counts["tool_results"] and (self.largest is None or n > self.largest["bytes"]):
             self.largest = {"category": "tool_results", "bytes": n}
 
     def row(self, known):
@@ -97,6 +97,12 @@ def usage_row(usage, runtime):
             "output_tokens": counter(usage.get("output_tokens"))}
 
 
+def is_tool_result_only(msg):
+    content = msg.get("content")
+    return isinstance(content, list) and bool(content) and all(
+        isinstance(b, dict) and b.get("type") in TOOL_OUTPUTS for b in content)
+
+
 def request_row(entry):
     """Explicit local exports: an Anthropic Messages or OpenAI Responses request object."""
     runtime, request = entry.get("runtime"), entry.get("request")
@@ -112,7 +118,8 @@ def request_row(entry):
     if isinstance(messages, str):
         inv.content(messages, "current_message")
     elif isinstance(messages, list):
-        last_user = max((i for i, m in enumerate(messages) if isinstance(m, dict) and m.get("role") == "user"), default=-1)
+        last_user = max((i for i, m in enumerate(messages)
+                         if isinstance(m, dict) and m.get("role") == "user" and not is_tool_result_only(m)), default=-1)
         for i, msg in enumerate(messages):
             if not isinstance(msg, dict):
                 inv.add("other_content", msg)

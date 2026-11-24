@@ -730,9 +730,6 @@ struct ToolDetail: View {
                 FindingsList(findings: i["findings"]?.array ?? [])
             case "ExitPlanMode":
                 Markdown(MarkdownMemo.content(i["plan"]?.string ?? "")).markdownTheme(.persona)
-                    #if os(macOS)
-                    .textSelection(.enabled)
-                    #endif
             case "AskUserQuestion", "ask_user":
                 // Claude Code's dialog shows its options too (#5889): what it asked can be read where it can't be answered.
                 AskUserDetail(call: call)
@@ -1042,9 +1039,6 @@ struct CodeBlock: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(Theme.codeBackground, in: .rect(cornerRadius: Theme.Radius.control, style: .continuous))
-            .macHoverActions {
-                MacHoverButton(title: String(localized: "Copy [Readiness Views d37380]"), symbol: Theme.Icon.copy) { MacHover.copy(text) }
-            }
             if clipped {
                 // In the chat its top stays where it is and the rest opens under it (#3757): animated, the block grew
                 // around the tap and moved what was above it.
@@ -1155,12 +1149,8 @@ struct FullOutputSheet: View {
         NavigationStack {
             Group {
                 if let text {
-                    #if os(macOS)
-                    MonoTextView(text: MonoText.plain(text, color: .label, size: 12))
-                    #else
                     // Every line read whole: long ones wrap (#6605); cut at the edge they did not say they scrolled.
                     MonoTextView(text: MonoText.plain(text, color: .label, size: 12), wraps: true)
-                    #endif
                 } else if let error {
                     ContentUnavailableView("Couldn't Load", systemImage: Theme.Icon.error, description: Text(error))
                 } else {
@@ -1171,16 +1161,6 @@ struct FullOutputSheet: View {
             .navigationTitle(title)
             .navigationBarTitleDisplayMode(.inline)
             .pageToolbar {
-                #if os(macOS)
-                // A Mac sheet has no navigation bar: only its bottom row of actions is drawn, and the leading item that
-                // maps to `.navigation` never showed (#743). Copy All goes in that row, before Done.
-                ToolbarItem(placement: .cancellationAction) { Button("Done [Extension System Presentation c0b3fb]") { dismiss() }.lineLimit(1) }
-                if let text {
-                    ToolbarItem(placement: .primaryAction) {
-                        Button { UIPasteboard.general.string = text } label: { Text("Copy All [Tool Views 1c5144]").lineLimit(1) }
-                    }
-                }
-                #else
                 // ✕ at the leading corner, the page's own Copy All at the trailing one (#9653).
                 SheetClose { dismiss() }
                 if let text {
@@ -1188,12 +1168,7 @@ struct FullOutputSheet: View {
                         Button { UIPasteboard.general.string = text } label: { Label("Copy All [Tool Views 1c5144]", systemImage: Theme.Icon.copy) }
                     }
                 }
-                #endif
             }
-            #if os(macOS)
-            // Sized to its bars a Mac sheet was 470 × 113, the text squeezed to nothing (#508): a reader wants the room.
-            .macLargeSheet(bars: true)
-            #endif
         }
         .task {
             guard text == nil, let load else { return }
@@ -1441,9 +1416,6 @@ struct DiffView: View {
         return HStack(spacing: Theme.Space.sm) {
             Text(sign).foregroundStyle(color).scaledFrame(width: Theme.Size.dotXL)
             Self.text(l, emphasis: emphasis).foregroundStyle(quiet ? Color.secondary : .primary)
-                #if os(macOS)
-                .textSelection(.enabled) // the text, not the +/− column, as on the web
-                #endif
         }
         .font(Theme.Font.code)
         .padding(.horizontal, Theme.Space.s)
@@ -1569,10 +1541,6 @@ struct Base64Image: View {
                     .scaledFrame(maxHeight: fillsWidth ? nil : Theme.Size.box280)
                     .contentShape(.rect)
                     .onTapGesture { open() }
-                    #if os(macOS)
-                    // Dragged out to Finder or another app, as a picture in a Mac app is (#2113).
-                    .draggable(Image(nsImage: image)) { Image(nsImage: image).resizable().scaledToFit().scaledFrame(maxHeight: Theme.Size.box120) }
-                    #endif
                     .matchedTransitionSource(id: pageZoom == nil ? "image" : payload.identity, in: pageZoom ?? zoom)
                     .accessibilityAddTraits(.isButton)
                     .accessibilityLabel("Image, tap to enlarge")
@@ -1701,7 +1669,7 @@ struct ComputerToolDetail: View {
                     .lineLimit(3)
             }
             ForEach(Array(call.images.enumerated()), id: \.offset) { i, img in Base64Image(payload: img, gallery: call.images, index: i) }
-            ScreenEntry(call: call)
+            ModuleViews(place: .toolCall, context: .init(call: call))
             RawInputToggle(raw: $raw, pinKey: "raw-" + call.id).accessibilityIdentifier("computer-raw")
             if raw {
                 CodeBlock(text: input, maxLines: 14)

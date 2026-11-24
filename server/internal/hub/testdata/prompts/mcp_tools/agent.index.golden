@@ -3,6 +3,12 @@ mail_search
 mail_read
 mail_save_attachment
 mail_send
+resource_status
+resource_acquire
+resource_get
+resource_renew
+resource_release
+resource_cancel
 report_to_supervisor
 todo_decisions
 todo_decision_add

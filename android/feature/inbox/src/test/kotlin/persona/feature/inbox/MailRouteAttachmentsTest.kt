@@ -29,6 +29,7 @@ import persona.core.domain.inbox.InboxItem
 import persona.core.navigation.AppTab
 import persona.core.navigation.Navigator
 import java.io.File
+import persona.core.inbox.*
 
 /** A stamped mail item's page can still download its attachments, as the item's manager. */
 @RunWith(AndroidJUnit4::class)

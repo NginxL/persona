@@ -579,7 +579,17 @@ struct MeetingPage: View {
         .animation(reduceMotion ? nil : Theme.Motion.state, value: writing)
         // In the sheet its ✕ at the leading corner (#9653, `SheetClose`); pushed, the back button there. The ⋯ trailing.
         .toolbar {
-            if let close { SheetClose(id: "recording-wrapup-done") { close() } }
+            if let close {
+                SheetClose(id: "recording-wrapup-done") { close() }
+            } else {
+                ToolbarItem(placement: .principal) {
+                    Text("Meeting")
+                        .font(Theme.Font.heading)
+                        .foregroundStyle(.primary)
+                        .lineLimit(1)
+                        .accessibilityAddTraits(.isHeader)
+                }
+            }
             if MeetingRoomOffers.of(entry.id).handOff { ToolbarItem(placement: .topBarTrailing) { afterMenu(entry) } }
         }
         .toolbar(.visible, for: .navigationBar)
@@ -839,7 +849,8 @@ struct MeetingPage: View {
         if case .ready = minutes.state { true } else { false }
     }
 
-    /// Where the minutes are, in the wrap-up's words: a spinner while they are written, a check once ready.
+    /// Where the minutes are, in the wrap-up's words: a spinner while they are written (or while the hub checks the
+    /// whole recording first, with how far it is: #13461), a check once ready.
     @ViewBuilder private var minutesLine: some View {
         if minutesAsked {
             Group {
@@ -847,7 +858,7 @@ struct MeetingPage: View {
                 case .writing:
                     HStack(spacing: Theme.Space.s) {
                         ProgressView()
-                        Text("Writing the minutes…")
+                        Text(MinutesWaitLine.of(minutes.transcription).title)
                     }
                 case .ready:
                     Label { Text("Minutes ready") } icon: { ThemedIcon(Theme.Icon.successFilled).foregroundStyle(Theme.positive) }
@@ -916,6 +927,7 @@ struct MeetingLiveBox: View {
 
     @State private var capture = RecordingCapture.shared
     @State private var transcription = MeetingTranscription.shared
+    @State private var phone = RecordingTranscription.shared
     @State private var rows: [LiveRow] = []
 
     private var paused: Bool { capture.state == .paused }
@@ -923,6 +935,9 @@ struct MeetingLiveBox: View {
     var body: some View {
         let hub = transcription.meeting(entry.id)
         let shown = transcription.shown(entry.id, role: entry.attendance?.role ?? .off)
+        // This iPhone can't transcribe the meeting (#13385): said where its own lines would show, instead of "Listening…".
+        let cannot = shown.hubLines ? nil : phone.cannot[entry.id]
+        let phoneWords = cannot.map { MeetingTranscriptionWords.phoneCannot($0, locale: entry.locale, fellBack: shown.fellBack) }
         // The hub's newest lines, keyed by their place in its live log (never renumbered): three, so cheap here.
         let lines = shown.hubLines ? hub.lines.suffix(Theme.Recording.liveLines).map {
             LiveRow(id: "hub-\($0.n)", start: $0.start, end: $0.end, text: $0.text)
@@ -933,10 +948,15 @@ struct MeetingLiveBox: View {
                 Text("Live").font(Theme.Font.captionStrong).foregroundStyle(.secondary)
                     .accessibilityAddTraits(.isHeader)
                 Spacer(minLength: Theme.Space.s)
-                // A caption is what is said now: nothing is behind.
-                if caption == nil { behind(lines.last) }
+                // A caption is what is said now: nothing is behind. A phone that can't transcribe isn't listening.
+                if caption == nil, cannot == nil { behind(lines.last) }
             }
-            if shown.fellBack { MeetingTranscriptionFallbackNotice(words: MeetingTranscriptionWords.fallback(hub)) }
+            if shown.fellBack {
+                let notice = MeetingTranscriptionWords.fallbackNotice(hub, service: transcription.service, phoneCannot: phoneWords)
+                MeetingTranscriptionFallbackNotice(words: notice.words, phone: notice.phone)
+            } else if let phoneWords {
+                MeetingTranscriptionFallbackNotice(words: phoneWords, identifier: "meeting-phone-cannot-transcribe")
+            }
             // Folded, only the newest: the caption when there is one, else the last line.
             ForEach(folded ? (caption == nil ? Array(lines.suffix(1)) : []) : lines) { row in
                 liveRow(row).accessibilityIdentifier(shown.hubLines ? "meeting-live-hub-line" : "meeting-live-line")

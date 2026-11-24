@@ -48,7 +48,7 @@ struct TodosListModelTests {
     static func outbox(_ store: TodoStore, hub: FakeHub, refused: @escaping @MainActor (String) -> Void = { _ in }) -> TodoOutbox {
         TodoOutbox(deps: .init(load: { [] }, save: { _, _ in Task {} }, hub: { "g" },
                                send: { entry, answered in await store.send(entry, answered: answered, api: hub.client) },
-                               refused: { _, message in refused(message) },
+                               refused: { _, message, _ in refused(message) },
                                standing: { id in
                                    store.byID[id].map { .init(title: $0.title, updatedAt: $0.updatedAt, done: $0.isDone, someday: false) }
                                },
@@ -79,10 +79,10 @@ struct TodosListModelTests {
         await store.refresh(api: hub.client)
         try await waitForListTest { list.ready && !list.groups.isEmpty }
         #expect(list.groups.map(\.id) == [TodoListSection.needsYou, TodoListSection.working, TodoListSection.todo])
-        #expect(list.entries.map(\.choice) == [.all, .needsYou, .inProgress])
+        #expect(list.filterOptions.map(\.choice) == TodosChoice.allCases)
         #expect(list.needsYou == 1)
         let kyoto = try #require(list.row("/t01")?.content)
-        #expect(kyoto.title == "Plan the Kyoto trip" && kyoto.mark == .needs && kyoto.door == .review)
+        #expect(kyoto.title == "Plan the Kyoto trip" && kyoto.mark == .needs && kyoto.asks == 1)
         #expect(list.row("/t05")?.content.mark == .working)
         #expect(!list.calm)
     }
@@ -168,7 +168,7 @@ struct TodosListModelTests {
             TodoViewJSON.row("a", view: TodoViewJSON.view(TodoListSection.waiting, line: "pr_open")),
             TodoViewJSON.row("b", view: TodoViewJSON.view(TodoListSection.todo, line: "rest"))], needsYou: 0, inProgress: 4))
         await store.refresh(api: hub.client)
-        try await waitForListTest { list.entries.first { $0.choice == .inProgress }?.count == 4 } // the numbers never wait
+        try await waitForListTest { store.countsSource.counts.inProgress == 4 } // the numbers never wait
         // Held: a proof that something did not happen needs a moment to have happened in; the store has told the list.
         try await Task.sleep(for: .milliseconds(100))
         #expect(list.groups.map(\.id) == [TodoListSection.working, TodoListSection.todo], "held while scrolled")
@@ -180,7 +180,7 @@ struct TodosListModelTests {
         await store.refresh(api: hub.client)
         try await waitForListTest { list.groups.first?.id == TodoListSection.needsYou }
         #expect(list.groups.map(\.id) == [TodoListSection.needsYou, TodoListSection.working])
-        #expect(list.row("/b")?.content.mark == .needs && list.row("/b")?.content.door == .review)
+        #expect(list.row("/b")?.content.mark == .needs && list.row("/b")?.content.asks == 1)
         #expect(list.row("/a")?.content.mark == .working)
         let arrived = try #require(list.row("/a")?.arrivals)
         // The list rests: the rest lands, a fading in where it now is.
@@ -251,7 +251,7 @@ struct TodosListModelTests {
         try await waitForListTest { list.row("/a")?.content.trailing != next.trailing }
     }
 
-    /// The bar's choice, the grouping and the sort are the owner's taps: they land at once, folds too.
+    /// The Filter's choice, the sort and Group by Project are the owner's taps: they land at once, folds too.
     @Test func choicesAndFoldsAreNeverHeld() async throws {
         let hub = FakeHub()
         hub.on("GET", "/api/v1/todos", json: Self.list([
@@ -272,8 +272,199 @@ struct TodosListModelTests {
         list.toggle(TodoListSection.canWait)
         #expect(list.groups[0].folds.first?.open == true && list.unfolded == [TodoListSection.canWait])
         list.choice = .all
-        list.grouping = .project
+        list.sort = .due
+        #expect(list.groups.map(\.id) == [TodoListSection.needsYou, TodoListSection.working], "a sort never moves a section")
+        list.byProject = true
         #expect(list.groups.map(\.id) == [TodoListSection.needsYou, "project:"])
+    }
+
+    /// The Filter: a choice draws its sections at once; one that leaves Needs you out says how many it hides, in the
+    /// guard line and the title's subtitle, and Show All (or ×) is All again. A search sets the choice aside.
+    @Test func theFilterAndItsGuardLine() async throws {
+        let hub = FakeHub()
+        hub.on("GET", "/api/v1/todos", json: Self.list([
+            TodoViewJSON.row("n", view: TodoViewJSON.view(TodoListSection.needsYou, asks: ["todo:decision@1"], line: "decision")),
+            TodoViewJSON.row("w", view: TodoViewJSON.view(TodoListSection.working)),
+            TodoViewJSON.row("t", title: "Renew passport", view: TodoViewJSON.view(TodoListSection.todo, line: "rest"))]))
+        hub.on("GET", "/api/v1/todos/places", json: Self.places)
+        let store = TodoStore(cachedTodos: [], cacheWriter: nil, hubListChanged: {}, v1: .on())
+        defer { store.forget() }
+        let list = model(store, hub: hub)
+        list.start()
+        await store.refresh(api: hub.client)
+        try await waitForListTest { list.groups.count == 3 }
+        #expect(list.hiddenNeeds == 0 && list.subtitle(place: "All To-dos") == "", "All hides nothing")
+        list.choice = .inProgress
+        #expect(list.groups.map(\.id) == [TodoListSection.working])
+        #expect(list.hiddenNeeds == 1, "the guard line: 1 more needs you")
+        let subtitle = list.subtitle(place: "All To-dos")
+        #expect(subtitle.hasPrefix(TodosChoice.inProgress.title) && subtitle.contains("1"), "\(subtitle)")
+        list.choice = .needsYou
+        #expect(list.hiddenNeeds == 0 && list.groups.map(\.id) == [TodoListSection.needsYou])
+        list.choice = .todo
+        list.query = "passport"
+        #expect(list.searching && list.hiddenNeeds == 0 && list.subtitle(place: "All To-dos") == "", "a search sets the choice aside")
+        #expect(list.groups.map(\.id) == [TodoListSection.todo] && list.groups[0].keys == ["/t"])
+        list.query = "kyoto"
+        #expect(list.isEmpty, "nothing open matches")
+        list.query = ""
+        #expect(list.choice == .todo && list.hiddenNeeds == 1, "the choice is back once the field is cleared")
+        list.choice = .all // Show All
+        #expect(list.groups.count == 3)
+    }
+
+    /// A fold is drawn open while searching and does nothing then: cleared, the list folds as the owner left it.
+    @Test func aFoldTappedWhileSearchingStaysAsItWas() async throws {
+        let hub = FakeHub()
+        hub.on("GET", "/api/v1/todos", json: Self.list([
+            TodoViewJSON.row("n", title: "Call the ryokan", view: TodoViewJSON.view(TodoListSection.needsYou, line: "decision")),
+            TodoViewJSON.row("c", title: "Pick a ryokan", view: TodoViewJSON.view(TodoListSection.canWait, line: "decision")),
+            TodoViewJSON.row("w", view: TodoViewJSON.view(TodoListSection.working))]))
+        hub.on("GET", "/api/v1/todos/places", json: Self.places)
+        let store = TodoStore(cachedTodos: [], cacheWriter: nil, hubListChanged: {}, v1: .on())
+        defer { store.forget() }
+        let list = model(store, hub: hub)
+        list.start()
+        await store.refresh(api: hub.client)
+        try await waitForListTest { list.groups.count == 2 }
+        list.query = "ryokan"
+        #expect(list.searching && list.groups.first?.folds.first?.open == true)
+        list.toggle(TodoListSection.canWait)
+        list.query = ""
+        #expect(list.unfolded.isEmpty && list.groups.first?.folds.first?.open == false, "folded, as before the search")
+    }
+
+    /// The Filter goes with the calm list, and its choice with it: when the list leaves calm again it lands on All, not on
+    /// a choice nobody can see (proposal 3.3, "lands on All").
+    @Test func aChoiceGoesWithTheFilter() async throws {
+        let hub = FakeHub()
+        let busy = Self.list([TodoViewJSON.row("w", view: TodoViewJSON.view(TodoListSection.working)),
+                              TodoViewJSON.row("t", view: TodoViewJSON.view(TodoListSection.todo, line: "rest"))])
+        hub.on("GET", "/api/v1/todos", json: busy)
+        hub.on("GET", "/api/v1/todos/places", json: Self.places)
+        let store = TodoStore(cachedTodos: [], cacheWriter: nil, hubListChanged: {}, v1: .on())
+        defer { store.forget() }
+        let list = model(store, hub: hub)
+        list.start()
+        await store.refresh(api: hub.client)
+        try await waitForListTest { list.groups.count == 2 }
+        list.choice = .todo
+        #expect(list.filters && list.choice == .todo)
+        hub.on("GET", "/api/v1/todos", json: Self.list([TodoViewJSON.row("t", view: TodoViewJSON.view(TodoListSection.todo, line: "rest"))],
+                                                       needsYou: 0, inProgress: 0))
+        await store.refresh(api: hub.client)
+        try await waitForListTest { list.calm }
+        #expect(!list.filters && list.choice == .all, "calm: no Filter, and no choice kept")
+        hub.on("GET", "/api/v1/todos", json: busy)
+        await store.refresh(api: hub.client)
+        try await waitForListTest { !list.calm }
+        #expect(list.choice == .all && list.groups.map(\.id) == [TodoListSection.working, TodoListSection.todo])
+    }
+
+    /// Back puts a list back at its end only while a scroll left it resting there (`TodoListView.backToTheEnd`). A
+    /// choice's scroll to the top and the search narrowing the list move it without ending a scroll phase, so the page
+    /// says so (`moved`): a to-do then opened without a touch on the list (VoiceOver, the keyboard, a link) must not pull
+    /// the list to its end on Back.
+    @Test func aListThePageMovedForgetsWhereItRested() {
+        let sight = TodoListSight()
+        sight.atEnd = true
+        sight.rested()
+        #expect(sight.restedAtEnd, "a scroll came to rest at the list's end")
+        sight.atEnd = false
+        sight.moved()
+        #expect(!sight.restedAtEnd, "a choice put the list at its top")
+        sight.atEnd = true
+        sight.moved()
+        #expect(!sight.restedAtEnd, "only a scroll's rest says the list rests at its end")
+        sight.rested()
+        #expect(sight.restedAtEnd, "the next rest at the end counts again")
+        sight.atEnd = false
+        sight.rested()
+        #expect(!sight.restedAtEnd, "a rest short of the end")
+    }
+
+    /// Group by Project leaves a row's project off line 3 only where its heading says it: the calm list's one card,
+    /// Done's days and the Someday and Done today folds after the last card have no project headings, so their rows
+    /// keep it.
+    @Test func aRowKeepsItsProjectWhereNoHeadingSaysIt() async throws {
+        let hub = FakeHub()
+        // A Someday row with steps, its project beside them ("Kyoto trip · Steps 1/4").
+        let someday = String(TodoViewJSON.view(TodoListSection.someday, line: "rest").dropLast()) + #","steps":{"done":1,"total":4}}"#
+        hub.on("GET", "/api/v1/todos", json: Self.list([
+            TodoViewJSON.row("w", extra: #""project":"kyoto""#, view: TodoViewJSON.view(TodoListSection.working, inactive: "idle")),
+            TodoViewJSON.row("s", extra: #""project":"kyoto""#, view: someday),
+            // Closed at the test clock's very moment: today in every time zone.
+            TodoViewJSON.row("t", extra: #""project":"kyoto","done_at":"2027-01-15T08:00:00Z""#,
+                             view: TodoViewJSON.view(TodoListSection.done, inactive: "idle")),
+            TodoViewJSON.row("d", extra: #""project":"kyoto","done_at":"2026-11-21T08:00:00Z""#,
+                             view: TodoViewJSON.view(TodoListSection.done, inactive: "idle"))]))
+        hub.on("GET", "/api/v1/todos/places", json: Self.places)
+        let store = TodoStore(cachedTodos: [], cacheWriter: nil, hubListChanged: {}, v1: .on())
+        defer { store.forget() }
+        let list = model(store, hub: hub)
+        list.start()
+        await store.refresh(api: hub.client)
+        try await waitForListTest { !list.groups.isEmpty }
+        #expect(list.row("/w")?.content.caption?.contains("Kyoto trip") == true, "\(list.row("/w")?.content.caption ?? "nil")")
+        list.byProject = true
+        #expect(list.groups.contains { $0.id == "project:kyoto" })
+        #expect(list.row("/w")?.content.caption?.contains("Kyoto trip") == false, "its heading says it")
+        #expect(Array(list.groups.map(\.id).suffix(2)) == ["tail:" + TodoListSection.someday, "tail:" + TodoListSection.done],
+                "Someday and Done today fold after the last card: \(list.groups.map(\.id))")
+        #expect(list.row("/s")?.content.caption?.contains("Kyoto trip") == true,
+                "Someday's fold: \(list.row("/s")?.content.caption ?? "nil")")
+        #expect(list.row("/t")?.content.caption?.contains("Kyoto trip") == true,
+                "Done today's fold: \(list.row("/t")?.content.caption ?? "nil")")
+        list.choice = .done
+        #expect(list.row("/d")?.content.caption?.contains("Kyoto trip") == true, "Done is listed by day: no heading says it")
+        #expect(!TodosListModel.grouped(true, calm: true, choice: .all, searching: false), "the calm list is one card")
+        #expect(TodosListModel.grouped(true, calm: false, choice: .needsYou, searching: true), "a search lists All")
+    }
+
+    /// ⋯'s Sort By, the list's one arrangement: Due Date puts the earliest due first inside a section (the one way to
+    /// order Working by date), Recently Changed the latest change, Priority the high ones first; Suggested, the hub's order,
+    /// is the reset. Needs you keeps the hub's order (its deadlines first) under every sort. The Filter keeps its choice
+    /// meanwhile.
+    @Test func theSortOrdersInsideEachSection() async throws {
+        let hub = FakeHub()
+        hub.on("GET", "/api/v1/todos", json: Self.list([
+            TodoViewJSON.row("a", extra: #""due_date":"2026-12-09","updated_at":"2026-11-20T08:00:00Z""#,
+                             view: TodoViewJSON.view(TodoListSection.working, rank: 0)),
+            TodoViewJSON.row("b", extra: #""due_date":"2026-12-02","updated_at":"2026-11-19T08:00:00Z""#,
+                             view: TodoViewJSON.view(TodoListSection.working, rank: 1)),
+            TodoViewJSON.row("c", extra: #""updated_at":"2026-11-21T08:00:00Z","priority":"high""#,
+                             view: TodoViewJSON.view(TodoListSection.working, rank: 2)),
+            TodoViewJSON.row("n", extra: #""due_date":"2026-12-20","updated_at":"2026-11-18T08:00:00Z""#,
+                             view: TodoViewJSON.view(TodoListSection.needsYou, rank: 0, line: "decision")),
+            TodoViewJSON.row("m", extra: #""due_date":"2026-12-01","updated_at":"2026-11-21T09:00:00Z""#,
+                             view: TodoViewJSON.view(TodoListSection.needsYou, rank: 1, line: "decision"))]))
+        hub.on("GET", "/api/v1/todos/places", json: Self.places)
+        let store = TodoStore(cachedTodos: [], cacheWriter: nil, hubListChanged: {}, v1: .on())
+        defer { store.forget() }
+        let list = model(store, hub: hub)
+        list.start()
+        await store.refresh(api: hub.client)
+        try await waitForListTest { list.groups.count == 2 }
+        let working = { list.groups.first { $0.id == TodoListSection.working }?.keys ?? [] }
+        let needs = { list.groups.first { $0.id == TodoListSection.needsYou }?.keys ?? [] }
+        #expect(working() == ["/a", "/b", "/c"], "Suggested: the hub's rank")
+        list.sort = .activity
+        #expect(needs() == ["/n", "/m"], "Needs you keeps the hub's order under every sort")
+        list.sort = .due
+        #expect(needs() == ["/n", "/m"])
+        list.sort = .suggested
+        list.choice = .inProgress
+        list.sort = .due
+        #expect(working() == ["/b", "/a", "/c"], "the earliest due first, the undated last")
+        list.sort = .activity
+        #expect(working() == ["/c", "/a", "/b"], "the latest change first")
+        list.sort = .priority
+        #expect(working() == ["/c", "/a", "/b"], "the high-priority one first, the hub's order after")
+        #expect(list.row("/c")?.content.highPriority == true && list.row("/a")?.content.highPriority == false)
+        list.sort = .suggested
+        #expect(working() == ["/a", "/b", "/c"])
+        #expect(list.choice == .inProgress, "the Filter has its own way back")
+        #expect(TodosListSort.allCases == [.suggested, .activity, .due, .priority])
     }
 
     /// The minute clock for rows filed by the app's own rules follows whatever made one current: another assistant made
@@ -508,10 +699,10 @@ struct TodosListWritesTests {
         #expect(list.needsYou == 1)
         list.someday("/n")
         try await waitForListTest { store.countsSource.needsYou == 0 }
-        try await waitForListTest { list.groups.last?.folds.contains { $0.id == TodoListSection.someday } == true }
+        try await waitForListTest { list.groups.last?.tail?.id == TodoListSection.someday }
         #expect(list.needsYou == 0, "N moves at once, everywhere")
         #expect(!list.groups.contains { $0.id == TodoListSection.needsYou })
-        #expect(list.groups.last?.folds.first { $0.id == TodoListSection.someday }?.keys == ["/n"], "folded under Someday")
+        #expect(list.groups.last?.tail?.keys == ["/n"], "folded under Someday, after the last card")
         #expect(hub.sent("PUT", "/api/v1/todos/n/someday").isEmpty)
         try await waitForListTest { !hub.sent("PUT", "/api/v1/todos/n/someday").isEmpty }
         let put = try #require(hub.sent("PUT", "/api/v1/todos/n/someday").first)

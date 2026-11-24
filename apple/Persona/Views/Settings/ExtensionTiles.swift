@@ -60,7 +60,12 @@ struct ExtensionTileView: View {
 
     @ViewBuilder private var content: some View {
         if let gauge = tile.gauge {
-            ExtensionGaugeFace(tile: tile, gauge: gauge, compact: compact)
+            GaugeRing(title: tile.title, value: ExtensionGaugeReading.center(tile, gauge: gauge),
+                      unit: tile.value?.isEmpty == false ? gauge.unit : nil, subtitle: tile.subtitle,
+                      ratio: gauge.ratio,
+                      color: ExtensionUIStyle.color(gauge.color) ?? ExtensionUIStyle.color(tile.color) ?? Theme.accent,
+                      compact: compact)
+                .accessibilityHidden(true)
                 .frame(maxWidth: .infinity)
                 .overlay(alignment: .topTrailing) {
                     HStack(spacing: Theme.Space.xs) {
@@ -183,68 +188,6 @@ nonisolated enum ExtensionGaugeReading {
         guard tile.value?.isEmpty == false else { return "\(percent(gauge.ratio))%" }
         let amount = [tile.value!, gauge.unit ?? ""].filter { !$0.isEmpty }.joined(separator: " ")
         return "\(amount), \(percent(gauge.ratio))%"
-    }
-}
-
-/// A gauge tile's ring, value and unit, title and subtitle. The tile outside keeps its surface, press, badge and
-/// switch; only the ordinary icon/value face changes. The ring itself is hidden from VoiceOver: the tile reads the
-/// same value as one accessibility element (a button when it has an action).
-private struct ExtensionGaugeFace: View {
-    var tile: ExtensionTile
-    var gauge: ExtensionGauge
-    var compact: Bool
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var shown: Double
-
-    init(tile: ExtensionTile, gauge: ExtensionGauge, compact: Bool) {
-        self.tile = tile
-        self.gauge = gauge
-        self.compact = compact
-        _shown = State(initialValue: min(max(gauge.ratio, 0), 1))
-    }
-
-    private var tint: Color { ExtensionUIStyle.color(gauge.color) ?? ExtensionUIStyle.color(tile.color) ?? Theme.accent }
-    private var side: CGFloat { compact ? Theme.Size.gaugeRingCompact : Theme.Size.gaugeRing }
-
-    var body: some View {
-        VStack(alignment: .center, spacing: Theme.Space.xs) {
-            ZStack {
-                Circle()
-                    .stroke(tint.opacity(0.14), lineWidth: Theme.Size.gaugeStroke)
-                if shown > 0 {
-                    Circle()
-                        .trim(from: 0, to: shown)
-                        .stroke(tint, style: StrokeStyle(lineWidth: Theme.Size.gaugeStroke, lineCap: .round))
-                        .rotationEffect(.degrees(-90))
-                }
-                VStack(alignment: .center, spacing: Theme.Space.flush) {
-                    ExtensionChangingText(ExtensionGaugeReading.center(tile, gauge: gauge))
-                        .font((compact ? Theme.Font.heading : Theme.Font.title).monospacedDigit())
-                        .foregroundStyle(Color.primary)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.6)
-                    if tile.value?.isEmpty == false, let unit = gauge.unit, !unit.isEmpty {
-                        Text(unit).font(Theme.Font.label).foregroundStyle(.tertiary).lineLimit(1)
-                    }
-                }
-                .frame(maxWidth: side * 0.72)
-            }
-            .scaledFrame(width: side, height: side)
-            Text(tile.title).font(Theme.Font.labelStrong).foregroundStyle(Color.primary).lineLimit(1)
-            if let subtitle = tile.subtitle, !subtitle.isEmpty {
-                Text(subtitle).font(Theme.Font.label).foregroundStyle(.secondary).lineLimit(1)
-            }
-        }
-        .padding(Theme.Space.m)
-        .accessibilityHidden(true)
-        .onChange(of: gauge.ratio) { _, ratio in
-            let next = min(max(ratio, 0), 1)
-            if reduceMotion {
-                shown = next
-            } else {
-                withAnimation(Theme.Motion.state) { shown = next }
-            }
-        }
     }
 }
 

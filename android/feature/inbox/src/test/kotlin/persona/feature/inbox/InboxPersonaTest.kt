@@ -12,6 +12,7 @@ import kotlinx.coroutines.test.runTest
 import org.junit.Assert.*
 import org.junit.Test
 import java.io.IOException
+import persona.core.inbox.*
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class InboxPersonaTest {

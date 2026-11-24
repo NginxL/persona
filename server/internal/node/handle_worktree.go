@@ -21,6 +21,8 @@ type worktreePrepareParams struct {
 	WorkspaceID string `json:"workspace_id"`
 	Cwd         string `json:"cwd"`
 	Branch      string `json:"branch"`
+	// AllowUntracked applies only to an automatic task branch in the checkouts folder.
+	AllowUntracked bool `json:"allow_untracked"`
 }
 
 // worktreeCreateParams is worktree.create's request (worktree.go): Composer asks for the composer's variant, AutoName for

@@ -10,7 +10,7 @@ import (
 
 // supervisorVerified says supervised task t was closed accepted with its evidence checked, and the owner was not asked
 // to look themselves: its supervisor (the main conversation or a leader) did so with task_review accepted and no
-// user_check, or the done judge's spot check did (judgeClose, #3356) on anything but a big feature (high priority,
+// user_check, or a legacy done judge's spot check did (before #5732) on anything but a big feature (high priority,
 // #3205), which the owner tries. What it asked the owner is then passed for them, not left for them (#3240). A task with
 // no supervisor still asks; so does a big feature's "Please verify" (verifyBySupervisor).
 func supervisorVerified(t Todo) bool {

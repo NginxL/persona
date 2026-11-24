@@ -544,6 +544,11 @@ button:disabled { cursor: default; }
  * Each reads on the surface in its theme (3:1 at least, as an icon); a tile that is on lays it at 14% under the ink. */
 :root { --hue-red: #e3474c; --hue-orange: #e2680a; --hue-amber: #b57a00; --hue-yellow: #9c8500; --hue-green: #189a4d; --hue-teal: #0f8a9c; --hue-blue: #0285ff; --hue-indigo: #5b5bd6; --hue-purple: #9a4fd0; --hue-pink: #d6407f; --hue-gray: #7c8087; }
 .dark { --hue-red: #ee5c61; --hue-orange: #f68f3c; --hue-amber: #f0b429; --hue-yellow: #e8d04a; --hue-green: #3dbb72; --hue-teal: #3fb8c8; --hue-blue: #3d9aff; --hue-indigo: #8b8ef0; --hue-purple: #c08af0; --hue-pink: #ef7aa8; --hue-gray: #9a9ea5; }
+/* Health's two rings (#13176, modules/health/HealthToday.tsx): water in a blue and protein in an amber, each at least 40 degrees of hue away from
+ * the Activity rings' red #FA114F, green #A6FF00 and cyan #00FFF6 so that nothing here reads as one of them (Apple's guidelines keep those
+ * colors for the Activity rings); 3:1 at least on the surface, as an icon (health-today.test.ts checks both). The track is the color at 14%. */
+:root { --health-water: #2457d6; --health-protein: #9a5900; }
+.dark { --health-water: #719bff; --health-protein: #f6b650; }
 
 /* A permission mode's tone (#3956; iOS Theme.ModeTone, Android ModeTone, docs/design/DESIGN_SYSTEM.md): how much a
  * mode lets an agent do without asking, on the header's mode button. None is an agent state's color (blue, orange, green).

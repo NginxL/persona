@@ -25,4 +25,10 @@ export const NAV_RAIL_METRICS = {
   previewGap: 8,
   previewPadding: 20,
   previewParagraphGap: 12,
+  // Question states (#13021): a follow-up's tick against a question's, a not-started tick's opacity against the plain
+  // tick's, the least opacity of one in progress or unread, and the unread dot's diameter.
+  followWidth: 0.6,
+  pendingOpacity: 0.6,
+  stateOpacity: 0.85,
+  dotSize: 4,
 } as const;

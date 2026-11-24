@@ -38,6 +38,8 @@ Persona 算好的事实（这次开跑时的快照，数字以此为准，别改
   - 时间线（只有标题，按时间）{{if $.Day.Left}}，中间省略了 {{$.Day.Left}} 段{{end}}：{{range .}}
     - {{.From}}–{{.To}} {{if .Meeting}}会议{{else}}会议以外{{end}}：{{.Title}}{{end}}{{end}}{{with .Actions}}
   - 还没确认的建议待办{{if $.Day.ActionsLeft}}（另有 {{$.Day.ActionsLeft}} 条没列）{{end}}：{{range .}}
-    - {{if .Who}}{{.Who}}：{{end}}{{.What}}{{end}}{{end}}{{end}}{{with .Setup}}
+    - {{if .Who}}{{.Who}}：{{end}}{{.What}}{{end}}{{end}}{{end}}{{with .Captures}}
+- 随手记（Persona 算好的；带敏感类别的只给条数，不要猜它的内容、标题或归到了哪里{{if $.Card}}；飞书卡片里已经原样列出，你不用再列{{end}}）：{{range .}}
+  - {{.}}{{end}}{{end}}{{with .Setup}}
 - 建议的设置（Persona 按过去 7 天的记录算出来的：哪个还没开的机制本可以让用户少被问几次、或让对话少跑几轮后台任务，后面是代价和在哪里开；也可能有一行说后台督办用的模型可以换低一档，那一行按过去 30 天算，依据写在那一行里。{{if $.Card}}飞书卡片里已经原样列出，你不用再列。{{else}}请在回答的最后把这几行原样列出来，数字和措辞都不要改。{{end}}开不开、换不换由用户自己决定：你不要替用户打开或改动其中任何一项，也不要为此调用设置工具）：{{range .}}
   - {{.}}{{end}}{{end}}

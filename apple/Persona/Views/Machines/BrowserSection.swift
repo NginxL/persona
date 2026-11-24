@@ -112,8 +112,8 @@ struct BrowserSection: View {
             .accessibilityIdentifier("browser-status")
             stepList(steps)
             HStack(spacing: Theme.Space.s) {
-                action(String(localized: "Open ego lite"), "open", prominent: !b.screenSharing, identifier: "browser-open")
-                if b.screenSharing { look(prominent: true) }
+                action(String(localized: "Open ego lite"), "open", prominent: !vnc(b), identifier: "browser-open")
+                if vnc(b) { look(prominent: true) }
                 recheckButton
             }
         }
@@ -175,10 +175,13 @@ struct BrowserSection: View {
         .accessibilityIdentifier("browser-recheck")
     }
 
+    /// VNC can be offered: the screen-share module is active (`LiveScreen`) and the Mac's Screen Sharing answers.
+    private func vnc(_ b: MachineBrowser) -> Bool { b.screenSharing && model.liveScreen != nil }
+
     /// VNC: the Mac's live screen, where ego's setup is done from the phone.
     private func look(prominent: Bool) -> some View {
         Button {
-            model.openVNC(ref)
+            model.liveScreen?.openVNC(ref, from: nil)
         } label: {
             Label("VNC", systemImage: Theme.Icon.screen).font(Theme.Font.labelStrong).lineLimit(1)
         }
@@ -226,13 +229,7 @@ struct BrowserSection: View {
 /// ego lite's first-run setup and what is left once it is ready, as steps (checked on 0.6.2, 2026-11-04).
 nonisolated enum BrowserGuide {
     static func setUpSteps(_ b: MachineBrowser) -> [GrantGuide.Step] {
-        // Build the platform-specific line first: a conditional compilation directive can't sit
-        // between elements of an array literal (it is only valid in statement or result-builder position).
-        #if os(macOS)
-        let open = String(localized: "Tap Open ego lite and it opens on that Mac (with Screen Sharing on, you can use VNC to control it remotely from this Mac)")
-        #else
         let open = String(localized: "Tap Open ego lite and it opens on that Mac (with Screen Sharing on, you can use VNC to work on it from your phone)")
-        #endif
         return [
             GrantGuide.Step(id: "open", done: false, text: open),
             GrantGuide.Step(id: "import", done: false, text: String(localized: "In the first-run setup, choose to import data from Chrome (or another browser): your site sign-ins come along. macOS asks for the keychain password several times; enter that Mac's login password each time. You can skip importing")),

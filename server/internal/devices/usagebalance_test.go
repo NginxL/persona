@@ -175,3 +175,366 @@ func TestUsageWindowsRouteIncludesBalanceAccounts(t *testing.T) {
 		t.Errorf("a balance account has no windows: %s", body)
 	}
 }
+
+// A key replaced after a good read does not lend its amount to the next credential: a failed read after the change
+// shows no amount rather than another account's last known balance (#11825).
+func TestBalancePollerDropsTheAmountWhenTheCredentialChanges(t *testing.T) {
+	ctx := context.Background()
+	now := time.Now().Truncate(time.Second)
+	step := 0
+	var b usageBalances
+	b.init(func(context.Context) ([]proto.UsageAccount, bool) {
+		switch step {
+		case 0:
+			a := balance("DeepSeek", "12.34", time.Time{})
+			a.BalanceCredential = "old"
+			return []proto.UsageAccount{a}, true
+		default:
+			return []proto.UsageAccount{{Provider: "deepseek", Name: "DeepSeek", Ref: "balance:DeepSeek",
+				Problem: "rejected", BalanceCredential: "new"}}, true
+		}
+	}, nil, nil)
+
+	b.pollDue(ctx, now)
+	if got := b.accounts(now); len(got) != 1 || got[0].Balance == nil || got[0].Balance.Amount != "12.34" {
+		t.Fatalf("first read: %+v", got)
+	}
+
+	step = 1
+	later := now.Add(usageBalancePoll)
+	b.pollDue(ctx, later)
+	got := b.accounts(later)
+	if len(got) != 1 || got[0].Balance != nil || got[0].Problem != "rejected" {
+		t.Fatalf("another credential's amount must not be kept: %+v", got)
+	}
+	if now.Sub(got[0].SampledAt) > usageBalancePoll {
+		t.Fatalf("the failed read must be sampled now: %+v", got[0])
+	}
+}
+
+// A failure on the same credential still keeps its last known amount (#11825).
+func TestBalancePollerKeepsTheAmountForTheSameCredential(t *testing.T) {
+	ctx := context.Background()
+	now := time.Now().Truncate(time.Second)
+	step := 0
+	var b usageBalances
+	b.init(func(context.Context) ([]proto.UsageAccount, bool) {
+		if step == 0 {
+			a := balance("DeepSeek", "12.34", time.Time{})
+			a.BalanceCredential = "same"
+			return []proto.UsageAccount{a}, true
+		}
+		return []proto.UsageAccount{{Provider: "deepseek", Name: "DeepSeek", Ref: "balance:DeepSeek",
+			Problem: "unreachable", BalanceCredential: "same"}}, true
+	}, nil, nil)
+	b.pollDue(ctx, now)
+	step = 1
+	later := now.Add(usageBalancePoll)
+	b.pollDue(ctx, later)
+	got := b.accounts(later)
+	if len(got) != 1 || got[0].Balance == nil || got[0].Balance.Amount != "12.34" || got[0].Problem != "unreachable" {
+		t.Fatalf("same credential keeps the amount: %+v", got)
+	}
+}
+
+// A launcher skipped because the poll's overall context expired keeps its previous state without being marked
+// unreachable or removed, and a never-read skipped launcher is not turned into a bogus failed row (#11825).
+func TestBalancePollerKeepsPreviousStateWhenSampleIsSkipped(t *testing.T) {
+	ctx := context.Background()
+	now := time.Now().Truncate(time.Second)
+	step := 0
+	var b usageBalances
+	b.init(func(context.Context) ([]proto.UsageAccount, bool) {
+		if step == 0 {
+			return []proto.UsageAccount{
+				balance("ds-a", "12.34", time.Time{}),
+				balance("ds-b", "5.00", time.Time{}),
+			}, true
+		}
+		return []proto.UsageAccount{
+			balance("ds-a", "11.00", time.Time{}),
+			{Provider: "deepseek", Name: "ds-b", Ref: "balance:ds-b", BalanceSkipped: true},
+			{Provider: "deepseek", Name: "ds-c", Ref: "balance:ds-c", BalanceSkipped: true},
+		}, true
+	}, nil, nil)
+
+	b.pollDue(ctx, now)
+	first := b.accounts(now)
+	if len(first) != 2 || first[1].Balance == nil || first[1].Balance.Amount != "5.00" {
+		t.Fatalf("first read: %+v", first)
+	}
+	bSampled := first[1].SampledAt
+
+	step = 1
+	later := now.Add(usageBalancePoll)
+	b.pollDue(ctx, later)
+	got := b.accounts(later)
+	if len(got) != 2 {
+		t.Fatalf("skipped never-read launcher must not fabricate a row, and existing one must stay: %+v", got)
+	}
+	if got[0].Name != "ds-a" || got[0].Balance == nil || got[0].Balance.Amount != "11.00" || got[0].Problem != "" {
+		t.Fatalf("healthy launcher should still update: %+v", got[0])
+	}
+	if got[1].Name != "ds-b" || got[1].Balance == nil || got[1].Balance.Amount != "5.00" ||
+		got[1].Problem != "" || got[1].Stale || !got[1].SampledAt.Equal(bSampled) {
+		t.Fatalf("skipped launcher must keep its previous state unchanged: %+v", got[1])
+	}
+}
+
+// A temporary open/resolution failure of unchanged sealed material (such as a locked vault behind an op:// reference)
+// keeps the last known amount marked stale with problem "failed" and preserves the prior resolved-key identity, so a
+// subsequent rotation to a different failing key still drops the old amount (#11825).
+func TestBalancePollerRetainsAmountOnTemporaryOpenFailureOfUnchangedSeal(t *testing.T) {
+	ctx := context.Background()
+	now := time.Now().Truncate(time.Second)
+	step := 0
+	var b usageBalances
+	b.init(func(context.Context) ([]proto.UsageAccount, bool) {
+		switch step {
+		case 0:
+			a := balance("DeepSeek", "12.34", time.Time{})
+			a.BalanceCredential = "resolved-old"
+			a.BalanceSealedCredential = "sealed:ref-1"
+			return []proto.UsageAccount{a}, true
+		case 1:
+			// Vault locked / extension temporarily unavailable: same sealed reference, no resolved key.
+			return []proto.UsageAccount{{
+				Provider:                "deepseek",
+				Name:                    "DeepSeek",
+				Ref:                     "balance:DeepSeek",
+				Problem:                 "failed",
+				BalanceSealedCredential: "sealed:ref-1",
+			}}, true
+		default:
+			// Vault unlocked, but the secret behind the same reference was rotated to a different failing key.
+			return []proto.UsageAccount{{
+				Provider:                "deepseek",
+				Name:                    "DeepSeek",
+				Ref:                     "balance:DeepSeek",
+				Problem:                 "rejected",
+				BalanceCredential:       "resolved-new",
+				BalanceSealedCredential: "sealed:ref-1",
+			}}, true
+		}
+	}, nil, nil)
+
+	b.pollDue(ctx, now)
+	first := b.accounts(now)
+	if len(first) != 1 || first[0].Balance == nil || first[0].Balance.Amount != "12.34" || first[0].Stale || first[0].Problem != "" {
+		t.Fatalf("first read: %+v", first)
+	}
+	sampled := first[0].SampledAt
+
+	step = 1
+	later := now.Add(usageBalancePoll)
+	b.pollDue(ctx, later)
+	kept := b.accounts(later)
+	if len(kept) != 1 || kept[0].Balance == nil || kept[0].Balance.Amount != "12.34" || kept[0].Balance.Currency != "CNY" || !kept[0].SampledAt.Equal(sampled) {
+		t.Fatalf("temporary open failure of unchanged sealed ref must keep last amount and time: %+v", kept)
+	}
+	if kept[0].Problem != "failed" || !kept[0].Stale {
+		t.Fatalf("temporary open failure must mark stale with problem failed: %+v", kept)
+	}
+
+	step = 2
+	afterRotate := later.Add(usageBalancePoll)
+	b.pollDue(ctx, afterRotate)
+	dropped := b.accounts(afterRotate)
+	if len(dropped) != 1 || dropped[0].Balance != nil || dropped[0].Problem != "rejected" || !dropped[0].Stale {
+		t.Fatalf("rotating resolved key after temporary open failure must drop old amount: %+v", dropped)
+	}
+	if !dropped[0].SampledAt.Equal(afterRotate.UTC()) {
+		t.Fatalf("dropped read must be sampled now: got %v want %v", dropped[0].SampledAt, afterRotate.UTC())
+	}
+}
+
+// Replacing the sealed reference itself with one that fails to open clears the old amount instead of keeping the
+// previous credential's balance (#11825).
+func TestBalancePollerDropsAmountWhenSealedReferenceIsReplacedAndFailsToOpen(t *testing.T) {
+	ctx := context.Background()
+	now := time.Now().Truncate(time.Second)
+	step := 0
+	var b usageBalances
+	b.init(func(context.Context) ([]proto.UsageAccount, bool) {
+		if step == 0 {
+			a := balance("DeepSeek", "12.34", time.Time{})
+			a.BalanceCredential = "resolved-1"
+			a.BalanceSealedCredential = "sealed:ref-1"
+			return []proto.UsageAccount{a}, true
+		}
+		return []proto.UsageAccount{{
+			Provider:                "deepseek",
+			Name:                    "DeepSeek",
+			Ref:                     "balance:DeepSeek",
+			Problem:                 "failed",
+			BalanceSealedCredential: "sealed:ref-2",
+		}}, true
+	}, nil, nil)
+
+	b.pollDue(ctx, now)
+	if first := b.accounts(now); len(first) != 1 || first[0].Balance == nil || first[0].Balance.Amount != "12.34" {
+		t.Fatalf("first read: %+v", first)
+	}
+
+	step = 1
+	later := now.Add(usageBalancePoll)
+	b.pollDue(ctx, later)
+	got := b.accounts(later)
+	if len(got) != 1 || got[0].Balance != nil || got[0].Problem != "failed" || !got[0].Stale {
+		t.Fatalf("replaced unopenable seal must drop previous amount: %+v", got)
+	}
+	if !got[0].SampledAt.Equal(later.UTC()) {
+		t.Fatalf("failed read must be sampled now: got %v want %v", got[0].SampledAt, later.UTC())
+	}
+}
+
+// Re-sealing the same resolved key (e.g. saving the launcher again) keeps the last amount across a network failure and
+// updates the tracked sealed digest so a later temporary open failure on the new seal still retains the amount (#11825).
+func TestBalancePollerKeepsAmountWhenSameKeyIsResealedAndLaterFailsToOpen(t *testing.T) {
+	ctx := context.Background()
+	now := time.Now().Truncate(time.Second)
+	step := 0
+	var b usageBalances
+	b.init(func(context.Context) ([]proto.UsageAccount, bool) {
+		switch step {
+		case 0:
+			a := balance("DeepSeek", "12.34", time.Time{})
+			a.BalanceCredential = "resolved-same"
+			a.BalanceSealedCredential = "sealed:v1"
+			return []proto.UsageAccount{a}, true
+		case 1:
+			return []proto.UsageAccount{{
+				Provider:                "deepseek",
+				Name:                    "DeepSeek",
+				Ref:                     "balance:DeepSeek",
+				Problem:                 "unreachable",
+				BalanceCredential:       "resolved-same",
+				BalanceSealedCredential: "sealed:v2",
+			}}, true
+		default:
+			return []proto.UsageAccount{{
+				Provider:                "deepseek",
+				Name:                    "DeepSeek",
+				Ref:                     "balance:DeepSeek",
+				Problem:                 "failed",
+				BalanceSealedCredential: "sealed:v2",
+			}}, true
+		}
+	}, nil, nil)
+
+	b.pollDue(ctx, now)
+	sampled := b.accounts(now)[0].SampledAt
+
+	step = 1
+	t1 := now.Add(usageBalancePoll)
+	b.pollDue(ctx, t1)
+	if got := b.accounts(t1); len(got) != 1 || got[0].Balance == nil || got[0].Balance.Amount != "12.34" ||
+		got[0].Problem != "unreachable" || !got[0].Stale || !got[0].SampledAt.Equal(sampled) {
+		t.Fatalf("same resolved key under new seal must keep amount: %+v", got)
+	}
+
+	step = 2
+	t2 := t1.Add(usageBalancePoll)
+	b.pollDue(ctx, t2)
+	if got := b.accounts(t2); len(got) != 1 || got[0].Balance == nil || got[0].Balance.Amount != "12.34" ||
+		got[0].Problem != "failed" || !got[0].Stale || !got[0].SampledAt.Equal(sampled) {
+		t.Fatalf("temporary open failure on updated seal must keep amount: %+v", got)
+	}
+}
+
+// A key rotation followed by a BalanceSkipped poll must clear the previous credential's balance instead of leaving it
+// visible across deadline exhaustion, while unchanged skipped launchers keep their balance and never-read skipped
+// launchers still create no row (#11825).
+func TestBalancePollerClearsAmountWhenCredentialRotatesBeforeSkippedRead(t *testing.T) {
+	ctx := context.Background()
+	now := time.Now().Truncate(time.Second)
+	step := 0
+	var b usageBalances
+	b.init(func(context.Context) ([]proto.UsageAccount, bool) {
+		switch step {
+		case 0:
+			rotated := balance("ds-rotated", "12.34", time.Time{})
+			rotated.BalanceCredential = "resolved-old"
+			rotated.BalanceSealedCredential = "sealed:ref-1"
+			same := balance("ds-same", "5.00", time.Time{})
+			same.BalanceCredential = "resolved-same"
+			same.BalanceSealedCredential = "sealed:ref-same"
+			return []proto.UsageAccount{rotated, same}, true
+		case 1, 2:
+			// Overall deadline expires after LauncherBalances resolved the rotated key.
+			return []proto.UsageAccount{
+				{
+					Provider:                "deepseek",
+					Name:                    "ds-rotated",
+					Ref:                     "balance:ds-rotated",
+					BalanceCredential:       "resolved-new",
+					BalanceSealedCredential: "sealed:ref-1",
+					BalanceSkipped:          true,
+				},
+				{
+					Provider:                "deepseek",
+					Name:                    "ds-same",
+					Ref:                     "balance:ds-same",
+					BalanceCredential:       "resolved-same",
+					BalanceSealedCredential: "sealed:ref-same",
+					BalanceSkipped:          true,
+				},
+				{
+					Provider:                "deepseek",
+					Name:                    "ds-never-read",
+					Ref:                     "balance:ds-never-read",
+					BalanceCredential:       "resolved-brand-new",
+					BalanceSealedCredential: "sealed:ref-new",
+					BalanceSkipped:          true,
+				},
+			}, true
+		default:
+			rotated := balance("ds-rotated", "50.00", time.Time{})
+			rotated.BalanceCredential = "resolved-new"
+			rotated.BalanceSealedCredential = "sealed:ref-1"
+			same := balance("ds-same", "5.00", time.Time{})
+			same.BalanceCredential = "resolved-same"
+			same.BalanceSealedCredential = "sealed:ref-same"
+			return []proto.UsageAccount{rotated, same}, true
+		}
+	}, nil, nil)
+
+	b.pollDue(ctx, now)
+	first := b.accounts(now)
+	if len(first) != 2 || first[0].Name != "ds-rotated" || first[0].Balance.Amount != "12.34" ||
+		first[1].Name != "ds-same" || first[1].Balance.Amount != "5.00" {
+		t.Fatalf("first read: %+v", first)
+	}
+	sameSampled := first[1].SampledAt
+
+	// First skipped poll after rotation drops ds-rotated's old balance, keeps ds-same, and ignores ds-never-read.
+	step = 1
+	t1 := now.Add(usageBalancePoll)
+	b.pollDue(ctx, t1)
+	got1 := b.accounts(t1)
+	if len(got1) != 1 || got1[0].Name != "ds-same" || got1[0].Balance == nil || got1[0].Balance.Amount != "5.00" ||
+		got1[0].Problem != "" || got1[0].Stale || !got1[0].SampledAt.Equal(sameSampled) {
+		t.Fatalf("rotated skipped launcher must clear old amount and never-read skipped must create no row: %+v", got1)
+	}
+	if _, ok := b.state["balance:ds-never-read"]; ok {
+		t.Fatalf("never-read skipped launcher must not create state entry")
+	}
+
+	// Repeated skipped poll continues hiding the old amount without fabricating a failed row.
+	step = 2
+	t2 := t1.Add(usageBalancePoll)
+	b.pollDue(ctx, t2)
+	if got2 := b.accounts(t2); len(got2) != 1 || got2[0].Name != "ds-same" {
+		t.Fatalf("repeated skipped poll must not resurrect old amount: %+v", got2)
+	}
+
+	// Once a non-skipped poll succeeds with the rotated key, the new balance appears normally.
+	step = 3
+	t3 := t2.Add(usageBalancePoll)
+	b.pollDue(ctx, t3)
+	got3 := b.accounts(t3)
+	if len(got3) != 2 || got3[0].Name != "ds-rotated" || got3[0].Balance == nil || got3[0].Balance.Amount != "50.00" ||
+		got3[0].Problem != "" || got3[0].Stale {
+		t.Fatalf("subsequent successful read after rotation: %+v", got3)
+	}
+}

@@ -22,9 +22,36 @@ type codexProcess struct {
 	// herdrSession is the herdr session pane is in ("" the default server; herdr.EnvSession): the registry writes the
 	// pane as the herdr host does (node herdrPaneIn).
 	herdrSession string
+	tmuxPane     string // TMUX_PANE (e.g. "%11")
+	tmuxSocket   string // tmux server socket extracted from TMUX ("" for the default server)
+	herdrCore    string // HC_TERMINAL_ID
+	ternPane     string // TERN_PANE
+	orcaHandle   string // ORCA_TERMINAL_HANDLE
+	orcaPane     string // ORCA_PANE_KEY / ORCA_AGENT_PANE
 }
 
-var codexHomePS = lazyre.New(`(?:^|\s)CODEX_HOME=(.*?)(?:\s+[A-Za-z_][A-Za-z_0-9]*=|$)`)
+func (p codexProcess) hasTakeoverTerminal() bool {
+	return p.pane != "" || p.tmuxPane != "" || p.herdrCore != "" || p.ternPane != "" || p.orcaHandle != "" || p.orcaPane != ""
+}
+
+const (
+	tmuxPaneEnv           = "TMUX_PANE"
+	orcaTerminalHandleEnv = "ORCA_TERMINAL_HANDLE"
+)
+
+var (
+	codexHomePS          = lazyre.New(`(?:^|\s)CODEX_HOME=(.*?)(?:\s+[A-Za-z_][A-Za-z_0-9]*=|$)`)
+	codexHerdrPaneRe     = envVarRe(herdrPaneEnv)
+	codexHerdrSessionRe  = envVarRe(herdrSessionEnv)
+	codexHerdrSocketRe   = envVarRe(herdrSocketEnv)
+	codexTmuxPaneRe      = envVarRe(tmuxPaneEnv)
+	codexTmuxRe          = envVarRe(tmuxEnv)
+	codexHerdrCorePaneRe = envVarRe(herdrCorePaneEnv)
+	codexTernPaneRe      = envVarRe(ternPaneEnv)
+	codexOrcaHandleRe    = envVarRe(orcaTerminalHandleEnv)
+	codexOrcaPaneRe      = envVarRe(orcaPaneEnv)
+	codexOrcaLegacyRe    = envVarRe(orcaLegacyPaneEnv)
+)
 
 func codexProcessArgs(pid int, args []string, env string) (codexProcess, bool) {
 	at := -1
@@ -47,29 +74,67 @@ func codexProcessArgs(pid int, args []string, env string) (codexProcess, bool) {
 	herdrEnv := map[string]string{}
 	if strings.ContainsRune(env, '\x00') {
 		for _, v := range strings.Split(env, "\x00") {
-			if strings.HasPrefix(v, "HERDR_PANE_ID=") {
-				p.pane = strings.TrimPrefix(v, "HERDR_PANE_ID=")
-			}
-			for _, name := range []string{herdrSessionEnv, herdrSocketEnv} {
-				if value, ok := strings.CutPrefix(v, name+"="); ok {
-					herdrEnv[name] = value
+			switch {
+			case strings.HasPrefix(v, herdrPaneEnv+"="):
+				p.pane = strings.TrimPrefix(v, herdrPaneEnv+"=")
+			case strings.HasPrefix(v, "CODEX_HOME="):
+				p.home = strings.TrimPrefix(v, "CODEX_HOME=")
+			case strings.HasPrefix(v, tmuxPaneEnv+"="):
+				p.tmuxPane = strings.TrimPrefix(v, tmuxPaneEnv+"=")
+			case strings.HasPrefix(v, tmuxEnv+"="):
+				p.tmuxSocket = tmuxSocket(strings.TrimPrefix(v, tmuxEnv+"="))
+			case strings.HasPrefix(v, herdrCorePaneEnv+"="):
+				p.herdrCore = strings.TrimPrefix(v, herdrCorePaneEnv+"=")
+			case strings.HasPrefix(v, ternPaneEnv+"="):
+				p.ternPane = strings.TrimPrefix(v, ternPaneEnv+"=")
+			case strings.HasPrefix(v, orcaTerminalHandleEnv+"="):
+				p.orcaHandle = strings.TrimPrefix(v, orcaTerminalHandleEnv+"=")
+			case strings.HasPrefix(v, orcaPaneEnv+"="):
+				p.orcaPane = strings.TrimPrefix(v, orcaPaneEnv+"=")
+			case strings.HasPrefix(v, orcaLegacyPaneEnv+"="):
+				if p.orcaPane == "" {
+					p.orcaPane = strings.TrimPrefix(v, orcaLegacyPaneEnv+"=")
+				}
+			default:
+				for _, name := range []string{herdrSessionEnv, herdrSocketEnv} {
+					if value, ok := strings.CutPrefix(v, name+"="); ok {
+						herdrEnv[name] = value
+					}
 				}
 			}
-			if strings.HasPrefix(v, "CODEX_HOME=") {
-				p.home = strings.TrimPrefix(v, "CODEX_HOME=")
-			}
 		}
-	} else if m := codexHomePS.FindStringSubmatch(env); m != nil {
-		p.home = m[1]
-	}
-	if p.pane == "" {
-		if m := envVarRe("HERDR_PANE_ID").FindStringSubmatch(env); m != nil {
+	} else if env != "" {
+		if m := codexHomePS.FindStringSubmatch(env); m != nil {
+			p.home = m[1]
+		}
+		if m := codexHerdrPaneRe.FindStringSubmatch(env); m != nil {
 			p.pane = m[1]
 		}
-		for _, name := range []string{herdrSessionEnv, herdrSocketEnv} {
-			if m := envVarRe(name).FindStringSubmatch(env); m != nil {
-				herdrEnv[name] = m[1]
-			}
+		if m := codexHerdrSessionRe.FindStringSubmatch(env); m != nil {
+			herdrEnv[herdrSessionEnv] = m[1]
+		}
+		if m := codexHerdrSocketRe.FindStringSubmatch(env); m != nil {
+			herdrEnv[herdrSocketEnv] = m[1]
+		}
+		if m := codexTmuxPaneRe.FindStringSubmatch(env); m != nil {
+			p.tmuxPane = m[1]
+		}
+		if m := codexTmuxRe.FindStringSubmatch(env); m != nil {
+			p.tmuxSocket = tmuxSocket(m[1])
+		}
+		if m := codexHerdrCorePaneRe.FindStringSubmatch(env); m != nil {
+			p.herdrCore = m[1]
+		}
+		if m := codexTernPaneRe.FindStringSubmatch(env); m != nil {
+			p.ternPane = m[1]
+		}
+		if m := codexOrcaHandleRe.FindStringSubmatch(env); m != nil {
+			p.orcaHandle = m[1]
+		}
+		if m := codexOrcaPaneRe.FindStringSubmatch(env); m != nil {
+			p.orcaPane = m[1]
+		} else if m := codexOrcaLegacyRe.FindStringSubmatch(env); m != nil {
+			p.orcaPane = m[1]
 		}
 	}
 	if p.pane != "" {

@@ -11,6 +11,7 @@ import kotlinx.coroutines.test.*
 import kotlinx.serialization.json.*
 import org.junit.Assert.*
 import org.junit.Test
+import persona.core.inbox.*
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class LarkConversationTest {

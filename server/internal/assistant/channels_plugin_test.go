@@ -620,7 +620,12 @@ func TestChannelReceiveAcknowledgesBeforeBusyMainTurnAndFolds(t *testing.T) {
 	close(release)
 	waitUntil(t, func() bool {
 		runs := s.channelRuns("examplechat")
-		return len(runs) == 1 && len(runs[0].MsgIDs) == 2
+		if len(runs) != 1 || len(runs[0].MsgIDs) != 2 {
+			return false
+		}
+		// Only a watched run is answered (checkChannelRun): the folded run's watcher registers it on its own goroutine.
+		_, watched := s.channelRunByID(runs[0].ID)
+		return watched != nil
 	})
 	runs := s.channelRuns("examplechat")
 	if runs[0].ReplyTo != "m2" || len(runs[0].Folded) != 1 || runs[0].Folded[0].ReplyTo != "m1" || len(*sent) != 0 {

@@ -1,6 +1,7 @@
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import persona.buildlogic.configureFilteredTestRuns
 import persona.buildlogic.configureRepositoryTests
+import persona.buildlogic.configureReturnValueChecks
 
 plugins {
     id("org.jetbrains.kotlin.jvm")
@@ -25,6 +26,8 @@ dependencies {
 configureRepositoryTests()
 // A --tests run executes instead of taking a result from the build cache (persona/buildlogic/TestRuns.kt).
 configureFilteredTestRuns()
+// A dropped must-use result is a compile error (persona/buildlogic/ReturnValues.kt).
+configureReturnValueChecks()
 tasks.withType<Test>().configureEach {
     useJUnit()
     testLogging {

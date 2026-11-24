@@ -147,6 +147,12 @@ var modelPurposes = []ModelPurpose{
 	{ID: "lark.agent", Group: "group_agents", Kind: "launcher", Parent: "agent.new"},
 	{ID: "inbox.judge", Group: "group_triage", Kind: "api", Parent: "inbox.triage"},
 	{ID: "agent.triage", Group: "group_triage", Kind: "api", Parent: "inbox.triage"},
+	// Tagging what a conversation says with information categories (info_tag.go, #13246): short calls with no tools,
+	// always on Sorting's model.
+	{ID: purposeInfoTag, Group: "group_triage", Kind: "api", Parent: "inbox.triage"},
+	// Sorting a quick capture into a track and tagging it, in one call (capture_sort.go, #13502): Sorting's model
+	// until it is given its own.
+	{ID: purposeCaptureSort, Group: "group_triage", Kind: "api", Parent: "inbox.triage"},
 	{ID: "inbox.draft", Group: "group_processing", Kind: "api", Parent: "kb"},
 	{ID: "kb.compress", Group: "group_processing", Kind: "api", Parent: "kb"},
 	{ID: "kb.project", Group: "group_processing", Kind: "api", Parent: "kb"},

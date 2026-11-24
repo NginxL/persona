@@ -173,7 +173,11 @@ internal fun SubagentCard(call: ToolCall, live: Boolean, assistant: Boolean, mod
             JIcon(PersonaIcons.disclosure, null, Modifier.padding(top = Tokens.Space.xs).rotate(if (open) 90f else 0f),
                 size = Tokens.Space.m, tint = palette.ink3)
         }
-        if (open) Details(call, agent, status, Modifier.unfolding(revealing))
+        if (open) {
+            val targetKey = call.use.item.toolUseId?.let { links?.keys?.get(it) }
+            val openFull = links?.open?.let { opener -> targetKey?.let { key -> { opener(key) } } }
+            Details(call, agent, status, openFull, Modifier.unfolding(revealing))
+        }
     }
 }
 
@@ -218,7 +222,7 @@ private fun MetaLine(meta: SubagentCardText.Meta, runningFor: String?) {
 
 /** The opened card: what it was asked, its latest result, its last tool and its output, on a rail of their own. */
 @Composable
-private fun Details(call: ToolCall, agent: Subagent?, status: SubagentStatus, modifier: Modifier = Modifier) {
+private fun Details(call: ToolCall, agent: Subagent?, status: SubagentStatus, onViewFull: (() -> Unit)? = null, modifier: Modifier = Modifier) {
     val palette = PersonaTheme.palette
     val type = PersonaTheme.type
     Row(modifier.fillMaxWidth().padding(top = Tokens.Space.s).height(IntrinsicSize.Min).semantics { testTag = "chat.subagent-details" }) {
@@ -230,6 +234,9 @@ private fun Details(call: ToolCall, agent: Subagent?, status: SubagentStatus, mo
                 Text(stringResource(R.string.chat_subagent_last_tool, it), style = type.micro, color = palette.ink3)
             }
             Subagents.outputFile(call)?.let { Text(stringResource(R.string.chat_subagent_output_file, it), style = type.micro, color = palette.ink3) }
+            if (onViewFull != null) {
+                JTextButton(stringResource(R.string.chat_subagent_view_full), onViewFull)
+            }
         }
     }
 }

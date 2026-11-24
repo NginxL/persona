@@ -13,7 +13,7 @@ import { useEffect, useMemo, useState } from "react";
 import { t } from "../../i18n";
 import { errorText, fullItem, imageURL } from "../../lib/api";
 import { imagePayload, MAX_IMAGE } from "../../lib/attachments";
-import { MAX_IMAGES } from "../../lib/composer-commands";
+import { imageLimitsFor } from "../../lib/image-limits";
 import { sendDraft, type DraftImage } from "../../lib/drafts";
 import type { ForwardBatch, ForwardDraft } from "../../lib/forward";
 import { forwardDraftOf } from "../../lib/forward-draft";
@@ -72,7 +72,8 @@ async function readImage(mid: string, sid: string, item: Item): Promise<DraftIma
 }
 
 /** The forwards with their whole text and their pictures, as they go: each cut at its share of the budget, the pictures
- *  of all of them up to a message's MAX_IMAGES; `lost`: pictures that could not be read. */
+ *  of all of them up to the pictures a message holds (lib/image-limits.ts; the box sends any it has no room for as files);
+ *  `lost`: pictures that could not be read. */
 async function complete(drafts: ForwardDraft[]): Promise<{ refs: ContextRef[]; images: DraftImage[]; lost: number }> {
   const limit = forwardLimit(drafts.length);
   const raws = await Promise.all(drafts.map(async (d) => (d.cut ? ((await fullItem(d.source.mid, d.source.sid, d.cut)).text ?? d.raw) : d.raw)));
@@ -81,7 +82,7 @@ async function complete(drafts: ForwardDraft[]): Promise<{ refs: ContextRef[]; i
       const { mid, sid } = d.source;
       return [...(d.images ?? []).map((i) => () => readImage(mid, sid, i)), ...(d.photos ?? []).map((p) => () => readPhoto(mid, p, d.cwd))];
     })
-    .slice(0, MAX_IMAGES);
+    .slice(0, imageLimitsFor().per_message);
   const read = await Promise.all(wanted.map((f) => f()));
   const images = read.filter((x): x is DraftImage => Boolean(x));
   return { refs: drafts.map((d, i) => forwardRef(raws[i], d.source, limit)), images, lost: read.length - images.length };

@@ -77,4 +77,51 @@ class SummaryRowsTest {
         val complete = Session(machineId = "mac", sessionId = "c1", assistant = true)
         assertTrue(complete.keepingDetails(detailed).undelivered.isNullOrEmpty())
     }
+
+    @Test fun codedStartDetailsNeverCrossAChangedRawError() {
+        val oldArgs = mapOf("where" to "terminal", "launcher" to "work")
+        val old = full.copy(startError = "The old launcher is missing", startErrorCode = "launcher_missing", startErrorArgs = oldArgs)
+        val unchanged = Session(machineId = "mac", sessionId = "c1", assistant = true, waiting = false,
+            startError = old.startError).keepingDetails(old)
+        assertEquals("launcher_missing", unchanged.startErrorCode)
+        assertEquals(oldArgs, unchanged.startErrorArgs)
+
+        val changed = Session(machineId = "mac", sessionId = "c1", assistant = true, waiting = false,
+            startError = "The checkout path is taken").keepingDetails(old)
+        assertNull(changed.startErrorCode)
+        assertNull(changed.startErrorArgs)
+
+        val newCode = Session(machineId = "mac", sessionId = "c1", assistant = true, waiting = false,
+            startError = "The checkout path is taken", startErrorCode = "worktree_path_taken").keepingDetails(old)
+        assertEquals("worktree_path_taken", newCode.startErrorCode)
+        assertNull("a new code never inherits the old code's arguments", newCode.startErrorArgs)
+
+        val newArgs = mapOf("path" to "/worktrees/task")
+        val newPair = Session(machineId = "mac", sessionId = "c1", assistant = true, waiting = false,
+            startError = "The checkout path is taken", startErrorCode = "worktree_path_taken", startErrorArgs = newArgs)
+            .keepingDetails(old)
+        assertEquals("worktree_path_taken", newPair.startErrorCode)
+        assertEquals(newArgs, newPair.startErrorArgs)
+    }
+
+    @Test fun clearingAStartFailureDoesNotReviveItsCodeOnLaterSummaryRows() {
+        val old = full.copy(startError = "The launcher is missing", startErrorCode = "launcher_missing",
+            startErrorArgs = mapOf("where" to "terminal", "launcher" to "work"))
+        val cleared = Session(machineId = "mac", sessionId = "c1", assistant = true, waiting = false)
+            .keepingDetails(old)
+        assertNull(cleared.startError)
+        assertNull(cleared.startErrorCode)
+        assertNull(cleared.startErrorArgs)
+
+        val laterSummary = Session(machineId = "mac", sessionId = "c1", assistant = true, waiting = false)
+            .keepingDetails(cleared)
+        assertNull(laterSummary.startErrorCode)
+        assertNull(laterSummary.startErrorArgs)
+
+        val completeClear = Session(machineId = "mac", sessionId = "c1", assistant = true).keepingDetails(old)
+        val afterCompleteClear = Session(machineId = "mac", sessionId = "c1", assistant = true, waiting = false)
+            .keepingDetails(completeClear)
+        assertNull(afterCompleteClear.startErrorCode)
+        assertNull(afterCompleteClear.startErrorArgs)
+    }
 }

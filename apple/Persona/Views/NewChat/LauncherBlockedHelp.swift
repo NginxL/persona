@@ -108,9 +108,6 @@ struct LauncherBlockedHelp: View {
             }
         }
         .sheet(isPresented: $addingProvider) { ProviderWizard(start: .pick) }
-        #if os(macOS)
-        .macSheet()
-        #endif
         .accessibilityIdentifier("launcherHelp")
     }
 

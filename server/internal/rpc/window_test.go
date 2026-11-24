@@ -412,3 +412,54 @@ func TestCreditWindowSpanStartsWhenTheBytesCouldArrive(t *testing.T) {
 		t.Fatalf("window %d after a pause, on a link that carries 30 KB/s with a 400 ms round trip", w.cwnd)
 	}
 }
+
+// TestCreditWindowShrinksWhenEffectiveRateDrops: a compressible burst over permessage-deflate (or bursty reads) raises
+// the 10 s peak rate and window; when less-compressible data then arrives at a lower effective rate and forward queueing
+// exceeds 4*queueTarget, the window and frame size shrink promptly instead of staying pinned at the 10 s peak (#13761).
+func TestCreditWindowShrinksWhenEffectiveRateDrops(t *testing.T) {
+	w := newCreditWindow()
+	now := time.Unix(1_000_000, 0)
+	seq := uint64(0)
+
+	// Warm up at 300 KB/s uncompressed with a 300 ms RTT and a 600 ms ack span (similar to compressible binary headers).
+	const fastRate = 300_000
+	w.cwnd = 256 << 10
+	seq++
+	w.wrote(seq, 28<<10, now, true)
+	w.acked(seq, clockMS(now.Add(150*time.Millisecond)), now.Add(300*time.Millisecond))
+	for range 3 {
+		now = now.Add(100 * time.Millisecond)
+		seq++
+		w.wrote(seq, 30_000, now, true)
+		recv := now.Add(150 * time.Millisecond)
+		w.acked(seq, clockMS(recv), now.Add(300*time.Millisecond))
+	}
+	if w.rate < fastRate*8/10 {
+		t.Fatalf("warm-up rate %.0f B/s, want near %d B/s", w.rate, fastRate)
+	}
+	// Put a large window in flight as observed in #13761 (~346 KiB in flight, ~257 KiB window).
+	w.cwnd = 257 << 10
+	sentAt := now
+	for range 12 {
+		seq++
+		w.wrote(seq, 28<<10, sentAt, true)
+	}
+
+	// Effective rate drops to 100 KB/s while forward queueing climbs past 4*queueTarget (e.g. 1.5 s queued).
+	recv := sentAt.Add(1650 * time.Millisecond)
+	ackAt := recv.Add(150 * time.Millisecond)
+	w.acked(seq-10, clockMS(recv), ackAt) // 56 KiB read over ~560 ms -> ~100 KB/s, queued = 1.5 s
+	recv2 := recv.Add(560 * time.Millisecond)
+	ackAt2 := recv2.Add(150 * time.Millisecond)
+	w.acked(seq-8, clockMS(recv2), ackAt2) // 56 KiB in 560 ms = 100 KB/s, queued = 2.06 s
+
+	if w.cwnd > 160<<10 {
+		t.Fatalf("window %d stayed pinned near stale peak after rate drop and severe queueing (rate=%.0f)", w.cwnd, w.rate)
+	}
+	if w.rate > 150_000 {
+		t.Fatalf("stale peak rate %.0f B/s was not lowered under severe forward queueing", w.rate)
+	}
+	if got := w.frameSize(); got > 16<<10 {
+		t.Fatalf("frameSize %d stayed inflated after rate drop (rate=%.0f)", got, w.rate)
+	}
+}

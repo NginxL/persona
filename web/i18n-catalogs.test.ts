@@ -17,6 +17,15 @@ const client = import.meta.glob<Catalog>("./src/i18n/locales/*/_meta.json", { qu
 const admin = import.meta.glob<Catalog>("./src/i18n/locales/*/_meta.json", { query: "?catalog=admin" });
 const startup = import.meta.glob<Catalog>("./src/i18n/locales/*/_meta.json", { query: "?catalog=client-startup" });
 const rest = import.meta.glob<Catalog>("./src/i18n/locales/*/_meta.json", { query: "?catalog=client-rest" });
+// the feature modules' namespaces (src/modules, docs/web/web.md "Modules"): their own catalogs, in neither part
+const modules = import.meta.glob<Catalog>("./src/i18n/locales/*/_meta.json", { query: "?catalog=modules" });
+// each module's own catalog, by its id (a module added to src/modules/index.ts gets a line here: the test below fails
+// until it does)
+const moduleCatalogs: Record<string, Record<string, () => Promise<Catalog>>> = {
+  health: import.meta.glob<Catalog>("./src/i18n/locales/*/_meta.json", { query: "?catalog=module-health" }),
+  voice: import.meta.glob<Catalog>("./src/i18n/locales/*/_meta.json", { query: "?catalog=module-voice" }),
+  recording: import.meta.glob<Catalog>("./src/i18n/locales/*/_meta.json", { query: "?catalog=module-recording" }),
+};
 /** flatten() over a language's namespace files of one kind, keyed like the import form's entries. The files are read
  *  from disk, not through an eager import.meta.glob: that made ~900 JSON modules, the slowest import of the suite. */
 function expected(lang: string, kind: "client" | "admin"): Record<string, string> {
@@ -63,15 +72,34 @@ describe("i18n catalogs under Vitest", () => {
       expect(source).not.toContain("chat-chatsearch.");
       for (const name of primary) expect(source).toContain(`chat-chatview.search_${name}`);
     });
-    it(`${lang}: client-startup holds what startup-namespaces.json lists and client-rest the rest, together the client catalog`, async () => {
-      const [whole, first, second] = await Promise.all([client[key](), startup[key](), rest[key]()]);
+    it(`${lang}: client-startup holds what startup-namespaces.json lists, client-rest the rest but the modules', together the client catalog`, async () => {
+      const [whole, first, second, third] = await Promise.all([client[key](), startup[key](), rest[key](), modules[key]()]);
       const listed = startupMatcher(startupNamespaces);
       expect(Object.keys(first.default).every(listed)).toBe(true);
       expect(Object.keys(second.default).some(listed)).toBe(false);
-      expect({ ...first.default, ...second.default }).toEqual(whole.default);
+      const ofModule = (k: string) => Object.keys(moduleCatalogs).some((id) => k.startsWith(`${id}.`) || k.startsWith(`${id}-`));
+      expect(Object.keys(third.default).length).toBeGreaterThan(0);
+      expect(Object.keys(third.default).every(ofModule)).toBe(true);
+      expect(Object.keys({ ...first.default, ...second.default }).some(ofModule)).toBe(false);
+      expect({ ...first.default, ...second.default, ...third.default }).toEqual(whole.default);
       const fallbacks: Catalog["fallbacks"] = {};
-      for (const part of [first, second]) for (const [l, entries] of Object.entries(part.fallbacks)) fallbacks[l] = { ...fallbacks[l], ...entries };
+      for (const part of [first, second, third]) for (const [l, entries] of Object.entries(part.fallbacks)) fallbacks[l] = { ...fallbacks[l], ...entries };
       expect(fallbacks).toEqual(whole.fallbacks);
+    });
+
+    // The core-only lane (web/core-only.ts, #13932) has an empty module list, while the modules' catalogs stay on disk.
+    it.skipIf(process.env.PERSONA_WEB_MODULES === "none")(`${lang}: each module's catalog holds its namespaces only, and together they are all the modules' strings`, async () => {
+      const { MODULES } = await import("./src/modules");
+      expect(Object.keys(moduleCatalogs).sort()).toEqual(MODULES.map((m) => m.id).sort());
+      const all = await modules[key]();
+      const together: Catalog["default"] = {};
+      for (const [id, catalog] of Object.entries(moduleCatalogs)) {
+        const own = (await catalog[key]()).default;
+        expect(Object.keys(own).length, id).toBeGreaterThan(0);
+        expect(Object.keys(own).every((k) => k.startsWith(`${id}.`) || k.startsWith(`${id}-`)), id).toBe(true);
+        Object.assign(together, own);
+      }
+      expect(together).toEqual(all.default);
     });
   }
 });

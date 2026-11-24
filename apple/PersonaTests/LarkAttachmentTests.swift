@@ -1,5 +1,7 @@
 import Foundation
+import ImageIO
 import Testing
+import UIKit
 @testable import Persona
 
 @MainActor struct LarkAttachmentTests {
@@ -9,6 +11,42 @@ import Testing
         let url = dir.appending(path: name)
         try Data(text.utf8).write(to: url)
         return url
+    }
+
+    private nonisolated final class ThumbnailDecodeLog: @unchecked Sendable {
+        private let lock = NSLock()
+        private var decodes = 0
+        private var mainThreadDecodes = 0
+        var count: Int { lock.withLock { decodes } }
+        var mainThreadCount: Int { lock.withLock { mainThreadDecodes } }
+
+        func decode(_ data: Data, maxPixel: CGFloat) -> UIImage? {
+            lock.withLock {
+                decodes += 1
+                if Thread.isMainThread { mainThreadDecodes += 1 }
+            }
+            return LarkMedia.decode(data, maxPixel: maxPixel)
+        }
+    }
+
+    private func thumbnailAttachment(id: UUID = UUID(), data: Data?) -> LarkAttachment {
+        LarkAttachment(id: id, kind: .image, file: URL.temporaryDirectory.appending(path: id.uuidString),
+                       name: "Photo.jpg", mime: "image/jpeg", size: data?.count ?? 0, thumbnail: data, temporary: false)
+    }
+
+    private func thumbnailJPEG(width: Int, height: Int, orientation: Int? = nil) throws -> Data {
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        let image = UIGraphicsImageRenderer(size: CGSize(width: width, height: height), format: format).image { context in
+            UIColor.systemTeal.setFill()
+            context.fill(CGRect(x: 0, y: 0, width: width, height: height))
+        }
+        let out = NSMutableData()
+        let destination = try #require(CGImageDestinationCreateWithData(out, "public.jpeg" as CFString, 1, nil))
+        let properties = orientation.map { [kCGImagePropertyOrientation: $0] as CFDictionary }
+        CGImageDestinationAddImage(destination, try #require(image.cgImage), properties)
+        #expect(CGImageDestinationFinalize(destination))
+        return out as Data
     }
 
     @Test func selectedFileIsAnImmutableSnapshotAndOnlyThatCopyIsRemoved() async throws {
@@ -52,6 +90,51 @@ import Testing
         let bodies = try hub.sent("POST", path).map { try JSONSerialization.jsonObject(with: $0.body!) as! [String: String] }
         #expect(bodies.count == 2 && bodies[0] == bodies[1])
         #expect(bodies[0]["client_id"] == item.clientID)
+    }
+
+    @Test func thumbnailDecodeIsOffMainAndReusedByAttachmentID() async throws {
+        let bytes = try thumbnailJPEG(width: 640, height: 320)
+        let attachment = thumbnailAttachment(data: bytes)
+        let sameID = thumbnailAttachment(id: attachment.id, data: bytes)
+        let otherID = thumbnailAttachment(data: bytes)
+        let log = ThumbnailDecodeLog()
+        let cache = LarkAttachmentThumbnailCache(decode: log.decode)
+
+        let first = try #require(await cache.image(for: attachment, maxPixel: 216))
+        let repeated = try #require(await cache.image(for: sameID, maxPixel: 216))
+        #expect(first === repeated)
+        #expect(log.count == 1, "one attachment ID has one decode across repeated renders")
+
+        _ = try #require(await cache.image(for: otherID, maxPixel: 216))
+        #expect(log.count == 2, "equal bytes belonging to another attachment ID have their own decode")
+        #expect(log.mainThreadCount == 0)
+    }
+
+    @Test func thumbnailDownsamplingBoundsCompactAndFullAndAppliesOrientation() async throws {
+        // EXIF right: the displayed image is 600 × 1200, not the encoded 1200 × 600 landscape.
+        let attachment = thumbnailAttachment(data: try thumbnailJPEG(width: 1200, height: 600, orientation: 6))
+        let cache = LarkAttachmentThumbnailCache()
+        let full = try #require(await cache.image(for: attachment, maxPixel: 900))
+        let compact = try #require(await cache.image(for: attachment, maxPixel: 216))
+
+        #expect(full.cgImage?.width == 450 && full.cgImage?.height == 900)
+        #expect(compact.cgImage?.width == 108 && compact.cgImage?.height == 216)
+        #expect(full.imageOrientation == .up && compact.imageOrientation == .up)
+        let display = LarkImagePart.displaySize(width: Double(full.size.width), height: Double(full.size.height))
+        #expect(display == CGSize(width: 150, height: 300), "full rendering keeps its existing aspect-ratio sizing")
+    }
+
+    @Test func malformedOrMissingThumbnailAlwaysUsesTheFileCardFallback() async {
+        let malformed = thumbnailAttachment(data: Data("not an image".utf8))
+        let missing = thumbnailAttachment(data: nil)
+        let cache = LarkAttachmentThumbnailCache()
+
+        let first = await cache.image(for: malformed, maxPixel: 216)
+        let repeated = await cache.image(for: malformed, maxPixel: 216)
+        let absent = await cache.image(for: missing, maxPixel: 216)
+        #expect(first == nil)
+        #expect(repeated == nil, "a failed decode must not turn into a cached image")
+        #expect(absent == nil)
     }
 
     @Test func fileUsesRawBytesAndItsExactAcknowledgement() async throws {

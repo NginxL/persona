@@ -93,6 +93,12 @@ func (n *Node) confirmWorkFirst(ctx context.Context, pane, kind, prompt string) 
 		if try == firstPromptTries {
 			return fmt.Sprintf(lostTries, firstPromptTries)
 		}
+		if kind == agyAgent {
+			if err := n.agyClearOverlay(ctx, pane, s); err != nil {
+				log.Printf("start in pane %s: clear agy overlay before retry: %v", pane, err)
+				return lostTimeout
+			}
+		}
 		log.Printf("start in pane %s: %s did not take its first message (try %d), typing it again", pane, kind, try)
 		err = n.hostPrompt(ctx, pane, prompt)
 		if errors.Is(err, host.ErrAgentBlocked) {
@@ -124,7 +130,7 @@ func (n *Node) workFirstSeen(ctx context.Context, pane, kind string) workFirst {
 		case a.Agent != kind:
 			return workFirstGone
 		case a.AgentStatus == proto.StatusWorking || a.AgentStatus == proto.StatusBlocked ||
-			a.AgentStatus == proto.StatusDone || reportedAgyConversation(*a) != "":
+			a.AgentStatus == proto.StatusDone || n.agyReported(*a) != "":
 			return workFirstTaken
 		default:
 			idle = a.AgentStatus == proto.StatusIdle

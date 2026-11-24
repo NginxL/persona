@@ -35,6 +35,7 @@ import persona.core.designsystem.jLoadableContent
 import persona.core.designsystem.text
 import persona.core.navigation.LarkMessagesRoute
 import persona.core.navigation.Navigator
+import persona.core.inbox.*
 
 /** The optional [LarkMessagesRoute] page: every direct and group chat, not another chat implementation. */
 @Composable

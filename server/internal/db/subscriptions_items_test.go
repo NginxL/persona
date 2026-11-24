@@ -15,7 +15,7 @@ func subscriptionForItems(t testing.TB, d *DB, id string, now time.Time) {
 	}
 }
 
-func keepData(data []byte, _ int64) ([]byte, error) { return data, nil }
+func keepData(data []byte, _ int64, _ map[string]bool) ([]byte, error) { return data, nil }
 
 // A run's new items are stored in the order the run gave them, so seq order is
 // the source's order, each with its data as written (json keeps its text).

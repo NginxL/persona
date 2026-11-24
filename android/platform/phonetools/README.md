@@ -1,10 +1,12 @@
 # Android 手机工具
 
-本模块对应 `docs/archive/redesign/android.md` 5.12、`parity.md` 第 21 节和设置中的「手机数据」。提供通讯录搜索、日历查询与新建、当前位置、照片元数据与缩放取图、剪贴板、设备信息、本地通知、健康数据汇总（Health Connect）、运动记录列表与详情（Health Connect）及 Persona 当前通知列表，共 19 个工具。
+本模块对应 `docs/archive/redesign/android.md` 5.12、`parity.md` 第 21 节和设置中的「手机数据」。提供通讯录搜索、日历查询与新建、当前位置、照片元数据与缩放取图、剪贴板、设备信息、本地通知、健康数据汇总（Health Connect）、运动记录列表与详情（Health Connect）及 Persona 当前通知列表，共 23 个工具。
 
 Android 没有统一的系统提醒事项接口，故不注册 `phone_reminders_*`。健康数据通过 Health Connect 提供每天的汇总（`phone_health_summary`，安卓 14 起系统自带；写入健康数据 `phone_health_write_sample` 为 iOS 独有）。不申请通知监听权限，不读取其他 App 的通知。`phone_notifications_list` 是 Android 新增工具，只返回本应用当前显示的通知，不包含操作确认通知。
 
 `phone_workouts_recent` 和 `phone_workout_detail` 读 Health Connect 的运动记录（`ExerciseSessionRecord`），距离、消耗、爬升和心率取自每段运动的时间窗口内的汇总；分段（每公里用时，扣除暂停）和每分钟心率只在详情里给出，算法与 iOS `WorkoutSplits` 一致，并有单测。需要 `READ_EXERCISE` 和 `READ_ELEVATION_GAINED`，它们与健康汇总的权限一起在「设置 › 手机数据 › 健康」里申请；未授权时工具报权限错误，不返回空列表。运动来源的名字用系统 App 名称，取不到时用包名。Dietary metrics use `NutritionRecord` totals per local day: `dietary_energy` in kcal and `protein`, `carbs`, and `fat` in g. `resting_energy` uses `BasalMetabolicRateRecord.BASAL_CALORIES_TOTAL` in kcal. Today's totals end at the query time. The new read permissions are `READ_NUTRITION` and `READ_BASAL_METABOLIC_RATE`; existing users can grant them under Settings › Phone data › Health.
+
+`phone_health_types`, `phone_health_samples`, `phone_health_sources` and `phone_health_request_access` (#13740, `HealthRecords.kt`) read the 38 Health Connect record types of `HealthRecords.types` record by record, with the source package, device and metadata. Anchors carry Health Connect's page token while pages remain, then its changes token (taken before the first page), so later calls get only what changed. Access is `granted` / `not_granted`, or `unavailable` for a permission the manifest does not declare (`HealthRecordsTest` checks every type is declared). `phone_health_request_access` opens Persona's page in Health Connect, since a tool call has no activity result for the request contract. There is no `phone_health_watch`: the hub never wakes an Android phone, so a background snapshot would answer nobody.
 
 ## 和 iOS 对齐（2026-11-02）
 

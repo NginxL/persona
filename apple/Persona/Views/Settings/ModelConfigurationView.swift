@@ -82,32 +82,10 @@ struct ModelConfigurationView: View {
             await page.load()
         }
         .refreshable { await page.load() }
-        #if os(macOS)
-        .sheet(item: $editing, onDismiss: { Task { await page.load() } }) { route in
-            NavigationStack { ModelPurposeEditorView(purposeID: route.id, inSheet: true, owner: owner) }
-                .macSheet()
-        }
-        #endif
     }
 
     @ViewBuilder private func categoryLink(_ category: ModelPurpose) -> some View {
-        #if os(macOS)
-        if inSheet {
-            Button { editing = ModelPurposeRoute(id: category.id) } label: {
-                HStack(spacing: Theme.Space.s) {
-                    categoryLabel(category)
-                    Spacer(minLength: Theme.Space.s)
-                    ThemedIcon(Theme.Icon.disclosure).font(Theme.Font.labelStrong).foregroundStyle(.tertiary)
-                }
-                .contentShape(.rect)
-            }
-            .buttonStyle(.plain)
-        } else {
-            NavigationLink(value: ModelPurposeRoute(id: category.id)) { categoryLabel(category) }
-        }
-        #else
         NavigationLink(value: ModelPurposeRoute(id: category.id)) { categoryLabel(category) }
-        #endif
     }
 
     private func categoryLabel(_ category: ModelPurpose) -> some View {
@@ -179,6 +157,10 @@ struct ModelPurposeEditorView: View {
                             .accessibilityIdentifier("model-config-inheritance")
                     }
                     LabeledContent("Model [Assistant View c98e11]", value: page.modelSummary(purpose))
+                    if let mode = page.permissionModeInEffect {
+                        LabeledContent("Permissions", value: SessionModes.mode(mode)?.title ?? SessionModes.listedOption(mode).title)
+                            .accessibilityIdentifier("model-config-permission-in-effect")
+                    }
                     if let limit = purpose.limit {
                         ModelLimitLine(limit: limit, font: Theme.Font.label)
                     } else if let status = purpose.status, !status.isEmpty {
@@ -201,17 +183,10 @@ struct ModelPurposeEditorView: View {
                                 ProgressView().controlSize(.small)
                             }
                         } else {
-                            #if os(macOS)
-                            // A Mac form: the field's name on the left, what to type in the box (#1221).
-                            TextField(String(localized: "Model [Model Configuration View 7986d5]"), text: optional(\.model), prompt: Text("Leave empty for default"))
-                                .font(Theme.Font.body.monospaced())
-                                .accessibilityIdentifier("model-config-model")
-                            #else
                             TextField(String(localized: "Model (leave empty for default)"), text: optional(\.model))
                                 .font(Theme.Font.body.monospaced())
                                 .textInputAutocapitalization(.never).autocorrectionDisabled()
                                 .accessibilityIdentifier("model-config-model")
-                            #endif
                             if let listError, listFor == listProvider {
                                 HStack {
                                     Text("Couldn't load the model list: \(listError)").font(Theme.Font.label).foregroundStyle(.secondary).lineLimit(2)
@@ -232,11 +207,28 @@ struct ModelPurposeEditorView: View {
                         .lineLimit(1)
                         .accessibilityIdentifier("model-config-effort")
                     }
+                    if !page.permissionModes.isEmpty {
+                        Picker(page.isInboxAgent ? String(localized: "Inbox Permissions") : String(localized: "Permissions"),
+                               selection: optional(\.permissionMode)) {
+                            Text(page.permissionModeDefaultLabel).tag("")
+                            ForEach(page.permissionModes) { Text($0.title).tag($0.id) }
+                            if let mode = page.draft.permissionMode, !page.permissionModes.contains(where: { $0.id == mode }) {
+                                Text(SessionModes.listedOption(mode).title).tag(mode)
+                            }
+                        }
+                        .lineLimit(1)
+                        .accessibilityIdentifier("model-config-permission")
+                    }
                 } header: {
                     Text("Model Settings [Model Configuration View 082a73]")
                 } footer: {
                     VStack(alignment: .leading, spacing: Theme.Space.xs) {
                         Text("Changes take effect from the next run. Current tasks aren't interrupted and past data isn't reprocessed. Permission settings don't change with the model.")
+                        if let hint = page.permissionModeHint {
+                            Text(hint)
+                                .foregroundStyle(page.draft.permissionMode == "bypassPermissions" ? Theme.danger : .secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
                         if let note = Self.defaultAssistantNote(owner: owner, model: model) {
                             Text(note)
                         }
@@ -284,19 +276,8 @@ struct ModelPurposeEditorView: View {
         .detailTitle(page.isLarkAgent ? String(localized: "Lark /agent") : page.purpose?.name ?? String(localized: "Model Settings [Launcher Model Picker 8cbcf7]"))
         .navigationBarTitleDisplayMode(.inline)
         .pageToolbar {
-            #if os(macOS)
-            if inSheet {
-                ToolbarItem(placement: .confirmationAction) { saveButton }
-            } else {
-                ToolbarItem(placement: .topBarTrailing) { saveButton }
-            }
-            #else
             ToolbarItem(placement: .topBarTrailing) { saveButton }
-            #endif
         }
-        #if os(macOS)
-        .sheetCancel(unsaved: page.dirty, when: inSheet) { dismiss() }
-        #endif
         .task(id: purposeID) {
             // Before its first request, which keeps the client.
             page.owner = owner
@@ -332,9 +313,6 @@ struct ModelPurposeEditorView: View {
             Task {
                 if await page.save() {
                     Haptics.success()
-                    #if os(macOS)
-                    if inSheet { dismiss() }
-                    #endif
                 } else {
                     Haptics.error()
                 }
@@ -484,18 +462,6 @@ private struct ModelConfigurationSheet: ViewModifier {
 
     func body(content: Content) -> some View {
         content.sheet(isPresented: $showing) {
-            #if os(macOS)
-            // No leading Close and no pushing in a Mac sheet (#1248): the editor brings its own Cancel and Save for the
-            // sheet's bottom row, and the categories open each one over this sheet.
-            NavigationStack {
-                if let purposeID {
-                    ModelPurposeEditorView(purposeID: purposeID, inSheet: true, owner: owner)
-                } else {
-                    ModelConfigurationView(inSheet: true, showsAdvancedProviders: false, owner: owner).macSheetDone { showing = false }
-                }
-            }
-            .macSheet()
-            #else
             NavigationStack {
                 Group {
                     if let purposeID {
@@ -509,7 +475,6 @@ private struct ModelConfigurationSheet: ViewModifier {
                     SheetClose { showing = false }
                 }
             }
-            #endif
         }
     }
 }

@@ -23,7 +23,8 @@ type PRFollowup struct {
 	Review             string     `json:"review,omitempty"`
 	ChangesRequestedAt *time.Time `json:"changes_requested_at,omitempty"`
 	LastObservedAt     *time.Time `json:"last_observed_at,omitempty"`
-	CreatedAt          time.Time  `json:"created_at"`
+	// CreatedAt records the to-do's closure time for new subscriptions.
+	CreatedAt time.Time `json:"created_at"`
 	// Deduplication keys: a conflict or a current-head changes-requested review wakes the supervisor only once per head.
 	NotifiedConflictHead string `json:"notified_conflict_head,omitempty"`
 	NotifiedReviewHead   string `json:"notified_review_head,omitempty"`

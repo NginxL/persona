@@ -1,8 +1,6 @@
 import BeautifulUI
 import SwiftUI
-#if os(iOS) || os(visionOS)
 import UIKit
-#endif
 
 // How a conversation's page gets into a voice call and back out of one (docs/assistant/voice.md 6.1, 1.2 L, 1.3): starting it from
 // the composer's button or the 「+」 menu's Voice Chat, what the menu says where there is none, Open Settings, and the line left
@@ -204,9 +202,7 @@ extension VoiceSupport {
         case .model:
             break
         case .system:
-            #if os(iOS) || os(visionOS)
             if let url = URL(string: UIApplication.openSettingsURLString) { UIApplication.shared.open(url) }
-            #endif
         }
     }
 }

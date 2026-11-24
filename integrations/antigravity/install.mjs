@@ -6,7 +6,8 @@
 //   node integrations/antigravity/install.mjs [--socket <runtime.sock>]
 
 import { runtimeStorePath } from '../runtime-sdk/lib/compat.js'
-import { dirname, join, resolve } from 'node:path'
+import { realpathSync } from 'node:fs'
+import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { prepareSocketDirectory } from '../runtime-sdk/lib/identity.js'
 import { defaultSocketPath, installCurrent, PACKAGES, packageHash, readShipped } from '../runtime-sdk/index.js'
@@ -22,7 +23,16 @@ export function installAntigravityPackage({ socketPath, root = join(dirname(file
   return { store, current: join(store, 'current'), hash }
 }
 
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+// Node loads the entry module by its real path; compare real paths so a symlinked directory still runs it (#12848).
+function isEntry() {
+  try {
+    return !!process.argv[1] && realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url))
+  } catch {
+    return false // no file behind argv[1]
+  }
+}
+
+if (isEntry()) {
   const i = process.argv.indexOf('--socket')
   const socketPath = (i > 0 && process.argv[i + 1]) || undefined
   const { current, hash } = installAntigravityPackage({ socketPath })

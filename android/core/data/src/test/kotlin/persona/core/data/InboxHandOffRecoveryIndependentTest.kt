@@ -60,7 +60,7 @@ import persona.core.contracts.api.MessageTransport
 import persona.core.contracts.api.MessageTransportResult
 import persona.core.contracts.api.OutboxMessage
 import persona.core.contracts.api.SessionsRepository
-import persona.feature.inbox.InboxHandOffRequest
+import persona.core.inbox.InboxHandOffRequest
 
 /** Independent counterexamples for the four recovery boundaries; each uses a different path from its diagnostic test. */
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -238,7 +238,15 @@ class InboxHandOffRecoveryIndependentTest {
             withTimeout(5_000) {
                 while (!destinationJournal.read(destination.path).agentHandOffs.single().delivered) delay(10)
             }
-            val original = originJournal.read(origin.path).agentHandOffs.single()
+            // Target evidence is committed before the cross-pairing origin credit; await the second durable commit.
+            val original = withTimeout(5_000) {
+                var saved = originJournal.read(origin.path).agentHandOffs.single()
+                while (!saved.delivered) {
+                    delay(10)
+                    saved = originJournal.read(origin.path).agentHandOffs.single()
+                }
+                saved
+            }
             assertEquals("merging a target must not re-parent the hand-off to the target group", origin.path, original.scope)
             assertTrue("the new target journal must be linked into the origin's replay set",
                 destination.path in original.deliveryScopes)

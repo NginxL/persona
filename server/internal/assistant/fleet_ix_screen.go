@@ -167,7 +167,7 @@ func (s *Service) createScreenInteraction(machine string, sess proto.Session) {
 	s.ixMapLocked()[id] = p
 	s.fleet.mu.Unlock()
 	s.record(ix)
-	if back && !told && terminalQuestion(ix) && s.restoreRoute(ctx, ix) {
+	if back && !told && supervisedScreen(ix) && s.restoreRoute(ctx, ix) {
 		return // Reconnecting a terminal must not lose a question held by its supervisor.
 	}
 	if back || d == nil {

@@ -2,12 +2,7 @@ package persona.feature.inbox
 
 import persona.core.domain.inbox.InboxItem
 import kotlinx.serialization.Serializable
-
-/** Bind these operations to the shared encrypted store for one HubScope. Writes must be atomic. */
-interface InboxStateStorage {
-    suspend fun read(): String?
-    suspend fun write(value: String)
-}
+import persona.core.inbox.*
 
 @Serializable
 internal data class InboxLocalState(

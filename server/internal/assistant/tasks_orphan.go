@@ -293,6 +293,7 @@ func (s *Service) orphanWatch(ctx context.Context, now time.Time) {
 	b.now, b.seen, b.progress = next, seen, progress
 	b.mu.Unlock()
 	if changed {
+		s.trevision.changed()
 		s.todosPushSoon()
 		s.boardChanged()
 	}

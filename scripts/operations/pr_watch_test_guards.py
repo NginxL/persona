@@ -10,7 +10,7 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from pr_watch_common import WatchError, checked
+from pr_watch_common import SHA, WatchError, checked
 
 
 def load_guard(relative, name, root=None):
@@ -94,6 +94,18 @@ def documentation_guard(relative, checkout, base):
         raise WatchError("documentation guard did not pass: " + relative)
 
 
+def validate_base_commit(base, checkout):
+    """Require the exact base object to be an available commit before guarding a PR."""
+    if not SHA.fullmatch(base):
+        raise WatchError("base must be exactly 40 lowercase hexadecimal characters")
+    try:
+        object_type = checked(["git", "cat-file", "-t", base], cwd=checkout).strip()
+    except WatchError as error:
+        raise WatchError("base must name an available commit") from error
+    if object_type != "commit":
+        raise WatchError("base must name an available commit")
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser()
     parser.add_argument("--base", required=True)
@@ -105,6 +117,7 @@ def main(argv=None):
     checkout = Path(args.worktree).resolve()
     if not checkout.is_dir():
         raise WatchError("verification worktree does not exist")
+    validate_base_commit(args.base, checkout)
     if args.repository_guards:
         checked(["python3", "-I", str(ROOT / "scripts/privacy_check.py"),
                  "--range", args.base + ".." + args.head], cwd=checkout,

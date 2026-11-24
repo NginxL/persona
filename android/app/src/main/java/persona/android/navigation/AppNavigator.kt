@@ -299,7 +299,7 @@ internal class AppNavigator(
         val stack = stacks.getValue(from)
         if (stack.size <= 1) {
             // A pushed page pops. A place that is the whole stack switches to the conversation (item 4, item 5).
-            if (from == AppTab.Persona) leavePlaceRoot()
+            if (from == AppTab.Persona) { val _ = leavePlaceRoot() }
             return
         }
         val page = stack.removeAt(stack.lastIndex)

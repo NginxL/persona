@@ -69,7 +69,7 @@ func (s *Service) estimateNewPlanTask(ctx context.Context, conversation string, 
 	evidence := TaskEstimateEvidence{Minutes: defaultTaskEstimateMinutes, Cohort: estimateUnavailable}
 	t.EstimateEvidence = &evidence
 	store := s.taskEstimateDB()
-	if store == nil || s.inHealth(ctx, conversation) {
+	if store == nil || s.selfPolicy(ctx, conversation).NoKBWrite {
 		return
 	}
 	cohort := s.taskEstimateCohort(*t)
@@ -142,7 +142,7 @@ func chooseTaskEstimate(cohort db.TaskEstimateCohort, samples []db.TaskEstimateS
 // event reached the brief store. There is no reconstruction for legacy rounds.
 func (s *Service) estimateDispatch(ctx context.Context, p *TaskPlan, t *PlanTask, todo, brief, round string, at time.Time) {
 	store := s.taskEstimateDB()
-	if store == nil || s.inHealth(ctx, p.Conversation) {
+	if store == nil || s.selfPolicy(ctx, p.Conversation).NoKBWrite {
 		return
 	}
 	if err := store.CreateTaskEstimateRound(ctx, db.TaskEstimateRound{

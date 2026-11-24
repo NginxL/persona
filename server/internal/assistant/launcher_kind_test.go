@@ -18,6 +18,10 @@ import (
 func TestSendRefusesALauncherOfAnotherAgentKind(t *testing.T) {
 	ctx := context.Background()
 	s, f := mainChatFixture(t)
+	// "nope" below is a launcher the list never has: its send waits out the launcher recovery, 30 s by default, for
+	// nothing. One second, polled fast, checks the same thing.
+	fastLauncherRecovery(t)
+	setLauncherRecovery(f, 1, nil)
 	setModel(t, s, "assistant", ModelBinding{Provider: "launcher.gw"})
 	setSettings(t, s, func(v *Settings) { v.Main = "main" })
 	f.setSessions("server",

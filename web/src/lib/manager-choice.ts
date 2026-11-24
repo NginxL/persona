@@ -53,6 +53,8 @@ let rosterDefault = BUILTIN_MANAGER;
 // Whether rosterDefault is the roster's (read once, or the hub has none to read): until then it is a placeholder, and
 // what goes by the default (the pages without a switcher, an item's requests) waits for it or is evaluated again.
 let defaultSettled = false;
+// Whether the hub returned a roster with a default manager (false after a failed/404 roster read or reset).
+let defaultConfirmed = false;
 const listeners = new Set<() => void>();
 const defaultListeners = new Set<(was: { id: string; settled: boolean }) => void>();
 
@@ -157,6 +159,7 @@ export function chooseManager(id: string | null) {
 export function setRosterDefault(id: string) {
   const was = { id: rosterDefault, settled: defaultSettled };
   defaultSettled = true;
+  defaultConfirmed = Boolean(id);
   if (!id || id === rosterDefault) {
     if (!was.settled) defaultListeners.forEach((l) => l(was));
     return;
@@ -170,6 +173,16 @@ export function setRosterDefault(id: string) {
   }
   emit();
   defaultListeners.forEach((l) => l(was));
+}
+
+/** The default manager confirmed by a live roster response, or undefined before the roster loaded or when unavailable. */
+export function confirmedDefaultManager(): string | undefined {
+  return defaultConfirmed ? rosterDefault : undefined;
+}
+
+/** Clears the confirmed-roster marker (tests resetting the roster). */
+export function clearConfirmedDefault() {
+  defaultConfirmed = false;
 }
 
 /** The hub has no roster (from before it), or it could not be read: the default stays the hub's own assistant, and
@@ -416,6 +429,7 @@ export function resetManagerChoice() {
   pins.clear();
   rosterDefault = BUILTIN_MANAGER;
   defaultSettled = false;
+  defaultConfirmed = false;
   emit();
   // Choice listeners may note the roster's current identity; tests still end with every remembered display gone.
   noteShownIdentity(null);

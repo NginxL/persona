@@ -108,6 +108,10 @@ type RecordingUpload struct {
 	TZ       string             `json:"tz,omitempty"`
 	Part     int                `json:"part,omitempty"`
 	Coverage *RecordingCoverage `json:"coverage,omitempty"`
+	// Space is the track the recording goes to instead of the knowledge base (#13501, docs/assistant/health.md
+	// "Tracks and kinds"): the manager writes its transcript into that track's recordings/ and never hands the upload
+	// to PutRecording. "" (and absent): the knowledge base, as ever. Never stored here.
+	Space string `json:"space,omitempty"`
 	// next is how many positions a day upload carried (empty segments included); dayFull: it is over the limits.
 	next    int
 	dayFull bool
@@ -293,6 +297,9 @@ type RecordingState struct {
 	// called only by when it started.
 	Name       string `json:"name,omitempty"`
 	NameSource string `json:"name_source,omitempty"`
+	// Space is the track a recording was saved into instead (#13501, RecordingUpload.Space): set by the manager on the
+	// ones it lists beside these, never by RecordingStates.
+	Space string `json:"space,omitempty"`
 }
 
 // What PutRecording did.

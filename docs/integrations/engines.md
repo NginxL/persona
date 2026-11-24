@@ -118,10 +118,33 @@ iOS / Android have both entry points (Android Machines is under Agents: **List s
 
 Windows: herdr has native Windows support since 0.9.5; except live terminal, capabilities match above. Orca works too. See [windows.md](../operations/windows.md), "herdr."
 
-Antigravity CLI panes can show chat history after the hook installed by `herdr integration install antigravity-cli`
-reports the pane's conversation ID. Persona reads that conversation's local `transcript.jsonl` from the node's Antigravity data
-directory and uses the reported ID to restore Persona-started panes with `agy --conversation`. Until herdr
-reports a usable ID, the pane remains accessible through the terminal and can still receive prompts.
+**Antigravity CLI panes** show chat history once the pane's conversation ID is known. Two sources report it, and either is
+enough: Persona's own hooks (below) and the hook installed by `herdr integration install antigravity-cli`. Persona reads
+that conversation's local `transcript.jsonl` from the node's Antigravity data directory, or `transcript_full.jsonl` when
+the compact export is absent. Switching export sources resets the history cursor. The node uses the conversation ID to
+restore Persona-started panes with `agy --conversation`. The pane's row is then titled after that conversation, as the Antigravity
+companion titles it: the companion's title, else agy's own (its `cache/conversation_metadata.json`), else the first
+message typed into it (#13639). agy sets no terminal title, so until one of these is known the row has the shell's title
+or herdr's tab name. Until an ID is known the pane remains accessible through the terminal and can still receive prompts.
+
+Persona's own Antigravity hooks (#13729) work the way Moshi's do, so agy under herdr-core, Orca or Tern, or under herdr
+without its integration, is readable too. The node adds a group `persona` to agy's global hooks file (`hooks.json` in the
+agy config directory next to the data directory, `~/.gemini/config` by default; `ANTIGRAVITY_CLI_CONFIG_DIR` moves both)
+with two entries, `PreInvocation` and `Stop`, running `<personad> hook --agy <Event>`. Groups of other tools (herdr, Moshi,
+Orca) are never touched; the write is additive, atomic and idempotent, and happens when the node starts and agy is
+installed. The hook reads agy's JSON input, finds its pane from the environment the engine gave it (`HERDR_PANE_ID`,
+`HC_TERMINAL_ID`, `ORCA_PANE_KEY`, `TERN_PANE`), reports `conversationId` to the node over its socket and always prints
+`{}` within two seconds; with no node it does nothing. The TUI stays the only writer of the conversation.
+A top-level group was chosen over an agy plugin directory because agy loads the global file for every interactive
+session and one owned key is as easy to remove as a directory.
+
+The node treats the two reports alike: one conversation belongs to one pane, a conversation reported in two panes is
+unreadable in both, and when herdr's report and Persona's differ for one pane nothing is known (never guessed). A
+conversation that opens as a built-in subagent's is ignored as before (#13336). A report is kept in node memory and
+dropped when its pane no longer runs agy. A pane is only readable under an engine that lists agy in its panes at all.
+`personad node doctor` has an `agy-hooks` line (installed / missing / stale when the binary moved; `--fix` rewrites it).
+`personad node agy-hooks [status|install|uninstall]` manages the entries; `uninstall` also tells the node not to put
+them back.
 
 Orca's native Claude chats (structured, no terminal) connect through node's bridge: list, state, send text / images, interrupt, close,
 answer approvals / questions, change permission / thinking (no plan mode); no screen reads, keys, or live terminal. Chats appear only after their first message;
@@ -231,7 +254,7 @@ workspace behavior.
   - only a shell is in front (herdr `pane.process_info`; Orca: no agent process carries the pane's key), and no client has its terminal open;
   - its screen has not changed for the whole grace period; new output restarts the clock.
 
-  Terminals the user opened, a pane picked for Run Agent Here and the panes of other engines (Tern, Herdr App) are never touched. A workspace is never closed directly: closing the pane closes its tab when it was the only pane, and the engine drops a workspace with its last tab, so a workspace goes only when everything in it was such a terminal (the first shell of a worktree the assistant creates for an Agent is marked too, #10624: `worktree.create` with `for_agent`, herdr's `persona_worktree` token or the node's in-memory record; it closes with the same checks once every other pane of its workspace is a finished Agent terminal, so the whole workspace goes; a worktree the user creates is never marked). When the engine does not answer nothing is closed that round; a failed close is retried on a later round; the clocks live in memory, so a node restart closes later, never sooner. Closing never changes the session's stop cause: an Agent the hub stopped as `task_completed` or `idle` can still be resumed by the assistant afterwards (an Agent stopped by hand, or one that exited by itself, has no cause and waits for the user's Resume, as before). Resume needs nothing new: within the grace period it runs in the kept shell (the same recovery lock keeps the two apart), after it in a new tab. Running the Agent with `exec` so the pane exits with it was rejected: the last output and the screen a failed start is diagnosed from would go at once, Resume could not reuse the shell, and the typed start's `&&` chains and per-shell quoting do not survive `exec` in fish or PowerShell.
+  Terminals the user opened, a pane picked for Run Agent Here and the panes of other engines (Tern, Herdr App) are never touched. A workspace is never closed directly: closing the pane closes its tab when it was the only pane, and the engine drops a workspace with its last tab, so a workspace goes only when everything in it was such a terminal (the first shell of a worktree the assistant creates for an Agent is marked too, #10624: `worktree.create` with `for_agent`, herdr's `persona_worktree` token or the node's in-memory record; it closes with the same checks once every other pane of its workspace is a finished Agent terminal, so the whole workspace goes; a worktree the user creates is never marked). When the engine does not answer nothing is closed that round; a failed close is retried on a later round; the clocks live in memory, so a node restart closes later, never sooner. Closing never changes the session's stop cause: an Agent the hub stopped as `task_completed` or `idle` can still be resumed by the assistant afterwards (an Agent stopped by hand waits for the user's Resume; one that exited by itself has no cause, which the assistant may resume on purpose since #11528). Resume needs nothing new: within the grace period it runs in the kept shell (the same recovery lock keeps the two apart), after it in a new tab. Running the Agent with `exec` so the pane exits with it was rejected: the last output and the screen a failed start is diagnosed from would go at once, Resume could not reuse the shell, and the typed start's `&&` chains and per-shell quoting do not survive `exec` in fish or PowerShell.
 - **The Agent mark** (#10111): every terminal Persona opens for an Agent starts with `PERSONA_AGENT=1` in its environment (herdr `workspace.create` / `tab.create` `env`, the Herdr App's `terminal.run` `env`; `host.EnvLauncher`, with the startup switches in "What a start tab's shell starts with" below), so a shell's startup files can tell it from one the user opened, for example to skip a prompt's git status daemon: `[[ -n $PERSONA_AGENT ]] && …`. The typed start also puts `PERSONA_AGENT=1` in front of the Agent command (`agentMarkEnv`, `server/internal/node/agentenv.go`), so the Agent's processes carry it on every engine, including Orca, whose `terminal.create` takes no environment (there the shell itself does not have it). A herdr without `env` support is asked again without it. Terminals the user opens never get it.
 - **Cleanup by hand**: `panes.list` labels each terminal a stopped Agent left with `agent_session`; **Close finished terminals** (`POST /api/v1/machines/{mid}/panes/close_finished`, preview first) closes the ones the user confirms now, after checking again that only a shell is in front.
 - **Who closes a terminal**: the user (**Close** on a session, **Archive and close**, force archive of an Agent blocked on a confirmation, closing a pane or tab from the terminal list), the grace period above for a finished Agent's terminal, and a finished review's reviewer, an internal helper, which closes with its worktree copy.

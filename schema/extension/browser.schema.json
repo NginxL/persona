@@ -1,0 +1,61 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "browser.schema.json",
+  "title": "Cross-machine browser automation",
+  "description": "Running scripts in an extension-isolated browser task space on a paired computer (#12866): browser.machines and browser.run require browser.run in permissions.hub (named grant only). Backed by a pluggable BrowserBackend interface (defaulting to ego lite; extensible to CDP and other browser drivers). Params are strict: an unknown field is invalid_params. Plugin-side: only the hub and the program speak it.",
+  "x-side": "plugin",
+  "x-methods": {
+    "browser.machines": {"from": "program", "params": "BrowserMachinesParams", "result": "BrowserMachinesResult"},
+    "browser.run": {"from": "program", "params": "BrowserRunParams", "result": "BrowserRunResult"}
+  },
+  "$defs": {
+    "BrowserMachinesParams": {
+      "description": "browser.machines (browser.run): list computers that have a browser backend enabled.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "backend": {"type": "string", "description": "Optional backend filter (e.g. ego, cdp). Empty returns all backends."}
+      }
+    },
+    "BrowserMachine": {
+      "type": "object",
+      "properties": {
+        "machine_id": {"type": "string"},
+        "name": {"type": "string"},
+        "backend": {"type": "string", "description": "Browser backend identifier (e.g. ego, cdp)."},
+        "online": {"type": "boolean"},
+        "ready": {"type": "boolean"}
+      },
+      "required": ["machine_id", "name", "backend", "online", "ready"]
+    },
+    "BrowserMachinesResult": {
+      "type": "object",
+      "properties": {
+        "machines": {"type": "array", "items": {"$ref": "#/$defs/BrowserMachine"}}
+      },
+      "required": ["machines"]
+    },
+    "BrowserRunParams": {
+      "description": "browser.run (browser.run): run a script inside an extension-isolated browser task space on machine_id.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "machine_id": {"type": "string", "minLength": 1},
+        "backend": {"type": "string", "description": "Browser backend to use (default: ego)."},
+        "slot": {"type": "string", "minLength": 1, "maxLength": 32, "pattern": "^[a-z0-9][a-z0-9_-]{0,31}$", "description": "Logical slot name scoped to this extension (e.g. pac-muse)."},
+        "script": {"type": "string", "minLength": 1, "description": "Async JS script body executed inside the isolated task space."},
+        "timeout_ms": {"type": "integer", "minimum": 0, "maximum": 120000}
+      },
+      "required": ["machine_id", "slot", "script"]
+    },
+    "BrowserRunResult": {
+      "type": "object",
+      "properties": {
+        "backend": {"type": "string"},
+        "output": {"type": "string", "description": "Raw output / JSON payload returned by the browser backend."},
+        "error": {"type": "string", "description": "Script error message, if any."}
+      },
+      "required": ["backend", "output"]
+    }
+  }
+}

@@ -17,11 +17,10 @@ import (
 	"github.com/nwverse/persona/server/internal/ai"
 	"github.com/nwverse/persona/server/internal/assistant"
 	"github.com/nwverse/persona/server/internal/assistantwire"
-	"github.com/nwverse/persona/server/internal/db"
 	"github.com/nwverse/persona/server/internal/proto"
 )
 
-// Closing a finished task (docs/assistant/todos.md "Automatic completion", #1092). Every test runs without a store (h.store nil: nothing
+// Delivering a finished task for review (docs/assistant/todos.md "Automatic completion", #1092, #5732). Every test runs without a store (h.store nil: nothing
 // reaches a database) and with a stubbed judge model.
 
 // judgeStub answers the judge's calls with reply (status 200) or fails them (status ≠ 200), counting them and keeping
@@ -32,6 +31,9 @@ type judgeStub struct {
 	input      atomic.Value
 }
 
+// infoTagPromptStart is how the information tagging prompt (prompts/assistant/info_tag.md) starts.
+const infoTagPromptStart = "You tag a piece of text from the owner's conversations"
+
 func stubJudge(t *testing.T, h *Hub, status int, reply string) *judgeStub {
 	t.Helper()
 	js := &judgeStub{}
@@ -41,6 +43,12 @@ func stubJudge(t *testing.T, h *Hub, status int, reply string) *judgeStub {
 			return
 		}
 		raw, _ := io.ReadAll(r.Body)
+		// Information tagging (info.tag) inherits Sorting's model too, and tags a text leaving a conversation
+		// (#13246); its requests are answered here and do not change the judge's count or input.
+		if strings.Contains(string(raw), infoTagPromptStart) {
+			_ = json.NewEncoder(w).Encode(map[string]any{"content": []any{map[string]any{"type": "text", "text": `{"categories":[]}`}}})
+			return
+		}
 		js.input.Store(string(raw))
 		js.calls.Add(1)
 		if status != http.StatusOK {
@@ -123,16 +131,19 @@ func runTurn(h *Hub, text string) {
 
 func receipts(h *Hub) int { return strings.Count(strings.Join(feedKinds(h, "conv1"), ","), "receipt") }
 
-// The judge finds the work finished: the todo is done by the hub, with why, and works like one the user closed (the
-// agent no longer counts for it, the snapshot says it was closed by the hub).
+// The judge finds the work delivered: the todo stays open for review or explicit user completion, with its conclusion and live link.
+// The agent remains attached to the task until the user or main actually accepts it (#5732).
 func TestTaskAutoDone(t *testing.T) {
 	h, _ := newTaskHub(t)
 	js := stubJudge(t, h, http.StatusOK, `{"verdict":"done","reason":"已合并 PR 并发了 TestFlight"}`)
 	todo := startedTask(t, h)
 	runTurn(h, "修好了，PR https://github.com/o/r/pull/901 已合并，TestFlight 构建号 202611041200")
-	waitFor(t, "auto done", func() bool { return todoNow(h, todo.ID).DoneAt != nil })
+	waitFor(t, "delivery review", func() bool {
+		got := todoNow(h, todo.ID)
+		return got.Check != nil && got.Check.Verdict == "done"
+	})
 	got := todoNow(h, todo.ID)
-	if got.DoneBy != db.DoneByAuto || got.DoneReason != "已合并 PR 并发了 TestFlight" || receipts(h) != 1 {
+	if got.DoneAt != nil || got.Check == nil || got.Check.Verdict != "done" || got.Check.Reason != "已合并 PR 并发了 TestFlight" || receipts(h) != 1 {
 		t.Fatalf("todo = %+v, %d receipts", got, receipts(h))
 	}
 	in, _ := js.input.Load().(string)
@@ -141,19 +152,21 @@ func TestTaskAutoDone(t *testing.T) {
 			t.Errorf("judge input lacks %q: %s", want, in)
 		}
 	}
-	if _, active := h.todoLinkOf("box", "s1"); active {
-		t.Fatal("the agent still counts for a done todo")
+	if _, active := h.todoLinkOf("box", "s1"); !active {
+		t.Fatal("the agent was detached before delivery was accepted")
 	}
-	if _, ok := taskOfAgent(h, "box", "s1"); ok {
-		t.Fatal("a done task is still followed")
+	if _, ok := taskOfAgent(h, "box", "s1"); !ok {
+		t.Fatal("a delivered task is no longer followed")
 	}
-	if line := taskLine(h, todo); !strings.Contains(line, "）：已完成（hub 判断做完了，自动关的）") {
+	if line := taskLine(h, todo); !strings.Contains(line, "已交付·待看") || !strings.Contains(line, "TestFlight 构建号 202611041200") {
 		t.Fatalf("the live context = %q", line)
 	}
+	found := false
 	for _, it := range inboxTasks(t, h) {
-		if it.ID == todo.ID {
-			t.Fatal("the inbox still links messages to a done task")
-		}
+		found = found || it.ID == todo.ID
+	}
+	if !found {
+		t.Fatal("the inbox lost an unaccepted delivery")
 	}
 }
 
@@ -199,13 +212,14 @@ func TestTaskNotAutoDone(t *testing.T) {
 	})
 }
 
-// A todo the user reopened is not closed again by the same work; after a new turn it is judged again.
+// A todo the user reopened is not judged by the same work; after a new turn it is delivered for review again, never
+// closed by the judge. Only the user's explicit completion closes it (#5732).
 func TestTaskReopenedNotAutoDoneAgain(t *testing.T) {
 	h, _ := newTaskHub(t)
 	js := stubJudge(t, h, http.StatusOK, `{"verdict":"done","reason":"做完了"}`)
 	todo := startedTask(t, h)
 	runTurn(h, "做完了")
-	waitFor(t, "auto done", func() bool { return todoNow(h, todo.ID).DoneAt != nil })
+	waitFor(t, "the first delivery", func() bool { return js.calls.Load() > 0 })
 
 	handler := h.routes()
 	patch := func(body string) Todo {
@@ -220,6 +234,9 @@ func TestTaskReopenedNotAutoDoneAgain(t *testing.T) {
 			t.Fatalf("PATCH %s: %d %s", body, w.Code, w.Body.String())
 		}
 		return out.Todo
+	}
+	if done := patch(`{"done":true}`); done.DoneAt == nil {
+		t.Fatal("explicit user completion did not close the delivered task")
 	}
 	re := patch(`{"done":false}`)
 	if re.DoneAt != nil || re.DoneBy != "" || re.DoneReason != "" || re.ReopenedAt == nil {
@@ -240,22 +257,22 @@ func TestTaskReopenedNotAutoDoneAgain(t *testing.T) {
 	// (A judgment that began before the reopen and ends after it does not overrule the user either: the assistant's
 	// TestAutoDoneKeepsTheUsersChange.)
 
-	// The user sends it on; the agent works and stops again: judged again, and closed.
+	// The user sends it on; the agent works and stops again: judged and delivered again, still open.
 	time.Sleep(5 * time.Millisecond)
 	runTurn(h, "又改了一处，全部做完了")
-	waitFor(t, "auto done again", func() bool { return todoNow(h, todo.ID).DoneAt != nil })
-	if got := todoNow(h, todo.ID); got.DoneBy != db.DoneByAuto {
+	waitFor(t, "delivered again", func() bool { return js.calls.Load() > calls })
+	if got := todoNow(h, todo.ID); got.DoneAt != nil || got.Check == nil || got.Check.Verdict != "done" {
 		t.Fatalf("todo = %+v", got)
 	}
 
-	// Done by the user: the hub's mark goes.
+	// Done by the user: only this explicit action closes it.
 	patch(`{"done":false}`)
 	if done := patch(`{"done":true}`); done.DoneAt == nil || done.DoneBy != "" || done.DoneReason != "" {
 		t.Fatalf("done by the user = %+v", done)
 	}
 }
 
-// Only tasks opened from a conversation are closed by the hub; done-check judges without writing.
+// Only tasks opened from a conversation are judged for delivery; done-check itself judges without writing.
 func TestTaskDoneSkipAndCheck(t *testing.T) {
 	h, _ := newTaskHub(t)
 	stubJudge(t, h, http.StatusOK, `{"verdict":"waiting","reason":"等审核"}`)
@@ -318,7 +335,7 @@ func TestTaskDoneSkipAndCheck(t *testing.T) {
 func TestTaskDoneReadsTheLatestTurn(t *testing.T) {
 	h, tn := newTaskHub(t)
 	js := stubJudge(t, h, http.StatusOK, `{"verdict":"done","reason":"已合并并发了 TestFlight"}`)
-	todo := startedTask(t, h)
+	startedTask(t, h)
 	tn.mu.Lock()
 	tn.items = []proto.Item{
 		{Kind: proto.KindText, Role: "user", Text: "再把「全部 N」挪到最左边"},
@@ -327,7 +344,7 @@ func TestTaskDoneReadsTheLatestTurn(t *testing.T) {
 	}
 	tn.mu.Unlock()
 	runTurn(h, "挪好了")
-	waitFor(t, "auto done", func() bool { return todoNow(h, todo.ID).DoneAt != nil })
+	waitFor(t, "the delivery judgment", func() bool { return js.calls.Load() > 0 })
 	in, _ := js.input.Load().(string)
 	for _, want := range []string{"这一轮收到的请求（不一定来自用户，不替代原任务）", "iPad 横屏时登录页崩溃", "全部 N", "构建号 202611040923", "没截图的：Mac"} {
 		if !strings.Contains(in, want) {
@@ -343,7 +360,7 @@ func TestTaskDoneReadsTheLatestTurn(t *testing.T) {
 // A turn the model service cut off (#1516) is no end of the work: the receipt says the task was interrupted (not the
 // error as its summary), nothing judges or closes it, the snapshot and the today card say it waits for the user, and
 // "Retry" tells its agent "continue" once however many taps come in. Once the agent works again the task is in progress, and
-// a turn that ends normally is a done receipt and closes it as before.
+// a turn that ends normally is a done receipt and a new delivery review, not an automatic close.
 func TestTaskInterruptedByAPIError(t *testing.T) {
 	h, tn := newTaskHub(t)
 	js := stubJudge(t, h, http.StatusOK, `{"verdict":"done","reason":"修好了"}`)
@@ -407,7 +424,10 @@ func TestTaskInterruptedByAPIError(t *testing.T) {
 	}
 	time.Sleep(20 * time.Millisecond)
 	m.setSessions([]proto.Session{{SessionID: "s1", Cwd: "/code/app", Agent: "claude", Status: proto.StatusDone, LastText: "修好了，补了测试", UpdatedAt: time.Now()}})
-	waitFor(t, "auto done", func() bool { return todoNow(h, todo.ID).DoneAt != nil })
+	waitFor(t, "the delivery judgment", func() bool { return js.calls.Load() > 0 })
+	if got := todoNow(h, todo.ID); got.DoneAt != nil {
+		t.Fatalf("the judge closed the recovered task: %+v", got)
+	}
 	items, _ = feed(h, "conv1")
 	rb = receiptBody{}
 	_ = json.Unmarshal(items[len(items)-1].Body, &rb)

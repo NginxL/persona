@@ -1,7 +1,4 @@
 import SwiftUI
-#if os(macOS)
-import AppKit
-#endif
 
 /// Every hit region of a worktree shares these commands and the exact host-owned creation target.
 struct WorktreeSidebarMenu: View, Equatable {
@@ -81,11 +78,7 @@ struct WorktreeSidebarMenu: View, Equatable {
                 ForEach(sessions) { session in
                     Menu { agentMenu(session) } label: {
                         Label { Text(session.title).lineLimit(1) } icon: {
-                            #if os(macOS)
-                            menuIcon(session)
-                            #else
                             AgentMark(session)
-                            #endif
                         }
                     }
                 }
@@ -101,20 +94,4 @@ struct WorktreeSidebarMenu: View, Equatable {
         #endif
     }
 
-    #if os(macOS)
-    /// NSHostingMenu extracts an Image's native size, ignoring AgentMark's SwiftUI frame.
-    private func menuIcon(_ session: Session) -> Image {
-        let kind = AgentKind(session)
-        guard let brand = kind.brand, let source = NSImage(named: brand) else {
-            return Theme.Icon.image(Theme.Icon.commandLine)
-        }
-        let size = NSSize(width: Theme.Size.markS, height: Theme.Size.markS)
-        let image = NSImage(size: size, flipped: false) { rect in
-            source.draw(in: rect)
-            return true
-        }
-        image.isTemplate = brand != Theme.Brand.claude
-        return Image(nsImage: image)
-    }
-    #endif
 }

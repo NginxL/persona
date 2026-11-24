@@ -165,6 +165,8 @@ data class AgentModel(
     val description: String? = null,
     /** The concrete model an alias stands for with this launcher's settings (opus → its model id). */
     val resolved: String? = null,
+    /** Other spellings the hub folded into this row; a saved alias selects this row, not a duplicate. */
+    val aliases: List<String> = emptyList(),
     /** What the agent runs when it is given no model: picking it is the same as picking none. */
     @SerialName("default") val isDefault: Boolean = false,
     /** The thinking efforts it takes, weakest first; empty: no effort setting. */

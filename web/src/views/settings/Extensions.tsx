@@ -32,6 +32,7 @@ import { Icon } from "../../ui/icons";
 import { ChannelLink } from "./Channels";
 import { MarketCatalog, MarketItem, Markets, PackMemberRow, UninstallDialog, useInstalledNames } from "./ExtensionMarket";
 import { ExtensionSettingsPage } from "./ExtensionSettingsPage";
+import { ExtensionInfoAccess } from "./ExtensionInfoAccess";
 import { ExtensionUI } from "./ExtensionView";
 import { ExtensionConnectorInbox } from "./HubConnector";
 import { getAuth, listAuthNote, onAuthChange, shownPages, signInAsked, takeSignIn, withAuth, type ExtensionAuth } from "../../lib/extension-auth";
@@ -846,6 +847,8 @@ function ExtensionDetail({ id, manager, onBack: back, headerBack, onPage, onUpgr
           </>}
           information={<>
           <SecretProviderGroups extension={id} users={p.secret_users} rules={p.handoff_rules} editable={editable} onStart={secretStart} onDone={secretDone} />
+          {/* extension trust is the default manager's (docs/web/web.md "Domain spaces"): another manager's page leaves it out */}
+          {!manager && <ExtensionInfoAccess extension={id} editable={editable} />}
           {!!p.depends?.length && (
             <Group title={t("settings-extensions.depends_title")} footer={t("settings-extensions.depends_footer")}>
               {p.depends.map((d) => <Row key={d.id} label={d.name || d.id} hint={d.version}><span className={cx(d.state !== "ok" && "text-orange")}>{dependencyText(d)}</span></Row>)}

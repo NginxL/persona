@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { contextLabel, contextNotes, contextTier, contextTooltip, contextUsage, contextWarn, modelShort, rowDetail } from "./context-usage";
+import { contextLabel, contextTier, contextTooltip, contextUsage, contextWarn, modelShort, rowDetail } from "./context-usage";
+import { contextNotes } from "./context-notes";
 import type { Session } from "./types";
 
 const base: Session = { machine_id: "m", session_id: "s", title: "t", cwd: "/code/weather", status: "idle" };
@@ -58,8 +59,8 @@ describe("rowDetail", () => {
   const now = Date.parse("2026-11-05T12:00:00Z");
   it("lists folder, model, context and age, leaving out what is unknown", () => {
     const s = { ...base, model: "claude-opus-5-5", context_tokens: 78000, context_window: 200000, updated_at: "2026-11-05T11:55:00Z" };
-    expect(rowDetail(s, now).map((p) => p.text)).toEqual(["opus 5.5", "上下文 39%", "5分钟前", "weather"]);
-    expect(rowDetail(s, now)[1]).toMatchObject({ text: "上下文 39%", warn: false, title: "上下文 39%（已用），还剩 61%" });
+    expect(rowDetail(s, now).map((p) => p.text)).toEqual(["上下文 39%", "opus 5.5", "5分钟前", "weather"]);
+    expect(rowDetail(s, now)[0]).toMatchObject({ text: "上下文 39%", warn: false, title: "上下文 39%（已用），还剩 61%" });
     expect(rowDetail(base, now).map((p) => p.text)).toEqual(["weather"]);
   });
   it("marks a nearly full window", () => {

@@ -152,7 +152,7 @@ class TriageCloseoutAskShotsTest {
         assertFalse("default and large text must render differently", default.sameAs(large))
 
         val layouts = mutableListOf<TextLayoutResult>()
-        rule.onNodeWithText("Ask for the status afterwards", useUnmergedTree = true).fetchSemanticsNode()
+        val _ = rule.onNodeWithText("Ask for the status afterwards", useUnmergedTree = true).fetchSemanticsNode()
             .config[SemanticsActions.GetTextLayoutResult].action!!(layouts)
         assertCompleteSingleLineTitle(layouts.single())
     }
@@ -170,7 +170,7 @@ class TriageCloseoutAskShotsTest {
         assertFalse("default and large text must render differently", default.sameAs(large))
 
         val layouts = mutableListOf<TextLayoutResult>()
-        rule.onNodeWithText("事后问一次进展", useUnmergedTree = true).fetchSemanticsNode()
+        val _ = rule.onNodeWithText("事后问一次进展", useUnmergedTree = true).fetchSemanticsNode()
             .config[SemanticsActions.GetTextLayoutResult].action!!(layouts)
         val title = layouts.single()
         assertCompleteSingleLineTitle(title)

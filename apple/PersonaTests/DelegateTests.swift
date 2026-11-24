@@ -308,9 +308,12 @@ struct DelegateTests {
         let handed = WatchInteractions.leavingMuted([card()])
         #expect(WatchInteractions.newOnes(in: handed, alreadyShown: []).map(\.id) == ["ix_1"])
         #expect(WatchInteractions.newOnes(in: handed, alreadyShown: handed).isEmpty)
-        // Only questions are delegated: a permission card marked so still shows.
+        // A permission card marked so is one its task's supervisor holds (`supervisorHeld`): off the watch too, which
+        // would answer it with a tap; handed over, it shows.
         var permission = card(delegating: true)
         permission.kind = .permission
+        #expect(WatchInteractions.leavingMuted([permission]).isEmpty)
+        permission.delegating = nil
         #expect(WatchInteractions.leavingMuted([permission]).map(\.id) == ["ix_1"])
     }
 }

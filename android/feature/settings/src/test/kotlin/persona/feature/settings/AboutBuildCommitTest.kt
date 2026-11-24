@@ -118,7 +118,7 @@ class AboutBuildCommitTest {
     private fun lines(node: SemanticsNodeInteraction): Int {
         val results = mutableListOf<TextLayoutResult>()
         val semantics: SemanticsNode = node.fetchSemanticsNode()
-        semantics.config[SemanticsActions.GetTextLayoutResult].action?.invoke(results)
+        val _ = semantics.config[SemanticsActions.GetTextLayoutResult].action?.invoke(results)
         return results.single().lineCount
     }
 

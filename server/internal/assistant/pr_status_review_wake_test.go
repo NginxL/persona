@@ -53,13 +53,15 @@ func TestPRReviewWakeBoundWait(t *testing.T) {
 			sends := len(sentToAgent(f))
 			s.deploy.forge = &statusForge{status: reviewWakeStatus(t, source, at.Add(time.Second), at.Add(2*time.Second))}
 			s.sweepPRStatuses(ctx, at.Add(2*time.Second))
+			wokeBy := wakeBound(at.Add(2 * time.Second))
 			cur := todoNow(s, task.ID)
 			if cur.DoneAt != nil || cur.Supervision.State != reviewPending || cur.Supervision.Parked != nil ||
 				!slices.Equal(pendingKinds(s, task.ID), []string{sigReview}) {
 				t.Fatalf("the bound change request did not return to review: %+v; signals %v", cur, pendingKinds(s, task.ID))
 			}
+			reviews := requireParkEnded(t, before.Supervision, cur.Supervision.Reviews, wokeBy)
 			if cur.Supervision.Supervisor != before.Supervision.Supervisor ||
-				!reflect.DeepEqual(cur.Supervision.Reviews, before.Supervision.Reviews) || len(sentToAgent(f)) != sends {
+				!reflect.DeepEqual(reviews, before.Supervision.Reviews) || len(sentToAgent(f)) != sends {
 				t.Fatal("the observation changed history, supervisor or sent an Agent instruction")
 			}
 			if name == "earlier PR while another is open" && (cur.PRURL == source || cur.PRStatus.State != "open") {
@@ -199,10 +201,13 @@ func TestPRReviewWakeRejectsReplacedWait(t *testing.T) {
 				t.Fatal("a request captured before this park resolved it")
 			}
 			s.sweepPRStatuses(ctx, now.Add(deployRecheck))
+			wokeBy := wakeBound(now.Add(deployRecheck))
 			cur := todoNow(s, task.ID)
-			if cur.Supervision.State != reviewPending || !pendingReviewSignal(s, task.ID) ||
-				!reflect.DeepEqual(cur.Supervision.Reviews, before.Supervision.Reviews) {
+			if cur.Supervision.State != reviewPending || !pendingReviewSignal(s, task.ID) {
 				t.Fatal("a fresh observation failed to resolve the same recorded wait")
+			}
+			if !reflect.DeepEqual(requireParkEnded(t, before.Supervision, cur.Supervision.Reviews, wokeBy), before.Supervision.Reviews) {
+				t.Fatal("a fresh observation rewrote the recorded wait's history")
 			}
 		})
 	}
@@ -273,6 +278,7 @@ func TestPRReviewWakePersistsAndRecovers(t *testing.T) {
 	}
 	again.deploy.forge = &statusForge{status: status}
 	again.sweepPRStatuses(ctx, at.Add(2*deployRecheck))
+	wokeBy := wakeBound(at.Add(2 * deployRecheck))
 	cur := todoNow(again, task.ID)
 	beforeHistory, err := json.Marshal(before.Supervision.Reviews)
 	if err != nil {
@@ -283,12 +289,17 @@ func TestPRReviewWakePersistsAndRecovers(t *testing.T) {
 		t.Fatal(err)
 	}
 	if cur.DoneAt != nil || cur.Supervision.State != reviewPending ||
-		string(afterHistory) != string(beforeHistory) ||
 		cur.Supervision.Supervisor != before.Supervision.Supervisor ||
 		!slices.Equal(pendingKinds(again, task.ID), []string{sigReview}) {
 		t.Fatalf("the saved review did not recover through the same wait: state=%s closed=%v supervisor=%q/%q signals=%v; history=%s/%s",
 			cur.Supervision.State, cur.DoneAt != nil, cur.Supervision.Supervisor, before.Supervision.Supervisor,
 			pendingKinds(again, task.ID), afterHistory, beforeHistory)
+	}
+	if afterHistory, err = json.Marshal(requireParkEnded(t, before.Supervision, cur.Supervision.Reviews, wokeBy)); err != nil {
+		t.Fatal(err)
+	}
+	if string(afterHistory) != string(beforeHistory) {
+		t.Fatalf("the recovered wake rewrote the saved review's history: %s/%s", afterHistory, beforeHistory)
 	}
 	again.sweepPRStatuses(ctx, at.Add(3*deployRecheck))
 	if !slices.Equal(pendingKinds(again, task.ID), []string{sigReview}) {

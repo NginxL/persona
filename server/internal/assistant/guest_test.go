@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/nwverse/persona/server/internal/modelhttp"
 	"github.com/nwverse/persona/server/internal/proto"
 )
 
@@ -340,7 +341,8 @@ func TestGuestConversationContextAndSends(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(params) != 4 || params["text"] != "more" || params["is_main"] != false || params["supervision_instructions"] != "" || params["origin_known"] != true {
+	if len(params) != 5 || params["text"] != "more" || params["is_main"] != false || params["supervision_instructions"] != "" || params["origin_known"] != true ||
+		params["model_source"] != (modelhttp.Source{Role: "main", Session: "g1"}) {
 		t.Fatalf("a guest's send params: %v", params)
 	}
 }

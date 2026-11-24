@@ -71,7 +71,7 @@ const render = async (todos: Todo[], sessions: Record<string, Session[]> = {}) =
 const section = (name: string) => host.querySelector<HTMLElement>(`[data-testid="todo-section"][data-section="${name}"]`);
 const summary = () => host.querySelector("[data-testid=todos-summary]")?.textContent;
 const summaryFor = (open: number, parked: number, done: number) =>
-  t("todos.summary_triage", { open, parked, shelved: 0, done });
+  t("todos.summary_triage", { open, parked, shelved: 0, done, cancelled: 0 });
 const task = (id: string, fields: Partial<Todo> = {}): Todo => ({
   id,
   title: `Independent task ${id}`,

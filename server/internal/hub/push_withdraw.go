@@ -74,13 +74,15 @@ func (p *Pusher) sendCard(manager string, policy pushPolicy, build localized, id
 		return ""
 	}
 	policy.manager = manager
-	if policy.level != assistantwire.LevelP0 {
+	if policy.level != assistantwire.LevelP0 || p.attentionNow().Active() {
 		// Extract before applyPushGrading's mode check too: enabling push grading between checks must not hold a source-less card.
+		// An immersive block lets through the cards of the session in focus, which it knows by the source.
 		policy = pushPolicyWithSource(policy, build(i18n.Default))
 	}
 	if allow, reason := p.applyPushGrading(policy); !allow {
 		return reason
 	}
+	rule = p.hushRule(rule) // quiet mode: without a sound on every device (push_attention.go)
 	p.sendFromTo(manager, build, cardCollapseID(manager, id), wants, rule, only, func(d Device) {
 		if hasFeature(d, featureWithdraw) {
 			p.cardPushedTo(id, d.DeviceID)

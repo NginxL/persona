@@ -309,9 +309,6 @@ class ManualWorkflowTests(unittest.TestCase):
         # One base per run: the guards check the commit path selection resolved, not a second origin/main.
         self.assertEqual(run[0]['env'], {'CI_BASE_SHA': '${{ needs.changes.outputs.base }}'})
         self.assertEqual(jobs['changes']['outputs']['base'], '${{ steps.base.outputs.base }}')
-        # The commit privacy range and the migration freeze read the base, so the guards need full history.
-        checkout = next(step for step in guards['steps'] if step.get('uses') == 'actions/checkout@v4')
-        self.assertEqual(checkout['with'], {'fetch-depth': '0', 'persist-credentials': 'false'})
         self.assertNotIn('guards.sh', str(jobs['changes']['steps']))
         for name in platforms:
             with self.subTest(platform=name):
@@ -332,6 +329,19 @@ class ManualWorkflowTests(unittest.TestCase):
         imported = {alias.name for node in ast.walk(tree) if isinstance(node, (ast.Import, ast.ImportFrom))
                     for alias in node.names}
         self.assertEqual(imported, {'json', 'os', 'sys'}, 'a shallow checkout has no history for git or subprocesses')
+
+    def test_history_checkouts_fetch_file_contents_only_at_the_tip(self):
+        # Path selection, the guards (commit privacy range, migration freeze, ratchets) and the scripts shards read
+        # history and the base, but only a few files at the base: a blobless clone of every branch and tag, with each
+        # blob a check reads at the base fetched on demand, skips the screenshot branches' contents (#12753).
+        root = Path(__file__).resolve().parents[2]
+        ci = yaml.load((root / '.github/workflows/ci.yml').read_text(), Loader=yaml.BaseLoader)['jobs']
+        scripts = yaml.load((root / '.github/workflows/scripts-tests.yml').read_text(), Loader=yaml.BaseLoader)['jobs']
+        for name, job in (('changes', ci['changes']), ('guards', ci['guards']), ('scripts', scripts['scripts'])):
+            with self.subTest(job=name):
+                checkout = next(step for step in job['steps'] if step.get('uses') == 'actions/checkout@v4')
+                self.assertEqual(checkout['with'],
+                                 {'fetch-depth': '0', 'filter': 'blob:none', 'persist-credentials': 'false'})
 
     def test_standalone_scripts_checkout_can_merge_base_origin_main(self):
         root = Path(__file__).resolve().parents[2]
@@ -574,7 +584,7 @@ class AppleWorkflowTests(unittest.TestCase):
     def test_reusable_lane_uses_quoted_environment_not_script_interpolation(self):
         root = Path(__file__).resolve().parents[2]
         workflow = (root / '.github/workflows/apple-test.yml').read_text()
-        self.assertIn('options: [ios, ios18, ios-build, packages, ios-focused, ios-regressions, ios-ipad-diagnostic]', workflow)
+        self.assertIn('options: [ios, ios18, ios-build, packages, ios-focused, ios-regressions, ios-model-picker, ios-ipad-diagnostic]', workflow)
         self.assertIn("if: github.event_name == 'workflow_dispatch' && inputs.lane == 'ios18'", workflow)
         floor = workflow.split('\n  ios18:\n', 1)[1]
         for required in ('runs-on: macos-15', '/Applications/Xcode_26.3.app/Contents/Developer',

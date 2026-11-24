@@ -25,6 +25,16 @@ MOCK_TODO_VIEW=late   as 1, except the hello names todo_view and todo_places onl
 MOCK_TODO_MANAGERS=2  the Weather App's to-dos are the second manager's (the first other one the roster lists, which
                       has the MacBook where their runs are): every row is stamped with its manager, the counts are
                       added up and the places merged as the hub merges them (server/internal/hub/todo_view.go).
+Send receipts         (docs/protocol/protocol.md "Message feedback (#5258)") under every mode the hello carries
+                      message_send_state: 1, and under 1 and late also todo_send_state: 1, as the hub writes them. A
+                      session's message with a client_msg_id says message_send_state processing to the session's
+                      subscribers before it is relayed, then delivered, kept, failed or unknown as it is answered; a
+                      message on a to-do's conversation route (served with MOCK_TASKS=1) with X-Persona-Op-Id says
+                      todo_send_state the same way to the full devices that declared it (client_hello or ?features=;
+                      not under old). Only the request that claimed the id says anything: the same op id waits up to 10 s for
+                      the first answer and gets it back (202 {"state": "pending"} after that), the same client_msg_id
+                      waits for the first answer, and an op id that is not a UUID is 400. MOCK_SEND_DELAY_MS holds
+                      the to-do's message as long as a session's.
 GET /mock/churn?todos=1[&n=20&ms=3000]  n times, ms apart, the newsletter's working line moves on and `todos` is
                       pushed, for measuring a push's cost on the list (/mock/churned counts the rounds).
 GET /mock/todo-view   the mode, whether the hello names the view now, the late phase and the managers.
@@ -59,6 +69,7 @@ import copy
 import hashlib
 import json
 import os
+import re
 import socket
 import sys
 import threading
@@ -84,14 +95,17 @@ PLAN_CARD = "ix_todo_widget_plan"
 
 HELP = ["MOCK_TODO_VIEW=1|old|late  the To-dos view from the design prototype's to-dos (#10465, "
         "scripts/mock/todo_view_mock.py): rows with view, counts and an ETag, the item and places routes, Someday and "
-        "restore, today's answers to its asks; old: a hub from before it (405); late: the hello names it only after a "
-        "reconnect (MOCK_TODO_VIEW_LATE_SECONDS apart, default 5; /mock/reset starts it again)",
+        "restore, today's answers to its asks, and the send receipts (message_send_state, and except under old "
+        "todo_send_state under X-Persona-Op-Id, with the hello's markers); old: a hub from before it (405); late: the "
+        "hello names it only after a reconnect (MOCK_TODO_VIEW_LATE_SECONDS apart, default 5; /mock/reset starts it "
+        "again)",
         "MOCK_TODO_MANAGERS=2  with MOCK_TODO_VIEW: the Weather App's to-dos are a second manager's (stamped rows, "
         "counts added up, places merged)"]
 
 _hub = {}  # mock_hub.py's globals (install)
 _state = {"phase": 0, "late_run": 0, "churn": 0, "bases": {}, "homes": {}, "order": [], "owners": {}, "legacy": {},
-          "settles": {}, "answers": {}, "sessions": {}, "card": None, "seen_hours": 0.0}
+          "settles": {}, "answers": {}, "sessions": {}, "card": None, "seen_hours": 0.0, "ops": {}, "flying": {},
+          "taken": set()}
 
 
 def stamp(t):
@@ -842,12 +856,179 @@ def retry(h, tid):
     return h.send_json({"todo": item(tid, datetime.now(timezone.utc))})
 
 
+# ---------- send receipts (#10465; docs/protocol/protocol.md "Message feedback (#5258)") ----------
+
+ROUTE = re.compile(r"/api/v1/assistant/conversations/[^/]+/route")
+SESSION_SEND = re.compile(r"/api/v1/sessions/([^/]+)/([^/]+)/messages")
+UUID = re.compile(r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}")
+_flights = threading.Lock()
+
+
+class Flight:
+    """One claimed write: a repeat of its id waits for its answer, as the hub's withClientOp and send flight do."""
+
+    def __init__(self):
+        self.done = threading.Event()
+        self.answer = None  # (status, body), once answered
+
+
+def join(flights, key, taken=()):
+    """(key's flight, whether this request claimed it); (None, False) for a key already taken."""
+    with _flights:
+        if key in taken:
+            return None, False
+        if key in flights:
+            return flights[key], False
+        flight = flights[key] = Flight()
+        return flight, True
+
+
+def receipt_versions():
+    """The hello's receipt markers, which only the hub writes (server/internal/hub/hello.go): message_send_state on
+    every hub since #5258, todo_send_state from #11080 on, so none under old."""
+    return {"message_send_state": 1} if MODE == "old" else {"message_send_state": 1, "todo_send_state": 1}
+
+
+def receipt(kind, state, **ids):
+    return dict({"type": kind}, **ids, state=state, at=datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"))
+
+
+def to_full_wanting(event):
+    """To the full devices that declared todo_send_state in client_hello or the socket's ?features= (the hub's
+    toFullWanting and client.wants)."""
+    with _hub["FAULT_LOCK"]:
+        sends = [c["send"] for c in _hub["CLIENTS"].values()
+                 if c.get("role") == "full" and "todo_send_state" in c["features"] | c.get("asked", set())]
+    for send in sends:
+        try:
+            send(dict(event))
+        except Exception:  # the socket went meanwhile
+            pass
+
+
+def to_subscribers(sid, event):
+    """To the sockets subscribed to the session (the hub's toSubscribers)."""
+    for send, subscribed in list(_hub["LIVE"]):
+        if sid in subscribed:
+            try:
+                send(dict(event))
+            except Exception:  # the socket went meanwhile
+                pass
+
+
+def todo_outcome(status, answer):
+    """How a to-do write ended, read as the hub reads its relay (todo_receipts.go todoSendOutcome): failed only when
+    nothing was taken."""
+    answer = answer if isinstance(answer, dict) else {}
+    if 200 <= status < 300:
+        return "delivered"
+    if answer.get("delivered") == "none" or answer.get("code") == "assistant_offline":
+        return "failed"
+    if not answer.get("delivered") and status in (400, 401, 403, 404):
+        return "failed"
+    return "unknown"
+
+
+def message_outcome(status, answer):
+    """How a session's message ended (send.go messageSendState)."""
+    answer = answer if isinstance(answer, dict) else {}
+    if status == 200:
+        return "delivered"
+    if status == 202 and answer.get("delivered") == "later":
+        return "kept"
+    return "unknown" if answer.get("delivered") == "unknown" else "failed"
+
+
+def answered(h, then):
+    """then(status, answer) as this request is answered, just before the answer goes out."""
+    own, request = h.send_json, h.requestline
+
+    def send_json(obj, status=200, *args, **kw):
+        h.__dict__.pop("send_json", None)  # this request only: a kept-alive connection's next one answers as before
+        if h.requestline == request:
+            then(status, obj)
+        return own(obj, status, *args, **kw)
+
+    h.send_json = send_json
+
+
+def receipts(h, path):
+    """Processing at once, before mock_hub.py relays the write, and its final state as it is answered:
+    todo_send_state for a message on a to-do's conversation route under X-Persona-Op-Id (the hub's todo_route
+    receipt), and message_send_state for a session's message with a client_msg_id (the hub's send flight). Only the
+    request that claimed the id says anything: the same op id waits up to 10 s for the first answer and gets it back,
+    or 202 pending (withClientOp), with nothing done again; the same client_msg_id in flight waits for the first answer,
+    and once taken mock_hub.py answers it as sent. What the hub refuses before it claims the id says nothing: an op id
+    that is not a UUID (400), a read-only device's message to a to-do (403). MOCK_SEND_DELAY_MS holds the to-do's
+    message as long as a session's. The asks route is not served here (no todo_asks), so it gets none. True when the
+    request was answered here."""
+    body = body_of(h) or {}
+    op = (h.headers.get("X-Persona-Op-Id") or "").lower()
+    if ROUTE.fullmatch(path) and op and MODE != "old":
+        if not UUID.fullmatch(op):
+            return h.send_json({"error": "operation id must be a UUID"}, 400) or True
+        flight, claimed = join(_state["ops"], op)
+        if not claimed:
+            if not flight.done.wait(10):
+                return h.send_json({"state": "pending"}, 202) or True
+            status, answer = flight.answer
+            return h.send_json(answer, status) or True
+        todo = body.get("todo_id") if isinstance(body.get("todo_id"), str) else ""
+
+        def then(status, answer):
+            flight.answer = (status, answer)
+            flight.done.set()
+            if todo:  # the hub says nothing of a write that names no to-do
+                to_full_wanting(receipt("todo_send_state", todo_outcome(status, answer), todo_id=todo, client_op_id=op))
+
+        if todo:
+            to_full_wanting(receipt("todo_send_state", "processing", todo_id=todo, client_op_id=op))
+            time.sleep(int(os.environ.get("MOCK_SEND_DELAY_MS") or 0) / 1000)
+        answered(h, then)
+        return False
+    m = SESSION_SEND.fullmatch(path)
+    msg = body.get("client_msg_id")
+    if not (m and isinstance(msg, str) and msg):
+        return False
+    if body.get("todo_id") and _hub["is_read_only"](h):
+        return False  # refused before the hub's send flight (send.go)
+    flight, claimed = join(_state["flying"], msg, _state["taken"])
+    if flight is None:  # taken: mock_hub.py answers it as sent, as the hub's kept flight does
+        return False
+    if not claimed:  # the hub's send flight: the first answer, as long as the send takes
+        flight.done.wait(600)
+        status, answer = flight.answer or (502, {"error": "the first send never answered", "delivered": "unknown"})
+        return h.send_json(answer, status) or True
+    mid, sid = unquote(m[1]), unquote(m[2])
+
+    def said(state):
+        return receipt("message_send_state", state, machine_id=mid, session_id=sid, client_msg_id=msg)
+
+    def then(status, answer):
+        state = message_outcome(status, answer)
+        flight.answer = (status, answer)
+        with _flights:
+            if state != "failed":  # nothing typed: the same id may go again
+                _state["taken"].add(msg)
+            if _state["flying"].get(msg) is flight:
+                del _state["flying"][msg]
+        flight.done.set()
+        to_subscribers(sid, said(state))
+
+    to_subscribers(sid, said("processing"))
+    answered(h, then)
+    return False
+
+
 def reset():
     """/mock/reset, before mock_hub.py puts the to-dos back: the answers, the churn, the runs' sessions and the Widget's
-    plan card as they started, and under late the hellos from the start of their sequence."""
+    plan card as they started, no send receipts kept, and under late the hellos from the start of their sequence."""
     _state["churn"] = 0
     _state["seen_hours"] = 0.0
     _state["answers"].clear()
+    _state["ops"].clear()
+    _state["flying"].clear()
+    _state["taken"].clear()
     first = _state["sessions"]
     _hub["SESSIONS"][:] = [copy.deepcopy(first[s["session_id"]]) if s["session_id"] in first else s
                            for s in _hub["SESSIONS"] if s["session_id"] != RETRIED]
@@ -861,6 +1042,8 @@ def reset():
 
 def route(h, method, path):
     """The routes above; False for anything else, which mock_hub.py answers."""
+    if method == "POST" and receipts(h, path):
+        return True
     if method == "GET" and path == "/mock/todo-view":
         hours = parse_qs(urlparse(h.path).query).get("seen_hours")
         if hours:
@@ -1016,7 +1199,9 @@ def install(hub):
          "updated": c.at(0, 9, 0), "extra": "short · active"}
         for pid, name, line_ in (("kyoto", "Kyoto trip", "Apr 3–9, two of us, a ryokan near Gion"),
                                  ("weather", "Weather App", "1.3 ships Friday with the new forecast view"),
-                                 ("home", "Home", "The house, the car and the school")))
+                                 ("home", "Home", "The house, the car and the school"),
+                                 # no to-dos: a project's place with nothing open (its empty state)
+                                 ("garden", "Garden", "Spring planting and the new beds")))
     by_id = {t["id"]: t for t in rows}
     _state.update(order=[t["id"] for t in rows], legacy=legacy, settles=settles, card=card,
                   owners={t["id"]: t.get("project") for t in rows if not t.get("part_of")},
@@ -1030,6 +1215,7 @@ def install(hub):
         return f + [x for x in ("todo_view", "todo_places") if x not in f] if listed() else f
 
     hub["features"] = features
+    hub["send_state_hello"] = receipt_versions
     if MODE == "late":
         start_late()
     return True

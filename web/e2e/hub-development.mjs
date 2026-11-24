@@ -54,7 +54,7 @@ async function open(width, theme, textSize, mode = 'available') {
 try {
   // Actual supported Web maximum is Large (14/13), not an iOS Dynamic Type category.
   for (const width of [1440, 390]) for (const theme of ['light', 'dark']) for (const size of ['standard', 'large']) {
-    const { context, page, shot } = await open(width, theme, size);
+    const { context, page, shot } = await open(width, theme, size, 'multi-assistant');
     const tag = `${width}-${theme}-${size}`;
     assert.match(await page.locator('[data-settings-group="hub-version"]').innerText(), /2026-11-13 · a{12}/);
     assert.match(await page.locator('[data-settings-group="hub-version"]').innerText(), /2026-11-14 · b{12}/);
@@ -67,6 +67,21 @@ try {
       for (let p = el.parentElement; p; p = p.parentElement) if (p.scrollHeight > p.clientHeight && /auto|scroll/.test(getComputedStyle(p).overflowY)) { p.scrollTop -= 80; break; }
     });
     await shot(tag + '-options');
+    const computers = page.locator('[data-settings-group="hub-nodes"]');
+    const desk = computers.getByRole('button', { name: /Desk computer/ });
+    const lab = computers.getByRole('button', { name: /Lab computer/ });
+    const travel = computers.getByRole('button', { name: /Travel computer/ });
+    await computers.getByText('Managed by Studio · Built locally by the assistant', { exact: true }).waitFor();
+    assert.match(await desk.innerText(), /Managed by Example assistant · Package from hub/);
+    assert.match(await desk.innerText(), /Transferring/);
+    assert.match(await lab.innerText(), /Waiting for idle/);
+    const installed = lab.getByText('web-dev-cccccccccccc-202611120001', { exact: true });
+    assert.equal(await installed.evaluate(el => el.scrollWidth > el.clientWidth), false, 'The installed build fits at this text size');
+    assert.match(await travel.innerText(), /Last deploy failed: Go is unavailable/);
+    assert.match(await travel.innerText(), /Install Go on the computer running Studio/);
+    assert.doesNotMatch(await travel.innerText(), /Package from hub|Built locally by the assistant/);
+    await computers.evaluate(el => el.scrollIntoView({ block: 'center' }));
+    await shot(tag + '-computers');
     await context.close();
   }
   {

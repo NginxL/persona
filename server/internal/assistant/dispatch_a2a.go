@@ -23,7 +23,7 @@ func (s *Service) dispatchTasks(ctx context.Context, ref a2aRef) ([]dispatchTask
 		return tasks, false, nil
 	}
 	cfg := s.a2aConfig(ctx)
-	if !s.a2aAllowed(ctx, cfg, ref) {
+	if !s.a2aToolAllowed(ctx, cfg, ref) {
 		return tasks, false, nil
 	}
 	caller := a2aSessionCaller(ref)
@@ -67,10 +67,10 @@ func (s *Service) admitDispatchA2A(ctx context.Context, from a2aRef, target, req
 			row, err := decodeA2A(st.A2ARequest(ctx, caller.Owner, requestID))
 			if row != nil || err != nil {
 				cfg := s.a2aConfig(ctx)
-				if !s.a2aAllowed(ctx, cfg, from) || row != nil && !s.a2aAllowed(ctx, cfg, row.target()) {
+				if !s.a2aToolAllowed(ctx, cfg, from) || row != nil && !s.a2aTaskEndpointAllowed(ctx, cfg, row.target(), row) {
 					return nil, false, errA2AUnavailable
 				}
-				launch.Dispatch = true
+				launch.Dispatch, launch.Subagent = true, true
 				row, err := a2aCheckRetry(row, err, a2aRef{Machine: target}, "", prompt, true, &launch)
 				return &dispatchA2AStart{store: st, task: row}, true, err
 			}
@@ -120,7 +120,7 @@ func (s *Service) prepareDispatchA2A(ctx context.Context, from a2aRef, target, r
 	caller := a2aSessionCaller(from)
 	to := a2aRef{target, newStartSessionID()}
 	cfg := s.a2aConfig(ctx)
-	if !s.a2aAllowed(ctx, cfg, from) || !s.a2aAllowed(ctx, cfg, to) {
+	if !s.a2aToolAllowed(ctx, cfg, from) || !s.a2aEndpointAllowed(ctx, cfg, to, true) {
 		return nil, false, errA2AUnavailable
 	}
 	if requestID == "" {
@@ -129,7 +129,7 @@ func (s *Service) prepareDispatchA2A(ctx context.Context, from a2aRef, target, r
 	if !a2aValidID(requestID) {
 		return nil, false, errA2AInvalid
 	}
-	launch.Dispatch, launch.Pending = true, true
+	launch.Dispatch, launch.Pending, launch.Subagent = true, true, true
 	now := time.Now().UTC()
 	task := &a2aTask{
 		A2ARow: db.A2ARow{ID: randomHex(16), Owner: caller.Owner, Request: requestID, Context: randomHex(16),
@@ -146,6 +146,7 @@ func (s *Service) prepareDispatchA2A(ctx context.Context, from a2aRef, target, r
 	if err != nil {
 		return nil, false, err
 	}
+	s.recordA2ASubagent(row)
 	return &dispatchA2AStart{store: st, task: row}, row.ID != task.ID, nil
 }
 

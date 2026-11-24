@@ -388,3 +388,32 @@ func assertClusterSeams(t *testing.T, clusters []string, fenced bool) {
 		}
 	}
 }
+
+func TestSplitInlineBacktickSpanAtLineStartIsNotAFence(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		lead string
+	}{
+		{"triple-backtick span at column zero", "```inline code``` followed by ordinary words"},
+		{"indented four-backtick span", "  ````a `b` c```` followed by ordinary words"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			text := tc.lead + "\n" + strings.Repeat("more plain prose on its own line\n", 6) + "final line"
+			parts := Split(text, 70)
+			if len(parts) < 3 {
+				t.Fatalf("got %d pieces, want >= 3", len(parts))
+			}
+			for i, p := range parts {
+				if l := len([]rune(p)); l > 70 {
+					t.Fatalf("piece %d has %d runes, want <= 70", i, l)
+				}
+				if i > 0 && (strings.HasPrefix(p, "`") || strings.HasSuffix(p, "`")) {
+					t.Fatalf("piece %d injected synthetic fence around prose: %q", i, p)
+				}
+			}
+			if got := strings.Join(parts, "\n"); got != text {
+				t.Fatalf("Split corrupted prose after inline backtick span:\n got %q\nwant %q", got, text)
+			}
+		})
+	}
+}

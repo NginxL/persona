@@ -15,6 +15,7 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.annotation.Config
 import persona.core.designsystem.PersonaTheme
+import persona.core.inbox.*
 
 /**
  * TalkBack names Lark voice and video messages, reads their duration and says a tap plays them (#3904). The name sits

@@ -1,7 +1,5 @@
 import SwiftUI
-#if canImport(UIKit)
 import UIKit
-#endif
 
 /// Settings › About's Developing Persona group (#9460, docs/operations/developing-persona.md): the switch, and while
 /// it is on, how much is recorded and the way to export it. Turning it off with something recorded asks first and
@@ -201,11 +199,7 @@ struct DevExportPage: View {
 
     private var details: String {
         let size = dev.size.map(DevModeSection.bytes) ?? "–"
-        #if canImport(UIKit)
         let system = "\(UIDevice.current.systemName) \(UIDevice.current.systemVersion)"
-        #else
-        let system = ProcessInfo.processInfo.operatingSystemVersionString
-        #endif
         return String(localized: "About \(size) · zip · \(system)")
     }
 

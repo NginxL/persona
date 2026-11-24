@@ -45,6 +45,13 @@ func newFixture(t *testing.T, features []string, handler http.HandlerFunc, prefl
 		t.Fatal(err)
 	}
 	f.hub = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// A Persona node on the machine running these tests probes this port too (GET /, User-Agent persona-ports,
+		// node/ports.go; docs/lessons/testing.md). The CLI's requests all go under /mount, so the probe is answered 404
+		// before the authentication check, which it would fail ("wrong authentication for GET", about 1 run in 13).
+		if r.Method == http.MethodGet && r.URL.Path == "/" {
+			http.NotFound(w, r)
+			return
+		}
 		if r.Header.Get("Authorization") != "Bearer "+fixtureToken || r.URL.Query().Has("token") {
 			t.Errorf("wrong authentication for %s", r.Method)
 			w.WriteHeader(http.StatusUnauthorized)
@@ -79,6 +86,25 @@ func newFixture(t *testing.T, features []string, handler http.HandlerFunc, prefl
 	}))
 	t.Cleanup(f.hub.Close)
 	return f
+}
+
+// The fixture hub answers a local node's port probe 404 without failing the test.
+func TestFixtureHubIgnoresPortProbes(t *testing.T) {
+	f := newFixture(t, nil, func(w http.ResponseWriter, r *http.Request) { t.Errorf("a port probe reached the handler: %s", r.URL) })
+	req, err := http.NewRequest(http.MethodGet, f.hub.URL+"/", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("User-Agent", "persona-ports") // node.portProbeAgent
+	req.Header.Set("Accept", "text/html")
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = res.Body.Close()
+	if res.StatusCode != http.StatusNotFound {
+		t.Fatalf("a port probe: HTTP %d, want 404", res.StatusCode)
+	}
 }
 
 func (f fixture) args(command string, flags ...string) []string {

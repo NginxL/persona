@@ -21,6 +21,7 @@ import persona.core.designsystem.PersonaTheme
 import persona.core.domain.inbox.InboxItem
 import persona.core.navigation.AppTab
 import persona.core.navigation.Navigator
+import persona.core.inbox.*
 
 /** Regression coverage for compatibility and locale boundaries not exercised by the changed tests. */
 @RunWith(AndroidJUnit4::class)

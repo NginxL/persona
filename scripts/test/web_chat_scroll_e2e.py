@@ -14,6 +14,10 @@ installed Chrome, or the browser PERSONA_E2E_CHROMIUM points at):
     (cd web && PERSONA_HUB_URL=http://127.0.0.1:18792 npx vite --port 5292 --strictPort &)
     python3 scripts/test/web_chat_scroll_e2e.py http://127.0.0.1:5292 [--hub http://127.0.0.1:18792] [--shots <dir>]
 
+    # The same checks with deferred bodies already active, including the upward pages:
+    MOCK_TASKS=1 MOCK_LONG_ASSISTANT=1 MOCK_LONG_HISTORY=90 PORT=18792 python3 scripts/mock/mock_hub.py &
+    python3 scripts/test/web_chat_scroll_e2e.py http://127.0.0.1:5292 --hub http://127.0.0.1:18792 --windowed
+
 Finished exchanges before the last two skip drawing while off screen (#2485): in the agent chat, what is on screen
 holds still while they are drawn on the way up, the browser's find reaches their words, and a rail jump and a search
 jump land on their row and stay there.
@@ -28,6 +32,7 @@ resets the fake hub).
 import argparse
 import json
 import os
+import re
 import sys
 import urllib.parse
 import urllib.request
@@ -152,7 +157,8 @@ def scrolled_up_stays(page, what):
 
 OFFSCREEN = """() => {
   const cv = [...document.querySelectorAll('[data-chat-scroll] section.seg-cv')];
-  return { cv: cv.length, skipped: cv.filter((s) => !s.firstElementChild?.checkVisibility({ contentVisibilityAuto: true })).length };
+  return { cv: cv.length, skipped: cv.filter((s) => !s.firstElementChild?.checkVisibility({ contentVisibilityAuto: true })).length,
+           placeholders: document.querySelectorAll('[data-chat-scroll] [data-segment-placeholder]').length };
 }"""
 
 # Scrolls up by script, a step a frame; per frame, how far the row at the view's middle moved beyond the step.
@@ -163,7 +169,13 @@ DRIFT = """async () => {
   const probe = () => {
     let el = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
     while (el && el !== sc && el.getBoundingClientRect().height < 4) el = el.parentElement;
-    return el;
+    // Compensating a row above moves scrollTop, so the list wrapper moves relative to the visible rows by design.
+    // Measure the exchange at this point; its section survives both content-visibility and deferred-body mounting.
+    const row = el?.closest('section[data-segment]');
+    if (row) return row;
+    // A gap belongs to the wrapper, not to either exchange. Follow the next row instead of measuring that wrapper.
+    const y = r.top + r.height / 2;
+    return [...sc.querySelectorAll('section[data-segment]')].find((s) => s.getBoundingClientRect().bottom >= y) ?? el;
   };
   let worst = 0, frames = 0;
   while (sc.scrollTop > 0 && frames < 100) {
@@ -195,13 +207,16 @@ HOLDS = """async (sel) => {
 }"""
 
 
-def offscreen_exchanges(page, what):
+def offscreen_exchanges(page, what, windowed=False):
     page.reload()
     at_end(page, what + ", reload")
     s = page.evaluate(OFFSCREEN)
     if s["cv"] < 3 or s["skipped"] < 1:
         fail(f"{what}: earlier exchanges do not skip drawing off screen ({s})")
     ok(f"{what}: {s['skipped']} of {s['cv']} earlier exchanges skip drawing off screen")
+    if bool(s["placeholders"]) != windowed:
+        fail(f"{what}: deferred bodies do not match --windowed={windowed} ({s})")
+    ok(f"{what}: {s['placeholders']} completed bodies wait off screen (windowed={windowed})")
 
     page.locator(SCROLL).hover()
     page.mouse.wheel(0, -200)  # leave the end as a reader does (a script's scroll is not the reader leaving)
@@ -222,12 +237,20 @@ def offscreen_exchanges(page, what):
     ok(f"{what}: the browser's find reaches an exchange that skipped drawing")
 
     tick = page.locator("[data-nav-rail] button").nth(1)
+    # A long history windows the rail too: its second visible tick is not necessarily the second question in the fixture.
+    label = tick.get_attribute("aria-label") or ""
+    match = re.search(r"第 \d+ 个问题", label)
+    if not match:
+        fail(f"{what}: the rail tick has no synthetic question in its label ({label})")
+    question = match.group(0)
     tick.click()
-    page.evaluate("""() => {
-      const b = [...document.querySelectorAll('[data-chat-scroll] [data-user-bubble]')].find((el) => el.textContent.includes('第 2 个问题'));
+    page.wait_for_function("""(question) => [...document.querySelectorAll('[data-chat-scroll] [data-user-bubble]')].some(
+      (el) => el.textContent.includes(question))""", arg=question)
+    page.evaluate("""(question) => {
+      const b = [...document.querySelectorAll('[data-chat-scroll] [data-user-bubble]')].find((el) => el.textContent.includes(question));
       document.querySelectorAll('[data-e2e-row]').forEach((el) => el.removeAttribute('data-e2e-row'));
       b.closest('[data-line] > *').setAttribute('data-e2e-row', '');
-    }""")
+    }""", question)
     h = page.evaluate(HOLDS, "[data-e2e-row]")
     if abs(h["top"] - 12) > 1 or h["spread"] > 1:
         fail(f"{what}: a rail jump left its question {h['top']:.1f} px under the top (12 wanted) or still moving ({h})")
@@ -235,8 +258,8 @@ def offscreen_exchanges(page, what):
 
     page.locator("[data-jump-pill]").click()
     at_end(page, what + ", back to the end again")
-    page.locator("header").get_by_role("button", name="更多操作", exact=True).click()  # the chat's menu, not a message's
-    page.get_by_role("menuitem", name="会话内搜索").click()
+    page.locator("header").get_by_role("button", name=re.compile(r"^(?:More actions|更多操作|その他の操作)$")).click()  # the chat's menu, not a message's
+    page.get_by_role("menuitem", name=re.compile(r"^(?:Search in chat|会话内搜索|会話内を検索)$")).click()
     page.locator("[data-chat-search] input").fill("第 3 个问题")
     page.locator("[data-search-result]").first.click()
     h = page.evaluate(HOLDS, "[data-search-hit]")
@@ -311,7 +334,11 @@ PAGED = """async () => {
   const probe = () => {
     let el = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
     while (el && el !== sc && el.getBoundingClientRect().height < 4) el = el.parentElement;
-    return el;
+    const row = el?.closest('section[data-segment]');
+    if (row) return row;
+    const y = r.top + r.height / 2;
+    return [...sc.querySelectorAll('section[data-segment]')]
+      .find((s) => s.getBoundingClientRect().bottom >= y) ?? el;
   };
   // the page's own scrollTop writes, told apart from this script's
   const own = Object.getOwnPropertyDescriptor(Element.prototype, 'scrollTop');
@@ -342,11 +369,14 @@ PAGED = """async () => {
   } finally {
     delete sc.scrollTop;
   }
-  return { pages: moves.length, worst: Math.max(0, ...moves.map(Math.abs)), moves, segs: count(), shown, written };
+  return { pages: moves.length, worst: Math.max(0, ...moves.map(Math.abs)), moves, segs: count(), shown, written,
+           placeholders: sc.querySelectorAll('[data-segment-placeholder]').length };
 }"""
 
 
-def paged_up_holds(page, what, touch=False):
+def paged_up_holds(page, what, touch=False, windowed=False):
+    if windowed and page.locator("[data-segment-placeholder]").count() < 1:
+        fail(f"{what}: upward paging did not start with deferred bodies")
     if touch:
         # leave the end with a finger (CDP touches, a drag down the chat)
         b = page.locator(SCROLL).bounding_box()
@@ -394,6 +424,7 @@ def main():
     ap.add_argument("--hub")
     ap.add_argument("--shots")
     ap.add_argument("--token", default="mock")
+    ap.add_argument("--windowed", action="store_true", help="require deferred bodies; run the hub with MOCK_LONG_HISTORY=90")
     a = ap.parse_args()
     base = a.base.rstrip("/")
     req = urllib.request.Request(base + "/api/v1/assistant", headers={"Authorization": "Bearer " + a.token})
@@ -443,7 +474,8 @@ def wide(browser, base, a, other):
     page.wait_for_function(f"location.pathname === '/persona/{other['session_id']}'")
     settled(page, "wide another Persona conversation")
     ok("wide: another Persona conversation opens")
-    page.locator('aside a[title="Persona 的主对话"]').click()
+    # The main-chat route is stable across UI languages and optional keyboard-shortcut labels.
+    page.locator('aside a[href="/"]').click()
     page.wait_for_function("location.pathname === '/'")
     at_end(page, "wide sidebar → Persona")
 
@@ -462,24 +494,35 @@ def wide(browser, base, a, other):
     burst_stays(page, "wide agent chat")
     composer_grows(page, "wide agent chat")
     scrolled_up_stays(page, "wide agent chat")
-    offscreen_exchanges(page, "wide agent chat")
+    offscreen_exchanges(page, "wide agent chat", a.windowed)
     if a.shots:
         # without the empty blocks the bursts added
         page.reload()
         at_end(page, "wide agent chat, reload before the screenshot")
     shot(page, a.shots, "wide-agent-light.png")
+    if a.shots:
+        for theme, size in (("dark", "default"), ("light", "large"), ("dark", "large")):
+            set_theme(page, theme)
+            page.evaluate("(size) => size === 'default' ? localStorage.removeItem('persona.text-size') : localStorage.setItem('persona.text-size', size)", size)
+            page.reload()
+            at_end(page, f"wide agent chat, {theme}, {size} text")
+            shot(page, a.shots, f"wide-agent-{theme}{'-large' if size == 'large' else ''}.png")
+        page.evaluate("() => localStorage.removeItem('persona.text-size')")
+        set_theme(page, "light")
+        page.reload()
+        at_end(page, "wide agent chat, restored default appearance")
 
     if a.hub:
         new_exchange_holds(page, a.hub, "wide agent chat")
         # The newest page first, more over a slow network. The long reply stays, so the agent chat's newest page fills
-        # the view and scrolling up asks for the earlier ones.
-        hub_get(a.hub, "/mock/paging?on=1")
+        # the view and scrolling up asks for the earlier ones. Windowed mode starts with 60 turns already loaded.
+        hub_get(a.hub, "/mock/paging?on=1" + ("&first=60" if a.windowed else ""))
         hub_get(a.hub, "/mock/delay?s=0.4")
         page.goto(base + "/")
         at_end(page, "wide / over a slow network, paged")
         page.goto(base + path)
         at_end(page, "wide agent chat over a slow network, paged")
-        paged_up_holds(page, "wide agent chat over a slow network, paged")
+        paged_up_holds(page, "wide agent chat over a slow network, paged", windowed=a.windowed)
         hub_get(a.hub, "/mock/reset")
     ctx.close()
 

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -206,6 +206,47 @@ describe("diff", () => {
     ["gone\tfile.ts", 'diff --git "a/gone\\tfile.ts" "b/gone\\tfile.ts"\ndeleted file mode 100644\n--- "a/gone\\tfile.ts"\n+++ /dev/null\n@@ -1 +0,0 @@\n-gone\n'],
   ])("preserves a rename or deletion chunk for %j", (path, diff) => {
     expect(splitDiff(diff)).toEqual({ [path]: diff });
+  });
+
+  it("preserves unquoted paths containing ' b/' across edits, deletions, binaries and renames", () => {
+    const edited = "diff --git a/docs/part b/guide.md b/docs/part b/guide.md\n--- a/docs/part b/guide.md\t\n+++ b/docs/part b/guide.md\t\n@@ -1 +1,2 @@\n x\n+++ b/not-a-header.md";
+    const deleted = "diff --git a/a b/gone.ts b/a b/gone.ts\ndeleted file mode 100644\n--- a/a b/gone.ts\n+++ /dev/null\n@@ -1 +0,0 @@\n-old";
+    const binary = "diff --git a/assets/set b/logo.png b/assets/set b/logo.png\nnew file mode 100644\nBinary files /dev/null and b/assets/set b/logo.png differ";
+    const renamed = "diff --git a/old.md b/docs/part b/renamed.md\nsimilarity index 100%\nrename from old.md\nrename to docs/part b/renamed.md";
+    const parts = splitDiff([edited, deleted, binary, renamed].join("\n"));
+    expect(Object.keys(parts)).toEqual(["docs/part b/guide.md", "a b/gone.ts", "assets/set b/logo.png", "docs/part b/renamed.md"]);
+    expect(parts["docs/part b/guide.md"]).toBe(edited);
+    expect(parts["a b/gone.ts"]).toBe(deleted);
+    expect(parts["assets/set b/logo.png"]).toBe(binary);
+    expect(parts["docs/part b/renamed.md"]).toBe(renamed);
+  });
+
+  it("maps actual Git-produced headers for names with spaces, which end their ---/+++ lines with a tab", () => {
+    const dir = mkdtempSync(join(tmpdir(), "persona-space-diff-"));
+    const git = (...args: string[]) => {
+      const result = spawnSync("git", ["-c", "core.quotepath=on", "-c", "user.name=t", "-c", "user.email=t@example.com", ...args], { cwd: dir, encoding: "utf8", timeout: 10_000 });
+      expect(result.status, result.stderr).toBe(0);
+      return result.stdout;
+    };
+    const names = ["my file.md", "docs/part b/guide.md", "a b\u00e9.md", "new name.md"];
+    try {
+      git("init", "-q");
+      mkdirSync(join(dir, "docs/part b"), { recursive: true });
+      for (const name of [...names.slice(0, 3), "old name.md"]) writeFileSync(join(dir, name), "one\ntwo\nthree\nfour\n");
+      git("add", "-A");
+      git("commit", "-qm", "base");
+      for (const name of names.slice(0, 3)) writeFileSync(join(dir, name), "one\ntwo\nthree\nfour\nfive\n");
+      git("mv", "old name.md", "new name.md");
+      writeFileSync(join(dir, "new name.md"), "one\ntwo\nthree\nfour\nsix\n");
+      git("add", "-A");
+      const diff = git("diff", "--cached", "-M");
+      expect(diff).toContain("+++ b/my file.md\t\n");
+      const parts = splitDiff(diff);
+      expect(Object.keys(parts).sort()).toEqual([...names].sort());
+      for (const name of names) expect(parseDiff(parts[name]).filter((line) => line.kind === "add").length).toBe(1);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 

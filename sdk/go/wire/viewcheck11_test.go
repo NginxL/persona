@@ -132,39 +132,47 @@ func TestCheckViewSceneShapes(t *testing.T) {
 		},
 		"cylinder with points": {
 			`{"kind":"cylinder","center":[0,0],"radius":0.5,"bottom":0,"top":1,"points":[[0,0],[1,0],[0,1]]}`,
-			"a cylinder has no points, size, yaw or round",
+			"a cylinder has no points, size, yaw, round or wall",
 		},
 		"cylinder with size": {
 			`{"kind":"cylinder","center":[0,0],"radius":0.5,"bottom":0,"top":1,"size":[1,1]}`,
-			"a cylinder has no points, size, yaw or round",
+			"a cylinder has no points, size, yaw, round or wall",
 		},
 		"cylinder with yaw": {
 			`{"kind":"cylinder","center":[0,0],"radius":0.5,"bottom":0,"top":1,"yaw":0}`,
-			"a cylinder has no points, size, yaw or round",
+			"a cylinder has no points, size, yaw, round or wall",
 		},
 		"cylinder with round": {
 			`{"kind":"cylinder","center":[0,0],"radius":0.5,"bottom":0,"top":1,"round":0}`,
-			"a cylinder has no points, size, yaw or round",
+			"a cylinder has no points, size, yaw, round or wall",
+		},
+		"cylinder marked a wall": {
+			`{"kind":"cylinder","center":[0,0],"radius":0.5,"bottom":0,"top":1,"wall":true}`,
+			"a cylinder has no points, size, yaw, round or wall",
+		},
+		"prism marked a wall": {
+			`{"kind":"prism","points":[[0,0],[1,0],[0,1]],"bottom":0,"top":1,"wall":true}`,
+			"a prism has no center, size, yaw, round, radius or wall",
 		},
 		"prism with center": {
 			`{"kind":"prism","points":[[0,0],[1,0],[0,1]],"bottom":0,"top":1,"center":[0,0]}`,
-			"a prism has no center, size, yaw, round or radius",
+			"a prism has no center, size, yaw, round, radius or wall",
 		},
 		"prism with size": {
 			`{"kind":"prism","points":[[0,0],[1,0],[0,1]],"bottom":0,"top":1,"size":[1,1]}`,
-			"a prism has no center, size, yaw, round or radius",
+			"a prism has no center, size, yaw, round, radius or wall",
 		},
 		"prism with yaw": {
 			`{"kind":"prism","points":[[0,0],[1,0],[0,1]],"bottom":0,"top":1,"yaw":0}`,
-			"a prism has no center, size, yaw, round or radius",
+			"a prism has no center, size, yaw, round, radius or wall",
 		},
 		"prism with round": {
 			`{"kind":"prism","points":[[0,0],[1,0],[0,1]],"bottom":0,"top":1,"round":0}`,
-			"a prism has no center, size, yaw, round or radius",
+			"a prism has no center, size, yaw, round, radius or wall",
 		},
 		"prism with radius": {
 			`{"kind":"prism","points":[[0,0],[1,0],[0,1]],"bottom":0,"top":1,"radius":0.5}`,
-			"a prism has no center, size, yaw, round or radius",
+			"a prism has no center, size, yaw, round, radius or wall",
 		},
 		"top equal to bottom": {
 			`{"kind":"box","center":[0,0],"size":[1,1],"bottom":0.4,"top":0.4}`,

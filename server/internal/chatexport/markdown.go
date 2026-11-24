@@ -27,7 +27,7 @@ func visibleItems(items []proto.Item, work, current bool) []proto.Item {
 			}
 		}
 	}
-	visible := items[:0]
+	visible := make([]proto.Item, 0, len(items))
 	for i, item := range items {
 		keep := false
 		switch item.Kind {

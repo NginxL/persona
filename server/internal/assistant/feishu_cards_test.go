@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/nwverse/persona/server/internal/feishubot"
+	"github.com/nwverse/persona/server/internal/botcard"
 	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/proto"
 )
@@ -95,7 +95,7 @@ func TestBotCommandListCardsClipAndFallback(t *testing.T) {
 func TestSwitchBindsPressedCard(t *testing.T) {
 	s, _, _, _ := startCardHub(t)
 	ctx := context.Background()
-	var a feishubot.CardAction
+	var a botcard.CardAction
 	a.Action.Value = map[string]any{"a": "switch", "k": targetAgent, "m": "box", "s": "agent01", "t": "修登录 · box"}
 	a.Context.MessageID = "om_agents"
 	r := s.botCardAction(ctx, &a, "")
@@ -120,7 +120,7 @@ func TestSwitchBindsPressedCard(t *testing.T) {
 func TestStartFormCallbackPostsStartCard(t *testing.T) {
 	s, f, posts, _ := startCardHub(t)
 	ctx := context.Background()
-	var a feishubot.CardAction
+	var a botcard.CardAction
 	a.Action.Value = map[string]any{"a": "start_form"}
 	a.Context.MessageID = "om_agents"
 	r := s.botCardAction(ctx, &a, "")
@@ -178,8 +178,8 @@ func startCardHub(t *testing.T) (*Service, *fakeHub, chan struct{}, chan string)
 	return s, f, posts, says
 }
 
-func startCardAction(mid string) *feishubot.CardAction {
-	var a feishubot.CardAction
+func startCardAction(mid string) *botcard.CardAction {
+	var a botcard.CardAction
 	a.Action.Value = map[string]any{"a": "start"}
 	a.Action.FormValue = map[string]any{"machine": "box", "cwd": "/home/me/work"} // prompt is optional on the card
 	a.Context.MessageID = mid
@@ -364,7 +364,7 @@ func TestStartCardLateFailureKeepsNewerSlot(t *testing.T) {
 // checks the toast the owner gets for it.
 func pressStartForm(t *testing.T, s *Service, mid string) {
 	t.Helper()
-	var a feishubot.CardAction
+	var a botcard.CardAction
 	a.Action.Value = map[string]any{"a": "start_form"}
 	a.Context.MessageID = mid
 	want := i18n.T("", "assistant-feishu_cards.start_form_opening")
@@ -438,7 +438,7 @@ func TestStartFormFailedPostFreesThePress(t *testing.T) {
 }
 
 // cardButtons is every button of a card's button rows (top level), by its text: what pressing it answers.
-func cardButtons(t *testing.T, c *feishubot.Card) map[string]map[string]any {
+func cardButtons(t *testing.T, c *botcard.Card) map[string]map[string]any {
 	t.Helper()
 	var m struct {
 		Body struct {
@@ -532,7 +532,7 @@ func TestFeishuPermissionCardOffersAlwaysOnlyWhereItWorks(t *testing.T) {
 }
 
 // cardMarkdown is a card's first Markdown element: the text it draws first.
-func cardMarkdown(t *testing.T, c *feishubot.Card) string {
+func cardMarkdown(t *testing.T, c *botcard.Card) string {
 	t.Helper()
 	var m struct {
 		Body struct {
@@ -605,10 +605,10 @@ func TestFeishuPlanCardClipClosesItsCodeBlock(t *testing.T) {
 	}
 
 	short := "1. Change `cache.go`\n```go\nx := 1\n```\n2. Test it\n"
-	if md := planCard(short); md != feishubot.CardMarkdown(short) {
+	if md := planCard(short); md != botcard.CardMarkdown(short) {
 		t.Fatalf("a short plan changed: %q", md)
 	}
-	if full := prose(maxPlanRunes); planCard(full) != feishubot.CardMarkdown(full) {
+	if full := prose(maxPlanRunes); planCard(full) != botcard.CardMarkdown(full) {
 		t.Fatal("a plan of exactly maxPlanRunes runes was clipped")
 	}
 	if head, ok := strings.CutSuffix(planCard(strings.Repeat("\n", 6000)), note); !ok || len([]rune(head)) > maxPlanRunes {
@@ -670,7 +670,7 @@ func TestInteractionCardHerdrSessionNames(t *testing.T) {
 		Kind: proto.IxPermission, ToolName: "Bash"}
 	for _, c := range []struct {
 		name string
-		card *feishubot.Card
+		card *botcard.Card
 	}{{"asking", s.interactionCard(ctx, ix)}, {"answered", s.answeredCard(ctx, ix, "允许")}} {
 		h := c.card.Header
 		if h.Title.Content != "Export work" || h.Subtitle == nil || !strings.HasSuffix(h.Subtitle.Content, "CLI session name") {

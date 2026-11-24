@@ -8,7 +8,7 @@ import Testing
 struct ContinuousMotionTests {
     private static let apple = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
     /// The app targets; `Packages/` (BeautifulUI) is a library with its own rules.
-    private static let dirs = ["Persona", "PersonaWatch", "PersonaWidgets", "PersonaWatchWidgets", "LiveActivity",
+    private static let dirs = ["Persona", "Modules", "PersonaWatch", "PersonaWidgets", "PersonaWatchWidgets", "LiveActivity",
                                "Shared", "Vision", "PersonaVisionWidgets", "PersonaLink"]
     private static let loop = try! NSRegularExpression(
         pattern: #"repeatForever|TimelineView\(\.animation|phaseAnimator|repeatCount = \.infinity|startAnimating\(\)"#)
@@ -30,7 +30,6 @@ struct ContinuousMotionTests {
         "Persona/Recording/MeetingFloatingWindow.swift": Entry(count: 1, why: "The floating meeting window's waveform while someone speaks (#8731 V5)", stillIn: "Persona/Recording/MeetingFloatingWindow.swift"),
         "Persona/Recording/RecordingLevelMeter.swift": Entry(count: 2, why: "A meeting recording: the level meter (a 30 fps clock) and the recording dot's blink", stillIn: "Persona/Recording/RecordingLevelMeter.swift"),
         "Persona/DesignSystem/ComposerHoldMic.swift": Entry(count: 1, why: "Recording while the finger holds the mic", stillIn: "Persona/DesignSystem/ComposerHoldMic.swift"),
-        "Persona/Views/Assistant/AssistantAvatar.swift": Entry(count: 1, why: "The built-in persona working on the Mac", stillIn: "Persona/Views/Assistant/AssistantAvatar.swift"),
         "Persona/Views/Assistant/PersonaFaceMotion.swift": Entry(count: 1, why: "The built-in persona thinking, working or needing you in the render server", stillIn: "Persona/Views/Assistant/AssistantAvatar.swift"),
         "Shared/Design/PersonaFace.swift": Entry(count: 1, why: "The built-in persona's blink", stillIn: "Persona/Views/Assistant/AssistantAvatar.swift"),
         "Persona/Persona/PersonaViews.swift": Entry(count: 1, why: "A downloaded persona's frames for its state", stillIn: "Persona/Persona/PersonaViews.swift"),

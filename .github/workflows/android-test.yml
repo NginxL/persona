@@ -1,7 +1,22 @@
 name: Android CI
 on:
   workflow_call:
+    inputs:
+      commit:
+        description: 'Exact merge result to test, rather than the caller branch tip'
+        required: true
+        type: string
+    outputs:
+      commit:
+        description: 'The exact source commit tested by both shards'
+        value: ${{ jobs.android.outputs.commit }}
   workflow_dispatch:
+    inputs:
+      commit:
+        description: 'Exact merge result to test, rather than the ref tip'
+        required: false
+        type: string
+        default: ''
 permissions:
   contents: read
 concurrency:
@@ -11,17 +26,28 @@ jobs:
   android:
     name: Android ${{ matrix.lane }}
     runs-on: ubuntu-latest
-    # Retain headroom until hosted cold/warm timings establish a safe lower bound.
-    timeout-minutes: 45
+    # Hosted lint, tests and evidence need more than 45 minutes; a cancelled lane has no receipt and cannot publish.
+    timeout-minutes: 90
     strategy:
       fail-fast: false
       max-parallel: 2
       matrix:
         # Two lanes balanced by task time; each runs its share in one Gradle invocation (scripts/ci/android-shards.py).
         lane: [lint-build-test-0, test-1]
+    outputs:
+      commit: ${{ steps.source.outputs.commit }}
     steps:
+      - id: source
+        env:
+          REQUESTED_COMMIT: ${{ inputs.commit || github.sha }}
+        run: |
+          set -euo pipefail
+          printf '%s\n' "$REQUESTED_COMMIT" | grep -E '^[0-9a-f]{40}$' > /dev/null
+          printf 'commit=%s\n' "$REQUESTED_COMMIT" >> "$GITHUB_OUTPUT"
       - uses: actions/checkout@v4
         with:
+          ref: ${{ inputs.commit || github.sha }}
+          fetch-depth: 0
           persist-credentials: false
       - uses: actions/setup-java@v4
         with:
@@ -62,15 +88,37 @@ jobs:
             ~/.m2/repository/org/robolectric/android-all
             ~/.m2/repository/org/robolectric/android-all-instrumented
           key: ${{ steps.robolectric.outputs.cache-primary-key }}
-      - name: Upload Android reports
+      - name: Upload the exact-source test evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: android-reports-${{ matrix.lane }}
-          retention-days: 7
-          if-no-files-found: ignore
+          name: android-source-evidence-${{ inputs.commit || github.sha }}-${{ matrix.lane }}
+          retention-days: 2
+          if-no-files-found: error
           path: |
             android/build/reports/profile/
             android/**/build/reports/lint-results*
             android/**/build/reports/tests/
             android/**/build/test-results/
+      - name: Bind the test result to the exact merge result
+        if: always()
+        env:
+          JOB_STATUS: ${{ job.status }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/android-source-evidence"
+          python3 - "${{ steps.source.outputs.commit }}" <<'PY'
+          import json, os, sys
+          from pathlib import Path
+          commit = sys.argv[1]
+          if os.environ.get('JOB_STATUS') != 'success':
+              raise SystemExit('Android shard did not pass')
+          Path(os.environ['RUNNER_TEMP'] + '/android-source-evidence/receipt-${{ matrix.lane }}.json').write_text(json.dumps({'commit': commit, 'verified': True}) + '\n')
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: android-source-receipt-${{ inputs.commit || github.sha }}-${{ matrix.lane }}
+          path: ${{ runner.temp }}/android-source-evidence/receipt-${{ matrix.lane }}.json
+          if-no-files-found: error
+          retention-days: 2

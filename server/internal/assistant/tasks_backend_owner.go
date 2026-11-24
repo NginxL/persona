@@ -72,8 +72,10 @@ func (s *Service) ownerBackendPlan(ctx context.Context, id string, in backendSta
 		if _, err = s.reusableTodo(ctx, conversation, id, false); err != nil {
 			return nil, err
 		}
+		callerPermission := "" // this entry point has no permission field: the caller named none
 		task := PlanTask{Title: todo.Title, Prompt: firstNonEmpty(strings.TrimSpace(in.Prompt), todo.Notes, todo.Title), Machine: named.Source.MachineID, Launcher: in.Launcher,
-			ReuseTodo: id, BackendStartDigest: digest, Workspace: &TaskWorkspace{Mode: workspaceBackend, Backend: &BackendWorkspaceSelection{OperationID: in.OperationID, Host: in.Host}}}
+			CallerPermission: &callerPermission,
+			ReuseTodo:        id, BackendStartDigest: digest, Workspace: &TaskWorkspace{Mode: workspaceBackend, Backend: &BackendWorkspaceSelection{OperationID: in.OperationID, Host: in.Host}}}
 		if err = s.resolveBackendTask(ctx, &task); err != nil {
 			return nil, err
 		}

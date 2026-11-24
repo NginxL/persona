@@ -38,6 +38,24 @@ func TestReferenceReportLinks(t *testing.T) {
 			want: nil,
 		},
 		{
+			// A bare "background" inside a delivery sentence must not demote the task's own PR (P1 review finding).
+			name: "background worker delivery stays delivery",
+			text: "Fixed the background sync worker in " + own + " and shipped it.",
+			want: nil,
+		},
+		{
+			// Explicit framing still marks the link reference, including the colon form and the "as background" form.
+			name: "explicit background framing is reference",
+			text: own + " is included as background only; our delivery is " + foreign + ".",
+			want: []string{own},
+		},
+		{
+			// Mid-sentence colon framing, not a line-start marker: only the link inside that sentence is reference.
+			name: "background colon clause is reference",
+			text: "See background: " + foreign + " for the upstream bug. Delivery landed in " + own + ".",
+			want: []string{foreign},
+		},
+		{
 			name: "empty text",
 			text: "",
 			want: nil,

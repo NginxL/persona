@@ -376,7 +376,9 @@ internal object Xml {
             "http://apache.org/xml/features/disallow-doctype-decl" to true,
             "http://xml.org/sax/features/external-general-entities" to false,
             "http://xml.org/sax/features/external-parameter-entities" to false,
-        )) runCatching { factory.setFeature(feature, on) }
+        )) {
+            val _ = runCatching { factory.setFeature(feature, on) }
+        }
         try {
             factory.newSAXParser().parse(InputSource(ByteArrayInputStream(xml)), handler)
         } catch (_: Exception) {

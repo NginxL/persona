@@ -57,10 +57,15 @@ function project(sent) {
   const text = (el) => (el.textContent ?? "").replace(/\s+/g, " ").trim();
   const messages = [];
   let live = null;
-  for (const el of document.querySelectorAll("[data-user-bubble], [data-answer]")) {
+  for (const el of document.querySelectorAll("[data-user-bubble], [data-answer], [data-queue-row]")) {
     if (el.hasAttribute("data-answer")) {
       if (el.dataset.answer === "streaming") live = text(el);
       else messages.push({ from: "agent", text: text(el) });
+      continue;
+    }
+    if (el.hasAttribute("data-queue-row")) {
+      const words = el.querySelector("[data-queue-row-body]");
+      messages.push({ from: "user", text: text(words), state: "pending" });
       continue;
     }
     const state = el.dataset.sendState;

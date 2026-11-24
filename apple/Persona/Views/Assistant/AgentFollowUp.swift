@@ -29,6 +29,7 @@ import SwiftUI
     /// One field of the page, as it is written.
     enum Change: Equatable {
         case startRequested(Bool)
+        case defaultPermission(String)
         case workspace(String)
         case mainSupervises(Bool)
         case agentTasks(Bool)
@@ -39,11 +40,12 @@ import SwiftUI
         case namingMax(Int)
         case namingInterval(Int)
 
-        enum Field: Hashable { case startRequested, workspace, mainSupervises, agentTasks, closeEndedTerminals, idleHours, archiveDays, naming, namingMax, namingInterval }
+        enum Field: Hashable { case startRequested, defaultPermission, workspace, mainSupervises, agentTasks, closeEndedTerminals, idleHours, archiveDays, naming, namingMax, namingInterval }
 
         var field: Field {
             switch self {
             case .startRequested: .startRequested
+            case .defaultPermission: .defaultPermission
             case .workspace: .workspace
             case .mainSupervises: .mainSupervises
             case .agentTasks: .agentTasks
@@ -61,6 +63,7 @@ import SwiftUI
             var b = APIClient.AssistantConfigBody()
             switch self {
             case .startRequested(let on): b.startRequestedTasks = on
+            case .defaultPermission(let mode): b.defaultPermissionMode = mode
             case .workspace(let value): b.taskWorkspacePreference = value
             case .mainSupervises(let on): b.mainSupervisesOwnTasks = on
             case .agentTasks(let on): b.agentTasks = on
@@ -77,6 +80,7 @@ import SwiftUI
         func apply(to s: inout APIClient.AssistantState) {
             switch self {
             case .startRequested(let on): s.startRequestedTasks = on
+            case .defaultPermission(let mode): s.defaultPermissionMode = mode
             case .workspace(let value): s.taskWorkspacePreference = value
             case .mainSupervises(let on): s.mainSupervisesOwnTasks = on
             case .agentTasks(let on): s.agentTasks = on
@@ -94,6 +98,7 @@ import SwiftUI
     static func copy(_ field: Change.Field, from source: APIClient.AssistantState, to target: inout APIClient.AssistantState) {
         switch field {
         case .startRequested: if let v = source.startRequestedTasks { target.startRequestedTasks = v }
+        case .defaultPermission: if let v = source.defaultPermissionMode { target.defaultPermissionMode = v }
         case .workspace: if let v = source.taskWorkspacePreference { target.taskWorkspacePreference = v }
         case .mainSupervises: if let v = source.mainSupervisesOwnTasks { target.mainSupervisesOwnTasks = v }
         case .agentTasks: if let v = source.agentTasks { target.agentTasks = v }
@@ -138,7 +143,8 @@ import SwiftUI
         return !(s.manager ?? "").isEmpty && (1...AgentFollowUpText.maxNames).contains(max) && (0...AgentFollowUpText.maxHours).contains(every)
     }
 
-    /// Whether the hub has any of the page's settings: the profile shows its row only then.
+    /// Whether the hub has any of this page's settings: the profile shows its row only then. Default Permissions lives
+    /// in Settings › Agent and the Direction sheet, so that field alone must not open a page with none of its own rows.
     static func offered(_ s: APIClient.AssistantState?) -> Bool {
         guard let s else { return false }
         return s.startRequestedTasks != nil || s.taskWorkspacePreference != nil || s.mainSupervisesOwnTasks != nil || s.agentTasks != nil
@@ -179,6 +185,9 @@ import SwiftUI
         defer { saving.remove(change.field) }
         do {
             let answer = try await api.setAssistant(change.body)
+            if case .defaultPermission(let mode) = change, answer.defaultPermissionMode != mode {
+                throw APIError(status: 0, message: String(localized: "The hub did not confirm the new-conversation permission."))
+            }
             if var now = state { Self.copy(change.field, from: answer, to: &now); state = now }
             deps.saved(answer)
         } catch {
@@ -186,6 +195,74 @@ import SwiftUI
             let text = error.shown ?? String(localized: "Can't reach the hub")
             deps.toast(Toast(String(localized: "Couldn't save: \(text) [Agent Follow-Up]"), style: .error))
         }
+    }
+}
+
+/// The shared new-conversation permission control. Settings › Agent and a direction's title menu use this same picker,
+/// backed by the manager's `default_permission_mode`; neither place creates a second setting.
+struct DefaultPermissionPicker: View {
+    let page: AgentFollowUpModel
+    let mode: String
+
+    var body: some View {
+        Picker(selection: Binding(get: { mode }, set: { value in
+            guard value != mode else { return }
+            Task { await page.set(.defaultPermission(value)) }
+        })) {
+            ForEach(SessionModes.listed(SessionModes.assistantModes, current: mode)) { option in
+                Text(option.title).lineLimit(1).tag(option.id)
+            }
+        } label: {
+            Label { Text("New Conversation Permissions").lineLimit(2) } icon: { ThemedIcon(Theme.Icon.permissions) }
+        }
+        .pickerStyle(.menu)
+        .disabled(page.saving.contains(.defaultPermission))
+        .accessibilityIdentifier("default-permission-mode")
+    }
+}
+
+/// A section with the hub's current value, an immediate local choice and a sparse confirmed write. A hub from before the
+/// setting leaves it out, as Agent Follow-Up's other optional rows do.
+struct DefaultPermissionsSettingsSection: View {
+    @State private var page = AgentFollowUpModel()
+
+    var body: some View {
+        Group {
+            if let mode = page.state?.defaultPermissionMode {
+                Section {
+                    DefaultPermissionPicker(page: page, mode: mode)
+                    if let option = SessionModes.assistantModes.first(where: { $0.id == mode }) {
+                        Text(option.detail).font(Theme.Font.caption)
+                            .foregroundStyle(mode == "bypassPermissions" ? Theme.danger : .secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                } header: {
+                    Text("Default Permissions")
+                } footer: {
+                    Text("Applies to new conversations without an explicit choice. Existing conversations keep their current permission mode.")
+                }
+            } else if page.state == nil {
+                Section {
+                    if let error = page.error {
+                        Label(error, systemImage: Theme.Icon.error).font(Theme.Font.label).foregroundStyle(Theme.danger)
+                        Button("Reload [Lark Chat Pins View 7bdd5c]") { Task { await page.load() } }.lineLimit(1)
+                    } else {
+                        ProgressView().frame(maxWidth: .infinity).padding(.vertical, Theme.Space.xl)
+                    }
+                }
+            }
+        }
+        .task { await page.load() }
+    }
+}
+
+/// The direction title menu's destination: exactly the section in Settings › Agent, not a direction-specific override.
+struct DefaultPermissionsView: View {
+    var body: some View {
+        SettingsForm { DefaultPermissionsSettingsSection() }
+            .themedGroupedPage()
+            .detailTitle(String(localized: "Default Permissions"))
+            .navigationBarTitleDisplayMode(.inline)
     }
 }
 
@@ -374,7 +451,7 @@ struct AgentFollowUpView: View {
             } header: {
                 Text("Tidying up [Agent Follow-Up]")
             } footer: {
-                Text("By default an idle Agent stops after 12 hours and keeps its terminal, and a closed session with no open task moves to Archived after 3 idle days.")
+                Text("By default an idle Agent stops after 12 hours and keeps its terminal (Close ended terminals closes it too), and a closed session with no open task moves to Archived after 3 idle days.")
             }
         }
     }

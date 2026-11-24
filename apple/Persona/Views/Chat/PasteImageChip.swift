@@ -1,4 +1,3 @@
-#if os(iOS) || os(visionOS)
 import SwiftUI
 import UIKit
 import UniformTypeIdentifiers
@@ -137,7 +136,9 @@ struct PasteImageChip: View {
                     // Handle the copy at the button callback, before loading providers can yield to a newer copy.
                     board.take()
                     Task { @MainActor in
-                        for p in providers.prefix(4) {
+                        // each goes to `attach`, which holds it to the hub's pictures and sends the rest as files (#12973):
+                        // no more are read than a message and its files can take
+                        for p in providers.prefix(ImageLimits.standard.perMessage + FileAttachments.most) {
                             if let img = await PasteboardImages.image(p) { attach(img) }
                         }
                     }
@@ -163,4 +164,3 @@ struct PasteImageChip: View {
         }
     }
 }
-#endif

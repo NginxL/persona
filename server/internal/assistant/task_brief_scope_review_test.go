@@ -176,7 +176,7 @@ func TestAgentSendRescopeRestoresMainSupervision(t *testing.T) {
 			Status: status, State: state, LastText: reply, UpdatedAt: time.Now(),
 		})
 		if status == proto.StatusWorking {
-			s.taskWorking(ctx, agent.MachineID, agent.SessionID)
+			s.taskWorking(ctx, agent.MachineID, agent.SessionID, startRow{})
 		} else {
 			s.taskTurnEnded(ctx, agent.MachineID, agent.SessionID)
 		}

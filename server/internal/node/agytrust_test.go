@@ -16,17 +16,77 @@ const agyTrustScreen = "Accessing workspace:\n\n/work/example-project\n\nDo you 
 	"Antigravity CLI requires permission to read, edit, and execute files here.\n\n> Yes, I trust this folder\n  No, exit\n\n" +
 	"  ↑/↓ Navigate · enter Confirm\n                                                   auto · Example model · medium\n"
 
+const (
+	agyTestRule         = "────────────────────────────────────────"
+	agyStatusLineScreen = agyTestRule + "\n>\n" + agyTestRule + "\nExample model │ Ctx 12%\n"
+)
+
 // withAgyTrustWait shortens how long a start watches for agy's trust dialog.
 func withAgyTrustWait(t *testing.T, wait time.Duration) {
 	t.Helper()
-	oldWait, oldPoll := agyTrustWait, agyTrustPoll
-	agyTrustWait, agyTrustPoll = wait, 10*time.Millisecond
-	t.Cleanup(func() { agyTrustWait, agyTrustPoll = oldWait, oldPoll })
+	oldWait, oldInit, oldPoll := agyTrustWait, agyInitWait, agyTrustPoll
+	agyTrustWait, agyInitWait, agyTrustPoll = wait, wait, 10*time.Millisecond
+	t.Cleanup(func() { agyTrustWait, agyInitWait, agyTrustPoll = oldWait, oldInit, oldPoll })
 }
 
 // isEnter: c is a send_keys whose keys include enter.
 func isEnter(c herdrCall) bool {
 	return c.Method == "pane.send_keys" && slices.ContainsFunc(keysOf(c), func(k string) bool { return strings.EqualFold(k, "enter") })
+}
+
+func TestAgyTrustFolderScreenReadiness(t *testing.T) {
+	withAgyTrustWait(t, 5*time.Second)
+	for _, tc := range []struct {
+		name, frame string
+		wantReads   int
+	}{
+		{"default footer", agyIdleScreen, 1},
+		{"custom status line", agyStatusLineScreen, 1},
+		{"custom status line with placeholder", agyTestRule + "\n> Auto mode (shift+tab to cycle)\n" + agyTestRule + "\nExample status\n", 1},
+		{"empty status line", agyTestRule + "\n  >   \n" + agyTestRule + "  \n\n", 1},
+		{"shell continuation", "~/work/example-project $ agy\n>\n", 2},
+		{"shell command mentions hint", "$ echo '? for shortcuts'\n", 2},
+		{"loading banner with rules", agyTestRule + "\nLoading Antigravity CLI…\n" + agyTestRule + "\n", 2},
+		{"incomplete input box", agyTestRule + "\n>\n", 2},
+		{"old input box above shell", agyStatusLineScreen + "$ agy\nLoading…\n", 2},
+		{"dialog over ready input", agyTestRule + "\n>\n" + agyTestRule + "\nEnter to confirm · Esc to cancel\n", 2},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			n, f, home := herdrNode(t)
+			const pane = "w1:p2"
+			f.reply("agent.get", agentWithStatus(agyAgent, proto.StatusIdle)(0, home))
+			// A second read always sees a ready screen, so a missed or premature match changes the read count.
+			f.screenSteps(pane, func(c herdrCall) bool { return c.Method == "pane.read" }, tc.frame, agyIdleScreen)
+			if err := n.agyTrustFolder(t.Context(), pane); err != nil {
+				t.Fatal(err)
+			}
+			if got := len(f.trace("pane.read")); got != tc.wantReads {
+				t.Errorf("read the pane %d times, want %d", got, tc.wantReads)
+			}
+			if got := f.trace("pane.send_keys"); len(got) != 0 {
+				t.Errorf("unexpected keys: %v", got)
+			}
+		})
+	}
+}
+
+func TestAgyClearOverlayWaitsForCustomStatusLine(t *testing.T) {
+	withAgyTrustWait(t, 5*time.Second)
+	n, f, _ := herdrNode(t)
+	const pane = "w1:p2"
+	// After Enter, the dialog can linger and briefly leave a loading screen before the input box appears.
+	f.screenSteps(pane, func(c herdrCall) bool { return c.Method == "pane.read" },
+		agyTrustScreen, "Loading Antigravity CLI…\n", agyStatusLineScreen, agyIdleScreen)
+	if err := n.agyClearOverlay(t.Context(), pane, agyTrustScreen); err != nil {
+		t.Fatal(err)
+	}
+	if got := len(f.trace("pane.read")); got != 3 {
+		t.Errorf("read the pane %d times, want one read per frame through the custom status line", got)
+	}
+	calls := f.calls()
+	if len(calls) == 0 || !isKeys("enter")(calls[0]) || len(f.trace("pane.send_keys")) != 1 {
+		t.Fatalf("want one Enter before reading the pane, got:\n%s", strings.Join(f.trace(), "\n"))
+	}
 }
 
 // The trust dialog is answered by trusting the folder the start chose, and only then does the first message go in.
@@ -42,7 +102,7 @@ func TestAgyStartTrustsTheFolderBeforeTheFirstMessage(t *testing.T) {
 		}
 		return agentWithStatus(agyAgent, status)(submissions, home)
 	})
-	x.f.screenSteps("w1:p2", isEnter, agyTrustScreen, agyIdleScreen)
+	x.f.screenSteps("w1:p2", isEnter, agyTrustScreen, agyStatusLineScreen)
 	id := x.start(t, agyAgent)
 
 	calls := x.f.trace("pane.send_keys", "agent.prompt")
@@ -194,6 +254,85 @@ func TestAgyStartDismissesTheNoticeBeforeTheFirstMessage(t *testing.T) {
 	calls := x.f.trace("pane.send_keys", "agent.prompt")
 	if len(calls) != 2 || !strings.Contains(calls[0], `"escape"`) || !strings.Contains(calls[1], "agent.prompt") {
 		t.Fatalf("want one Esc, then the first message:\n%s", strings.Join(calls, "\n"))
+	}
+}
+
+// The input box can appear while herdr still reports agy as unknown. A late notice is dismissed during this window,
+// and the first message waits for agy to settle (#11345).
+func TestAgyStartWaitsForUnknownStatusToSettle(t *testing.T) {
+	for _, tc := range []struct{ name, ready, notice string }{
+		{"default footer", agyIdleScreen, agyNoticeScreen},
+		{"custom status line", agyStatusLineScreen, strings.Replace(agyNoticeScreen, "? for shortcuts", "Example model │ Ctx 12%", 1)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			withAgyTrustWait(t, 5*time.Second)
+			var polls atomic.Int32
+			var dismissed, settled, early atomic.Bool
+			x := newWorkFirstFixture(t, agyAgent, func(submissions int, home string) any {
+				status := proto.StatusUnknown
+				switch {
+				case submissions >= 1:
+					status = proto.StatusWorking
+				case settled.Load():
+					status = proto.StatusIdle
+				}
+				return agentWithStatus(agyAgent, status)(submissions, home)
+			})
+			const pane = "w1:p2"
+			x.f.setScreen(pane, tc.ready)
+			x.f.after(func(c herdrCall) {
+				switch c.Method {
+				case "agent.get":
+					switch polls.Add(1) {
+					case 2:
+						x.f.setScreen(pane, tc.notice)
+					case 3:
+						// The third reply still says unknown, even if the notice has been dismissed.
+						settled.Store(dismissed.Load())
+					}
+				case "pane.send_keys":
+					if slices.Contains(keysOf(c), "escape") {
+						x.f.setScreen(pane, tc.ready)
+						dismissed.Store(true)
+					}
+				case "agent.prompt":
+					if !settled.Load() || polls.Load() < 4 {
+						early.Store(true)
+					}
+				}
+			})
+			id := x.start(t, agyAgent)
+			if early.Load() {
+				t.Fatal("first message sent before herdr reported agy had settled")
+			}
+			calls := x.f.trace("pane.send_keys", "agent.prompt")
+			if len(calls) != 2 || !strings.Contains(calls[0], `"escape"`) || !strings.Contains(calls[1], "agent.prompt") {
+				t.Fatalf("want Esc for late notice then first message, got:\n%s", strings.Join(calls, "\n"))
+			}
+			if p, ok := x.n.lostFirst.get(id); ok {
+				t.Errorf("listed as lost: %q", p.why)
+			}
+		})
+	}
+}
+
+// Waiting for status unknown to clear is bounded by agyInitWait so a host that never reports idle does not stall starts.
+func TestAgyStartUnknownStatusWaitIsBounded(t *testing.T) {
+	withAgyTrustWait(t, 5*time.Second)
+	agyInitWait = 120 * time.Millisecond
+	x := newWorkFirstFixture(t, agyAgent, func(submissions int, home string) any {
+		if submissions >= 1 {
+			return agentWithStatus(agyAgent, proto.StatusWorking)(submissions, home)
+		}
+		return agentWithStatus(agyAgent, proto.StatusUnknown)(submissions, home)
+	})
+	began := time.Now()
+	x.start(t, agyAgent)
+	if took := time.Since(began); took > 2*time.Second {
+		t.Errorf("start waited %s on permanent unknown status; want bounded by agyInitWait", took)
+	}
+	if got := x.f.trace("agent.prompt"); len(got) != 1 {
+		t.Errorf("prompted %d times, want 1", len(got))
 	}
 }
 

@@ -32,7 +32,7 @@ struct OutboxRestoreTests {
     }
 
     /// The app with `pending` in the chat is ended once its outbox is written (300 ms after a change) and starts again.
-    private func relaunched(with pending: [PendingMessage], cached: [Item] = []) async throws -> [PendingMessage] {
+    private func relaunchModel(with pending: [PendingMessage], cached: [Item] = [], hub: FakeHub? = nil) async throws -> AppModel {
         clean()
         let before = AppModel(stateFolder: folder)
         before.chat(key).pending = pending
@@ -40,9 +40,18 @@ struct OutboxRestoreTests {
         try await Task.sleep(for: .milliseconds(600))
         if !cached.isEmpty { ChatCache.save(key, items: cached, hasMore: false, in: folder) }
         let after = AppModel(stateFolder: folder)
+        if let hub {
+            after.apiForTests = hub.client
+            after.linksUpForTests = true
+        }
         after.restoreOutbox()
-        let restored = after.chat(key).pending
         try await Task.sleep(for: .milliseconds(600)) // what the restore writes back, before the next test starts
+        return after
+    }
+
+    private func relaunched(with pending: [PendingMessage], cached: [Item] = [], hub: FakeHub? = nil) async throws -> [PendingMessage] {
+        let after = try await relaunchModel(with: pending, cached: cached, hub: hub)
+        let restored = after.chat(key).pending
         clean()
         return restored
     }
@@ -72,11 +81,49 @@ struct OutboxRestoreTests {
         #expect(back.first?.state == .waiting)
     }
 
-    /// Offline for a day or two is still worth sending; a week on, its chat may be long gone.
-    @Test func aWaitingMessageComesBackUntilItIsAWeekOld() async throws {
-        let recent = message(.waiting, age: 86400 * 2)
-        #expect(try await relaunched(with: [recent]).map(\.id) == [recent.id])
-        #expect(try await relaunched(with: [message(.waiting, age: OutboxWait.restoreLimit + 60)]).isEmpty)
+    @Test func aFailedMessageComesBackAfterADay() async throws {
+        let p = message(.failed, age: 86400 + 60)
+        let hub = FakeHub()
+        let back = try await relaunched(with: [p], hub: hub)
+        #expect(back.map(\.id) == [p.id])
+        #expect(back.first?.state == .failed)
+        #expect(back.first?.text == p.text)
+        #expect(hub.requests.isEmpty) // restoring input never sends it
+    }
+
+    @Test func waitingAndSendingMessagesComeBackAfterAWeek() async throws {
+        for state in [PendingMessage.State.sending, .waiting] {
+            let p = message(state, age: 7 * 86400 + 60)
+            let hub = FakeHub()
+            let back = try await relaunched(with: [p], hub: hub)
+            #expect(back.map(\.id) == [p.id], "\(state)")
+            #expect(back.first?.state == .waiting, "\(state)")
+            #expect(back.first?.text == p.text, "\(state)")
+            #expect(hub.requests.isEmpty, "\(state)") // restoring input never sends it
+        }
+    }
+
+    /// A missing cached row alone does not prove deletion (the list can be paged). Once the ordinary connected-retry
+    /// path gives up with no destination, the restored words remain available with the reason and recovery actions.
+    @Test func aRestoredMessageWhoseDestinationIsMissingFailsWithoutLosingItsText() async throws {
+        let p = message(.waiting)
+        let hub = FakeHub()
+        let after = try await relaunchModel(with: [p], hub: hub)
+        defer { clean() }
+        #expect(after.chat(key).pending.map(\.state) == [.waiting])
+        #expect(after.outboxRetry.isEmpty)
+        #expect(hub.requests.isEmpty) // restore itself neither sends nor schedules a retry
+
+        after.chat(key).pending[0].stalledSince = Date().addingTimeInterval(-OutboxWait.connectedLimit)
+        #expect(after.settleSend(key, p.id, .waiting) == .failed)
+
+        let failed = try #require(after.chat(key).pending.first)
+        #expect(failed.id == p.id)
+        #expect(failed.text == p.text)
+        #expect(failed.failure == String(localized: "Waiting messages weren't sent: their chat wasn't found on the hub."))
+        #expect(after.toast?.message == failed.failure)
+        #expect(hub.requests.isEmpty)
+        try await Task.sleep(for: .milliseconds(600)) // the failure's outbox write finishes before cleanup
     }
 
     /// Longer ago than a sent message ever waits for its copy: it had its copy or gave up then.

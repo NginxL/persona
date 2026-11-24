@@ -5,7 +5,9 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.text.contextmenu.builder.item
+import androidx.compose.foundation.text.contextmenu.data.TextContextMenuKeys
 import androidx.compose.foundation.text.contextmenu.modifier.appendTextContextMenuComponents
+import androidx.compose.foundation.text.contextmenu.modifier.filterTextContextMenuComponents
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.text.selection.rememberSelectionState
 import androidx.compose.runtime.Composable
@@ -171,6 +173,10 @@ private fun SelectedWords(menu: MessageMenuState, target: MessageTarget, content
     DisposableEffect(menu, target.id) { onDispose { menu.endSelection(target.id) } }
     CompositionLocalProvider(LocalClipboard provides clipboard) {
         SelectionContainer(state, Modifier
+            .filterTextContextMenuComponents { component ->
+                // A read-only chat has no quote flow; only its Copy belongs in this message's toolbar.
+                quote != null || component.key != TextContextMenuKeys.SelectAllKey
+            }
             .pointerInput(target.id) {
                 awaitEachGesture {
                     awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)

@@ -182,6 +182,13 @@ func TestRequestPrerequisitesMissingCancelledAndLegacy(t *testing.T) {
 
 func TestRequestPrerequisitesUnconfirmedStartNeverReplays(t *testing.T) {
 	shortTaskStartReconcile(t)
+	// The start fails at once on the fake hub (failStart below), so nothing here waits for the start's budget. The
+	// budget still covers what the start reads before the hub: the task's model record from Postgres. 100 ms (the
+	// helper's) was not always enough with the package's partitions sharing one server, and a start that fails there
+	// never reaches the hub, so the unconfirmed launch this test is about never happens (#13557).
+	shortBudget := taskStartTimeout
+	taskStartTimeout = 2 * time.Second
+	t.Cleanup(func() { taskStartTimeout = shortBudget })
 	database := todoTestDB(t)
 	env := newTodoEnv(t, database)
 	ctx := context.Background()
@@ -200,7 +207,7 @@ func TestRequestPrerequisitesUnconfirmedStartNeverReplays(t *testing.T) {
 	requestTestIdle(t, env.s)
 	loaded, err := env.s.loadPlan(ctx, plan.ID)
 	if err != nil || loaded.Tasks[0].Queue == nil || !loaded.Tasks[0].Queue.Claimed || len(taskStartMachines(env.f)) != 1 {
-		t.Fatalf("unconfirmed launch: loaded=%+v error=%v starts=%v", loaded, err, taskStartMachines(env.f))
+		t.Fatalf("unconfirmed launch: loaded=%+v queue=%+v error=%v starts=%v", loaded, loaded.Tasks[0].Queue, err, taskStartMachines(env.f))
 	}
 	env.s = newServiceOn(t, env.f, database)
 	if err := env.s.recoverTaskStarts(ctx, time.Now().UTC()); err != nil {

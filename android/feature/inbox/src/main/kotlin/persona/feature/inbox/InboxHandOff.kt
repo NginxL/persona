@@ -6,6 +6,7 @@ import persona.core.contracts.Session
 import persona.core.contracts.contextBody
 import persona.core.domain.sort.canSend
 import java.time.Instant
+import persona.core.inbox.*
 
 /** What to ask for, as iOS and the old app offer it; an empty request means the first. */
 fun handoffPresets(res: Resources): List<String> = listOf(R.string.inbox_handoff_preset_summary, R.string.inbox_handoff_preset_background,
@@ -51,24 +52,8 @@ internal fun contextTag(title: String, text: String, url: String = ""): String {
         contextBody(text) + "\n</persona-context>"
 }
 
-/** An agent "Hand to AI" can send to: the most recently active live ones, never Persona itself (iOS: eight). */
-data class HandOffTarget(val machineId: String, val sessionId: String, val title: String, val machine: String) {
-    val key: String get() = "$machineId/$sessionId"
-}
-
 /** "Also mark done" starts off for every [target]; an explicit [userChoice] survives target changes. */
 internal fun handOffMarkDone(target: HandOffTarget?, userChoice: Boolean? = null): Boolean = userChoice ?: false
-
-/**
- * Live, non-assistant sessions, newest first, at most [limit]. Sessions that cannot take a message (read-only ones
- * from other runtimes) drop out once sessions say so; until then being live is the test.
- */
-fun handOffTargets(sessions: List<Session>, machines: Map<String, String> = emptyMap(), limit: Int = 8): List<HandOffTarget> =
-    // Only agents that take messages: a read-only session (Codex history, an attached source without send) is left out.
-    sessions.filter { !it.assistant && it.isLive && it.canSend }
-        .sortedWith(compareByDescending<Session> { it.updated ?: Instant.EPOCH }.thenBy { it.key.path })
-        .take(limit)
-        .map { HandOffTarget(it.machineId, it.sessionId, it.displayTitle, machines[it.machineId]?.takeIf { name -> name.isNotBlank() } ?: it.machineId) }
 
 /**
  * The operation ID of a hand-off: kept while the same text goes to the same place (a retry after an unclear failure

@@ -139,12 +139,7 @@ func (n *Node) waitCodexBox(ctx context.Context, pane string, maxWait time.Durat
 // the folder is trusted (they chose it), an update offer is skipped — with Skip's own key only, never enter, which
 // would take the highlighted "Update now" and run the installer. true when it pressed a key.
 func (n *Node) answerCodexStartDialog(ctx context.Context, pane, text string) bool {
-	if keys := codexTrustKeys(text); keys != nil {
-		_ = n.sendKeys(ctx, pane, keys...)
-		_ = sleepCtx(ctx, codexDialogPause)
-		return true
-	}
-	if keys := codexSkipUpdateKeys(text); keys != nil {
+	if d, keys := matchStartDialog(codexStartDialogs, text, false); d != nil { // startdialogs.go
 		_ = n.sendKeys(ctx, pane, keys...)
 		_ = sleepCtx(ctx, codexDialogPause)
 		return true
@@ -701,7 +696,7 @@ func (n *Node) attachCodexWait(ctx context.Context, w *codexWait, thread, how st
 	if !w.manual {
 		st, _ := n.state.get(w.id)
 		n.state.put(thread, sessionState{Pane: w.pane, Launcher: st.Launcher, Cwd: st.Cwd, Model: st.Model, ModelEffort: st.ModelEffort,
-			StartedAt: st.StartedAt, AppMode: st.AppMode, CreationID: st.CreationID, Incarnation: st.Incarnation})
+			StartedAt: st.StartedAt, AppMode: st.AppMode, AppModeExplicit: st.AppModeExplicit, CreationID: st.CreationID, Incarnation: st.Incarnation})
 	}
 	n.mu.Lock()
 	occupied := n.agents[thread].PaneID

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -215,6 +216,83 @@ func TestClaudeDesktopIndexFollowsChanges(t *testing.T) {
 	}
 }
 
+func TestClaudeDesktopDataDirectories(t *testing.T) {
+	home := t.TempDir()
+	mac := claudeDesktopDataDirs(home, "darwin", "", "")
+	if len(mac) != 2 || mac[0] != filepath.Join(home, "Library", "Application Support", "Claude") ||
+		mac[1] != filepath.Join(home, "Library", "Application Support", "Claude-3p") {
+		t.Fatalf("macOS directories = %v", mac)
+	}
+	if got := claudeDesktopDataDirs(home, "linux", "", ""); len(got) != 0 {
+		t.Fatalf("unknown desktop layout = %v", got)
+	}
+	local, roaming := filepath.Join(t.TempDir(), "Local Data"), filepath.Join(t.TempDir(), "Roaming Data")
+	store := filepath.Join(home, "AppData", "Local", "Packages", "Claude_example", "LocalCache")
+	if err := os.MkdirAll(store, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	dirs := claudeDesktopDataDirs(home, "windows", local, roaming)
+	for _, base := range []string{filepath.Join(home, "AppData", "Local"), filepath.Join(home, "AppData", "Roaming"),
+		local, roaming, filepath.Join(store, "Local"), filepath.Join(store, "Roaming")} {
+		for _, name := range []string{"Claude", "Claude-3p", "Claude-Data"} {
+			if !slices.Contains(dirs, filepath.Join(base, name)) {
+				t.Errorf("missing %s under %s", name, base)
+			}
+		}
+	}
+	seen := map[string]bool{}
+	for _, p := range claudeDesktopDataDirs(home, "windows", filepath.Join(home, "AppData", "Local"), "relative") {
+		key := strings.ToLower(p)
+		if seen[key] || !filepath.IsAbs(p) {
+			t.Fatalf("duplicate or relative directory %q", p)
+		}
+		seen[key] = true
+	}
+}
+
+func TestClaudeDesktopDirectoriesDoNotUseAnotherHomesEnvironment(t *testing.T) {
+	home, other := t.TempDir(), t.TempDir()
+	t.Setenv("LOCALAPPDATA", filepath.Join(other, "Local"))
+	t.Setenv("APPDATA", filepath.Join(other, "Roaming"))
+	for _, p := range claudeDesktopDirs(home) {
+		if !strings.HasPrefix(p, home+string(filepath.Separator)) {
+			t.Fatalf("another home's desktop directory was included: %q", p)
+		}
+	}
+	if runtime.GOOS == "windows" && len(claudeDesktopDirs(home)) == 0 {
+		t.Fatal("Windows desktop directories are missing")
+	}
+}
+
+// Use the real Windows directory depth, including Store redirection. Read no app configuration or credentials.
+func TestClaudeDesktopWindowsIndexLocations(t *testing.T) {
+	home := t.TempDir()
+	store := filepath.Join(home, "AppData", "Local", "Packages", "Claude_example", "LocalCache", "Roaming", "Claude")
+	local := filepath.Join(home, "AppData", "Local", "Claude-3p")
+	roaming := filepath.Join(home, "AppData", "Roaming", "Claude")
+	const current = "eeeeeeee-0000-4000-8000-000000000021"
+	const prior = "eeeeeeee-0000-4000-8000-000000000022"
+	const archived = "eeeeeeee-0000-4000-8000-000000000023"
+	const packaged = "eeeeeeee-0000-4000-8000-000000000024"
+	cwd := filepath.Join(home, "work", "project")
+	extra, _ := json.Marshal(cwd)
+	origin, _ := json.Marshal(filepath.Join(home, "work"))
+	writeDesktopEntry(t, local, current, current, false, []string{prior}, `,"cwd":`+string(extra)+`,"originCwd":`+string(origin))
+	writeDesktopEntry(t, roaming, archived, archived, true, nil, "")
+	writeDesktopEntry(t, store, packaged, packaged, false, nil, "")
+	old := claudeDesktopDirs
+	claudeDesktopDirs = func(home string) []string { return claudeDesktopDataDirs(home, "windows", "", "") }
+	t.Cleanup(func() { claudeDesktopDirs = old })
+	x := readClaudeDesktopIndex(home)
+	if !x.listed(current) || !x.listed(packaged) || x.listed(archived) || !x.hidden(archived, nil) {
+		t.Fatalf("desktop visibility = %v", x.visible)
+	}
+	if !x.hidden(prior, map[string]bool{current: true}) || x.about[current].cwd != cwd ||
+		x.about[current].originCwd != filepath.Join(home, "work") || x.about[current].local != "local_"+current {
+		t.Fatalf("desktop entry = %+v, prior = %v", x.about[current], x.earlier[prior])
+	}
+}
+
 // The desktop app's sidebar lists its unarchived sessions however long they have been quiet: so does the offline list,
 // on a count of its own, so they don't push the newest other sessions out (#3304). Old ones the app archived, or no
 // entry names, stay out as before.
@@ -241,7 +319,9 @@ func TestDesktopSessionsAreListedWhateverTheirAge(t *testing.T) {
 	_ = os.Chtimes(silent, time.Now().Add(-month), time.Now().Add(-month))
 	writeDesktopEntry(t, third, "open", oldOpen, false, nil, "")
 	writeDesktopEntry(t, third, "archived", oldArchived, true, nil, "")
-	writeDesktopEntry(t, third, "silent", oldSilent, false, nil, "")
+	silentCwd := filepath.Join(home, "project")
+	silentCwdJSON, _ := json.Marshal(silentCwd)
+	writeDesktopEntry(t, third, "silent", oldSilent, false, nil, `,"cwd":`+string(silentCwdJSON))
 	for i := 0; i < 85; i++ { // the newest 80 others stay the newest 80
 		writeEntrypointTranscript(t, dir, fmt.Sprintf("cccccccc-0000-4000-8000-%012d", i), "cli", time.Duration(i+1)*time.Minute)
 	}
@@ -263,7 +343,7 @@ func TestDesktopSessionsAreListedWhateverTheirAge(t *testing.T) {
 	}
 	// A session whose transcript says nothing yet has the title and the directory its entry gives (a message to it
 	// resumes it there).
-	if s := got[oldSilent]; s.Title != "t" || s.Cwd != "/src/app" {
+	if s := got[oldSilent]; s.Title != "t" || s.Cwd != silentCwd {
 		t.Fatalf("silent session title %q cwd %q, want the entry's", s.Title, s.Cwd)
 	}
 }

@@ -589,3 +589,172 @@ func TestRelayImmediateTryCarriesMarkIntoQueue(t *testing.T) {
 		t.Fatal("the immediate try's start was lost on queueing")
 	}
 }
+
+// A second exact confirmation can rewrite a withdrawn head while its earlier copy is being drained. The old copy must
+// not restore signals from a head it did not actually remove. The head's durable doubt time must also survive restart
+// and a landed check that could not remove that changed head, or a later drain replays delivered signals (#5732).
+func TestWithdrawnRelayReplayRequiresRemovingSameHead(t *testing.T) {
+	s, f := newQuietServiceOn(t, &memStore{})
+	start := superviseSignal{Todo: "todo-b", Kind: sigUnjudged, Key: "start-unknown@todo-b", At: time.Now()}
+	other := superviseSignal{Todo: "todo-c", Kind: sigStalled, Key: "still-pending", At: time.Now()}
+	oldSignals := []superviseSignal{start, other}
+	msg := relayMsg{Tool: superviseTool, Text: "mixed supervision", At: time.Now(), Withdrawn: true, DoubtedAt: time.Now().Add(-time.Second), Signals: encodeDigestSignals(oldSignals)}
+	if s.queueRelay("conv1", msg) != 1 {
+		t.Fatal("the withdrawn head was not queued")
+	}
+	f.mu.Lock()
+	f.items = append(f.items, proto.Item{Seq: 1, Role: "user", Kind: proto.KindText, Text: msg.Text, TS: time.Now()})
+	f.mu.Unlock()
+	newSignals := []superviseSignal{other}
+	updated := msg
+	updated.Signals = encodeDigestSignals(newSignals) // the second confirmation removed start from the durable head, retaining its doubt time
+	r := &s.relays
+	r.mu.Lock()
+	r.st.Queue["conv1"][0] = updated
+	r.doubted = nil // only the durable head survives a real restart
+	r.mu.Unlock()
+	if !s.relayLanded("server", "conv1", msg) {
+		t.Fatal("the persisted in-doubt original was not recognized after restart")
+	}
+	r.mu.Lock()
+	replay := s.takeRelayHeadLocked("conv1", msg, true)
+	queued := len(r.st.Queue["conv1"])
+	restored := r.st.SupervisePending[start.id()]
+	r.mu.Unlock()
+	if len(replay) != 0 || restored.Key != "" {
+		t.Fatalf("a stale head copy replayed confirmed signals: replay=%+v restored=%+v", replay, restored)
+	}
+	if queued != 1 {
+		t.Fatalf("the changed queue head was removed by an older copy: %d queued", queued)
+	}
+	if !s.relayLanded("server", "conv1", updated) {
+		t.Fatal("the changed-head check discarded the durable delivery evidence before removal")
+	}
+	r.mu.Lock()
+	replay = s.takeRelayHeadLocked("conv1", updated, false)
+	queued = len(r.st.Queue["conv1"])
+	r.mu.Unlock()
+	if len(replay) != 0 || queued != 0 {
+		t.Fatalf("the landed updated head was replayed or retained: replay=%+v queued=%d", replay, queued)
+	}
+}
+
+// A successful send may finish after another writer replaced the queue head. Only the exact sent head may leave;
+// a different head is not delivery evidence and must remain queued (#5732).
+func TestSuccessfulRelayRemovalRequiresSameHead(t *testing.T) {
+	s, _ := newQuietServiceOn(t, &memStore{})
+	if s.queueRelay("conv1", relayMsg{Tool: "conversation_send", Text: "current head", At: time.Now()}) != 1 {
+		t.Fatal("the current head was not queued")
+	}
+	r := &s.relays
+	r.mu.Lock()
+	head := r.st.Queue["conv1"][0]
+	older := head
+	older.Text = "an older send"
+	replay := s.takeRelayHeadLocked("conv1", older, true)
+	queued := len(r.st.Queue["conv1"])
+	r.mu.Unlock()
+	if len(replay) != 0 || queued != 1 {
+		t.Fatalf("a successful older send removed the current head: replay=%+v queued=%d", replay, queued)
+	}
+	r.mu.Lock()
+	replay = s.takeRelayHeadLocked("conv1", head, true)
+	queued = len(r.st.Queue["conv1"])
+	r.mu.Unlock()
+	if len(replay) != 0 || queued != 0 {
+		t.Fatalf("the exact successful head was not removed: replay=%+v queued=%d", replay, queued)
+	}
+}
+
+// The queue's own pre-send write adds attempt metadata to the head. That is still the exact message being sent,
+// not a concurrent replacement; a successful send must remove it (#5732).
+func TestSuccessfulRelayRemovalAllowsOwnAttemptMetadata(t *testing.T) {
+	s, _ := newQuietServiceOn(t, &memStore{})
+	if s.queueRelay("conv1", relayMsg{Tool: superviseTool, Text: "current head", At: time.Now()}) != 1 {
+		t.Fatal("the current head was not queued")
+	}
+	r := &s.relays
+	r.mu.Lock()
+	sent := r.st.Queue["conv1"][0]
+	r.st.Queue["conv1"][0].TriedAt = time.Now().UTC()
+	r.st.Queue["conv1"][0].Looks = 2
+	r.st.Queue["conv1"][0].LookAfter = time.Now().Add(time.Second).UTC()
+	r.st.Queue["conv1"][0].DoubtedAt = time.Now().UTC()
+	replay := s.takeRelayHeadLocked("conv1", sent, true)
+	queued := len(r.st.Queue["conv1"])
+	r.mu.Unlock()
+	if len(replay) != 0 || queued != 0 {
+		t.Fatalf("the sender's own attempt metadata blocked exact-head removal: replay=%+v queued=%d", replay, queued)
+	}
+}
+
+// A successful original digest covers only signals it actually carried. A concurrently retained new signal must keep
+// both its queue head and durable outbox entry even when the narrowed head is withdrawn (#5732).
+func TestSuccessfulRelayRemovalRejectsUncoveredSupervisionSignals(t *testing.T) {
+	s, _ := newQuietServiceOn(t, &memStore{})
+	start := superviseSignal{Todo: "todo-a", Kind: sigUnjudged, Key: "start", At: time.Now()}
+	other := superviseSignal{Todo: "todo-b", Kind: sigStalled, Key: "other", At: time.Now()}
+	sent := relayMsg{Tool: superviseTool, Text: "mixed supervision", At: time.Now(), Signals: encodeDigestSignals([]superviseSignal{start, other})}
+	if s.queueRelay("conv1", sent) != 1 {
+		t.Fatal("the mixed digest was not queued")
+	}
+	newSignal := superviseSignal{Todo: "todo-c", Kind: sigReview, Key: "new-after-send", At: time.Now()}
+	r := &s.relays
+	r.mu.Lock()
+	r.st.Queue["conv1"][0].Withdrawn = true
+	r.st.Queue["conv1"][0].Signals = encodeDigestSignals([]superviseSignal{newSignal})
+	r.st.SupervisePending = map[string]superviseSignal{newSignal.id(): newSignal}
+	replay := s.takeRelayHeadLocked("conv1", sent, true)
+	queued := len(r.st.Queue["conv1"])
+	retained := r.st.SupervisePending[newSignal.id()]
+	r.mu.Unlock()
+	if len(replay) != 0 || queued != 1 || retained.Key != newSignal.Key {
+		t.Fatalf("an uncovered new signal was acknowledged: replay=%+v queued=%d retained=%+v", replay, queued, retained)
+	}
+}
+
+// A manager can stop after the original send lands but before it removes a withdrawn durable head. That head has no
+// in-doubt marker, yet its original line is already in the conversation: the remaining signals must not be replayed.
+func TestWithdrawnRelayLandedBeforeRestartDoesNotReplayWithoutDoubt(t *testing.T) {
+	s, f := newQuietServiceOn(t, &memStore{})
+	start := superviseSignal{Todo: "todo-b", Kind: sigUnjudged, Key: "start-unknown@todo-b", At: time.Now()}
+	other := superviseSignal{Todo: "todo-c", Kind: sigStalled, Key: "already-delivered", At: time.Now()}
+	signals := []superviseSignal{start, other}
+	msg := relayMsg{Tool: superviseTool, Text: "mixed supervision", At: time.Now(), Withdrawn: true, Signals: encodeDigestSignals(signals)}
+	if s.queueRelay("conv1", msg) != 1 {
+		t.Fatal("the withdrawn head was not queued")
+	}
+	f.mu.Lock()
+	f.items = append(f.items, proto.Item{Seq: 1, Role: "user", Kind: proto.KindText, Text: msg.Text, TS: time.Now()})
+	f.mu.Unlock()
+	s.drainRelays("server", []proto.Session{{SessionID: "conv1", MachineID: "server", Assistant: true, Status: proto.StatusIdle}})
+	waitFor(t, "the landed withdrawn head to leave the queue", func() bool { return s.queuedFor("conv1") == 0 })
+	if got := storedSupervisePending(t, s); len(got) != 0 {
+		t.Fatalf("the landed original left signals for a duplicate after restart: %+v", got)
+	}
+}
+
+// Selective /stop owns the same doubtful-head boundary as start confirmation. If the original mixed text did not land,
+// its stopped task must not be sent again; the remaining task is replayed without the old text (#5732).
+func TestStopDoubtfulMixedDigestDoesNotResendStoppedTask(t *testing.T) {
+	s, f := newQuietServiceOn(t, &memStore{})
+	s.superviseTimes = superviseTimings{gather: time.Hour, every: time.Hour, urgent: time.Hour}
+	stopped := superviseSignal{Todo: "stopped-task", Kind: sigReview, Key: "stopped-review", At: time.Now()}
+	other := superviseSignal{Todo: "other-task", Kind: sigReview, Key: "other-review", At: time.Now()}
+	signals := []superviseSignal{stopped, other}
+	msg := relayMsg{Tool: superviseTool, Text: "stopped task\nremaining task", At: time.Now(), DoubtedAt: time.Now().Add(-time.Second), Signals: encodeDigestSignals(signals)}
+	s.queueRelay("conv1", msg)
+	n, taken := s.dropQueuedSupervisionTasks("conv1", map[string]bool{stopped.Todo: true}, nil)
+	if n != 0 || len(taken) != 1 || taken[0].Key != stopped.Key {
+		t.Fatalf("selective stop of a doubtful head = %d, %+v", n, taken)
+	}
+	idle := proto.Session{SessionID: "conv1", MachineID: "server", Assistant: true, Status: proto.StatusIdle}
+	s.drainRelays("server", []proto.Session{idle})
+	waitFor(t, "the doubtful stopped head to settle", func() bool { return s.queuedFor("conv1") == 0 })
+	if got := strings.Join(f.noticesTo("conv1"), "\n"); strings.Contains(got, "stopped task") {
+		t.Fatalf("the failed original resent a stopped task: %q", got)
+	}
+	if got := storedSupervisePending(t, s)[other.id()]; got.Key != other.Key {
+		t.Fatalf("the other mixed signal was not replayed after the doubtful head failed: %+v", got)
+	}
+}

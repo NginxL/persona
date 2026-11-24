@@ -63,14 +63,15 @@ nonisolated struct ExtensionSurfaceClient: Sendable {
     var helloTransport: HelloTransport? = nil
     var clientMetadata: RequestClientMetadata = .current
 
-    func request<T: Decodable>(_ path: String, body: (any Encodable & Sendable)? = nil, method: String? = nil) async throws -> T {
+    func request<T: Decodable>(_ path: String, body: (any Encodable & Sendable)? = nil, method: String? = nil,
+                               query: [URLQueryItem] = []) async throws -> T {
         guard ["https", "http"].contains(credential.url.scheme?.lowercased() ?? ""),
               credential.url.user == nil, credential.url.password == nil,
               credential.url.host != "demo.invalid", !credential.token.isEmpty,
               var components = URLComponents(url: credential.url, resolvingAgainstBaseURL: false) else { throw URLError(.badURL) }
         components.path = components.path.trimmingCharacters(in: CharacterSet(charactersIn: "/")) + "/" + path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
         if !components.path.hasPrefix("/") { components.path = "/" + components.path }
-        components.queryItems = nil; components.fragment = nil
+        components.queryItems = query.isEmpty ? nil : query; components.fragment = nil
         guard let url = components.url else { throw URLError(.badURL) }
         var request = URLRequest(url: url)
         request.httpMethod = method ?? (body == nil ? "GET" : "POST")

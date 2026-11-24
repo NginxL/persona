@@ -12,7 +12,7 @@ import (
 	"time"
 
 	"github.com/nwverse/persona/server/internal/assistantwire"
-	"github.com/nwverse/persona/server/internal/mail"
+	"github.com/nwverse/persona/server/internal/mailwire"
 	"github.com/nwverse/persona/server/internal/rpc"
 )
 
@@ -23,11 +23,11 @@ type replyFailMail struct {
 	sends atomic.Int32
 }
 
-func (m *replyFailMail) GetMessage(context.Context, string, uint32, string) (*mail.MailMessage, error) {
-	return &mail.MailMessage{From: mail.Address{Email: "li@example.com"}, Subject: "Question", MessageID: "q1@example.com", Text: "When?"}, nil
+func (m *replyFailMail) GetMessage(context.Context, string, uint32, string) (*mailwire.MailMessage, error) {
+	return &mailwire.MailMessage{From: mailwire.Address{Email: "li@example.com"}, Subject: "Question", MessageID: "q1@example.com", Text: "When?"}, nil
 }
 
-func (m *replyFailMail) Send(context.Context, mail.SendRequest) error {
+func (m *replyFailMail) Send(context.Context, mailwire.SendRequest) error {
 	m.sends.Add(1)
 	return m.err
 }
@@ -44,8 +44,8 @@ func TestInboxMailReplyItsServerDidNotAnswerStaysInDoubt(t *testing.T) {
 		record string
 		log    string
 	}{
-		{"no answer to the message", fmt.Errorf("smtp: finish body: %w: %w", mail.ErrMaybeSent, io.EOF), assistantwire.CodeAssistantInDoubt, 1, sendUnknown,
-			"may have gone out: assistant_in_doubt (mail: " + mail.ErrMaybeSent.Error() + ")"},
+		{"no answer to the message", fmt.Errorf("smtp: finish body: %w: %w", mailwire.ErrMaybeSent, io.EOF), assistantwire.CodeAssistantInDoubt, 1, sendUnknown,
+			"may have gone out: assistant_in_doubt (mail: " + mailwire.ErrMaybeSent.Error() + ")"},
 		{"refused by the server", errors.New("smtp: finish body: 554 5.7.1 message rejected"), assistantwire.CodeInboxSendFailed, 2, "",
 			"not sent: inbox_send_failed"},
 	} {

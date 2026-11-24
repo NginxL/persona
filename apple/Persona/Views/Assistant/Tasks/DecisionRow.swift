@@ -125,16 +125,11 @@ struct TodoAskRow: View {
     var showsTitle = true
 
     var body: some View {
-        #if os(macOS)
-        // The native Mac app is frozen (docs/apple/mac.md): it keeps the one button it had.
-        BriefAcceptRow(row: ask.row(for: todo), group: group, open: open, decision: deferrable ? todo : nil, showsTitle: showsTitle)
-        #else
         if ask.decisionOptions.isEmpty {
             BriefAcceptRow(row: ask.row(for: todo), group: group, open: open, decision: deferrable ? todo : nil, showsTitle: showsTitle)
         } else {
             DecisionRow(todo: todo, ask: ask, group: group, open: open, showsTitle: showsTitle, deferrable: deferrable)
         }
-        #endif
     }
 }
 

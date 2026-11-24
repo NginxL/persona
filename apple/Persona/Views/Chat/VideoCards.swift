@@ -118,9 +118,6 @@ struct AttachedVideoCard: View {
     var machine: MachineRef?
     @State private var received: Int64?
     @State private var task: Task<Void, Never>?
-    #if os(macOS)
-    @State private var playing: MacVideo?
-    #endif
 
     var body: some View {
         Button(action: tap) {
@@ -153,15 +150,6 @@ struct AttachedVideoCard: View {
         .accessibilityHint(received == nil ? String(localized: "Play") : String(localized: "Stop download"))
         .accessibilityIdentifier("video-card")
         .onDisappear { task?.cancel() }
-        #if os(macOS)
-        .sheet(item: $playing) { v in
-            VideoPlayer(player: v.player)
-                .macLargeSheet()
-                .onAppear { v.player.play() }
-                .onDisappear { v.player.pause() }
-                .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Done [Extension System Presentation c0b3fb]") { playing = nil }.lineLimit(1) } }
-        }
-        #endif
     }
 
     private var status: String {
@@ -211,20 +199,10 @@ struct AttachedVideoCard: View {
     }
 
     private func play(_ url: URL) {
-        #if os(macOS)
-        playing = MacVideo(player: AVPlayer(url: url))
-        #else
         SystemVideoPlayer.present(url)
-        #endif
     }
 }
 
-#if os(macOS)
-private struct MacVideo: Identifiable {
-    let id = UUID()
-    let player: AVPlayer
-}
-#else
 /// The system's full-screen player (AVPlayerViewController), presented over whatever is on top.
 enum SystemVideoPlayer {
     static func present(_ url: URL) {
@@ -238,4 +216,3 @@ enum SystemVideoPlayer {
         top.present(vc, animated: true) { vc.player?.play() }
     }
 }
-#endif

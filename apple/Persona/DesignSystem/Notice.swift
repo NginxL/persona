@@ -30,16 +30,11 @@ struct NoticeBanner<Action: View>: View {
             ThemedIcon(symbol ?? defaultSymbol)
                 .font(Theme.Font.labelStrong)
                 .foregroundStyle(color)
-            #if os(macOS)
-            words.frame(maxWidth: .infinity, alignment: .leading)
-            button
-            #else
             VStack(alignment: .leading, spacing: Theme.Space.xs) {
                 words
                 button
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            #endif
             if let dismiss { close(dismiss) }
         }
         .padding(.horizontal, Theme.Space.m)

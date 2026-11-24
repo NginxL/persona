@@ -78,8 +78,8 @@ internal fun rememberClipboardImages(focused: Boolean): ClipboardImages {
     LaunchedEffect(images, windowFocused, focused) { if (windowFocused) images.refresh() }
     DisposableEffect(images) {
         val listener = ClipboardManager.OnPrimaryClipChangedListener { images.changed() }
-        runCatching { images.clipboard?.addPrimaryClipChangedListener(listener) }
-        onDispose { runCatching { images.clipboard?.removePrimaryClipChangedListener(listener) } }
+        val _ = runCatching { images.clipboard?.addPrimaryClipChangedListener(listener) }
+        onDispose { val _ = runCatching { images.clipboard?.removePrimaryClipChangedListener(listener) } }
     }
     return images
 }

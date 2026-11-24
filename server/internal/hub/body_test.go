@@ -222,7 +222,7 @@ func TestAppHandlersBodyLimitTooLarge(t *testing.T) {
 		{"POST", "/api/v1/sessions/m1/s1/rename", "", 1 << 20},
 		{"POST", "/api/v1/sessions/m1/s1/rewind", "", rewindMaxPrompt + 4<<10},
 		{"POST", "/api/v1/machines/m1/preview/start", "", 64 << 10},
-		{"POST", "/api/v1/sessions", "", 4 << 20},
+		{"POST", "/api/v1/sessions", "", proto.MessageBodyLimit},
 		{"POST", "/api/v1/notify", "", 16 << 10},
 		// (/api/v1/agents/… are the manager's: extmgr TestAgentRoutesBodyLimitTooLarge.)
 		{"POST", "/api/v1/machines/m1/panes", "", 4 << 10},

@@ -11,6 +11,7 @@ import (
 
 	"github.com/nwverse/persona/server/internal/assistantwire"
 	"github.com/nwverse/persona/server/internal/compat"
+	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/proto"
 )
 
@@ -224,18 +225,34 @@ func (s *Service) probeLauncherWithRetry(ctx context.Context, machine, launcher 
 func (s *Service) healthyMachine(ctx context.Context, launcher, except string, suitable ...func(Device) bool) (Device, bool) {
 	best, rank := Device{}, 3
 	for _, d := range s.devices(ctx) {
-		if d.ID == except || !d.Reachable {
+		if d.ID == except {
+			continue
+		}
+		p := placementOf(ctx)
+		if p != nil {
+			p.candidate(d.ID)
+		}
+		if !d.Reachable {
+			p.hit(d.ID, "offline", nil)
 			continue
 		}
 		r, ok := s.launcherHealth(ctx, d.ID, launcher)
 		n := 1
 		switch {
 		case ok && r.unusable():
+			p.hit(d.ID, "launcher_unhealthy", i18n.Args{"kind": r.Kind})
 			continue
 		case ok && r.State == healthOK:
 			n = 0
 		}
-		if n >= rank || !s.launcherOn(ctx, d.ID, launcher) {
+		if p != nil {
+			p.candidate(d.ID).HealthRank = &n
+		}
+		if n >= rank {
+			continue
+		}
+		if !s.launcherOn(ctx, d.ID, launcher) {
+			p.hit(d.ID, "launcher_missing", nil)
 			continue
 		}
 		if slices.ContainsFunc(suitable, func(accept func(Device) bool) bool { return !accept(d) }) {
@@ -361,7 +378,11 @@ func (s *Service) healthDetour(ctx context.Context, m Device, launcher string, s
 	if !bad {
 		return m, "", false
 	}
+	placementOf(ctx).hit(m.ID, "launcher_unhealthy", i18n.Args{"launcher": launcher, "kind": r.Kind})
 	alt, moved := s.healthyMachine(ctx, launcher, m.ID, suitable...)
+	if p := placementOf(ctx); p != nil && moved {
+		p.ReasonKey = "healthy_launcher"
+	}
 	// The pool is provider-level: resolve it once from the failed machine. Missing or stale data gives no note, and
 	// a pool with any schedulable account stays quiet too. Read only after the on-the-spot recheck, since a passing
 	// probe returns above without any detour line.

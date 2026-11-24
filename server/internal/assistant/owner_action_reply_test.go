@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/nwverse/persona/server/internal/assistantwire"
-	"github.com/nwverse/persona/server/internal/feishubot"
+	"github.com/nwverse/persona/server/internal/botcard"
 	"github.com/nwverse/persona/server/internal/proto"
 )
 
@@ -52,8 +52,8 @@ func ownerReplyItemIX(batch ownerActionBatch, item ownerActionItem) proto.Intera
 		Kind: proto.IxPermission, ToolName: item.Tool, ApprovalBatchID: batch.ID, ApprovalItemID: item.ID, OwnerProposal: true, Resumable: true, NoExpiry: true}
 }
 
-func ownerReplyEvent(parent string) feishubot.MessageEvent {
-	var ev feishubot.MessageEvent
+func ownerReplyEvent(parent string) botcard.MessageEvent {
+	var ev botcard.MessageEvent
 	ev.Message.MessageID = "om_reply"
 	ev.Message.ParentID = parent
 	ev.Message.ChatID = "oc_owner"

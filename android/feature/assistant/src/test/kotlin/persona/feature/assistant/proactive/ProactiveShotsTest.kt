@@ -190,7 +190,7 @@ class ProactiveShotsTest {
                         val option = rule.onNodeWithText(it, useUnmergedTree = true)
                         assertTrue("$it is clipped outside the page in $s", option.getUnclippedBoundsInRoot().right <= pageBounds.right)
                         val layouts = mutableListOf<TextLayoutResult>()
-                        option.fetchSemanticsNode().config[SemanticsActions.GetTextLayoutResult].action!!(layouts)
+                        val _ = option.fetchSemanticsNode().config[SemanticsActions.GetTextLayoutResult].action!!(layouts)
                         val layout = layouts.single()
                         val fits = layout.multiParagraph.maxIntrinsicWidth <= layout.layoutInput.constraints.maxWidth || layout.lineCount > 1
                         assertTrue("$it is horizontally clipped in $s: lines=${layout.lineCount}, constraints=${layout.layoutInput.constraints}, intrinsic=${layout.multiParagraph.maxIntrinsicWidth}, size=${layout.size}", fits)

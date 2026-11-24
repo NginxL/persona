@@ -2,7 +2,6 @@ package persona.core.data
 
 import persona.core.contracts.*
 import persona.core.contracts.api.*
-import persona.feature.inbox.*
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.test.runTest
@@ -11,6 +10,7 @@ import kotlinx.serialization.json.*
 import org.junit.Assert.*
 import org.junit.Test
 import java.nio.file.Files
+import persona.core.inbox.*
 
 /** The data side of "AI draft", "Hand to AI" and the row labels. */
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -203,7 +203,7 @@ class InboxHandOffRepositoryTest {
             // Join the repository owner's real IO work too; the test scheduler alone does not drain Dispatchers.IO.
             backgroundScope.coroutineContext[Job]!!.cancelAndJoin()
             AssistantManagerChoice.reset()
-            runCatching { directory.deleteRecursively() }
+            val _ = runCatching { directory.deleteRecursively() }
         }
     }
 
@@ -239,7 +239,7 @@ class InboxHandOffRepositoryTest {
         } finally {
             advanceUntilIdle()
             backgroundScope.coroutineContext[Job]!!.cancelAndJoin()
-            runCatching { directory.deleteRecursively() }
+            val _ = runCatching { directory.deleteRecursively() }
         }
     }
 

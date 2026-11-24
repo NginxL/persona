@@ -1,4 +1,3 @@
-#if os(iOS) || os(visionOS)
 import QuartzCore
 import SwiftUI
 import Testing
@@ -229,4 +228,3 @@ import UIKit
         return layers.flatMap { $0.animationKeys() ?? [] }.sorted()
     }
 }
-#endif

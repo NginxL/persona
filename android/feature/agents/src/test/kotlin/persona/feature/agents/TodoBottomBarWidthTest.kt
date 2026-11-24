@@ -84,7 +84,7 @@ class TodoBottomBarWidthTest {
             val buttons = labels.map { rule.onNode(hasText(it) and hasClickAction()).getUnclippedBoundsInRoot() }
             val cut = labels.filter { label ->
                 val layouts = mutableListOf<TextLayoutResult>()
-                rule.onNodeWithText(label, useUnmergedTree = true).fetchSemanticsNode()
+                val _ = rule.onNodeWithText(label, useUnmergedTree = true).fetchSemanticsNode()
                     .config[SemanticsActions.GetTextLayoutResult].action!!(layouts)
                 layouts.first().isLineEllipsized(0)
             }

@@ -37,6 +37,8 @@ type report struct {
 	// used; missing when none is set (HTTPS_PROXY and ALL_PROXY apply). link.proxy says the one a link is connected
 	// through.
 	Proxy string `json:"proxy,omitempty"`
+	// ProxyAlways: proxy-only mode is set in link.json (persona-link proxy --always).
+	ProxyAlways bool `json:"proxy_always,omitempty"`
 	// Trust: how the hub is checked, "pin" (its key, from the pairing) | "system" (behind an HTTPS reverse proxy:
 	// the system's CAs and the host name).
 	Trust string `json:"trust,omitempty"`
@@ -98,6 +100,7 @@ func gather(e *env) report {
 		if r.Proxy = link.RedactedProxy(c.Proxy); r.Proxy == "" && c.Proxy != "" {
 			r.Proxy = proxyInvalid // nothing of an unusable setting is shown, but that there is one
 		}
+		r.ProxyAlways = c.ProxyAlways
 		if r.SSH == nil {
 			r.SSH = c.SSH
 		}
@@ -243,6 +246,8 @@ func (r report) text(now time.Time, user string) string {
 				}
 				return terminalText("link-cli.candidate_notes", i18n.Args{"notes": strings.Join(notes, terminalText("link-cli.candidate_note_separator"))})
 			}
+			// Proxy-only mode, unless Always use SSH (which wins) is set too.
+			proxyOnly := r.ProxyAlways && (r.SSH == nil || !r.SSH.Always)
 			sshLine := func() {
 				if r.SSH == nil {
 					return
@@ -254,12 +259,40 @@ func (r report) text(now time.Time, user string) string {
 				if r.SSH.Always {
 					notes = append(notes, terminalText("link-cli.note_always_ssh"))
 				}
+				if proxyOnly {
+					notes = append(notes, terminalText("link-cli.note_skip_proxy_only"))
+				}
 				line("%s", terminalText("link-cli.candidate_ssh", i18n.Args{
 					"kind": kindName(link.KindSSH), "server": r.SSH.Server, "target": r.SSH.Target, "notes": notesText(notes),
 				}))
 			}
-			if r.SSH != nil && r.SSH.Always {
+			// The proxy: the one in use, else link.json's.
+			proxyLine := func() {
+				proxy := r.Proxy
+				if inUse != link.KindProxy && (proxy == "" || proxy == link.ProxyOff) {
+					return
+				}
+				var notes []string
+				if inUse == link.KindProxy {
+					proxy = st.Proxy
+					notes = append(notes, terminalText("link-cli.note_in_use"))
+				} else if proxy == proxyInvalid {
+					proxy = terminalText("link-errors.proxy_invalid")
+				}
+				if r.SSH != nil && r.SSH.Always {
+					notes = append(notes, terminalText("link-cli.note_skip_direct"))
+				}
+				if proxyOnly {
+					notes = append(notes, terminalText("link-cli.note_always_proxy"))
+				}
+				line("%s", terminalText("link-cli.candidate_endpoint", i18n.Args{"kind": kindName(link.KindProxy), "address": proxy, "notes": notesText(notes)}))
+			}
+			// Routes are listed as they are tried: the only one first.
+			switch {
+			case r.SSH != nil && r.SSH.Always:
 				sshLine()
+			case proxyOnly:
+				proxyLine()
 			}
 			for _, ep := range r.Endpoints {
 				var notes []string
@@ -272,21 +305,13 @@ func (r report) text(now time.Time, user string) string {
 				if r.SSH != nil && r.SSH.Always {
 					notes = append(notes, terminalText("link-cli.note_skip_direct"))
 				}
+				if proxyOnly {
+					notes = append(notes, terminalText("link-cli.note_skip_proxy_only"))
+				}
 				line("%s", terminalText("link-cli.candidate_endpoint", i18n.Args{"kind": kindName(ep.Kind), "address": ep.URL, "notes": notesText(notes)}))
 			}
-			// The proxy comes after the direct addresses, as it is tried: the one in use, else link.json's.
-			if proxy := r.Proxy; inUse == link.KindProxy || (proxy != "" && proxy != link.ProxyOff) {
-				var notes []string
-				if inUse == link.KindProxy {
-					proxy = st.Proxy
-					notes = append(notes, terminalText("link-cli.note_in_use"))
-				} else if proxy == proxyInvalid {
-					proxy = terminalText("link-errors.proxy_invalid")
-				}
-				if r.SSH != nil && r.SSH.Always {
-					notes = append(notes, terminalText("link-cli.note_skip_direct"))
-				}
-				line("%s", terminalText("link-cli.candidate_endpoint", i18n.Args{"kind": kindName(link.KindProxy), "address": proxy, "notes": notesText(notes)}))
+			if !proxyOnly {
+				proxyLine() // after the direct addresses, as it is tried
 			}
 			if r.SSH != nil && !r.SSH.Always {
 				sshLine()

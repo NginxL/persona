@@ -635,6 +635,7 @@ type fleetPushSink struct {
 
 type fleetPushCall struct {
 	device, kind, event, priority string
+	token                         string // a Live Activity push's activity or push-to-start token
 	state                         FleetState
 }
 
@@ -644,7 +645,8 @@ func (s *fleetPushSink) RoundTrip(r *http.Request) (*http.Response, error) {
 		return nil, err
 	}
 	_ = r.Body.Close()
-	call := fleetPushCall{device: strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer grant-"), kind: req.Type, priority: req.Priority}
+	call := fleetPushCall{device: strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer grant-"), kind: req.Type, priority: req.Priority,
+		token: req.Token}
 	call.event, _ = req.APS["event"].(string)
 	if b, err := json.Marshal(req.APS["content-state"]); err == nil {
 		_ = json.Unmarshal(b, &call.state)

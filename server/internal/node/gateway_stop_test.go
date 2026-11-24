@@ -1,6 +1,7 @@
 package node
 
 import (
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -36,7 +37,8 @@ func testGatewayStoppedProvenance(t *testing.T) {
 			offlineCache.at = time.Time{}
 			offlineCache.Unlock()
 			row := byID(listSessions(t, n))[sidA]
-			if row.Capabilities == nil || row.Capabilities.StopCause != proto.StopUnknown || n.supervisorResumeAllowed(sidA, "", "") == nil {
+			// An unknown stop, which the assistant may resume on purpose (#11528), not a gateway one.
+			if row.Capabilities == nil || row.Capabilities.StopCause != proto.StopUnknown || n.stopCause(sidA) != proto.StopUnknown {
 				t.Fatal("unobserved gateway history granted recovery")
 			}
 			// Observe the failed turn while its Agent still runs, even within RanAt's normal write interval.
@@ -81,7 +83,9 @@ func testGatewayStoppedProvenance(t *testing.T) {
 					t.Fatalf("gateway error overrode %s", cause)
 				}
 			}
-			// Consuming a previous resume cannot grant a second start from the old failure.
+			// Consuming a previous resume cannot grant a second start from the old failure: the cause stays unknown, and
+			// the uncertain start holds the assistant's next resume off (resumeSettle).
+			n.uncertainResumes.begin(sidA, time.Now())(errors.New("no answer"))
 			n.state.stopped(sidA, proto.StopUnknown)
 			row.Capabilities = nil
 			n.markStopped(&row)
@@ -100,7 +104,7 @@ func testGatewayStoppedProvenance(t *testing.T) {
 			n.state.put(sidA, sessionState{Launcher: "claude", Cwd: home, Pane: "w1:p1", RanAt: time.Now().Unix()})
 			row := proto.Session{SessionID: sidA, Agent: "claude", Status: proto.StatusOffline, TurnError: tc.text, UpdatedAt: at}
 			n.markStopped(&row)
-			if row.Capabilities == nil || row.Capabilities.StopCause != proto.StopUnknown || n.supervisorResumeAllowed(sidA, "", "") == nil {
+			if row.Capabilities == nil || row.Capabilities.StopCause != proto.StopUnknown || n.stopCause(sidA) != proto.StopUnknown {
 				t.Fatal("a gateway error authorized a terminal the user closed")
 			}
 		})

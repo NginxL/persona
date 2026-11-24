@@ -86,7 +86,10 @@ enum PhoneToolRegistry {
 
     /// A Mac has HealthKit's API but no health data: no health tools there.
     private static var healthTools: [PhoneTool] {
-        #if os(iOS) || os(visionOS)
+        #if os(iOS)
+        // The generic type, sample, source, access and watch tools (#13740) are iPhone only.
+        HealthTool.tools + WorkoutTool.tools + HealthRecords.tools
+        #elseif os(visionOS)
         HealthTool.tools + WorkoutTool.tools
         #else
         []

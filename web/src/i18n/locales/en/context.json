@@ -2,6 +2,7 @@
   "details": "Show agent details",
   "details_hint": "Agent rows get a second line: model, context, idle time, folder. Off by default.",
   "label": "Context {percent}%",
+  "current_tokens": "Context · {tokens} tok",
   "summary": "Context {used}% used, {left}% left",
   "hint_ok": "Context is how much of this conversation the agent can keep in mind. When it runs out, it compacts on its own: earlier parts are kept only as a summary.",
   "hint_warn": "Almost full. When it fills up it compacts on its own and earlier parts are kept only as a summary. To wrap up first, send /compact to compact now, or start a new agent to carry on.",

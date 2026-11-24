@@ -357,7 +357,7 @@ func (h *herdrCoreHost) Watch(ctx context.Context, _ []host.PaneRef, changed fun
 }
 
 // hcAgents names the agents herdr-core's status reports (status.app, the program's own word) the way the node does.
-var hcAgents = map[string]string{"claude-code": "claude", "claude": "claude", "codex": "codex"}
+var hcAgents = map[string]string{"claude-code": "claude", "claude": "claude", "codex": "codex", "antigravity": agyAgent}
 
 // hcStatus maps OSC 7501 states to the node's; error has no counterpart (the program said something failed, not what
 // it does now).
@@ -399,19 +399,28 @@ func fromTerminal(t herdrcore.Terminal) host.Agent {
 		if a.AgentStatus == "" {
 			a.AgentStatus = proto.StatusUnknown
 		}
-		return a
+		return withAgyPresence(a, t.Foreground)
 	}
 	if len(t.Foreground.Argv) > 0 {
 		if k := hcAgentProgram(t.Foreground.Argv[0]); k != "" {
 			a.Agent, a.AgentStatus = k, proto.StatusUnknown
 		}
 	}
+	return withAgyPresence(a, t.Foreground)
+}
+
+// withAgyPresence names an agy terminal's conversation: herdr-core does not report it, the presence lock its agy holds
+// open does (agypresence.go, #13603).
+func withAgyPresence(a host.Agent, fg *herdrcore.Foreground) host.Agent {
+	if a.Agent == agyAgent && fg != nil {
+		a.AgentSession = agyPresenceSession(fg.Pid)
+	}
 	return a
 }
 
-// hcAgentProgram is the agent a program name or path is ("claude", "codex", also as claude.exe), else "".
+// hcAgentProgram is the agent a program name or path is ("claude", "codex", "agy", also as claude.exe), else "".
 func hcAgentProgram(name string) string {
-	if k := strings.TrimSuffix(filepath.Base(name), ".exe"); k == "claude" || k == "codex" {
+	if k := strings.TrimSuffix(filepath.Base(name), ".exe"); k == "claude" || k == "codex" || k == agyAgent {
 		return k
 	}
 	return ""

@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/nwverse/persona/server/internal/assistantwire"
@@ -330,23 +331,73 @@ func (h *Hub) getClientOp(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, op)
 }
 
+// clientOpsCleanupEvery bounds the periodic client_ops cleanup (var for tests).
+var clientOpsCleanupEvery = 24 * time.Hour
+
+type clientOpsWake struct {
+	mu       sync.Mutex
+	wake     chan struct{}
+	deferred bool
+}
+
+func (c *clientOpsWake) channel() chan struct{} {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.wake == nil {
+		c.wake = make(chan struct{}, 1)
+	}
+	return c.wake
+}
+
+func (h *Hub) cleanupClientOps(ctx context.Context) {
+	if h.store == nil {
+		return
+	}
+	if !h.quiesce.beginOrDefer(func() {
+		h.clientOps.mu.Lock()
+		h.clientOps.deferred = true
+		h.clientOps.mu.Unlock()
+	}) {
+		return
+	}
+	defer h.quiesce.end()
+	cleanCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	err := h.store.CleanupClientOps(cleanCtx, time.Now().UTC().AddDate(0, 0, -30))
+	cancel()
+	if err != nil && ctx.Err() == nil {
+		h.logf("clean client operations: %v", err)
+	}
+}
+
+func (h *Hub) wakeClientOps() {
+	h.clientOps.mu.Lock()
+	deferred := h.clientOps.deferred
+	h.clientOps.deferred = false
+	ch := h.clientOps.wake
+	h.clientOps.mu.Unlock()
+	if !deferred || ch == nil {
+		return
+	}
+	select {
+	case ch <- struct{}{}:
+	default:
+	}
+}
+
 func (h *Hub) startClientOps(ctx context.Context) error {
 	if err := h.store.RecoverClientOps(ctx); err != nil {
 		return err
 	}
+	wake := h.clientOps.channel()
 	go func() {
-		ticker := time.NewTicker(24 * time.Hour)
+		ticker := time.NewTicker(clientOpsCleanupEvery)
 		defer ticker.Stop()
 		for {
-			cleanCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
-			err := h.store.CleanupClientOps(cleanCtx, time.Now().UTC().AddDate(0, 0, -30))
-			cancel()
-			if err != nil && ctx.Err() == nil {
-				h.logf("clean client operations: %v", err)
-			}
+			h.cleanupClientOps(ctx)
 			select {
 			case <-ctx.Done():
 				return
+			case <-wake:
 			case <-ticker.C:
 			}
 		}

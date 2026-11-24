@@ -31,7 +31,7 @@ func TestASubscriptionsRowIsRepliedToThroughItsConnector(t *testing.T) {
 	}
 	items := []subscriptions.Item{{UID: "c2", Thread: "example-org/example-repo#12", Title: "A comment", Kind: "sub_notice",
 		ReplyTo: "Comment on example-org/example-repo#12 (anyone who can see the repo)"}}
-	if err := store.CommitRun(ctx, subscriptions.RunCommit{Sub: sub, Revision: 1, Items: items, Now: now}); err != nil {
+	if _, err := store.CommitRun(ctx, subscriptions.RunCommit{Sub: sub, Revision: 1, Items: items, Now: now}); err != nil {
 		t.Fatal(err)
 	}
 	h.subs = subscriptions.New(h.subscriptionOptions(store))

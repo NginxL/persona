@@ -4,7 +4,9 @@
 // says where it came from ("Came from … · click to return", ChatView's HandoffBack), and going back puts the
 // conversation's chat where it was (ChatView takes the place `leaveChat` kept on the conversation's history entry).
 // An Agent opened from inside another page (a to-do, a knowledge project, a meeting: `openFromPage`, #12055) says where
-// it came from the same way, and the sidebar keeps that page's row (lib/persona-nav.ts sidebarRoute, #9971).
+// it came from the same way, and the sidebar keeps that page's row (lib/persona-nav.ts sidebarRoute, #9971). Set to
+// Full page, the main conversation keeps the page it opened last while another place is in front, and the sidebar's
+// Main Chat opens it again over the conversation (`pickMainChat`, #13164), as a place keeps its stack on iOS.
 import { agentOpenMode } from "./agent-open";
 import { onOverlayEntry } from "./back-close";
 import { stripBase } from "./base";
@@ -44,16 +46,33 @@ const address = () => stripBase(location.pathname) + location.search;
 // The place a hand-off kept when the conversation's entry could not carry it: left from an overlay's entry (a sheet, the
 // task board), which the new page takes over, so Back lands on the entry under it. Used when Back reaches that address.
 let left: { path: string; place: ChatPlace; back: boolean; panel?: Panel } | null = null;
+
+// The page the main conversation opened last as a page of its own, set to Full page (an Agent's or a task's: leaveChat),
+// with where its chat was (#13164). It is the conversation's page while another place is in front, as a place keeps its
+// drill-down on iOS (SidebarPageRoots, docs/design/sidebar-navigation.md): Main Chat picked in the sidebar opens it again
+// (`pickMainChat`). Back (or Forward) to the conversation and Main Chat picked while it or its page is in front drop it.
+// `chat` names the conversation (mainChat), so another assistant's never opens over this one's; kept in this page only:
+// a reload, or another hub's page, starts with none.
+let pushed: { chat: string; to: Route; place?: ChatPlace } | null = null;
+
+/** The main conversation `r` shows, named by its assistant's manager and sid; null for any other page. */
+function mainChat(r: Route | null, s: State = getState()): string | null {
+  if (r?.name !== "persona" || (r.sid !== undefined && r.sid !== s.assistant?.main)) return null;
+  return `${s.assistant?.manager ?? ""}/${s.assistant?.main ?? ""}`;
+}
+
 if (typeof addEventListener !== "undefined") {
   // capture: before the router's listener draws the page that reads it
   addEventListener("popstate", () => {
     if (left) left.back = left.path === address();
   }, true);
   // after it: Back to a conversation left from its side panel (a task's or an Agent's "Open Agent page") opens that panel
-  // again, as the chat's place is put back; the strip's "click to return" is this same Back
+  // again, as the chat's place is put back; the strip's "click to return" is this same Back. Back to the main
+  // conversation puts it in front, with its page no longer kept.
   addEventListener("popstate", () => {
     const p = panelIn();
-    if (p) openPanel(p);
+    if (p) openPanel(p, { push: false });
+    if (pushed && mainChat(routeAt(location.href))) pushed = null;
   });
 }
 
@@ -175,6 +194,9 @@ export function leaveChat(to: Route, from = true, panel?: Panel) {
   const path = address();
   const kept = panel && (panel.kind === "task" || panel.kind === "agent") ? panel : undefined;
   const place = sc ? chatPlaceOf(sc) : undefined;
+  // set to Full page, the main conversation keeps the page it opens now (#13164); a page that names nowhere, none
+  const chat = mainChat(here);
+  if (chat) pushed = from && agentOpenMode() === "page" ? { chat, to, place } : null;
   // an overlay's entry is taken over by the new page (router.ts navigate): Back lands on the conversation's own
   left = onOverlayEntry() && (place || kept) ? { path, place: place ?? { end: true, offset: 0 }, back: false, panel: kept } : null;
   if (!left) {
@@ -183,4 +205,28 @@ export function leaveChat(to: Route, from = true, panel?: Panel) {
     if (place || kept || old !== undefined) history.replaceState({ ...rest, ...(place ? { [PLACE]: place } : {}), ...(kept ? { [PANEL]: kept } : {}) }, "");
   }
   navigate(to, false, state);
+}
+
+/** Opens a link's Agent or task page (lib/links.ts openLink) as a page of its own: from a Persona conversation (its
+ *  cards' session and task links) it names the conversation, as the conversation's own hand-offs do (#13164); from any
+ *  other page it is a root, as an Agent picked in the sidebar is. */
+export function openLinkPage(to: Route) {
+  leaveChat(to, typeof location !== "undefined" && routeAt(location.href)?.name === "persona");
+}
+
+/**
+ * The sidebar's Main Chat picked (#13164). While the conversation or a page opened from it is in front (`inFront`: its
+ * row is lit) the row goes to the bare conversation, as a tab bar's item picked in front pops to its root, and the page
+ * is no longer kept. From any other place the page the conversation kept opens again over it: a new entry for the
+ * conversation (with where its chat was), then the page's, naming it, so Back returns to the conversation. False when
+ * there is nothing to open again: the row goes to the conversation as it always did.
+ */
+export function pickMainChat(inFront: boolean): boolean {
+  const kept = pushed;
+  pushed = null;
+  if (inFront || !kept || agentOpenMode() !== "page" || kept.chat !== mainChat({ name: "persona" })) return false;
+  navigate({ name: "persona" }, false, kept.place ? { [PLACE]: kept.place } : null);
+  navigate(kept.to, false, openedFromHere());
+  pushed = kept;
+  return true;
 }

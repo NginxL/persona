@@ -11,12 +11,8 @@ nonisolated extension ExtensionUIContext {
     static let version = 3
 
     static var platform: String {
-        #if os(macOS)
-        ExtensionPlatform.mac
-        #else
         // The protocol has only four platforms for now; watchOS and visionOS use Apple mobile's ios.
         ExtensionPlatform.ios
-        #endif
     }
 
     static var appLocale: String {

@@ -5,8 +5,10 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.MutableState
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
@@ -56,21 +58,54 @@ internal fun rememberChatPageTaskHost(
     DisposableEffect(tasks, key) { onDispose { tasks?.watchAgents(emptySet()) } }
     // the cards still to answer: one just answered here no longer says what it asked
     val taskCards = remember(allRequests, taps.resolved) { taps.shown(allRequests) }
-    val taskHost = tasks?.let { store ->
-        val namespace = GroupKeys.namespaceOf(key.machineId)
-        val localSessions = sessionList.filter { GroupKeys.namespaceOf(it.machineId) == namespace }
-            .map { it.copy(machineId = GroupKeys.raw(it.machineId)) }
-            .map { base -> base.copy(plan = listOfNotNull(base.plan, taskAgentSessions[base.key]?.plan)
-                .maxByOrNull { parseTime(it.at) ?: java.time.Instant.MIN }) }
-        AssistantTaskHost(store, key.sessionId, (localSessions + taskAgentSessions.values).distinctBy { it.key },
-            { id -> machines.firstOrNull { it.id == GroupKeys.machine(id, namespace) }?.displayName ?: id },
-            onOpen = { k -> chrome.onOpenSession?.invoke(GroupKeys.key(k, namespace)) }, onError = { onNotice(operationFeedback(it).text.resolve(res)) },
-            say = { text -> scope.launch { runCatching { sendTodayCardMessage(sender, key, text, UUID.randomUUID().toString()) } } },
-            sheet = taskSheet, machines = machines.filter { GroupKeys.namespaceOf(it.id) == namespace }.map { it.copy(id = GroupKeys.raw(it.id)) },
-            pending = taskCards.filter { GroupKeys.namespaceOf(it.machineId) == namespace }.map { it.copy(machineId = GroupKeys.raw(it.machineId)) },
-            manager = session?.manager,
-            backgroundRecords = assistantPresentation.background, onOpenBackground = { backgroundOpenState.value = true },
-            onOpenSetup = chrome.onOpenSetup?.let { open -> { page: persona.core.contracts.BriefSetupPage -> open(page, session?.manager) } })
+    val currentOnNotice by rememberUpdatedState(onNotice)
+    val currentOnOpenSession by rememberUpdatedState(chrome.onOpenSession)
+    val currentOnOpenSetup by rememberUpdatedState(chrome.onOpenSetup)
+    val hasOpenSetup = chrome.onOpenSetup != null
+    val namespace = GroupKeys.namespaceOf(key.machineId)
+    val hostSessions = remember(tasks != null, namespace, sessionList, taskAgentSessions) {
+        if (tasks == null) emptyList()
+        else {
+            val localSessions = sessionList.filter { GroupKeys.namespaceOf(it.machineId) == namespace }
+                .map { it.copy(machineId = GroupKeys.raw(it.machineId)) }
+                .map { base ->
+                    val extraPlan = taskAgentSessions[base.key]?.plan
+                    if (extraPlan == null) base
+                    else base.copy(plan = listOfNotNull(base.plan, extraPlan)
+                        .maxByOrNull { parseTime(it.at) ?: java.time.Instant.MIN })
+                }
+            (localSessions + taskAgentSessions.values).distinctBy { it.key }
+        }
+    }
+    val hostMachines = remember(tasks != null, namespace, machines) {
+        if (tasks == null) emptyList()
+        else machines.filter { GroupKeys.namespaceOf(it.id) == namespace }.map { it.copy(id = GroupKeys.raw(it.id)) }
+    }
+    val machineDisplayNames = remember(hostMachines) { hostMachines.associate { it.id to it.displayName } }
+    val hostPending = remember(tasks != null, namespace, taskCards) {
+        if (tasks == null) emptyList()
+        else taskCards.filter { GroupKeys.namespaceOf(it.machineId) == namespace }.map { it.copy(machineId = GroupKeys.raw(it.machineId)) }
+    }
+    val manager = session?.manager
+    val backgroundRecords = assistantPresentation.background
+    val taskHost = remember(
+        tasks, key, namespace, hostSessions, hostMachines, machineDisplayNames, hostPending,
+        manager, backgroundRecords, hasOpenSetup, scope, res, sender, taskSheet, backgroundOpenState,
+    ) {
+        tasks?.let { store ->
+            AssistantTaskHost(
+                store, key.sessionId, hostSessions,
+                { id -> machineDisplayNames[id] ?: id },
+                onOpen = { k -> currentOnOpenSession?.invoke(GroupKeys.key(k, namespace)) },
+                onError = { currentOnNotice(operationFeedback(it).text.resolve(res)) },
+                say = { text -> scope.launch { val _ = runCatching { sendTodayCardMessage(sender, key, text, UUID.randomUUID().toString()) } } },
+                sheet = taskSheet, machines = hostMachines,
+                pending = hostPending,
+                manager = manager,
+                backgroundRecords = backgroundRecords, onOpenBackground = { backgroundOpenState.value = true },
+                onOpenSetup = if (hasOpenSetup) { page: persona.core.contracts.BriefSetupPage -> currentOnOpenSetup?.invoke(page, manager) } else null,
+            )
+        }
     }
     return ChatPageTaskHost(taskHost, backgroundOpenState)
 }

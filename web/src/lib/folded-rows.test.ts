@@ -42,17 +42,25 @@ describe("folded rows (#5120)", () => {
     expect(foldRows(rows)).toBe(out);
   });
 
-  it("a parent on another machine is not the parent", () => {
-    const rows = [row("c", { folded_under: "gone" }), row("p", { machine_id: "other" }), row("d", { folded_under: "p" })];
+  it("a parent on another machine only folds when folded_under_machine_id names it, and orphan is_subagent rows never leak", () => {
+    const rows = [
+      row("c", { folded_under: "gone" }),
+      row("orphan", { is_subagent: true, parent_session_id: "archived" }),
+      row("p", { machine_id: "other" }),
+      row("d", { folded_under: "p" }),
+      row("remote-kid", { machine_id: "box", folded_under: "p", folded_under_machine_id: "other", is_subagent: true }),
+    ];
     expect(foldRows(rows).map((s) => s.session_id)).toEqual(["c", "p", "d"]);
   });
 
-  it("puts a child's card on its parent", () => {
+  it("puts same-machine and cross-machine child cards on their parent", () => {
     const card = { id: "1", machine_id: "m", session_id: "c", folded_under: "p" } as Interaction;
+    const cross = { id: "4", machine_id: "box", session_id: "rc", folded_under: "p", folded_under_machine_id: "m" } as Interaction;
     const own = { id: "2", machine_id: "m", session_id: "p" } as Interaction;
     const elsewhere = { id: "3", machine_id: "n", session_id: "c", folded_under: "p" } as Interaction;
-    expect([card, own].map(homeKey)).toEqual(["m/p", "m/p"]);
-    expect(childCards([card, own, elsewhere], "m", "p").map((ix) => ix.id)).toEqual(["1"]);
+    expect([card, cross, own].map(homeKey)).toEqual(["m/p", "m/p", "m/p"]);
+    expect(childCards([card, cross, own, elsewhere], "m", "p").map((ix) => ix.id)).toEqual(["1", "4"]);
+    expect(sessionCard([cross], "m", "p")?.id).toBe("4");
   });
 });
 

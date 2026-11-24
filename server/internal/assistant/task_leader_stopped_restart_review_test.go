@@ -44,7 +44,7 @@ func checkLeaderReviewDelivery(t *testing.T, status string, confirmed bool) {
 	f.setSessions("box",
 		proto.Session{SessionID: "s1", MachineID: "box", Cwd: "/code/app", Agent: "claude", Status: proto.StatusIdle},
 		proto.Session{SessionID: worker, MachineID: "box", Cwd: "/code/app", Agent: "claude", Status: proto.StatusWorking, State: proto.StateWorking, UpdatedAt: time.Now()})
-	s.taskWorking(ctx, "box", worker)
+	s.taskWorking(ctx, "box", worker, startRow{})
 	stopLeader(f, worker)
 	f.setSessions("box",
 		proto.Session{SessionID: "s1", MachineID: "box", Cwd: "/code/app", Agent: "claude", Status: status, Capabilities: &proto.SessionCapabilities{Read: true, Terminal: true}, UpdatedAt: time.Now()},

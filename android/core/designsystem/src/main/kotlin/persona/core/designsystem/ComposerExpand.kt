@@ -102,23 +102,29 @@ fun ExpandedComposer(
         }
     }
     JFullScreen(onCollapse) {
-        Column(Modifier.fillMaxSize().systemBarsPadding().imePadding().testTag("composer-expanded")) {
-            Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp.dense), horizontalArrangement = Arrangement.End) {
-                ComposerExpandButton(expanded = true, onClick = onCollapse)
+        InterfaceContent {
+            Column(Modifier.fillMaxSize().systemBarsPadding().imePadding().testTag("composer-expanded")) {
+                Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp.dense), horizontalArrangement = Arrangement.End) {
+                    ComposerExpandButton(expanded = true, onClick = onCollapse)
+                }
+                ReadingContent {
+                    BasicTextField(
+                        value, onValueChange, Modifier.then(hardwareModifier).weight(1f).fillMaxWidth().padding(horizontal = 20.dp.dense).focusRequester(focus).hardwareShortcutTextInput().testTag("composer-expanded-input"),
+                        enabled = enabled, textStyle = PersonaTheme.type.body.copy(color = palette.ink), cursorBrush = SolidColor(palette.ink),
+                        decorationBox = { field ->
+                            Box {
+                                if (value.text.isEmpty()) InterfaceContent {
+                                    Text(placeholder, style = PersonaTheme.type.body, color = palette.ink3)
+                                }
+                                field()
+                            }
+                        },
+                    )
+                }
+                Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp.dense, vertical = 4.dp.dense), horizontalArrangement = Arrangement.End,
+                    verticalAlignment = Alignment.CenterVertically, content = send)
             }
-            BasicTextField(
-                value, onValueChange, Modifier.then(hardwareModifier).weight(1f).fillMaxWidth().padding(horizontal = 20.dp.dense).focusRequester(focus).hardwareShortcutTextInput().testTag("composer-expanded-input"),
-                enabled = enabled, textStyle = PersonaTheme.type.body.copy(color = palette.ink), cursorBrush = SolidColor(palette.ink),
-                decorationBox = { field ->
-                    Box {
-                        if (value.text.isEmpty()) Text(placeholder, style = PersonaTheme.type.body, color = palette.ink3)
-                        field()
-                    }
-                },
-            )
-            Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp.dense, vertical = 4.dp.dense), horizontalArrangement = Arrangement.End,
-                verticalAlignment = Alignment.CenterVertically, content = send)
         }
     }
-    LaunchedEffect(Unit) { runCatching { focus.requestFocus() } }
+    LaunchedEffect(Unit) { val _ = runCatching { focus.requestFocus() } }
 }

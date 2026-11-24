@@ -132,6 +132,10 @@ func activeRuns(f *Facts, now time.Time) []run {
 		r.kind = runReading(r, now)
 		if linked != nil {
 			r.kind = runAsks
+		} else if r.kind == runAsks && r.card != nil && r.card.Delegating {
+			// The card went to the conversation supervising it (or Persona decides whether to answer it): Persona's work
+			// until that conversation passes it up, not the owner's.
+			r.kind = runPersona
 		} else if r.card == nil && r.kind == runAsks && r.s.Work != nil && r.s.Work.InteractionID == parkInteractionID(f, a) {
 			// The exact linked card is gone; this is its stale session state, not a new owner question.
 			r.kind = runIdle

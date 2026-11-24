@@ -100,7 +100,8 @@ def strings(o, key=()):
 
 def example_values():
     try:
-        return {v for _, v in strings(json.load(open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "config.example.json"))))}
+        with open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "config.example.json")) as source:
+            return {v for _, v in strings(json.load(source))}
     except (OSError, ValueError):
         return set()
 
@@ -178,6 +179,10 @@ def config_values():
     paths.update(os.path.expanduser(os.environ[key]) for key in CONFIG_ENV if os.environ.get(key))
     defaults = example_values()
     for path in paths:
+        # The runtime's hub.json contains credentials. A build config override
+        # or symlink must never make the repository scanner open that file.
+        if any(os.path.normcase(os.path.basename(p)) == "hub.json" for p in (path, os.path.realpath(path))):
+            continue
         try:
             with open(path) as source:
                 cfg = json.load(source)

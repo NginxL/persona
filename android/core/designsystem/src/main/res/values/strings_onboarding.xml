@@ -17,6 +17,7 @@
     <string name="designsystem_readiness_action_install_claude">How to install</string>
     <string name="designsystem_readiness_action_login_claude">How to sign in</string>
     <string name="designsystem_readiness_action_connect_model">Connect a model</string>
+    <string name="designsystem_readiness_action_pick_model">Choose another model</string>
     <string name="designsystem_readiness_action_edit_provider">Change the key</string>
     <string name="designsystem_readiness_action_test_assistant">Try it</string>
     <string name="designsystem_readiness_send_add_computer">Add a computer first</string>

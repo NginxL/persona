@@ -1,4 +1,5 @@
 {
+  "settings_unavailable": "暂时无法读取飞书机器人设置，请稍后重试。",
   "no_credentials": "还没填应用凭证",
   "bot_off": "机器人没打开或还没配对",
   "test_title": "测试消息",
@@ -10,6 +11,8 @@
   "topic_chat_home_many": "主话题群只能有一个",
   "topic_needs_owner": "先配对机器人：开启的群属于主人的名单",
   "topic_chats_new_app": "群名单请单独提交：换 App ID 会解除主人配对",
+  "nudge_save_failed": "未能保存提醒设置，请重试。",
   "nudge_after_range": "催办等待时间要在 0（关闭）到 {max} 分钟之间",
-  "source_report_delay_range": "回复原群的等待时间须为 0 至 {max} 分钟的整数"
+  "source_report_delay_range": "回复原群的等待时间须为 0 至 {max} 分钟的整数",
+  "settings_save_failed": "无法保存机器人设置，请重试。"
 }

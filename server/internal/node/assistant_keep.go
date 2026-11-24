@@ -45,7 +45,11 @@ func (k *assistantKeeper) stopAll() {
 	k.mu.Lock()
 	kept := k.procs
 	k.procs = map[string]*assistantProc{}
+	warm := k.cacheWarm
 	k.mu.Unlock()
+	if warm != nil {
+		warm.close()
+	}
 	procs := make([]*assistantProc, 0, len(kept))
 	for _, p := range kept {
 		procs = append(procs, p)
@@ -101,6 +105,7 @@ func waitExited(procs []*assistantProc, within time.Duration) (left []*assistant
 
 // assistantKeeper holds the conversations between two connections of a resident node.
 type assistantKeeper struct {
+	cacheWarm      *assistantCachePool
 	mu             sync.Mutex
 	procs          map[string]*assistantProc
 	recoveryOwners map[string]*Node              // each session's previous Node, holding its recovery under that Node's mu

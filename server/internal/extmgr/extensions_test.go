@@ -18,12 +18,11 @@ import (
 
 	"github.com/coder/websocket"
 
+	"github.com/nwverse/persona/server/internal/builtinext"
 	"github.com/nwverse/persona/server/internal/db/dbtest"
 	"github.com/nwverse/persona/server/internal/extension"
 	"github.com/nwverse/persona/server/internal/extension/sandbox"
 	"github.com/nwverse/persona/server/internal/extension/sourcevalidate"
-	"github.com/nwverse/persona/server/internal/voice"
-	"github.com/nwverse/persona/server/internal/volc"
 )
 
 // TestMain doubles as a plugin: re-run with PERSONA_TEST_PLUGIN=1 the test binary serves on PERSONA_PLUGIN_SOCKET.
@@ -43,16 +42,16 @@ func TestMain(m *testing.M) {
 		serveTranscriptionExtensionForTest()
 		return
 	}
-	if len(os.Args) > 1 && os.Args[1] == "volc" { // the built-in Volcengine speech extension run by the hub (volc_extension_test.go)
-		if err := volc.Run(context.Background(), "test"); err != nil { // newTestManager's version
+	if run, ok := builtinext.LookupProgram("volc"); ok && len(os.Args) > 1 && os.Args[1] == "volc" { // the built-in Volcengine speech extension run by the hub (volc_extension_test.go)
+		if err := run(context.Background(), "test"); err != nil { // newTestManager's version
 			log.Fatal(err)
 		}
 		return
 	}
-	if len(os.Args) > 1 && os.Args[1] == "voice" { // the built-in voice extension run by the hub (voice_extension_test.go)
+	if run, ok := builtinext.LookupProgram("voice"); ok && len(os.Args) > 1 && os.Args[1] == "voice" { // the built-in voice extension run by the hub (voice_extension_test.go)
 		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 		defer stop()
-		if err := voice.Run(ctx); err != nil {
+		if err := run(ctx, "test"); err != nil {
 			log.Fatal(err)
 		}
 		return
@@ -93,6 +92,10 @@ func TestMain(m *testing.M) {
 		serveSecretProviderExtensionForTest()
 		return
 	}
+	if os.Getenv("PERSONA_TEST_PLUGIN") == "memory" { // memory_sources_test.go
+		serveMemorySourceExtensionForTest()
+		return
+	}
 	if os.Getenv("PERSONA_TEST_PLUGIN") == "repos" {
 		serveRepositoryProviderExtensionForTest()
 		return
@@ -123,6 +126,10 @@ func TestMain(m *testing.M) {
 	}
 	if os.Getenv("PERSONA_TEST_PLUGIN") == "usage" {
 		serveUsageExtensionForTest()
+		return
+	}
+	if os.Getenv("PERSONA_TEST_PLUGIN") == "lark_images" {
+		serveLarkImageFixture()
 		return
 	}
 	if os.Getenv("PERSONA_TEST_PLUGIN") == "messaging" {

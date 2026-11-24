@@ -130,6 +130,9 @@ func TestClippedFollowsClipJSON(t *testing.T) {
 	if !clipped(in) {
 		t.Fatal("clipJSON's note not recognized")
 	}
+	if !clipped(map[string]any{"content": "prefix" + ApproximateClipNote(12)}) {
+		t.Fatal("the approximate clip note was not recognized")
+	}
 	if clipped(map[string]any{"content": "said: \n…（已截断，共 12 字节）, then more"}) || clipped(map[string]any{"content": long}) {
 		t.Fatal("an unclipped text read as clipped")
 	}

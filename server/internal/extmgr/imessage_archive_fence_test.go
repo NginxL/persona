@@ -13,9 +13,9 @@ import (
 
 	"github.com/nwverse/persona/server/internal/assistantwire"
 	"github.com/nwverse/persona/server/internal/connector"
-	"github.com/nwverse/persona/server/internal/connector/imessage"
 	"github.com/nwverse/persona/server/internal/db"
 	"github.com/nwverse/persona/server/internal/i18n"
+	"github.com/nwverse/persona/server/internal/imessagewire"
 )
 
 type archiveFenceStore struct {
@@ -85,6 +85,7 @@ func (s *archiveFenceStore) PutSetting(ctx context.Context, key string, v any) e
 }
 
 func TestIMessageArchiveFenceRecoversReservations(t *testing.T) {
+	needsIMessageModule(t)
 	ctx := context.Background()
 	store := newMemStore()
 	var before imessageArchiveFence
@@ -125,6 +126,7 @@ func TestIMessageArchiveFenceRecoversReservations(t *testing.T) {
 }
 
 func TestIMessageArchiveFenceAbortAfterUncertainPersistence(t *testing.T) {
+	needsIMessageModule(t)
 	ctx := context.Background()
 	store := &committedErrorArchiveStore{memStore: newMemStore()}
 	var first imessageArchiveFence
@@ -164,6 +166,7 @@ func TestIMessageArchiveFenceAbortAfterUncertainPersistence(t *testing.T) {
 }
 
 func TestIMessageArchiveFenceEndAfterUncertainPersistence(t *testing.T) {
+	needsIMessageModule(t)
 	ctx := context.Background()
 	store := &committedErrorArchiveStore{memStore: newMemStore()}
 	var f imessageArchiveFence
@@ -188,6 +191,7 @@ func TestIMessageArchiveFenceEndAfterUncertainPersistence(t *testing.T) {
 }
 
 func TestIMessageArchiveFenceMissingRecordFailsClosed(t *testing.T) {
+	needsIMessageModule(t)
 	ctx := context.Background()
 	store := &archiveFenceStore{memStore: newMemStore()}
 	var f imessageArchiveFence
@@ -223,6 +227,7 @@ func TestIMessageArchiveFenceMissingRecordFailsClosed(t *testing.T) {
 }
 
 func TestIMessageSettingReadFailureFailsClosedAndRecovers(t *testing.T) {
+	needsIMessageModule(t)
 	for _, saved := range []bool{false, true} {
 		t.Run(map[bool]string{false: "saved off", true: "saved on"}[saved], func(t *testing.T) {
 			ctx := context.Background()
@@ -234,7 +239,7 @@ func TestIMessageSettingReadFailureFailsClosedAndRecovers(t *testing.T) {
 			h := newTestManager(t)
 			h.store = store
 			h.connectors = connector.NewRegistry(nil)
-			if err := h.addIMessage(imessage.Config{Machine: "example"}); err != nil {
+			if err := h.addIMessage(imessagewire.Config{Machine: "example"}); err != nil {
 				t.Fatal(err)
 			}
 			if h.imessage().AI() || !h.imessageAIPending.Load() {
@@ -262,6 +267,7 @@ func TestIMessageSettingReadFailureFailsClosedAndRecovers(t *testing.T) {
 }
 
 func TestIMessageSettingRefreshRecoversSavedChoice(t *testing.T) {
+	needsIMessageModule(t)
 	ctx := context.Background()
 	store := &imessageAIReadStore{memStore: newMemStore()}
 	if err := store.PutSetting(ctx, imessageAIKey, true); err != nil {
@@ -271,7 +277,7 @@ func TestIMessageSettingRefreshRecoversSavedChoice(t *testing.T) {
 	h := newTestManager(t)
 	h.store = store
 	h.connectors = connector.NewRegistry(nil)
-	if err := h.addIMessage(imessage.Config{Machine: "example"}); err != nil {
+	if err := h.addIMessage(imessagewire.Config{Machine: "example"}); err != nil {
 		t.Fatal(err)
 	}
 	store.fail.Store(false)
@@ -295,6 +301,7 @@ func (s isolatedArchiveFenceStore) PutSetting(ctx context.Context, _ string, v a
 }
 
 func TestIMessageArchiveFencePostgresRestart(t *testing.T) {
+	needsIMessageModule(t)
 	address := os.Getenv("PERSONA_TEST_DATABASE_URL")
 	if address == "" {
 		t.Skip("PERSONA_TEST_DATABASE_URL is required for the disposable Postgres fixture")
@@ -340,6 +347,7 @@ func TestIMessageArchiveFencePostgresRestart(t *testing.T) {
 }
 
 func TestIMessageArchiveFenceStorageFailureAndCancellation(t *testing.T) {
+	needsIMessageModule(t)
 	ctx := context.Background()
 	store := &archiveFenceStore{memStore: newMemStore()}
 	store.failRead.Store(true)
@@ -393,6 +401,7 @@ func TestIMessageArchiveFenceStorageFailureAndCancellation(t *testing.T) {
 }
 
 func TestIMessageArchiveFenceDeadlineWhileReservationStoreIsBusy(t *testing.T) {
+	needsIMessageModule(t)
 	store := &blockingArchiveFenceStore{memStore: newMemStore(), entered: make(chan struct{}), release: make(chan struct{})}
 	var release sync.Once
 	t.Cleanup(func() { release.Do(func() { close(store.release) }) })
@@ -435,6 +444,7 @@ func TestIMessageArchiveFenceDeadlineWhileReservationStoreIsBusy(t *testing.T) {
 }
 
 func TestIMessageArchiveFenceDoesNotDiscardCorruptReservations(t *testing.T) {
+	needsIMessageModule(t)
 	store := newMemStore()
 	store.settings[imessageArchiveReservationsKey] = json.RawMessage(`{"version":1,"tokens":["bad"]}`)
 	var f imessageArchiveFence
@@ -448,12 +458,13 @@ func TestIMessageArchiveFenceDoesNotDiscardCorruptReservations(t *testing.T) {
 }
 
 func TestIMessageArchivePendingResponseIsLocalized(t *testing.T) {
+	needsIMessageModule(t)
 	h := newTestManager(t)
 	store := newMemStore()
 	store.settings[imessageArchiveReservationsKey] = json.RawMessage(`{"version":1,"tokens":["bad"]}`)
 	h.store = store
 	h.connectors = connector.NewRegistry(nil)
-	if err := h.addIMessage(imessage.Config{Machine: "example"}); err != nil {
+	if err := h.addIMessage(imessagewire.Config{Machine: "example"}); err != nil {
 		t.Fatal(err)
 	}
 	mux := h.routes()
@@ -466,10 +477,11 @@ func TestIMessageArchivePendingResponseIsLocalized(t *testing.T) {
 }
 
 func TestIMessageLegacyArchiveCallerFailsClosed(t *testing.T) {
+	needsIMessageModule(t)
 	h := newTestManager(t)
 	h.store = newMemStore()
 	h.connectors = connector.NewRegistry(nil)
-	if err := h.addIMessage(imessage.Config{Machine: "example"}); err != nil {
+	if err := h.addIMessage(imessagewire.Config{Machine: "example"}); err != nil {
 		t.Fatal(err)
 	}
 	_, handled, err := h.kbSourcesCall(context.Background(), assistantwire.AppCall{AppID: assistantwire.AppConnectors,

@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/nwverse/persona/server/internal/extension/egress"
+	"github.com/nwverse/persona/server/internal/i18n"
 )
 
 // TestMain: this test binary is also the sandbox's first process (RunCommand) and the program it runs (probe).
@@ -418,5 +419,70 @@ func TestBwrapProbeArgs(t *testing.T) {
 		if !slices.Contains(args, ns) {
 			t.Errorf("missing namespace %q in %v", ns, args)
 		}
+	}
+}
+
+// resetProbe puts the probe cache back as it was before a test replaced probeFn.
+func resetProbe() {
+	probeMu.Lock()
+	defer probeMu.Unlock()
+	probed, probedAt, probedOK = Support{}, time.Time{}, false
+}
+
+// A machine that cannot sandbox starts working the moment bwrap is installed (#13540): the missing-bwrap reason is not
+// cached, so the next probe finds bwrap, and once a machine can sandbox it stays probed.
+func TestProbeRecoversFromMissingBwrap(t *testing.T) {
+	old := probeFn
+	t.Cleanup(func() { probeFn = old; resetProbe() })
+	resetProbe()
+	calls := 0
+	probeFn = func() Support {
+		calls++
+		s := Support{OS: "linux"}
+		s.setReason("extension-status.sandbox_no_bwrap", nil)
+		return s
+	}
+	if sup := Probe(); sup.Available() || sup.Reason == nil || sup.Reason.Key != "extension-status.sandbox_no_bwrap" {
+		t.Fatalf("before bwrap: %+v", sup)
+	}
+	if sup := Probe(); sup.Available() || calls != 2 {
+		t.Fatalf("a missing bwrap is probed again at once: %+v, %d calls", sup, calls)
+	}
+	probeFn = func() Support { calls++; return Support{OS: "linux", Bwrap: "/usr/bin/bwrap", Scope: true} }
+	if sup := Probe(); !sup.Available() {
+		t.Fatalf("bwrap installed: %+v", sup)
+	}
+	probeFn = func() Support { calls++; return Support{OS: "linux"} }
+	if sup := Probe(); !sup.Available() || calls != 3 {
+		t.Fatalf("available is probed once and kept: %+v, %d calls", sup, calls)
+	}
+}
+
+// A broken mount or another failure is reused for a moment instead of spawning bwrap on every list endpoint.
+func TestProbeCachesAnotherFailure(t *testing.T) {
+	old := probeFn
+	t.Cleanup(func() { probeFn = old; resetProbe() })
+	resetProbe()
+	calls := 0
+	probeFn = func() Support {
+		calls++
+		s := Support{OS: "linux"}
+		s.setReason("extension-status.sandbox_mount", i18n.Args{"err": "boom"})
+		return s
+	}
+	if Probe().Available() {
+		t.Fatal("available")
+	}
+	Probe()
+	if calls != 1 {
+		t.Fatalf("a mount failure is cached for a moment: %d calls", calls)
+	}
+	// Once the interval has passed it is tried again.
+	probeMu.Lock()
+	probedAt = time.Now().Add(-probeRetryInterval)
+	probeMu.Unlock()
+	Probe()
+	if calls != 2 {
+		t.Fatalf("tried again after the interval: %d calls", calls)
 	}
 }

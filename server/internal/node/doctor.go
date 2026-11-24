@@ -98,6 +98,8 @@ type DoctorOptions struct {
 	// Preflight is the path-access check (preflight.go); nil leaves it out. It receives this run's language so a
 	// terminal --json run can keep the legacy bytes even when the terminal is not Chinese.
 	Preflight func(context.Context, i18n.Lang) DoctorCheck
+	// AgyHooksFile is agy's global hooks file (node/agyhooks.go); "" leaves the check out (agy is not here).
+	AgyHooksFile string
 	// Fix writes the generated files again when they are stale or missing, and (outside the node) writes
 	// ProcessType=Interactive into the LaunchAgent and loads it again.
 	Fix bool
@@ -120,6 +122,9 @@ func DefaultDoctorOptions() (DoctorOptions, error) {
 		Dir: dir, Bin: bin,
 		NodeSock: nodeclient.SocketPath(), RuntimeSock: RuntimeSocketPath(), HerdrSock: herdr.SocketPath(),
 		ClaudeConfigDir: claudeDirOf(home), ClaudeVersion: claudeVersion, ClaudeProbe: claudeProbe,
+	}
+	if an := (&Node{home: home, dir: dir, bin: bin}); an.agyInstalled() {
+		opts.AgyHooksFile = an.agyHooksFile()
 	}
 	opts.withLaunchd(home)
 	// Under the node's agent (a claude the node started runs the doctor) a reload would stop the doctor too: under
@@ -333,6 +338,9 @@ func RunDoctor(ctx context.Context, opts DoctorOptions) DoctorReport {
 	var fixed []string
 	var failed []DoctorCheck
 	var stale []string
+	if fixAgyHooks(opts) {
+		fixed = append(fixed, agyHooksCheck)
+	}
 	for _, c := range rep.Checks {
 		if c.State == "stale" || c.State == "missing" {
 			stale = append(stale, c.Name)
@@ -400,6 +408,9 @@ func doctorChecks(ctx context.Context, opts DoctorOptions) DoctorReport {
 	add(checkClaudeVersionIn(ctx, opts.claudeProbe(), opts.Lang))
 	add(checkHerdrIn(ctx, opts.HerdrSock, opts.Lang))
 	add(checkGlobalPermissionHooksIn(opts.ClaudeConfigDir, opts.Dir, opts.Lang))
+	if opts.AgyHooksFile != "" {
+		add(checkAgyHooks(opts))
+	}
 	add(checkAgentSandboxIn(opts.Dir, opts.Lang))
 	if opts.LaunchAgent != "" {
 		add(checkLaunchAgent(inspectLaunchAgent(ctx, opts), opts))

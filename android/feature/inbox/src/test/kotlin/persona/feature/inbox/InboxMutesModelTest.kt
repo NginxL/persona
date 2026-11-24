@@ -9,6 +9,7 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
 import org.junit.Test
+import persona.core.inbox.*
 
 /**
  * "Muted" (docs/assistant/inbox.md "Muting") with several managers (docs/assistant/managers.md "Clients"): the list is the

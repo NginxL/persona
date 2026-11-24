@@ -39,6 +39,14 @@ describe("projectsFolder", () => {
     const list = [row("/Users/me/Documents/Codex/2026-10-27/pei-z", "codex"), row("/Users/me/Documents/Codex/2026-10-28/x", "codex"), row("/Users/me/code/app", "codex"), row("/Users/me/notes/a")];
     expect(projectsFolder(list, true)).toBe("/Users/me/code");
   });
+  it("groups Windows drive and UNC project parents without case or separator differences", () => {
+    expect(projectsFolder([row("C:\\Projects\\App"), row("c:/projects/Docs/"), row("D:\\Other\\Notes")])).toBe("c:/Projects");
+    expect(projectsFolder([row("\\\\Server\\Share\\Projects\\App"), row("//server/share/projects/Docs")])).toBe("//server/share/Projects");
+    expect(projectsFolder([row("C:\\"), row("C:\\App"), row("\\\\Server\\Share"), row("\\\\Server\\Share\\App")])).toBeUndefined();
+  });
+  it("keeps Windows scratch chats out of the projects folder regardless of path case", () => {
+    expect(projectsFolder([row("C:\\Users\\User\\documents\\codex\\2026-10-27\\chat", "codex"), row("C:\\Projects\\App", "codex")], true)).toBe("c:/Projects");
+  });
 });
 
 describe("isCodexChatFolder", () => {
@@ -58,5 +66,16 @@ describe("newFolderPath", () => {
   it("refuses what is not one name", () => {
     for (const bad of ["", "  ", ".", "..", "a/b"]) expect(newFolderPath(bad, "/Users/me/code")).toBeUndefined();
     expect(newFolderPath("web", "relative")).toBeUndefined();
+  });
+  it("creates paths in Windows drive roots and UNC shares", () => {
+    expect(newFolderPath(" web ", "C:\\Projects\\")).toBe("c:/Projects/web");
+    expect(newFolderPath("web", "C:\\")).toBe("c:/web");
+    expect(newFolderPath("web", "\\\\Server\\Share\\Projects")).toBe("//server/share/Projects/web");
+    expect(newFolderPath("web", "\\\\Server\\Share")).toBe("//server/share/web");
+  });
+  it("refuses Windows separators and reserved names without changing POSIX names", () => {
+    for (const bad of ["..\\escape", "a\\b", "a:b", "con", "NUL.txt", "COM1", "name.", "a?b", "a\0b"]) expect(newFolderPath(bad, "C:\\Projects")).toBeUndefined();
+    expect(newFolderPath("a\\b", "/projects")).toBe("/projects/a\\b");
+    expect(newFolderPath("con", "/projects")).toBe("/projects/con");
   });
 });

@@ -144,6 +144,52 @@ final class QuietReceiptsUITests: XCTestCase {
         shot("needs-you-failed-\(appearance)-\(size)")
     }
 
+    /// Account-sealed native Codex compaction is permanent even when the node gives no recognizable raw explanation
+    /// (#10399, AC3). Four distinct task/session fixtures isolate kind-only, code-only, legacy raw-only and an ordinary
+    /// retryable interruption in one launch, so cached state cannot make one variant stand in for another.
+    @MainActor func testInvalidConversationWireCodesAndRawText() throws {
+        let looks = ProcessInfo.processInfo.environment["PERSONA_LOOKS"] ?? "light:L,dark:L,light:XXXL,dark:XXXL"
+        let guidance = "此会话已失效：压缩上下文属于另一个账号。请换新会话接着做。"
+        for look in looks.split(separator: ",") {
+            let parts = look.split(separator: ":").map(String.init)
+            let (appearance, size) = (parts[0], parts[1])
+            launch(appearance, size, ["-showActionTray", "needs-you"])
+            var heights: [String: CGFloat] = [:]
+            for mode in ["kind", "code", "sealed"] {
+                let row = app.trayTasks.matching(NSPredicate(format: "label CONTAINS %@", "整理发布说明 " + mode)).firstMatch
+                XCTAssertTrue(row.waitForExistence(timeout: 60), "\(appearance) \(size) \(mode): invalid row:\n\(app.debugDescription)")
+                guard row.exists else { continue }
+                reveal(row, in: "action-tray.needs-you")
+                let heading = row.label.components(separatedBy: guidance).first ?? row.label
+                XCTAssertTrue(heading.contains("已失效") && !heading.contains("中断"),
+                              "\(appearance) \(size) \(mode): no Invalid conversation label: \(row.label)")
+                XCTAssertTrue(row.label.contains(guidance),
+                              "\(appearance) \(size) \(mode): not the full new-conversation guidance: \(row.label)")
+                if mode == "sealed" {
+                    XCTAssertFalse(row.label.contains("compacted natively"), "raw sealed error replaced the guidance")
+                } else {
+                    XCTAssertFalse(row.label.contains("Context unavailable"), "\(mode): raw opaque error replaced the guidance")
+                }
+                heights[mode] = row.frame.height
+            }
+            let kindHeight = try XCTUnwrap(heights["kind"])
+            let codeHeight = try XCTUnwrap(heights["code"])
+            let rawHeight = try XCTUnwrap(heights["sealed"])
+            XCTAssertGreaterThan(rawHeight, 60, "the legacy raw-text control must render more than one subtitle line")
+            XCTAssertEqual(kindHeight, rawHeight, accuracy: 1, "turn_error_kind guidance is truncated to one line")
+            XCTAssertEqual(codeHeight, rawHeight, accuracy: 1, "turn_error_code guidance is truncated to one line")
+
+            let ordinary = app.trayTasks.matching(NSPredicate(format: "label CONTAINS %@", "整理发布说明 ordinary")).firstMatch
+            XCTAssertTrue(ordinary.waitForExistence(timeout: 60), "ordinary interrupted release row:\n\(app.debugDescription)")
+            let resumes = app.buttons.matching(identifier: "action-tray.continue")
+            XCTAssertTrue(resumes.firstMatch.waitForExistence(timeout: 10), "an ordinary interrupted turn must remain retryable")
+            XCTAssertEqual(resumes.count, 1, "only the ordinary interruption may offer Continue")
+            let invalid = app.trayTasks.matching(NSPredicate(format: "label CONTAINS %@", "整理发布说明 kind")).firstMatch
+            reveal(invalid, in: "action-tray.needs-you")
+            shot("invalid-conversation-\(appearance)-\(size)")
+        }
+    }
+
     // MARK: -
 
     @MainActor private func launch(_ appearance: String, _ size: String, _ extra: [String]) {

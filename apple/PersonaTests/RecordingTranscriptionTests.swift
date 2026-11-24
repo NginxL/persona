@@ -278,4 +278,81 @@ import PersonaWire
         entry.segments[0].sentences = []
         #expect(entry.pullState(from: base, to: to, transcribing: false, error: nil) == .silent)
     }
+
+    // MARK: The phone transcribes in the meeting's language, or says it can't (#13385)
+
+    /// The on-device module runs only in the recording's own language: another language or script a module answers
+    /// with, or a locale its asset doesn't support, is no answer, and with neither module left the language can't be
+    /// transcribed here (nil), never written in another language's words.
+    @Test func theEngineRunsOnlyInTheRecordingsLanguage() {
+        typealias Choice = RecordingEngineChoice
+        typealias Answer = RecordingEngineChoice.Answer
+        let zh = Locale(identifier: "zh-CN"), en = Locale(identifier: "en-US")
+        let chinese = Answer(locale: zh), english = Answer(locale: en), none = Answer()
+        #expect(Choice.pick(zh, speechAvailable: true, speech: chinese, dictation: chinese) == .speech(zh))
+        // The speech module answers another language for it (the system's word, not ours): dictation, in Chinese.
+        #expect(Choice.pick(zh, speechAvailable: true, speech: english, dictation: chinese) == .dictation(zh))
+        // It names Chinese, but has no model for it.
+        #expect(Choice.pick(zh, speechAvailable: true, speech: Answer(locale: zh, unsupported: true), dictation: chinese) == .dictation(zh))
+        #expect(Choice.pick(zh, speechAvailable: false, speech: chinese, dictation: chinese) == .dictation(zh))
+        // Neither writes Chinese: none, so the phone says it can't.
+        #expect(Choice.pick(zh, speechAvailable: true, speech: english, dictation: english) == nil)
+        #expect(Choice.pick(zh, speechAvailable: true, speech: Answer(locale: Locale(identifier: "zh-TW")), dictation: none) == nil,
+                "Traditional Chinese for a Simplified Chinese meeting")
+        #expect(Choice.pick(zh, speechAvailable: true, speech: Answer(locale: Locale(identifier: "yue-CN")), dictation: none) == nil,
+                "Cantonese for a Mandarin meeting")
+        #expect(Choice.pick(zh, speechAvailable: true, speech: none, dictation: Answer(locale: zh, unsupported: true)) == nil)
+        #expect(Choice.pick(zh, speechAvailable: true, speech: none, dictation: none) == nil)
+        // The same language and script in another region is the same language.
+        let gb = Locale(identifier: "en-GB")
+        #expect(Choice.pick(en, speechAvailable: true, speech: Answer(locale: gb), dictation: english) == .speech(gb))
+        #expect(Choice.sameLanguage(Locale(identifier: "zh"), zh) && Choice.sameLanguage(Locale(identifier: "zh-Hans"), zh))
+        #expect(!Choice.sameLanguage(en, zh))
+    }
+
+    /// A hub-mode meeting's fallback lines are the phone's own, transcribed in the language its uploads name to the hub,
+    /// for every segment; a phone that can't transcribe it says why (`cannot`), also where the hub's transcript lets the
+    /// segment go without the phone's text, until a segment transcribes again.
+    @Test func theFallbackTranscribesInTheUploadsLanguageOrSaysItCant() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let lib = RecordingLibrary(root: root)
+        var entry = try meeting(lib, segments: 3)
+        entry.locale = "zh-CN"
+        try lib.save(entry)
+        let asked = OSAllocatedUnfairLock<[String]>(initialState: [])
+        // The last segment transcribes only once the test has seen the first two fail.
+        let released = OSAllocatedUnfairLock(initialState: false)
+        let runner = RecordingTranscription(library: lib) { url, locale in
+            asked.withLock { $0.append(locale.identifier(.bcp47)) }
+            guard url.lastPathComponent == "seg-002.m4a" else { throw RecordingSpeechError.unsupportedLanguage }
+            while !released.withLock({ $0 }) { try await Task.sleep(for: .milliseconds(5)) }
+            return [RecordingSentence(start: 1, end: 3, text: "继续")]
+        }
+        runner.enqueue(entry.id)
+        for _ in 0..<200 where runner.cannot[entry.id] == nil { try await Task.sleep(for: .milliseconds(10)) }
+        #expect(runner.cannot[entry.id] == .unsupportedLanguage)
+        #expect(runner.errors[entry.id] == nil, "the hub's segments go without the phone's text (#9491)")
+        released.withLock { $0 = true }
+        for _ in 0..<200 where lib.entry(entry.id)?.transcribedAll != true { try await Task.sleep(for: .milliseconds(10)) }
+        let done = try #require(lib.entry(entry.id))
+        #expect(done.segments.map { $0.sentences?.count } == [0, 0, 1])
+        #expect(RecordingUpload(done).language == "zh-CN")
+        #expect(asked.withLock { $0 } == ["zh-CN", "zh-CN", "zh-CN"], "every segment in the upload's language")
+        #expect(runner.cannot[entry.id] == nil, "a segment transcribed: the phone can again")
+    }
+
+    /// A change of language clears what the old one couldn't do.
+    @Test func aNewLanguageClearsWhatTheOldOneCouldnt() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let lib = RecordingLibrary(root: root)
+        let entry = try meeting(lib, segments: 1, transcription: .device)
+        let runner = RecordingTranscription(library: lib, transcribe: Self.failing)
+        runner.enqueue(entry.id)
+        for _ in 0..<200 where runner.errors[entry.id] == nil || runner.current != nil { try await Task.sleep(for: .milliseconds(10)) }
+        #expect(runner.cannot[entry.id] == .unsupportedLanguage)
+        runner.setLocale(entry.id, "en-US")
+        #expect(runner.cannot[entry.id] == nil)
+    }
 }

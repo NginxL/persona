@@ -12,7 +12,7 @@ unchanged (Go `server/internal/assistantwire/todo_view_gen_test.go`, Kotlin
 
 | File | What it pins | Cases |
 | --- | --- | --- |
-| `todo_view.json` | One to-do, its runs' sessions and pending cards → its view | 53: every phase and section at least once, every reason the hub produces, each kind of ask's risk |
+| `todo_view.json` | One to-do, its runs' sessions and pending cards → its view | 55: every phase and section at least once, every reason the hub produces, each kind of ask's risk |
 
 ## Format
 
@@ -55,10 +55,12 @@ failed start reads as open although `done_at` is stored: `done` holds exactly wh
 | Case | View: phase · section · reason | Proposal 6.3 | Today's hub: section · rule |
 | --- | --- | --- | --- |
 | `failed_start_recent` | needs_you · needs_you · `failed_start` | row 1 | waiting · failed_start |
+| `failed_start_supervised` | working · working · `persona_working`, line `failed_start`, no ask | row 1, supervised | waiting · failed_start |
 | `failed_start_after_two_days` | todo · todo · `rest`, with `inactive` | rows 1, 13, 14 | done · failed_start |
 | `failed_start_edited_since` | todo · todo · `rest` | rows 1, 13, 14 | waiting · failed_start |
 | `failed_start_due_ahead` | todo · todo · `rest`, with `inactive` | rows 1, 13, 14 | done · failed_start |
 | `agent_asks_question` | needs_you · needs_you · `agent_asks` | row 2 | waiting · agent_asks |
+| `agent_asks_held_by_supervisor` | working · working · `persona_working`, the card `delegating` | rows 2, 5 | waiting · agent_asks |
 | `interrupted_turn` | needs_you · needs_you · `interrupted` | row 2 | waiting · agent_asks |
 | `owner_decides_decision` | needs_you · needs_you · `owner_decides` | row 3 | waiting · owner_decides |
 | `can_wait_decision` | needs_you · can_wait · `can_wait` | row 4 | waiting · owner_decides |

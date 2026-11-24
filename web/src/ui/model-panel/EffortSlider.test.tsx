@@ -22,7 +22,7 @@ afterEach(() => {
 });
 
 function draw(value: string, onChange = vi.fn(), disabled = false) {
-  act(() => root.render(<EffortSlider stops={STOPS} value={value} recommended="high" labelOf={(e) => e.toUpperCase()} onChange={onChange} disabled={disabled} />));
+  act(() => root.render(<EffortSlider stops={STOPS} value={value} recommended="high" onChange={onChange} disabled={disabled} />));
   const slider = host.querySelector<HTMLElement>('[role="slider"]')!;
   return { slider, onChange };
 }
@@ -37,8 +37,8 @@ describe("the effort slider", () => {
   it("says its level and moves one level per key", () => {
     const { slider, onChange } = draw("high");
     expect(slider.getAttribute("aria-valuenow")).toBe("2");
-    expect(slider.getAttribute("aria-valuetext")).toBe("HIGH");
-    expect(host.textContent).toContain("HIGH");
+    expect(slider.getAttribute("aria-valuetext")).toBe("High");
+    expect(host.textContent).toContain("High");
     expect(host.textContent).toContain("推荐");
     key(slider, "ArrowRight");
     key(slider, "ArrowDown");
@@ -62,6 +62,7 @@ describe("the effort slider", () => {
     pointer(document, "pointermove", 290);
     expect(onChange).not.toHaveBeenCalled();
     expect(slider.getAttribute("aria-valuenow")).toBe("3");
+    expect(slider.getAttribute("aria-valuetext")).toBe("XHigh");
     pointer(document, "pointerup", 300);
     expect(onChange.mock.calls).toEqual([["xhigh"]]);
   });
@@ -76,7 +77,7 @@ describe("the effort slider", () => {
 
   it("with no level set (#5104) says so, draws no fill, and a key lands on the lowest or the highest", () => {
     const onChange = vi.fn();
-    act(() => root.render(<EffortSlider stops={STOPS} value="" labelOf={(e) => e.toUpperCase()} unsetLabel="Model default" onChange={onChange} />));
+    act(() => root.render(<EffortSlider stops={STOPS} value="" unsetLabel="Model default" onChange={onChange} />));
     const slider = host.querySelector<HTMLElement>('[role="slider"]')!;
     expect(slider.getAttribute("aria-valuetext")).toBe("Model default");
     expect(slider.getAttribute("aria-valuenow")).toBeNull();

@@ -269,16 +269,23 @@ func (h *Hub) lookupToken(ctx context.Context, tok string) (principal, bool, err
 	}
 	touch := time.Since(t.touched[c.p.ID]) > 5*time.Minute
 	if touch {
-		t.touched[c.p.ID] = time.Now()
+		// Account for the async last_seen write under the quiescer before
+		// spawning: paused snapshots skip the touch (without stamping touched,
+		// so the next request after resume updates it), and already-started
+		// touches finish before pause returns.
+		if h.quiesce.begin() {
+			t.touched[c.p.ID] = time.Now()
+			t.mu.Unlock()
+			go func(id string) {
+				defer h.quiesce.end()
+				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				defer cancel()
+				_ = h.store.TouchDeviceToken(ctx, id)
+			}(c.p.ID)
+			return *c.p, true, nil
+		}
 	}
 	t.mu.Unlock()
-	if touch {
-		go func(id string) {
-			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			defer cancel()
-			_ = h.store.TouchDeviceToken(ctx, id)
-		}(c.p.ID)
-	}
 	return *c.p, true, nil
 }
 
@@ -287,12 +294,12 @@ func (h *Hub) lookupToken(ctx context.Context, tok string) (principal, bool, err
 // its method. Something new the watch needs goes here.
 var (
 	answerReads = lazyre.New(`^/api/v1/(machines|sessions|sessions/archived|interactions|inbox|saved-agent-searches|workspace-board|workspace-board/activity(?:/[1-9][0-9]*)?|workspaces|sessions/[^/]+/[^/]+/items|` +
-		`extensions/-/(widgets|shortcuts)|personas/nwverse/pet/[A-Za-z0-9_-][A-Za-z0-9._-]*\.(json|png))$`)
+		`assistant/health/intake|extensions/-/(widgets|shortcuts)|personas/nwverse/pet/[A-Za-z0-9_-][A-Za-z0-9._-]*\.(json|png))$`)
 	// The watch draws extensions' widgets on its faces and runs their shortcuts (docs/extensions/extensions.md "System-level placements").
 	// It also fetches the built-in Milk Frog's art for its row and face, and only that: pet/ of the nwverse package
 	// (docs/apple/persona.md "The Milk Frog on the watch"), not another package or an uploaded look.
 	answerWrites = lazyre.New(`^/api/v1/(interactions/[^/]+/(resolve|choose)|sessions/[^/]+/[^/]+/(messages|seen|interrupt)|` +
-		`inbox/[^/]+/(done|reply|draft|suggestion)|extensions/[^/]+/-/(widget|shortcut)/[^/]+)$`)
+		`assistant/health/intake|inbox/[^/]+/(done|reply|draft|suggestion)|extensions/[^/]+/-/(widget|shortcut)/[^/]+)$`)
 	answerPuts = lazyre.New(`^/api/v1/devices/[^/]+/widgets$`)
 	// answerKey is a key the watch can press on a screen card it could not read: a menu's number, Esc, Return.
 	answerKey = lazyre.New(`^([1-9]|esc|enter)$`)

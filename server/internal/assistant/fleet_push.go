@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"path"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -342,13 +343,26 @@ func (s *Service) notifyFinishedNow(machine, id string, gen int, t fleetTimings)
 		return
 	}
 	place := s.pushPlace(machine, sess)
-	head, text := doneAlert(s.lang(context.Background()), sess)
+	// Decided once on the words the push would carry (exitPolicy), for the push and its Feishu card alike.
+	bg, l, space := context.Background(), s.lang(context.Background()), spaceOf(sess)
+	head, text := doneAlertIn(l, sess, false)
+	if report && strings.HasPrefix(head, "⚠️") && s.briefOf(id) != nil && !s.trackPolicy(bg, space).Redact {
+		return // the scheduled-run watcher sends the one fixed-facts fallback, not this model error
+	}
+	redact := s.exitPolicy(bg, head+"\n"+text, id, space).Redact
+	if redact {
+		if floor, _ := s.trackFloor(bg, space); slices.Contains(floor, categoryHealth) {
+			head, text = doneAlertIn(l, sess, true) // as the health space always said
+		} else {
+			head, text = s.redactedNotice(bg, l, space)
+		}
+	}
 	if report && strings.HasPrefix(head, "⚠️") && s.briefOf(id) != nil {
 		return // the scheduled-run watcher sends the one fixed-facts fallback, not this model error
 	}
 	// A routine with facts says the counts it worked out (briefing.go) when it ended normally and asks nothing: a question
-	// is what the owner acts on, and a health conversation says only that there is news.
-	if !strings.HasPrefix(head, "⚠️") && !strings.HasPrefix(head, "⏳") && !sess.AwaitsReply && spaceOf(sess) != SpaceHealth {
+	// is what the owner acts on, and a conversation of a space that redacts says only that there is news.
+	if !strings.HasPrefix(head, "⚠️") && !strings.HasPrefix(head, "⏳") && !sess.AwaitsReply && !redact {
 		if counts := s.briefPush(id, s.lang(context.Background()), report); counts != "" {
 			text = counts
 		}
@@ -357,7 +371,7 @@ func (s *Service) notifyFinishedNow(machine, id string, gen int, t fleetTimings)
 		Body: text, TookMS: took.Milliseconds(), LongMS: long.Milliseconds()})
 	// The same finished turn's one Feishu card (#4674); the sender re-checks the pushes switch and the conversations
 	// with their own Feishu path (main, scheduled task, health).
-	go s.feishuAgentDone(machine, sess, head, text, place)
+	go s.feishuAgentDone(machine, sess, head, text, place, redact)
 	// And the topic of the todo this agent works on, if it has one (the same decision again, not a second one).
 	s.threadAgentDone(machine, sess)
 }
@@ -452,9 +466,15 @@ func pushTitle(sess proto.Session) string {
 	return title
 }
 
-// doneAlert is the title and body of the push for sess's finished turn, in l.
+// doneAlert is the title and body of the push for sess's finished turn, in l, a conversation of any space redacted
+// (fail closed: no registry here).
 func doneAlert(l i18n.Lang, sess proto.Session) (head, text string) {
-	if spaceOf(sess) == SpaceHealth { // the lock screen hears there is news, not what it is, nor the conversation's title
+	return doneAlertIn(l, sess, spaceOf(sess) != "")
+}
+
+// doneAlertIn is doneAlert with whether sess's space redacts (redact) decided by the caller.
+func doneAlertIn(l i18n.Lang, sess proto.Session, redact bool) (head, text string) {
+	if redact { // the lock screen hears there is news, not what it is, nor the conversation's title
 		return i18n.T(l, "push.health_title"), i18n.T(l, "push.health_body")
 	}
 	title := pushTitle(sess)
@@ -516,24 +536,35 @@ func (s *Service) notifyInteraction(ix proto.Interaction, machine string, covere
 func (s *Service) notifyInteractionAt(ix proto.Interaction, machine string, covered bool, level, key string) {
 	n := Notification{Kind: assistantwire.NotifyInput, DeviceID: ix.MachineID, Subtitle: machine, SessionID: ix.SessionID,
 		Interaction: &ix, Level: level, RelatedKey: key}
+	src := s.inputCardSource(ix, level != "" || key != "") // a level or key: ask_route rang it (card_layers.go)
 	if !covered || s.devs == nil {
-		s.deliver(n)
+		s.deliverCard(src, n)
 		return
 	}
 	go func() {
 		n.LinkCovered = s.devs.LinkRang(s.runCtx(), ix.ID, linkRangWait)
-		s.deliver(n)
+		s.deliverCard(src, n)
 	}()
 }
 
 // deliver has the hub deliver a push the manager decided on (notify.request), off the caller's way.
-func (s *Service) deliver(n Notification) {
+func (s *Service) deliver(n Notification) { s.deliverCard("", n) }
+
+// deliverCard is deliver of a push made at source (card_layers.go); "" counts a finished turn's push as agent_done
+// and any other as untagged.
+func (s *Service) deliverCard(source string, n Notification) {
 	if n.ID == "" {
 		n.ID = "ntf_" + randomHex(8)
+	}
+	if source == "" && n.Kind == assistantwire.NotifyDone {
+		source = cardAgentDone
 	}
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
+		// Off the caller's way, no lock of theirs is held: the owner may be read from the to-dos.
+		s.noteCardOwner(ctx, source, s.supervisingOwner(ctx, n))
+		s.capTrackPush(ctx, &n) // a track's push_cap (track_attention.go); never a card's
 		if _, err := s.hub.NotifyRequest(ctx, NotifyRequest{Notification: n}); err != nil {
 			s.logf("assistant: push: %v", err)
 		}

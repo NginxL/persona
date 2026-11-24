@@ -18,7 +18,10 @@ func codexHistorySession(sid string, cause proto.StopCause, status string) proto
 }
 
 func TestAssistantResumeProvenanceMatrix(t *testing.T) {
-	causes := []proto.StopCause{proto.StopIdle, proto.StopTaskCompleted, proto.StopRestart, proto.StopUsageLimit, proto.StopTransientError}
+	// Every stop but the user's: an unknown one too, an Agent that quit by itself or that its machine's restart cut off
+	// (#11528).
+	causes := []proto.StopCause{proto.StopIdle, proto.StopTaskCompleted, proto.StopRestart, proto.StopUsageLimit, proto.StopTransientError,
+		proto.StopResumeFailed, proto.StopCompactFailed, proto.StopUnknown}
 	for _, source := range []string{"ordinary", "codex_history"} {
 		statuses := []string{proto.StatusOffline, proto.StatusInterrupted}
 		if source == "codex_history" {
@@ -68,7 +71,7 @@ func TestAssistantResumeRejectsIneligibleProvenance(t *testing.T) {
 		session proto.Session
 	}{
 		{"user stop", stoppedWithCause("userstop", proto.StopUser)},
-		{"unknown stop", stoppedWithCause("unknown1", proto.StopUnknown)},
+		{"exit", stoppedWithCause("exitstop", proto.StopExit)},
 		{"future stop cause", stoppedWithCause("future01", proto.StopCause("future"))},
 		{"legacy node without capabilities", func() proto.Session {
 			c := stoppedWithCause("legacy01", proto.StopUnknown)

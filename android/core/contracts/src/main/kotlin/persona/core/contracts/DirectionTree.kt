@@ -5,9 +5,12 @@ package persona.core.contracts
 
 /** The hub's tree: every current direction in `GET /assistant/leaders` order, then the secretary group last. */
 data class DirectionTree(val directions: List<Direction> = emptyList()) {
-    /** The tree with every agent's machine id passed through [machine] (a hub group's plain ids into the merged ones). */
+    /** The tree with every agent's and outside target's machine id passed through [machine] (plain ids into merged ones). */
     fun mapMachines(machine: (String) -> String): DirectionTree =
-        copy(directions = directions.map { d -> d.copy(tasks = d.tasks.map { t -> t.copy(agents = t.agents.map { it.mapMachines(machine) }) }) })
+        copy(directions = directions.map { d ->
+            d.copy(external = d.external?.mapMachine(machine),
+                tasks = d.tasks.map { t -> t.copy(agents = t.agents.map { it.mapMachines(machine) }) })
+        })
 
     /** The direction led by conversation [id], or the secretary group when [id] is its (the main conversation's). */
     fun direction(id: String): Direction? = directions.firstOrNull { it.id == id }
@@ -26,7 +29,7 @@ data class DirectionTree(val directions: List<Direction> = emptyList()) {
 }
 
 /**
- * One direction (a leader conversation) or, [secretary], the group of to-dos supervised by the main conversation or by
+ * One direction (a leader conversation or an explicitly outside direction) or, [secretary], the group of to-dos supervised by the main conversation or by
  * no current direction; [id] is then the main conversation's and [name] is empty.
  */
 data class Direction(
@@ -41,6 +44,8 @@ data class Direction(
      * it; the working count is not shown. From a hub without it: whether it counts a working task, as before.
      */
     val running: Boolean = false,
+    /** Non-null only when the hub explicitly marks this as an outside direction, with no Persona conversation. */
+    val external: ExternalDirection? = null,
 ) {
     /**
      * What a heading calls it: the secretary group is named by the app, a lead the hub has no name for ("" when its
@@ -51,6 +56,18 @@ data class Direction(
         name.isBlank() -> CoreText.of(CoreText.Key.DirectionUntitled)
         else -> CoreText.plain(name)
     }
+}
+
+/** An outside direction's optional Agent target. Missing or incomplete ids leave its row visible but not tappable. */
+data class ExternalDirection(
+    val machineId: String = "",
+    val sessionId: String = "",
+) {
+    val target: SessionKey?
+        get() = if (machineId.isNotBlank() && sessionId.isNotBlank()) SessionKey(machineId, sessionId) else null
+
+    fun mapMachine(machine: (String) -> String): ExternalDirection =
+        copy(machineId = machineId.takeIf { it.isNotBlank() }?.let(machine).orEmpty())
 }
 
 /** How many of a direction's listed tasks are in each state (`counts`): the row shows [needsYou] (#6626: what runs

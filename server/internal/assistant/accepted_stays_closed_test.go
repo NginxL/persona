@@ -305,7 +305,7 @@ func TestAcceptedPlanTaskReopensWhenItsConversationSendsMore(t *testing.T) {
 				f.setSessions("box", proto.Session{SessionID: sid, MachineID: "box", Cwd: "/code/app", Agent: "claude", Status: status,
 					State: state, UpdatedAt: time.Now()})
 				if state == proto.StateWorking {
-					s.taskWorking(ctx, "box", sid)
+					s.taskWorking(ctx, "box", sid, startRow{})
 				}
 			}
 			done := time.Now()
@@ -396,7 +396,7 @@ func TestAcceptedPlanTaskReopensForACardMessageAfterItsAgentStopped(t *testing.T
 		f.setSessions("box", stopped, proto.Session{SessionID: body.NewAgent, MachineID: "box", Cwd: "/code/app", Agent: "claude",
 			Status: status, State: state, LastText: text, UpdatedAt: time.Now()})
 		if status == proto.StatusWorking {
-			s.taskWorking(ctx, "box", body.NewAgent)
+			s.taskWorking(ctx, "box", body.NewAgent, startRow{})
 		} else {
 			s.taskTurnEnded(ctx, "box", body.NewAgent)
 		}

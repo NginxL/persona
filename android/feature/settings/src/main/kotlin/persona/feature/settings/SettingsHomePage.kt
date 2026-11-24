@@ -17,6 +17,10 @@ import persona.core.navigation.*
 private data class HomeEntry(val key: NavKey, val title: Int, val icon: PhIcon, val subtitle: Int? = null,
     val aliases: Int? = null, val value: String? = null)
 
+/** The active modules' Settings pages (#13847), at the end of the assistant's group; each opens its module's page. */
+private fun moduleEntries(pages: List<persona.core.moduleapi.ModuleSettingsPage>): List<HomeEntry> =
+    pages.map { HomeEntry(it.route, it.title, it.icon) }
+
 /** Navigation only. The first scope uses the same current-assistant roster and bound services as before. */
 @Composable
 internal fun SettingsHomePage(
@@ -48,7 +52,7 @@ internal fun SettingsHomePage(
             R.string.settings_knowledge_selection_subtitle, R.string.settings_knowledge_selection_search_aliases),
         if (!channelsAvailable) null else entry(SettingsPage.Channels, R.string.settings_src_channels_title, PersonaIcons.channels, R.string.settings_home_channels_detail),
         entry(SettingsPage.AgentSettings, R.string.settings_home_agents, PersonaIcons.agents, R.string.settings_home_agents_detail, R.string.settings_search_agents_aliases),
-    )
+    ) + moduleEntries(persona.core.moduleapi.LocalModuleSettingsPages.current.takeIf { onNavigate != null }.orEmpty())
     val deviceEntries = listOfNotNull(
         entry(SettingsPage.Appearance, R.string.settings_style_title, PersonaIcons.options, aliases = R.string.settings_search_appearance_aliases, value = PersonaTheme.style.label),
         entry(SettingsPage.Language, R.string.settings_language_title, PersonaIcons.servedPage),

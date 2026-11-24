@@ -25,7 +25,6 @@ enum RuntimeCLI {
         .merging(motionCommands) { core, _ in core }
         .merging(imageViewerCommands) { core, _ in core }
         .merging(agentsPagingCommands) { core, _ in core }
-        .merging(screenRoutesTable) { core, _ in core }
         .merging(recordingTable) { core, _ in core }
 
     /// The recording being made (#9417), on the phone only.
@@ -37,14 +36,10 @@ enum RuntimeCLI {
         #endif
     }
 
-    /// The live screen's routes (#6398), on the phone only.
-    private static var screenRoutesTable: [String: Command] {
-        #if os(iOS) && canImport(PersonaScreenKit)
-        screenRouteCommands
-        #else
-        [:]
-        #endif
-    }
+    /// Commands an active module adds in its launch hook (the live screen's routes, #6398): looked up after the core's.
+    static var moduleCommands: [String: Command] = [:]
+    /// Fields an active module adds to `state` (the small window's steps, #1839).
+    static var moduleState: [String: @MainActor () -> Any] = [:]
 
     private static let coreCommands: [String: Command] = [
         "ping": { _ in ["pong": true, "pid": Int(ProcessInfo.processInfo.processIdentifier)] },
@@ -104,7 +99,9 @@ enum RuntimeCLI {
 
     /// One command by name, with its `ok` and `ms`: what the local port and the hub (RuntimeCLI+Hub.swift) both run.
     static func run(_ name: String, _ args: Args) async -> Reply {
-        guard let command = commands[name] else { return fail("unknown command \(name): \(commands.keys.sorted())") }
+        guard let command = commands[name] ?? moduleCommands[name] else {
+            return fail("unknown command \(name): \((Array(commands.keys) + moduleCommands.keys).sorted())")
+        }
         let started = Date.now
         var r = await command(args)
         if r["ok"] == nil { r["ok"] = true }
@@ -128,7 +125,7 @@ enum RuntimeCLI {
 
     static func state() -> Reply {
         let m = AppModel.shared
-        return [
+        var r: Reply = [
             "tab": m.selectedTab.rawValue, "openChat": name(m.openChat), "assistant": name(m.assistantCurrent),
             "visibleSession": name(m.visibleSession), "settingsOpen": m.shellSettings, "settingsDepth": m.settingsPath.count,
             "style": m.style.rawValue, "color": m.themeColor.rawValue, "paired": m.isPaired,
@@ -136,8 +133,11 @@ enum RuntimeCLI {
             "appearance": window?.traitCollection.userInterfaceStyle == .dark ? "dark" : "light",
             "appState": ["active", "inactive", "background"][min(2, UIApplication.shared.applicationState.rawValue)],
             "screen": [Double(window?.bounds.width ?? 0), Double(window?.bounds.height ?? 0)],
-            "vncPiP": Array(VNCPiPLog.lines.suffix(20)), // the small window's steps (#1839)
+            // The modules on, and those the hub turned off (#13849, docs/apple/ios.md "Modules").
+            "modules": Modules.registry.active.map(\.id.rawValue), "modulesOffByHub": Modules.registry.offByHub.map(\.rawValue),
         ]
+        for (key, read) in moduleState { r[key] = read() }
+        return r
     }
 
     /// Waits for the hub's live connection; after 2 s asks it to connect, what coming back to the foreground does. A

@@ -18,6 +18,7 @@ import org.junit.Test
 import persona.core.contracts.api.AssistantManagerChoice
 import persona.core.contracts.api.InboxAssistantTransport
 import persona.core.contracts.api.RequestManager
+import persona.core.inbox.*
 
 /** Notes each read with the manager its request names: no [RequestManager] (null), the default's (""), or an id. */
 internal class ManagerReads(override val scope: String = "pairing") : InboxAssistantTransport {

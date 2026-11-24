@@ -384,3 +384,42 @@ func TestRuntimeSearchDecodesOutsideTheLock(t *testing.T) {
 		})
 	}
 }
+
+func TestRuntimeSearchAgentsOnlyExcludesFoldedPrivateAndAssistantSideSessions(t *testing.T) {
+	ctx := searchContext()
+	var decoded []string
+	ctx.Document = func(item Item) (SearchDocument, error) {
+		decoded = append(decoded, item.ID)
+		return item.Full.(SearchDocument), nil
+	}
+	parent := searchItem("row", "computer", "Parent row", ctx.Now)
+
+	privateSide := searchItem("private-side", "computer", "Private side", ctx.Now)
+	pd := privateSide.Full.(SearchDocument)
+	pd.AgentText = "secret needle in private side"
+	privateSide.Full = pd
+	privateSide.Private = true
+	privateSide.Fold = &Fold{Root: "row-session", SearchAs: "row", SearchSession: "private-side-session"}
+
+	assistantSide := searchItem("assistant-side", "computer", "Assistant side", ctx.Now)
+	ad := assistantSide.Full.(SearchDocument)
+	ad.AgentText = "assistant needle in side"
+	assistantSide.Full = ad
+	assistantSide.Assistant = true
+	assistantSide.Fold = &Fold{Root: "row-session", SearchAs: "row", SearchSession: "assistant-side-session"}
+
+	var index Index
+	index.Replace("computer", []Item{parent, privateSide, assistantSide})
+	page, err := index.Query(Options{Search: "needle", SearchContext: ctx, AgentsOnly: true, Roots: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if page.Total != 0 || len(page.Sessions) != 0 || len(page.SearchHits) != 0 {
+		t.Fatalf("AgentsOnly leaked folded side session hit: %+v", page)
+	}
+	for _, id := range decoded {
+		if id == "private-side" || id == "assistant-side" {
+			t.Fatalf("AgentsOnly decoded excluded folded side session %q (decoded=%v)", id, decoded)
+		}
+	}
+}

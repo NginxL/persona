@@ -13,11 +13,7 @@ final class ExtensionStreamUITests: XCTestCase {
         continueAfterFailure = false
         let app = XCUIApplication()
         app.launchArguments = ["-pairURL", pair, "-tab", "settings", "-ApplePersistenceIgnoreState", "YES"]
-        #if os(macOS)
-        app.launchArguments += ["-openMacExtensionPage", "showcase/" + ui, "-macAppearance", appearance]
-        #else
         app.launchArguments += ["-openExtension", "showcase", "-openExtensionPage", ui, "-ui.scheme", appearance]
-        #endif
         app.launchPinned()
         let committed = waitForNativeReady(app, timeout: 30)
         let ready = app.descendants(matching: .any)["extension-ui-ready"].firstMatch
@@ -83,11 +79,7 @@ final class ExtensionStreamUITests: XCTestCase {
 
     @MainActor private func shot(_ app: XCUIApplication, name: String) throws {
         if !name.hasPrefix("diagnostic-") { XCTAssertTrue(waitForNativeReady(app, timeout: 15), app.debugDescription) }
-        #if os(macOS)
-        let capture = app.windows.firstMatch.screenshot()
-        #else
         let capture = app.screenshot()
-        #endif
         let attachment = XCTAttachment(screenshot: capture); attachment.name = name; attachment.lifetime = .keepAlways; add(attachment)
         if let directory = ProcessInfo.processInfo.environment["PERSONA_STREAM_SHOTS"] {
             try capture.pngRepresentation.write(to: URL(fileURLWithPath: directory).appending(path: name + ".png"))
@@ -101,11 +93,7 @@ final class ExtensionStreamUITests: XCTestCase {
         XCTAssertTrue(ordinary.waitForExistence(timeout: 20), app.debugDescription)
         let revision = NSPredicate(format: "value == %@", "stream:1")
         XCTAssertTrue(app.descendants(matching: .any).matching(revision).firstMatch.waitForExistence(timeout: 10))
-        #if os(macOS)
-        try shot(app, name: "mac-showcase-" + appearance)
-        #else
         try shot(app, name: "ios-showcase-" + appearance)
-        #endif
         XCTAssertTrue(waitForNativeReady(app, timeout: 15), app.debugDescription)
         ordinary.tap()
         let advanced = NSPredicate(format: "value == %@", "stream:2")

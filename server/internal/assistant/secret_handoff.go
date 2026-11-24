@@ -129,7 +129,7 @@ func (s *Service) handoffPrepare(ctx context.Context, machine, machineName strin
 	if !s.hello(ctx).SecretHandoffGate {
 		return nil, errors.New("the hub is older than secret hand-offs (it does not check who approves them): update the hub first")
 	}
-	nodes, _ := s.devs.(nodeAnnouncer)
+	nodes, _ := s.physicalDevices().(nodeAnnouncer)
 	if s.devs == nil || !s.devs.Has(machine) || nodes == nil {
 		return nil, fmt.Errorf("%s is not connected by this manager: secrets can be handed only to an Agent on one of its own computers", machineName)
 	}
@@ -201,7 +201,7 @@ func (s *Service) handoffApprove(ctx context.Context, convMachine, self string, 
 		Summary:     handoffSummary(l, len(names), agent, h.machineName),
 		AlwaysLabel: i18n.T(l, "assistant-secret_handoff.always", i18n.Args{"launcher": h.launcher, "machine": h.machineName}),
 		CreatedAt:   now, ExpiresAt: expires}
-	r, err := s.ask(ctx, ix)
+	r, err := s.ask(withCard(ctx, cardSecretForm), ix)
 	claim, vouched := s.takeHandoffClaim(ix.ID)
 	if err != nil {
 		return "", "", err
@@ -360,6 +360,23 @@ func (h *humanSends) note(session, id, text string) {
 
 func (h *humanSends) noteForReply(session, id, text string) {
 	h.record(session, id, text, true)
+}
+
+// markReplyOnly downgrades a recorded vouched send so it remains usable for missing-reply recovery without letting
+// secret hand-off Always rules bypass approval when another conversation's quiet context rode along (#3962).
+func (h *humanSends) markReplyOnly(session, id string) {
+	if session == "" || id == "" {
+		return
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	ids := h.m[session]
+	sent, ok := ids[id]
+	if !ok || sent.void {
+		return
+	}
+	sent.replyOnly = true
+	ids[id] = sent
 }
 
 func (h *humanSends) record(session, id, text string, replyOnly bool) {

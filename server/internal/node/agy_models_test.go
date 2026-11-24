@@ -17,14 +17,15 @@ func TestAgyModelList(t *testing.T) {
 		"\tmissing ID\r\nmissing-name\t\r\n" +
 		"example-high\tExample High\r\nexample-high\tDuplicate\r\n" +
 		"example\t\tExample Model\textra column\r\nexample-low\tExample Low\r\n" +
-		"example-max\tExample Max\r\nexample-xhigh\tExample Extra High\r\nplain\tPlain Model"
-	efforts := []string{"low", "high", "xhigh", "max"}
+		"example-max\tExample (Max)\r\nexample-xhigh\tExample (XHigh)\r\nexample-medium\tExample (Medium)\r\nplain\tPlain Model"
+	efforts := []string{"low", "medium", "high", "xhigh", "max"}
 	want := []proto.AgentModel{
 		{ID: "example-high", Name: "Example High", Efforts: efforts, DefaultEffort: "high"},
 		{ID: "example", Name: "Example Model", Efforts: efforts},
 		{ID: "example-low", Name: "Example Low", Efforts: efforts, DefaultEffort: "low"},
-		{ID: "example-max", Name: "Example Max", Efforts: efforts, DefaultEffort: "max"},
-		{ID: "example-xhigh", Name: "Example Extra High", Efforts: efforts, DefaultEffort: "xhigh"},
+		{ID: "example-max", Name: "Example (Max)", Efforts: efforts, DefaultEffort: "max"},
+		{ID: "example-xhigh", Name: "Example (XHigh)", Efforts: efforts, DefaultEffort: "xhigh"},
+		{ID: "example-medium", Name: "Example (Medium)", Efforts: efforts, DefaultEffort: "medium"},
 		{ID: "plain", Name: "Plain Model"},
 	}
 	got, err := agyModelList(strings.NewReader(output))

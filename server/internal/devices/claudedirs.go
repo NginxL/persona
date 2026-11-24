@@ -131,6 +131,9 @@ func (m *Machine) configureNode(ctx context.Context, peer *rpc.Peer, hub *device
 		"botmux": m.botmux(ctx), "claude_start_dir": m.cfg.ClaudeStartDir,
 		"herdr_autostart": m.herdrAutostart(ctx), "herdr_autoinstall": m.cfg.HerdrAutoinstall, "claude_global_hooks": m.cfg.ClaudeGlobalHooks,
 		"usage_windows": m.usageWindows(), "claude_live_replies": m.liveReplies(ctx), "extra_path": m.extraPath()}
+	if m.d.config().PrivateNetwork {
+		params["private_network"] = true // office network mode: the node stops its tailcat endpoint (node/tailcat.go)
+	}
 	// The sessions it lists however quiet are the assistant's to say (its profile); before it said, the node keeps
 	// what it has.
 	if keep, ok := m.d.keptOn(m.cfg.ID); ok {

@@ -60,9 +60,6 @@ struct SecretHandoffForm: View {
             .disabled(sending)
             if let scope = interaction.alwaysLabel, !scope.isEmpty {
                 Button("Always Allow") { submit(Resolution(allow: true, always: true)) }
-                    #if os(macOS)
-                    .buttonStyle(.link)
-                    #endif
                     .lineLimit(1)
                     .minimumScaleFactor(0.8)
                     .font(Theme.Font.caption)
@@ -82,7 +79,8 @@ struct SecretHandoffForm: View {
 
     /// Who gets the values, where, and for how long.
     private func lead(_ r: SecretHandoffRequest) -> String {
-        switch (r.agent.isEmpty, r.machine.isEmpty) {
+        if r.isStore { return interaction.summary ?? "" }
+        return switch (r.agent.isEmpty, r.machine.isEmpty) {
         case (false, false): String(localized: "“\(r.agent)” on \(r.machine) gets these for this run only:")
         case (true, false): String(localized: "An Agent on \(r.machine) gets these for this run only:")
         default: String(localized: "An Agent gets these for this run only:")

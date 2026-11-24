@@ -17,6 +17,7 @@ import persona.core.navigation.RouteSource
 import java.time.Instant
 import java.time.ZoneId
 import java.util.Locale
+import persona.core.inbox.*
 
 // Inbox phase 1 (docs/assistant/inbox.md"Events, handling chains, and suggestions", docs/android/android.md"Inbox: events, suggestions, and handling chains"): the pure parts of
 // how an event reads in the list and on its page. Older items have no event sections; chat and mail still open the detail
@@ -151,7 +152,7 @@ internal fun chainTarget(entry: InboxChainEntry, record: InboxRecord): ChainTarg
         "source" -> {
             val position = link.positionValue
             when {
-                position != null && record.feedId != null -> ChainTarget.Page(LarkRoute(record.feedId, record.item.id, position))
+                position != null && record.feedId != null -> ChainTarget.Page(LarkRoute(record.feedId!!, record.item.id, position))
                 !link.url.isNullOrBlank() -> ChainTarget.Url(link.url!!)
                 link.uid != null && record.isMail && record.doc == null -> ChainTarget.Page(MailRoute(record.item.id, link.uid))
                 else -> ChainTarget.Source

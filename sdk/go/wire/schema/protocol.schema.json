@@ -573,6 +573,147 @@
       },
       "required": ["value"]
     },
+    "SecretStoreField": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "maxLength": 80
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "STRING",
+            "CONCEALED"
+          ]
+        }
+      },
+      "required": [
+        "name",
+        "type"
+      ],
+      "description": "A public field name/type; never a value or source path."
+    },
+    "SecretStoreTarget": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "operation": {
+          "type": "string",
+          "enum": [
+            "create",
+            "edit"
+          ]
+        },
+        "vault": {
+          "type": "string",
+          "maxLength": 120
+        },
+        "item": {
+          "type": "string",
+          "maxLength": 120
+        },
+        "title": {
+          "type": "string",
+          "maxLength": 200
+        },
+        "category": {
+          "type": "string",
+          "maxLength": 40
+        },
+        "fields": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/SecretStoreField"
+          },
+          "minItems": 1,
+          "maxItems": 16
+        }
+      },
+      "required": [
+        "operation",
+        "vault",
+        "fields"
+      ],
+      "description": "The canonical public target approved on the secret storage card."
+    },
+    "SecretStoreParams": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "contribution": {
+          "type": "string",
+          "maxLength": 120
+        },
+        "phase": {
+          "type": "string",
+          "enum": [
+            "describe",
+            "prepare",
+            "commit"
+          ]
+        },
+        "target": {
+          "$ref": "#/$defs/SecretStoreTarget"
+        },
+        "machine": {
+          "type": "string",
+          "maxLength": 120
+        },
+        "session": {
+          "type": "string",
+          "maxLength": 200
+        },
+        "key_id": {
+          "type": "string",
+          "maxLength": 100
+        },
+        "sealed": {
+          "type": "string",
+          "maxLength": 550000
+        }
+      },
+      "required": [
+        "phase",
+        "target",
+        "machine",
+        "session"
+      ],
+      "description": "secrets.store: describe metadata, prepare an expiring node HPKE key after explicit approval, commit one encrypted payload."
+    },
+    "SecretStoreResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "target": {
+          "$ref": "#/$defs/SecretStoreTarget"
+        },
+        "vault_name": {
+          "type": "string",
+          "maxLength": 120
+        },
+        "key": {
+          "type": "string",
+          "maxLength": 200
+        },
+        "key_id": {
+          "type": "string",
+          "maxLength": 100
+        },
+        "references": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string",
+            "maxLength": 1024
+          }
+        }
+      },
+      "required": [
+        "target"
+      ],
+      "description": "Metadata and a recipient key, or references of written fields. Never values."
+    },
     "SecretsUsedEvent": {
       "description": "secrets.used (an event to the provider, no answer): a reference it resolved was used, for the usage record its own page shows. Never the value.",
       "type": "object",

@@ -16,6 +16,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 
 	"golang.org/x/net/proxy"
@@ -49,7 +50,7 @@ func Pinned(parent context.Context, network, port string, ips []net.IPAddr, dial
 	results := make(chan result)
 	next, active := 0, 0
 	start := func() {
-		target := net.JoinHostPort(ips[next].IP.String(), port)
+		target := net.JoinHostPort(ips[next].String(), port)
 		next++
 		active++
 		go func() {
@@ -76,8 +77,12 @@ func Pinned(parent context.Context, network, port string, ips []net.IPAddr, dial
 			if r.conn != nil {
 				_ = r.conn.Close()
 			}
+			err := r.err
+			if err == nil {
+				err = errors.New("dial returned nil connection")
+			}
 			if next == len(ips) && active == 0 {
-				return nil, r.err
+				return nil, err
 			}
 			if next < len(ips) {
 				start()
@@ -102,7 +107,7 @@ func ThroughProxy(ctx context.Context, upstream *url.URL, network, target string
 	}
 	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
-	scheme := upstream.Scheme
+	scheme := strings.ToLower(upstream.Scheme)
 	if scheme == "" {
 		scheme = "http"
 	}
@@ -175,6 +180,12 @@ func ThroughProxy(ctx context.Context, upstream *url.URL, network, target string
 	}
 	if resp.StatusCode != http.StatusOK {
 		return nil, errors.New("proxy refused CONNECT")
+	}
+	if !stop() {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		return nil, context.Canceled
 	}
 	if err := ctx.Err(); err != nil {
 		return nil, err

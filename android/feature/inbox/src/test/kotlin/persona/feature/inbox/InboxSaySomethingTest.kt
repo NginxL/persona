@@ -30,6 +30,7 @@ import persona.core.designsystem.LocalAppFeedback
 import persona.core.designsystem.PersonaTheme
 import persona.core.domain.inbox.InboxItem
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import persona.core.inbox.*
 
 @RunWith(AndroidJUnit4::class)
 @Config(sdk = [35], qualifiers = "zh-w400dp-h900dp-mdpi")

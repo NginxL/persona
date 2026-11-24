@@ -98,7 +98,7 @@ func TestTaskReceiptAndRetryAfterTheWindow(t *testing.T) {
 		receipts := func() int { return strings.Count(feedKinds(s, "conv1"), "receipt") }
 		end := func(text string, retry bool) {
 			elapse(time.Second) // more work, after the last receipt
-			s.taskWorking(ctx, "box", "s1")
+			s.taskWorking(ctx, "box", "s1", startRow{})
 			done := proto.Session{SessionID: "s1", MachineID: "box", Cwd: "/code/app", Agent: "claude", Status: proto.StatusDone,
 				LastText: text, UpdatedAt: time.Now()}
 			f.setSessions("box", done)

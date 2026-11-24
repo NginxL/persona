@@ -158,5 +158,11 @@
   "socket_missing": "存在しません",
   "socket_stale_hint": "終了した古いノードが残したファイルの可能性があります。このコンピューターでノードを再起動してください",
   "summary": "合計{total}件：正常{ok}件、注意{warn}件、問題{fail}件",
-  "title": "ノードの自己診断（{dir}）"
+  "title": "ノードの自己診断（{dir}）",
+  "agy_hooks_installed": "PersonaのAntigravity CLIフックはインストール済みです",
+  "agy_hooks_missing": "PersonaのAntigravity CLIフックがインストールされていません",
+  "agy_hooks_stale": "PersonaのAntigravity CLIフックが別のプログラムを指しています",
+  "agy_hooks_hint": "personad node doctor --fix を実行してください（どのエンジンのagyペインでも会話を読めるようになります）",
+  "agy_hooks_off": "PersonaのAntigravity CLIフックは意図的に削除されています（personad node agy-hooks install で戻せます）",
+  "agy_hooks_unreadable": "Antigravity CLIのフックファイルを読み取れません（{error}）"
 }

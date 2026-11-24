@@ -8,8 +8,8 @@
 //     [--model <provider/model>] [--instance <id>] [--no-assistant] [--no-update] [--parent-stdin]
 //     [--assistant-workers <1..64>] [--assistant-idle-ms <milliseconds>]
 
-import { resolve } from 'node:path'
-import { pathToFileURL } from 'node:url'
+import { realpathSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
 import { parseArgs } from 'node:util'
 import { createOpencodeCompanion } from './lib/companion.js'
 
@@ -98,6 +98,16 @@ function main() {
   }
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
+// Node loads the entry module by its real path, so compare real paths: through a symlinked home or package directory
+// argv[1] keeps the link while import.meta.url does not, and a plain comparison would skip main() and exit 0 (#12848).
+function isEntry() {
+  try {
+    return !!process.argv[1] && realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url))
+  } catch {
+    return false // no file behind argv[1] (node -e, a REPL import)
+  }
+}
+
+if (isEntry()) {
   main()
 }

@@ -20,7 +20,6 @@ import (
 	"github.com/nwverse/persona/server/internal/lazyre"
 	"github.com/nwverse/persona/server/internal/prompts"
 	"github.com/nwverse/persona/server/internal/proto"
-	"github.com/nwverse/persona/server/internal/remoteimage"
 	"github.com/nwverse/persona/server/internal/rpc"
 )
 
@@ -60,7 +59,7 @@ func (s *Service) channelSend(ctx context.Context, id, ref, text, kind, replyTo 
 		err := s.appCall(ctx, AppChannels, ChannelsSend, params, nil)
 		var re *rpc.Error
 		if errors.As(err, &re) && re.Code == CodeCannotSend {
-			return errCannotSend
+			return cannotSendError{msg: strings.TrimSpace(re.Message)}
 		}
 		if err != nil {
 			return err
@@ -111,11 +110,18 @@ func (e extensionSink) typing(ctx context.Context, on bool) {
 // conversation the channel talks to.
 // action is the owner's action the hub handed over with it: what it answers, it answers with that.
 func (s *Service) channelReceive(id string, m channel.Message, action string) {
+	s.channelReceiveInGeneration(id, m, action, s.channelGeneration(id))
+}
+
+func (s *Service) channelReceiveInGeneration(id string, m channel.Message, action string, generation uint64) {
+	if !s.channelGenerationCurrent(id, generation) {
+		return
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()
 	text := strings.TrimSpace(m.Text)
 	if strings.HasPrefix(text, "/") && len(m.Images) == 0 && len(m.Files) == 0 {
-		handled, rest := s.channelCommand(ctx, id, m, text)
+		handled, rest := s.channelCommandInGeneration(ctx, id, m, text, generation)
 		if handled {
 			return
 		}
@@ -125,10 +131,13 @@ func (s *Service) channelReceive(id string, m channel.Message, action string) {
 		text = strings.TrimSpace(rest)
 		m.Text = text
 	}
+	if !s.channelGenerationCurrent(id, generation) {
+		return
+	}
 	if s.channelAnswerAsk(ctx, id, m, text, action) {
 		return
 	}
-	if err := s.channelForward(ctx, id, m); err != nil {
+	if err := s.channelForwardInGeneration(ctx, id, m, generation); err != nil && s.channelGenerationCurrent(id, generation) {
 		s.logf("channels: %s: send: %v", id, err)
 		_ = s.channelTell(ctx, id, m.ID, i18n.T(s.botLang(ctx), "assistant-channels_plugin.not_sent", i18n.Args{"error": clip(oneLine(err.Error()), 200)}), channel.OutNote)
 	}
@@ -137,13 +146,25 @@ func (s *Service) channelReceive(id string, m channel.Message, action string) {
 // channelCommand runs one of the commands every channel has; false (and the text to send on) for one it does not
 // know: it may be the conversation's own (/compact).
 func (s *Service) channelCommand(ctx context.Context, id string, m channel.Message, text string) (bool, string) {
+	return s.channelCommandInGeneration(ctx, id, m, text, s.channelGeneration(id))
+}
+
+func (s *Service) channelCommandInGeneration(ctx context.Context, id string, m channel.Message, text string, generation uint64) (bool, string) {
 	name, rest, _ := strings.Cut(text, " ")
 	rest = strings.TrimSpace(rest)
 	l := s.botLang(ctx)
-	reply := func(t string) { _ = s.channelTell(ctx, id, m.ID, t, channel.OutNote) }
+	reply := func(t string) {
+		if s.channelGenerationCurrent(id, generation) {
+			_ = s.channelTell(ctx, id, m.ID, t, channel.OutNote)
+		}
+	}
 	setTarget := func(t channel.Target) {
 		c := &s.chans
 		c.mu.Lock()
+		if c.generation[id] != generation {
+			c.mu.Unlock()
+			return
+		}
 		s.loadChannelsLocked(ctx)
 		s.channelPrefLocked(id).Target = &t
 		s.saveChannelsLocked()
@@ -159,7 +180,7 @@ func (s *Service) channelCommand(ctx context.Context, id string, m channel.Messa
 		// In a thread it starts the thread over; the channel's target stays where it is.
 		thread := s.channelThreadKey(ctx, id, m)
 		if thread != "" {
-			s.unbindChannelThread(id, thread)
+			s.unbindChannelThread(id, thread, generation)
 		} else {
 			setTarget(channel.Target{Kind: channel.TargetNew})
 		}
@@ -174,6 +195,9 @@ func (s *Service) channelCommand(ctx context.Context, id string, m channel.Messa
 		return false, rest // "/new help me…": the rest starts it
 	case "/stop", "/停":
 		rt, _, err := s.channelRoute(ctx, id, m)
+		if !s.channelGenerationCurrent(id, generation) {
+			return true, ""
+		}
 		switch {
 		case err != nil:
 			reply(i18n.T(l, "assistant-channels_plugin.not_stopped", i18n.Args{"error": err.Error()}))
@@ -186,6 +210,10 @@ func (s *Service) channelCommand(ctx context.Context, id string, m channel.Messa
 			}
 			c := &s.chans
 			c.mu.Lock()
+			if c.generation[id] != generation {
+				c.mu.Unlock()
+				return true, ""
+			}
 			c.st.Runs = slices.DeleteFunc(c.st.Runs, func(r *channel.Run) bool { return r.Channel == id && r.SessionID == rt.session.SessionID })
 			s.saveChannelStateLocked()
 			c.mu.Unlock()
@@ -300,10 +328,13 @@ func (s *Service) channelRoute(ctx context.Context, id string, m channel.Message
 // channelForward sends the owner's message to the conversation the channel talks to (starting it when there is none
 // yet) and follows its turn.
 func (s *Service) channelForward(ctx context.Context, id string, m channel.Message) error {
-	c := &s.chans
-	c.mu.Lock()
-	generation := c.generation[id]
-	c.mu.Unlock()
+	return s.channelForwardInGeneration(ctx, id, m, s.channelGeneration(id))
+}
+
+func (s *Service) channelForwardInGeneration(ctx context.Context, id string, m channel.Message, generation uint64) error {
+	if !s.channelGenerationCurrent(id, generation) {
+		return nil
+	}
 	v, ok := s.pluginChannel(ctx, id)
 	if !ok {
 		return fmt.Errorf("no channel %s", id)
@@ -330,7 +361,7 @@ func (s *Service) channelForward(ctx context.Context, id string, m channel.Messa
 		}
 		data, mime := img.Data, img.MIME
 		if len(data) > channel.ImageMost { // a photo sent as the original: scaled down to fit, not dropped (#11985)
-			fit, err := remoteimage.Fit(data, channel.ImageMost)
+			fit, err := s.remoteImages.Fit(ctx, data, channel.ImageMost)
 			if err != nil {
 				in.Unsupported = append(in.Unsupported, i18n.T(lang, "assistant-channels_plugin.image_too_large"))
 				continue
@@ -363,6 +394,9 @@ func (s *Service) channelForward(ctx context.Context, id string, m channel.Messa
 	if v.Kind == channel.KindMention {
 		ext = map[string]string{"chat": m.Chat, "thread": m.Topic, "public": "1"}
 	}
+	if !s.channelGenerationCurrent(id, generation) {
+		return nil
+	}
 	run := &channel.Run{ID: id + "_" + m.ID, Channel: id, ReplyTo: m.ID, TargetKind: channel.TargetConversation, Label: rt.label, Ext: ext,
 		Started: time.Now().UTC(), Probe: channel.Probe(in.Text, append(slices.Clone(in.Files), in.Forward, in.Quote)...)}
 	if rt.isNew {
@@ -370,11 +404,20 @@ func (s *Service) channelForward(ctx context.Context, id string, m channel.Messa
 		if err != nil {
 			return fmt.Errorf("%s%w", i18n.T(s.botLang(ctx), "assistant-channels_plugin.not_started"), err)
 		}
+		if !s.channelGenerationCurrent(id, generation) {
+			return nil
+		}
 		if thread != "" { // the thread's first message: the thread goes on in it, the channel's target stays
-			s.bindChannelThread(id, thread, sess.MachineID, sess.SessionID)
+			if !s.bindChannelThread(id, thread, sess.MachineID, sess.SessionID, generation) {
+				return nil
+			}
 		} else if !rt.main { // /new: the chat goes on in it
 			c := &s.chans
 			c.mu.Lock()
+			if c.generation[id] != generation {
+				c.mu.Unlock()
+				return nil
+			}
 			s.loadChannelsLocked(ctx)
 			s.channelPrefLocked(id).Target = &channel.Target{Kind: channel.TargetConversation, MachineID: sess.MachineID, SessionID: sess.SessionID}
 			s.saveChannelsLocked()
@@ -394,16 +437,24 @@ func (s *Service) channelForward(ctx context.Context, id string, m channel.Messa
 		if len(images) > 0 {
 			p["images"] = images
 		}
+		if !s.channelGenerationCurrent(id, generation) {
+			return nil
+		}
 		s.UserSpoke(ctx, SessionRef{MachineID: rt.machine, SessionID: sid}) // unarchived, and its title the user's to keep
 		params, err := s.SendParams(ctx, SendParams{MachineID: rt.machine, SessionID: sid, Params: p})
 		if err != nil {
 			return err
 		}
+		if !s.channelGenerationCurrent(id, generation) {
+			return nil
+		}
 		if err := s.sendOnce(ctx, rt.machine, params); err != nil {
 			return err
 		}
 		if thread != "" {
-			s.bindChannelThread(id, thread, rt.machine, sid) // the thread is still alive
+			if !s.bindChannelThread(id, thread, rt.machine, sid, generation) {
+				return nil
+			} // the thread is still alive
 		}
 	}
 	s.startChannelRunForBinding(run, &generation)
@@ -513,6 +564,13 @@ func (s *Service) channelInteraction(ix proto.Interaction) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	var to []string
+	redacted, decided := false, false
+	redacts := func() bool { // decided once for every channel, and only when one needs it
+		if !decided {
+			redacted, decided = s.exitPolicy(ctx, interactionText(ix), ix.SessionID, s.ixSpace(ctx, ix)).Redact, true
+		}
+		return redacted
+	}
 	for _, v := range s.textChannels(ctx) {
 		if v.Capabilities.Asks != channel.AsksText || !featureOn(v, channel.FeatureAsks) {
 			continue
@@ -520,8 +578,9 @@ func (s *Service) channelInteraction(ix proto.Interaction) {
 		if ix.Private {
 			continue // a Just me turn's card: never in a channel (meeting_justme.go)
 		}
-		// "All questions" does not take a health conversation's: only one the channel drives itself (health.go).
-		if !s.channelDrives(ctx, v.ID, ix.MachineID, ix.SessionID) && (!featureOn(v, channel.FeatureAllAsks) || s.ixInHealth(ctx, ix)) {
+		// "All questions" does not take a card that says something sensitive: only one the channel drives itself
+		// (health.go, info_use.go).
+		if !s.channelDrives(ctx, v.ID, ix.MachineID, ix.SessionID) && (!featureOn(v, channel.FeatureAllAsks) || redacts()) {
 			continue
 		}
 		to = append(to, v.ID)
@@ -857,8 +916,8 @@ func (s *Service) extensionMirror(ctx context.Context, machine, session string) 
 		return
 	}
 	sess, ok := s.session(ctx, machine, session)
-	if !ok || sess.WokeByTask && !main || spaceOf(sess) == SpaceHealth {
-		return // a health task's runs stay off the channels (health.go)
+	if !ok || sess.WokeByTask && !main || s.trackPolicy(ctx, spaceOf(sess)).Redact {
+		return // the runs of a space that redacts stay off the channels (health.go)
 	}
 	if s.transientRetryTurn(ctx, sess) {
 		return

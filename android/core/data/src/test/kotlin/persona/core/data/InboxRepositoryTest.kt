@@ -2,7 +2,6 @@ package persona.core.data
 
 import persona.core.contracts.*
 import persona.core.contracts.api.*
-import persona.feature.inbox.*
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.test.TestScope
@@ -15,6 +14,7 @@ import org.junit.Test
 import java.io.File
 import java.io.IOException
 import java.nio.file.Files
+import persona.core.inbox.*
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class InboxRepositoryTest {
@@ -589,8 +589,8 @@ class InboxRepositoryTest {
             repository.refresh()
             val avatar = repository.snapshot.value.records.single().avatar!!
             assertEquals("hub/generation:https://cdn.example.com/avatar/bot.jpg", avatar.cacheKey)
-            avatar.read()
-            avatar.read()
+            val _ = avatar.read()
+            val _ = avatar.read()
             // Read once as an avatar (the hub transport reads a full https URL directly); the second is cached.
             assertEquals(listOf("https://cdn.example.com/avatar/bot.jpg"), transport.avatarRefs)
         } finally {
@@ -617,11 +617,11 @@ class InboxRepositoryTest {
             }
             val other = image(ManagerPins.of(listOf(listOf("lark", "conversations", "feed")), "m-3"))
             assertEquals("hub/generation#m-3:/api/v1/lark/media/img", other.cacheKey)
-            other.read()
+            val _ = other.read()
             assertEquals("m-3", transport.messageManagers.last())
             val default = image(null)
             assertEquals("hub/generation:/api/v1/lark/media/img", default.cacheKey)
-            default.read()
+            val _ = default.read()
             assertNull(transport.messageManagers.last())
             assertEquals(listOf("/api/v1/lark/media/img" to "m-3", "/api/v1/lark/media/img" to null), transport.mediaReads)
         } finally {
@@ -673,8 +673,8 @@ class InboxRepositoryTest {
             assertEquals("hub/generation:/api/v1/lark/media/key?size=144", avatars["lark:chat:1"]?.cacheKey)
             assertNull(avatars["lark:dm:1"])
             assertNull(avatars["mail:1"])
-            avatars["lark:chat:1"]!!.read()
-            avatars["lark:chat:1"]!!.read()
+            val _ = avatars["lark:chat:1"]!!.read()
+            val _ = avatars["lark:chat:1"]!!.read()
             // Read with the pairing at the thumbnail size, and once: the second comes from the bytes cache.
             assertEquals(listOf("/api/v1/lark/media/key?size=144"), transport.mediaRefs)
             assertEquals(transport.mediaRefs, transport.avatarRefs)
@@ -725,15 +725,15 @@ class InboxRepositoryTest {
             val decoded = JsonCodec.encodeToJsonElement(InboxConnectorRef.serializer(), connector.connector!!).jsonObject
             assertEquals(picture, decoded["avatar_url"]?.jsonPrimitive?.content)
 
-            connector.avatar!!.read()
-            connector.avatar!!.read()
-            records.getValue("lark:chat:1").avatar!!.read()
+            val _ = connector.avatar!!.read()
+            val _ = connector.avatar!!.read()
+            val _ = records.getValue("lark:chat:1").avatar!!.read()
             assertEquals(listOf(sized, "/api/v1/lark/media/key?size=144"), transport.avatarRefs)
             // Rebuilding the same row retains its equal image and the authenticated bytes cache.
             repository.refresh()
             val rebuilt = repository.snapshot.value.records.single { it.item.id == "telegram:1" }
             assertEquals(connector, rebuilt)
-            rebuilt.avatar!!.read()
+            val _ = rebuilt.avatar!!.read()
             assertEquals(listOf(sized, "/api/v1/lark/media/key?size=144"), transport.avatarRefs)
         } finally {
             owner.coroutineContext[Job]!!.cancelAndJoin()
@@ -849,8 +849,8 @@ class InboxRepositoryTest {
             }
             val repository = repository(transport, directory, owner, FakeHub())
             val zone = java.time.ZoneId.of("Asia/Shanghai")
-            assertEquals(listOf(persona.feature.inbox.InboxDoneDay(java.time.LocalDate.of(2026, 11, 10), 120),
-                persona.feature.inbox.InboxDoneDay(java.time.LocalDate.of(2026, 11, 3), 4)), repository.doneDays("m-3fa21c", zone))
+            assertEquals(listOf(persona.core.inbox.InboxDoneDay(java.time.LocalDate.of(2026, 11, 10), 120),
+                persona.core.inbox.InboxDoneDay(java.time.LocalDate.of(2026, 11, 3), 4)), repository.doneDays("m-3fa21c", zone))
             assertEquals(listOf<Pair<String?, String>>("m-3fa21c" to "Asia/Shanghai"), asked)
             fun refused(code: Int) = object : IOException("hub $code"), persona.core.contracts.api.HubCodedFailure {
                 override val status: Int = code
@@ -1338,8 +1338,8 @@ class InboxRepositoryTest {
             assertEquals(listOf("received", "something_new"), listed.event.chain.map { it.kind })
             assertEquals(1L, listed.event.chain.first().link?.positionValue)
 
-            val request = persona.feature.inbox.SuggestionRequest("lark:c:1", 2, persona.feature.inbox.SuggestionAction.Confirm, "好的，改过")
-            assertEquals(persona.feature.inbox.SuggestionOutcome.Done, repository.actOnSuggestion(request))
+            val request = persona.core.inbox.SuggestionRequest("lark:c:1", 2, persona.core.inbox.SuggestionAction.Confirm, "好的，改过")
+            assertEquals(persona.core.inbox.SuggestionOutcome.Done, repository.actOnSuggestion(request))
             assertEquals(listOf("lark:c:1", 2L, "confirm", "好的，改过", request.clientId), transport.seen.single())
             repository.snapshot.value.records.single().let {
                 assertEquals("working", it.item.status)
@@ -1348,8 +1348,8 @@ class InboxRepositoryTest {
             }
 
             transport.answer = { throw InboxSuggestionStale(item(3, "action", "done")) }
-            val stale = persona.feature.inbox.SuggestionRequest("lark:c:1", 2, persona.feature.inbox.SuggestionAction.Reject)
-            assertEquals(persona.feature.inbox.SuggestionOutcome.Stale, repository.actOnSuggestion(stale))
+            val stale = persona.core.inbox.SuggestionRequest("lark:c:1", 2, persona.core.inbox.SuggestionAction.Reject)
+            assertEquals(persona.core.inbox.SuggestionOutcome.Stale, repository.actOnSuggestion(stale))
             assertEquals(3L, repository.snapshot.value.records.single().event.suggestion?.version)
         } finally {
             owner.coroutineContext[Job]!!.cancelAndJoin()

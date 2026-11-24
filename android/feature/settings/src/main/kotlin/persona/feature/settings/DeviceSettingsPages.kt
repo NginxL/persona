@@ -258,12 +258,20 @@ internal fun AboutSettingsPage(
     commit: BuildCommit? = rememberBuildCommit(),
     developing: DevelopingDiagnostics? = null,
     onExport: () -> Unit = {},
+    /** A test-only Build-row comparison; null preserves the existing handwritten row. */
+    buildRow: (@Composable () -> Unit)? = null,
 ) {
     val context = LocalContext.current
     val info = remember(context) { context.packageManager.getPackageInfo(context.packageName, 0) }
     val count = if (developing == null) 3 else 4
     JGroupItem(GroupPosition.of(0, count)) { JRow(stringResource(R.string.settings_about_version), value = info.versionName ?: stringResource(R.string.settings_not_provided)) }
-    JGroupItem(GroupPosition.of(1, count)) { JRow(stringResource(R.string.settings_about_build), trailing = { Text("${info.longVersionCode}", style = PersonaTheme.type.micro, color = PersonaTheme.palette.ink3) }) }
+    JGroupItem(GroupPosition.of(1, count)) {
+        if (buildRow == null) {
+            JRow(stringResource(R.string.settings_about_build), trailing = { Text("${info.longVersionCode}", style = PersonaTheme.type.micro, color = PersonaTheme.palette.ink3) })
+        } else {
+            buildRow()
+        }
+    }
     JGroupItem(GroupPosition.of(2, count)) { AboutBuildCommitRow(commit) }
     developing?.let { DevelopingPersonaAbout(it, GroupPosition.of(3, count), onExport) }
 }

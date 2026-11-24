@@ -2,7 +2,7 @@
 // One Escape closes one overlay, the topmost: a zoomed diagram inside a Dialog, or a Dialog over another Dialog.
 import { act, useState } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 // jsdom has no matchMedia (useMedia reads it); the diagram is drawn already, so Mermaid itself never loads
 vi.hoisted(() => {
@@ -15,7 +15,12 @@ vi.mock("../lib/mermaid", () => ({
 }));
 import { t } from "../i18n";
 import { Dialog } from "./atoms";
-import { MermaidBlock } from "./Mermaid";
+import { MermaidBlock, MermaidViewer } from "./Mermaid";
+
+// The zoomed view is its own chunk (Mermaid.tsx): in before the clicks, so each one draws it at once, as after a hover.
+beforeAll(async () => {
+  await MermaidViewer.preload();
+});
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 

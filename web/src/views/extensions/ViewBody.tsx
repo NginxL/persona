@@ -723,7 +723,8 @@ function Row({ item: it, busy, onPress, pressable, chosen, h }: { item: UIItem; 
       <RowLead item={it} onImageFailed={h.onImageFailed} />
       <div className="min-w-0 flex-1">
         <div className="truncate text-[13px] text-ink">{it.title}</div>
-        {it.subtitle && <div className="mt-0.5 truncate text-[11.5px] text-ink-3">{it.subtitle}</div>}
+        {/* read, not cut at one line: two lines at most, as iOS draws it (#13605); the row's button never wraps */}
+        {it.subtitle && <div className="mt-0.5 line-clamp-2 text-submeta break-words whitespace-normal text-ink-3">{it.subtitle}</div>}
       </div>
       {it.spark && <Sparkline spark={it.spark} />}
       {it.value && !slider && <span className="shrink-0 truncate text-[12.5px] text-ink-2 tabular-nums"><Rolling value={it.value} /></span>}

@@ -9,6 +9,7 @@ import kotlinx.serialization.json.*
 import persona.core.hub.HubFailure
 import java.time.Instant
 import java.util.UUID
+import persona.core.inbox.*
 
 // Comments on a Feishu document in the reader (#1290 / #2964; iOS FeishuDocsCommentsModel, web lib/doc-comments): the
 // threads from the hub's read-only Lark gateway window and, when the plugin says `lark_doc_comments`, the user's own

@@ -31,6 +31,7 @@ func (w *botWorld) feishuErr(method string, params any) error {
 }
 
 func TestBotPinsAndWithdrawsOnlyItsOwnMessagesInTheOwnersChat(t *testing.T) {
+	needsLarkModule(t)
 	w := newBotWorld(t)
 	w.pair(t)
 	w.api.sentBy("om_wb", "oc_p2p", "cli_test")
@@ -71,6 +72,7 @@ func TestBotPinsAndWithdrawsOnlyItsOwnMessagesInTheOwnersChat(t *testing.T) {
 
 // The switch is off by default and set through feishu.configure like the others.
 func TestBotWorkbenchSwitchIsOffByDefault(t *testing.T) {
+	needsLarkModule(t)
 	w := newBotWorld(t)
 	st := w.feishu(t, assistantwire.FeishuStatusGet, nil)
 	if f, _ := st["features"].(map[string]any); f["workbench"] != false {

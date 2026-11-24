@@ -61,7 +61,11 @@ func (s *Service) watchChannelRun(r *channel.Run) {
 			if c.live[r.ID] == prog {
 				delete(c.live, r.ID)
 			}
+			st := prog.sink
 			c.mu.Unlock()
+			if a, ok := st.(interface{ Abort() }); ok {
+				a.Abort() // the sink's own work for the run (the Feishu agent message's worker)
+			}
 			return
 		}
 		s.retryFollow(r.MachineID, r.SessionID)

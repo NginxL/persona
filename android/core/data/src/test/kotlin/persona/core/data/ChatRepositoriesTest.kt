@@ -699,6 +699,26 @@ class ChatRepositoriesTest {
         assertEquals(90_000, reply.fullSize)
     }
 
+    @Test fun trackedActionsForwardTheRealStartAnswerInsteadOfTheInterfaceDefault() = runTest {
+        val repository = HubChatRepository(FakeChatTransport(), FakeConnection(), FakeItemsCache(CachedChat()),
+            FakeSessions(), backgroundScope)
+        val session = Session(key.machineId, key.sessionId)
+        val answered = session.copy(startErrorCode = null, startErrorArgs = null)
+        val calls = mutableListOf<Pair<Session, String>>()
+        val actions = repository.trackActions(object : ChatActions {
+            override suspend fun isMuted(session: Session) = false
+            override suspend fun execute(session: Session, action: ChatAction) = ChatActionResult.Done
+            override suspend fun verify(session: Session, action: ChatAction) = ChatActionResult.Done
+            override suspend fun continueStart(session: Session, choice: String): Session {
+                calls += session to choice
+                return answered
+            }
+        })
+
+        assertSame(answered, actions.continueStart(session, "y"))
+        assertEquals(listOf(session to "y"), calls)
+    }
+
     @Test fun lifecycleRequiresVerifiedListsAndConfirmedActionsAndKeepsRecordedDurationOnly() = runTest {
         val connection = FakeConnection()
         val working = Session(key.machineId, key.sessionId, status = "working", paneId = "pane")

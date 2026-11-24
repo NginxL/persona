@@ -29,9 +29,9 @@ import persona.core.navigation.TodosRoute
 import persona.feature.chat.*
 import persona.feature.assistant.personaConversationTitle
 import persona.feature.inbox.InboxWebSelection
-import persona.feature.knowledge.KnowledgeDetailRoute
-import persona.feature.knowledge.KnowledgeKindRoute
-import persona.feature.knowledge.KnowledgeRoute
+import persona.core.navigation.KnowledgeDetailRoute
+import persona.core.navigation.KnowledgeKindRoute
+import persona.core.navigation.KnowledgeRoute
 import persona.feature.inbox.LocalInboxWebSelection
 import java.util.UUID
 

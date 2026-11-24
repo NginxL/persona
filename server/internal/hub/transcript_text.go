@@ -137,11 +137,15 @@ func noticeText(l i18n.Lang, s string) string {
 		return tt(l, "schedule_fired")
 	case strings.HasPrefix(s, transcript.PaseoScheduleNotice+"："):
 		return tt(l, "schedule_fired_what", i18n.Args{"what": strings.TrimPrefix(s, transcript.PaseoScheduleNotice+"：")})
-	case s == i18n.T(i18n.Default, "node-engine.agy_pane_integration"):
+	case s == i18n.T(i18n.Default, "node-engine.agy_pane_integration"), s == legacyAgyPaneNotice:
 		return i18n.T(l, "node-engine.agy_pane_integration")
 	}
 	return s
 }
+
+// legacyAgyPaneNotice is the pane notice an older node writes (before #13763 it pointed only at herdr's integration):
+// shown in the reader's language as the current one.
+const legacyAgyPaneNotice = "你仍可发送消息和使用终端。herdr 确认此窗格对应的对话后，Persona 就会显示该对话。如果尚未安装集成，请运行 herdr integration install antigravity-cli。"
 
 // runtimeResultText is a tool result in l when a runtime bridge wrote words of its own into it (transcript.Runtime*):
 // a cancelled call's, and a failed command's exit code after its output; the output itself stays as it is.

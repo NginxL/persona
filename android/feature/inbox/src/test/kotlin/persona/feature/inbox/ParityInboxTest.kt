@@ -8,6 +8,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import persona.core.contracts.api.InboxAssistantTransport
 import persona.core.domain.inbox.InboxItem
+import persona.core.inbox.*
 
 class ParityInboxTest {
     private fun json(text: String) = Json.parseToJsonElement(text).jsonObject
@@ -30,13 +31,13 @@ class ParityInboxTest {
         val options = inboxMuteOptions(json("""{"mutes":[{"tag":"repo","value":"o/r","name":"o/r"},{"tag":"sender","value":"x"},{"tag":"","value":"y"}]}"""))
         assertEquals(listOf(InboxMuteOption("repo", "o/r", "o/r"), InboxMuteOption("sender", "x", "x")), options)
         assertEquals("r", options[0].shortName)
-        assertEquals(R.string.inbox_mute_repo, options[0].title)
-        assertEquals(R.string.inbox_mute_sender, options[1].title)
+        assertEquals(persona.core.inbox.R.string.inbox_mute_repo, options[0].title)
+        assertEquals(persona.core.inbox.R.string.inbox_mute_sender, options[1].title)
         val mutes = inboxMutes(json("""{"mutes":[{"id":"a","source":"lark","tag":"chat","value":"c","name":"Chat","created_at":"2026-01-01T00:00:00Z"},
             {"id":"b","source":"github","source_name":"GitHub","tag":"repo","value":"o/r","created_at":"2026-02-01T00:00:00Z"},{"source":"x"}]}"""))
         assertEquals(listOf("b", "a"), mutes.map { it.id })
         assertEquals("o/r", mutes[0].name)
-        assertEquals(R.string.inbox_mute_tag_chat, mutes[1].tagName)
+        assertEquals(persona.core.inbox.R.string.inbox_mute_tag_chat, mutes[1].tagName)
     }
 
     @Test fun aMuteCoversTheOpenItemsOfItsSourceWithTheSameValue() {

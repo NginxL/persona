@@ -7,14 +7,8 @@
     <string name="settings_pairing_notice_local_denied">未获得本地网络权限。可以去系统设置授权，再回来重试。</string>
     <string name="settings_pairing_notice_camera_denied">相机权限未开启，可以手动输入地址和配对码。</string>
     <string name="settings_pairing_notice_clipboard_empty">剪贴板里没有配对链接。</string>
+    <string name="settings_pairing_help">帮助</string>
     <string name="settings_pairing_welcome_title">欢迎使用 Persona</string>
-    <string name="settings_pairing_welcome_body">把 Hub 接到手机上，随时查看电脑上的 Agent，处理需要你确认的事。</string>
-    <string name="settings_pairing_welcome_agents">查看执行过程，回答提问、审批计划和工具操作。</string>
-    <string name="settings_pairing_welcome_inbox_title">收件箱</string>
-    <string name="settings_pairing_welcome_inbox">集中查看飞书和邮件，让 AI 帮你分拣、草拟回复。</string>
-    <string name="settings_pairing_welcome_assistant_title">Persona 助手</string>
-    <string name="settings_pairing_welcome_assistant">连接你的知识库，手机数据会在需要时单独申请授权。</string>
-    <string name="settings_pairing_welcome_push">没有 Google 服务也能收通知：手机通过常驻连接接收 Hub 的消息。</string>
     <string name="settings_pairing_welcome_guide">还没有 Hub？</string>
     <string name="settings_pairing_failed_title">连接未完成</string>
     <string name="settings_pairing_failed_body">按下面的提示处理后，再试一次。</string>

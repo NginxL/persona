@@ -184,10 +184,11 @@ func TestDirectionStandingTellsStoppedOfflineAndRemovedApart(t *testing.T) {
 	}
 }
 
-// An Agent on a supervised task that is not done, but shelved or seen (the To-dos open count leaves both out), follows
-// its task in the read, the write and the tree, and so does a sub-agent session under it (points 4 and 5).
-func TestDirectionRuleOneHoldsShelvedAndSeenTasks(t *testing.T) {
-	for _, state := range []string{"shelved", "seen"} {
+// An Agent on a supervised task that is not done, but shelved or accepted (the To-dos open count leaves both out), follows
+// its task in the read, the write and the tree, and so does a sub-agent session under it (points 4 and 5). Seen alone no
+// longer files a supervised task: it remains awaiting review under #5732, so the second case uses standing acceptance.
+func TestDirectionRuleOneHoldsShelvedAndAcceptedTasks(t *testing.T) {
+	for _, state := range []string{"shelved", "accepted"} {
 		t.Run(state, func(t *testing.T) {
 			e := directionFilingEnv(t, nil)
 			ctx := context.Background()
@@ -195,7 +196,7 @@ func TestDirectionRuleOneHoldsShelvedAndSeenTasks(t *testing.T) {
 			old := now.Add(-72 * time.Hour)
 			agent := proto.Session{MachineID: "box", SessionID: "agent-quiet", Agent: "codex", Status: proto.StatusIdle,
 				State: proto.StateIdle, Title: "Quiet agent", UpdatedAt: old}
-			if state == "seen" {
+			if state == "accepted" {
 				agent.Status, agent.State, agent.UpdatedAt = proto.StatusDone, proto.StateUnread, now.Add(-time.Hour)
 			}
 			kid := proto.Session{MachineID: "box", SessionID: "agent-quiet-kid", Agent: "codex", ParentSessionID: "agent-quiet",
@@ -208,8 +209,9 @@ func TestDirectionRuleOneHoldsShelvedAndSeenTasks(t *testing.T) {
 				todo.Supervision = &Supervision{Supervisor: "conv_lead_a"}
 				todo.Agents = []TodoAgent{{MachineID: "box", SessionID: "agent-quiet", Agent: "codex", LinkedAt: old}}
 				todo.CreatedAt, todo.UpdatedAt = old, old
-				if state == "seen" {
-					todo.SeenAt = &now
+				if state == "accepted" {
+					todo.Supervision.State = reviewAccepted
+					todo.Supervision.Reviews = []TaskReview{{At: now, Verdict: reviewAccepted}}
 				}
 			})
 			e.s.todos.mu.Lock()
@@ -218,7 +220,7 @@ func TestDirectionRuleOneHoldsShelvedAndSeenTasks(t *testing.T) {
 
 			tb, _, _ := e.s.directionTreeParts(ctx, time.Now())
 			placed := tb.placed[taskID]
-			wantSection := map[string]string{"shelved": triageShelved, "seen": triageDone}[state]
+			wantSection := map[string]string{"shelved": triageShelved, "accepted": triageDone}[state]
 			if tb.isOpen(taskID) || todoNow(e.s, taskID).DoneAt != nil || placed.Section != wantSection {
 				t.Fatalf("precondition: a task not done that the open count leaves out (%s): open=%v placed=%+v", state, tb.isOpen(taskID), placed)
 			}

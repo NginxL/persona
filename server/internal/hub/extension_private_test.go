@@ -616,3 +616,53 @@ func TestExtensionCardActionsRefuseHiddenPendingCards(t *testing.T) {
 		t.Fatalf("a visible card's resolve was not forwarded:\n%s", b.log())
 	}
 }
+
+// The user's own extension (#13246, trust owner in the manager, assistantwire.Profile.ExtensionOwners; such as their
+// memory extension) reads the tracks' conversations and cards on the hub's read routes; a private card stays hidden,
+// and once the user takes the mark away the extension is shown none of them again.
+func TestTheUsersOwnExtensionReadsTheTracks(t *testing.T) {
+	h, url, _, b := reachHub(t)
+	h.takeFleetSessions(assistantwire.FleetSessions{MachineID: "mb", Sessions: []proto.Session{
+		{MachineID: "mb", SessionID: "b1", Title: "B-SESSION", Cwd: "/work/project"},
+		{MachineID: "mb", SessionID: "bh", Title: "HEALTH-SESSION", Cwd: "/home/me/.persona/health", Assistant: true, Space: "health"},
+	}})
+	eventually(t, 5*time.Second, "mb's sessions", func() bool { _, ok := h.localMachine("mb").session("bh"); return ok })
+	for _, ix := range []proto.Interaction{
+		{ID: "ix_private", MachineID: "mb", SessionID: "b1", Cwd: "/work/project", Kind: proto.IxQuestion, Private: true, Summary: "PRIVATE-CARD"},
+		{ID: "ix_health", MachineID: "mb", SessionID: "bh", Kind: proto.IxQuestion, Summary: "HEALTH-CARD"},
+	} {
+		if err := b.peer.Notify(assistantwire.EventFleetInteraction, assistantwire.FleetInteraction{Interaction: ix}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	eventually(t, 5*time.Second, "the cards", func() bool { return h.interactionOwner("ix_health") != "" })
+	owners := func(ids ...string) {
+		a := &h.assistant
+		a.mu.Lock()
+		a.profile = &assistantwire.Profile{MachineID: "mb", ExtensionOwners: ids}
+		a.mu.Unlock()
+	}
+
+	owners("bx")
+	if code, body := extDo(t, url, http.MethodGet, "/api/v1/sessions?machine_id=mb", "", nil); code != http.StatusOK || !strings.Contains(body, "HEALTH-SESSION") {
+		t.Fatalf("the user's own extension, list: %d %s", code, body)
+	}
+	if code, body := extDo(t, url, http.MethodGet, "/api/v1/sessions/mb/bh/info", "", nil); code == http.StatusNotFound {
+		t.Fatalf("the user's own extension, read: %d %s", code, body)
+	}
+	if code, body := extDo(t, url, http.MethodGet, "/api/v1/interactions", "", nil); code != http.StatusOK || !strings.Contains(body, "HEALTH-CARD") ||
+		strings.Contains(body, "PRIVATE") {
+		t.Fatalf("the user's own extension, cards: %d %s", code, body)
+	}
+
+	owners("someone-else")
+	if code, body := extDo(t, url, http.MethodGet, "/api/v1/sessions?machine_id=mb", "", nil); code != http.StatusOK || strings.Contains(body, "HEALTH") {
+		t.Fatalf("a third party's, list: %d %s", code, body)
+	}
+	if code, body := extDo(t, url, http.MethodGet, "/api/v1/sessions/mb/bh/info", "", nil); code != http.StatusNotFound {
+		t.Fatalf("a third party's, read: %d %s", code, body)
+	}
+	if code, body := extDo(t, url, http.MethodGet, "/api/v1/interactions", "", nil); code != http.StatusOK || strings.Contains(body, "HEALTH") {
+		t.Fatalf("a third party's, cards: %d %s", code, body)
+	}
+}

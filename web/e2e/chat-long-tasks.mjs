@@ -131,12 +131,21 @@ async function scenario(browser, name, { path, assistant, items, last, stream })
   }
   // A page still stuck gets half a minute to finish the task in hand, so its length can be told.
   const tasks = await Promise.race([page.evaluate(() => window.__longTasks), new Promise((done) => setTimeout(() => done(null), 30_000))]);
+  const dom = await Promise.race([
+    page.evaluate(() => ({
+      totalElements: document.querySelectorAll("*").length,
+      chatElements: document.querySelectorAll("[data-chat-scroll] *").length,
+      segments: document.querySelectorAll("[data-segment]").length,
+      placeholders: document.querySelectorAll("[data-segment-placeholder]").length,
+    })),
+    new Promise((done) => setTimeout(() => done(null), 30_000)),
+  ]);
   const shot = await page.screenshot({ path: join(output, `${name}.png`), timeout: 10_000 }).then(() => `${name}.png`, () => null); // a stuck page draws nothing
   const hung = samples.filter((ms) => ms >= PROBE_CAP_MS).length;
   const longestTask = tasks ? Math.max(0, ...tasks) : null;
   const ok = drawnAfter !== null && tasks !== null && hung === 0 && longestTask <= LONG_TASK_LIMIT_MS && errors.length === 0 && outside.length === 0;
   const row = { name, items: items.length, drawnAfter, deltas, longestTask, tasksOver1s: tasks?.filter((d) => d > LONG_TASK_LIMIT_MS).length ?? null,
-    longTaskTotal: tasks?.reduce((a, d) => a + d, 0) ?? null, slowestProbe: Math.max(0, ...samples), probesOver5s: hung, errors, outside: outside.slice(0, 5), screenshot: shot, verdict: ok ? "pass" : "fail" };
+    longTaskTotal: tasks?.reduce((a, d) => a + d, 0) ?? null, slowestProbe: Math.max(0, ...samples), probesOver5s: hung, dom, errors, outside: outside.slice(0, 5), screenshot: shot, verdict: ok ? "pass" : "fail" };
   results.scenarios.push(row);
   console.log(JSON.stringify(row));
   await context.close();

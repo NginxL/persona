@@ -1,11 +1,7 @@
 import Foundation
 import Observation
 import PersonaWire
-#if canImport(UIKit)
 import UIKit
-#elseif canImport(AppKit)
-import AppKit
-#endif
 
 /// The unified inbox as the app knows it (docs/assistant/inbox.md): the hub's items, kept on disk so the list paints at once
 /// (offline too), refreshed when the hub says `inbox` and on (re)connect. Marking done applies at once and is sent
@@ -64,11 +60,7 @@ final class InboxStore {
             cursorRevision = itemsRevision
         }
         teachLarkSync()
-        #if os(iOS) || os(visionOS)
         let leaving = [UIApplication.didEnterBackgroundNotification, UIApplication.willTerminateNotification]
-        #else
-        let leaving = [NSApplication.willTerminateNotification]
-        #endif
         for name in leaving {
             NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { @Sendable _ in
                 MainActor.assumeIsolated { InboxStore.shared.saver.flush() }
@@ -369,12 +361,8 @@ final class InboxStore {
         }
     }
 
-    /// The connectors' items (GitHub…) are drawn on iOS and the Mac (#2611, #2736); the watch fetches its own (WatchModel, #2727).
-    #if os(iOS) || os(visionOS) || os(macOS)
+    /// The connectors' items (GitHub…) are drawn on iOS and visionOS (#2611, #2736); the watch fetches its own (WatchModel, #2727).
     private static let drawsConnectors = true
-    #else
-    private static let drawsConnectors = false
-    #endif
 
     private func fetch(_ load: (APIClient) async throws -> InboxListing) async {
         guard let api = AppModel.shared.api else { return }

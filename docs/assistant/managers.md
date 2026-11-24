@@ -348,9 +348,34 @@ On an upgraded install the manager's `secret.key` began as the same bytes as the
 
 ## Automatic updates for an independent manager
 
-An independent manager's executable is separate from the Hub and the node. Updating either
-of those does not update that manager. Older `manager run` processes have no update command
-or RPC. Their first update is driven externally by the existing release publisher, executing
+An independent assistant runs its own manager executable and deploys the node programs
+on the computers it owns. Each installation confirms its own update.
+
+### Following a Web development commit
+
+When a Linux or macOS Hub with a built-in child assistant confirms a Web development
+update, it sends capable independent managers the confirmed commit, version and build.
+A pending candidate and a failed Hub update never become manager update targets.
+
+The manager authenticates to the Hub, requests a package for its own platform and
+verifies the archive and executable hashes. If the manifest lacks that platform,
+the manager can use Git and Go on its host to build the same detached commit from the
+canonical Persona repository. The program must match the target's version, commit and
+build. Missing tools or failed verification leave the running manager in place.
+
+The manager waits until it is idle to replace its program and keeps its previous
+executable through startup. If the new manager fails to start, recovery restores the
+previous program. The manager also obtains packages for the computers it owns and reports
+each deployment separately. See [Node packages](../operations/node-update.md#node-packages).
+
+A remote assistant with its own storage can keep running during the Hub's backup. Another
+manager installed under the Hub's runtime, or extra databases or data roots in that backup,
+requires a pair of local quiesce and resume hooks. See [Web development updates](../operations/hub-update.md#web-development-updates).
+
+### Release bootstrap for older managers
+
+Older `manager run` processes have no update command or RPC. Their first update is
+driven externally by the existing release publisher, executing
 the **new, same-source release artifact** as `personad manager update`. It does not ask the
 old process to execute a new command, reinstall or join again.
 
@@ -795,7 +820,7 @@ An app shows one assistant at a time, the **current assistant**, picked in a swi
 
 - **Names**: what people read says assistant (助手, アシスタント): New assistant, Manage assistants…, Settings › Assistants, Default assistant; the settings row for the assistant's own profile is Assistant profile (助手资料). Code, the protocol, `manager.json` and these docs keep `manager`.
 - **The pick** is kept on the device, per hub, across launches. A device that never picked follows the hub's default, and a pick whose manager left the roster (deleted, or never installed) goes back to it. Requests name the pick with `X-Persona-Manager: <id>`; with the default current none is sent, so a hub with one manager gets the requests it always got. Until the roster is read after a launch, the kept pick already counts: the pages list its things only and the switcher shows the name the roster last gave it, rather than every assistant's and the hub's own name for a moment.
-- **One identity for the default assistant (#6401)**: the default manager is the Persona of the main conversation, so every client shows the chosen look's face in the switcher's head — not the first-letter monogram every other assistant keeps — with the same presence and needs-you corner marks. Changing the look changes that face. Its name is the manager name the hub keeps (`PATCH /api/v1/managers/{id}`), shown in the switcher's head, the main conversation's row (on Apple the row says Main Chat under the head instead and Persona's top bar names it, #9973), the profile and the composer; on web and Apple the profile edits it directly (a pencil on the name), and every client can rename it from Settings › Assistants. A hub without a roster keeps the look's own name and the earlier header, read-only.
+- **One identity for the default assistant (#6401)**: the default manager is the Persona of the main conversation, so every client shows the chosen look's face in the switcher's head — not the first-letter monogram every other assistant keeps — with the same presence and needs-you corner marks. Changing the look changes that face. Its name is the manager name the hub keeps (`PATCH /api/v1/managers/{id}`), shown in the switcher's head, the main conversation's row (on Apple the row says Main Chat under the head instead and Persona's top bar names it, #9973), the profile and the composer; every client's profile/Details page edits it directly (web and Apple use a pencil on the name, Android a **Rename** row), and every client can also rename it from Settings › Assistants. A hub without a roster keeps the look's own name and the earlier header, read-only.
 
 - **The switcher** shows the current assistant's avatar, name and status (Online · its computer, Offline · last synced …). It opens the roster: the installed managers, the default first and tagged Default, the current one checked, an offline one's whole row faded (avatar, name and line) but still selectable (its pages show what the app last read, as below); then the ones still installing (Installing · code expires in n minutes), where choosing one opens its install code and commands instead of switching; then **New assistant** and **Manage assistants…** (Settings › Assistants). With one installed manager, web, Android and Apple show the same switcher and a one-row roster without a Default tag; New assistant and Manage assistants… remain available. New assistant also remains in Settings › Assistants. With two or more installed managers, all three use the switcher above, including offline managers; pending installs alone do not enable it. On Apple, a hub without a roster keeps the persona's name as the sidebar's title; web and Android keep their earlier header and controls. With several hubs on one device (`docs/protocol/multi-hub.md`), Apple's switcher lists the hubs first, the current one checked, then the current hub's assistants under its name (hub › its assistants, #12594); picking a hub makes it the current hub and closes the list.
 - **A hidden built-in assistant** (`hidden` in the roster, #9055) is left out of the switcher's rows on every client. It still counts as installed, so scoping, badges and the Default tag are unchanged; a pick that becomes hidden goes back to the default. Settings' page of the built-in manager has a **Show in the switcher** switch (在切换器里显示, 切り替えに表示): off sends `hide: true`, which cannot be turned off while it is the default or has a computer; on sends `hide: false`.

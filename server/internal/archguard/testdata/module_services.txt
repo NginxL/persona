@@ -1,0 +1,20 @@
+# Known exceptions to TestModulesUseOnlyTheSPI, shrink-only debt (docs/architecture/core-and-modules.md "Guards"): a
+# module that still imports a stateful core package, as "<module id> <core package>" for any of its files or
+# "<module id> (test) <core package>" for its tests only. A line no import needs fails the test. Never add one to make
+# a new import pass when a contract, a leaf library or a port would do; no wildcards.
+#
+# The GitHub and iMessage connectors' tests run them through the connector framework as the manager does: the
+# registry and the write gate (chatrule_test.go, gate_args_test.go), the connector-protocol conformance suite
+# (conformance_test.go) and the subscription service (inbox_things_test.go). They use the modules' unexported fixtures,
+# so they stay in the modules until those fixtures are stand-ins (internal/modules/<id>/<id>test) a core test can use
+# (#13936).
+github (test) internal/connector
+github (test) internal/connector/conformance
+github (test) internal/subscriptions
+imessage (test) internal/connector
+imessage (test) internal/connector/conformance
+imessage (test) internal/subscriptions
+#
+# Meeting recording keeps the recordings' storage in the knowledge base (the kb.Recording model with its Engine and
+# Store), which stays in the core until kb offers a recording port (#13407).
+recording internal/kb

@@ -2,6 +2,7 @@
 <resources>
     <string name="chat_plan_approve_stepwise">批准，每步确认</string>
     <string name="chat_menu_fork">分支到新聊天</string>
+    <string name="chat_menu_fork_wait_turn">等这一轮完成后再分支</string>
     <string name="chat_menu_forked">已分支到新聊天</string>
     <string name="chat_menu_fork_failed">分支失败：%1$s</string>
     <string name="chat_menu_rewind">回退到这里</string>
@@ -28,4 +29,11 @@
     <string name="chat_tool_open_subagent">查看子 Agent</string>
     <string name="chat_tool_no_answer">没有回答</string>
     <string name="chat_computer_pill_opens">查看步骤</string>
+    <string name="chat_menu_star">收藏</string>
+    <string name="chat_menu_unstar">取消收藏</string>
+    <string name="chat_starred_saved">已收藏</string>
+    <string name="chat_starred_saving">正在保存收藏消息</string>
+    <string name="chat_starred_removed">已取消收藏</string>
+    <string name="chat_starred_undo">撤销</string>
+    <string name="chat_starred_failed">收藏状态更新失败</string>
 </resources>

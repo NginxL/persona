@@ -24,6 +24,7 @@ type ownerTmuxPane struct {
 	plain, ansi         string
 	draft               string
 	writes              []string
+	keys                []string
 	submissions         []ownerTmuxSubmission
 	unconfirmed         string
 	confirmRead         func(string)
@@ -75,6 +76,7 @@ func (h *ownerTmuxPane) SendKeys(_ context.Context, pane host.PaneRef, keys ...s
 	defer h.mu.Unlock()
 	h.writes = append(h.writes, "keys")
 	for _, key := range keys {
+		h.keys = append(h.keys, pane.String()+":"+key)
 		if key == "enter" && h.draft != "" {
 			h.submissions = append(h.submissions, ownerTmuxSubmission{pane: pane.String(), text: h.draft})
 			h.unconfirmed = h.draft
@@ -109,6 +111,12 @@ func (h *ownerTmuxPane) submitted() []ownerTmuxSubmission {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	return append([]ownerTmuxSubmission(nil), h.submissions...)
+}
+
+func (h *ownerTmuxPane) sentKeys() []string {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return append([]string(nil), h.keys...)
 }
 
 type ownerTmuxTestNode struct {
@@ -389,8 +397,9 @@ func TestTmuxClaudeListsSendWithOrWithoutInbox(t *testing.T) {
 				t.Errorf("tmux dialog row = %+v, want attention %q", row, wantAttention)
 			}
 			capabilities := row.Capabilities
-			if capabilities == nil || !capabilities.Read || !capabilities.Send || !capabilities.Terminal {
-				t.Errorf("tmux capabilities with inbox=%v = %+v, want read, send and terminal", withInbox, capabilities)
+			if capabilities == nil || !capabilities.Read || !capabilities.Send || !capabilities.Terminal ||
+				!capabilities.Approve || !capabilities.Interrupt {
+				t.Errorf("tmux capabilities with inbox=%v = %+v, want read, send, terminal, approve, and interrupt", withInbox, capabilities)
 			}
 			if capabilities != nil && capabilities.PluginInput {
 				t.Errorf("a tmux row advertises plugin input although its pane takes the owner's message: %+v", capabilities)
@@ -399,5 +408,21 @@ func TestTmuxClaudeListsSendWithOrWithoutInbox(t *testing.T) {
 				t.Errorf("tmux row with inbox=%v is read-only: %q", withInbox, row.ReadOnlyReason)
 			}
 		})
+	}
+}
+
+// Interrupting an outside tmux Claude sends Escape straight to its tmux pane even when no peer inbox is available.
+func TestTmuxClaudeInterruptWithoutInboxSendsEscToPane(t *testing.T) {
+	plain, ansi := emptyOwnerTmuxScreens(t)
+	env := newOwnerTmuxTestNode(t, "busy", plain, ansi, false, false)
+	row := byID(listSessions(t, env.n))[sidA]
+	if row.Capabilities == nil || !row.Capabilities.Approve || !row.Capabilities.Interrupt {
+		t.Fatalf("busy tmux row without inbox caps = %+v, want approve and interrupt", row.Capabilities)
+	}
+	if _, err := request(t, env.n, "session.interrupt", map[string]any{"session_id": sidA}); err != nil {
+		t.Fatalf("tmux interrupt without inbox: %v", err)
+	}
+	if keys := env.pane.sentKeys(); len(keys) != 1 || keys[0] != "tmux:%11:esc" {
+		t.Fatalf("sent keys = %v, want [tmux:%%11:esc]", keys)
 	}
 }

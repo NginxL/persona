@@ -128,7 +128,7 @@ func (s *Service) assistantSessions(m fleetMachine) []proto.Session {
 // it started (its row), rather than where the hook ran: Claude Code gives a hook the shell's directory after the
 // model's `cd`, and a health conversation's card from health/reports or /tmp went to the lock screen and the channels
 // in full (#2368). Every node lists a running headless conversation in its start directory, so this holds for older
-// nodes too. A hook directory inside a health space stays (identity.CardCwd): a mix-up can only hide more. A card
+// nodes too. A hook directory inside a space stays (identity.CardCwd): a mix-up can only hide more. A card
 // with no listed row, or an agent's, keeps its own.
 func (s *Service) placeCard(ix *proto.Interaction) {
 	if ix.SessionID == "" {

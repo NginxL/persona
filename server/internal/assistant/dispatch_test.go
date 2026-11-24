@@ -82,7 +82,7 @@ func TestDispatchToolsAreTheAgentsWhenOn(t *testing.T) {
 // The whole way: an agent on mac hands a subtask to box, the new agent is told who handed it the task, and the
 // caller reads its state and, once it stopped, its final reply.
 func TestDispatchStartsOnAnotherComputerAndReadsTheResult(t *testing.T) {
-	s, f, _ := newDispatchService(t, true)
+	s, f, store := newDispatchService(t, true)
 	r := dispatchCall(s, "mac", "caller-0001", "dispatch_start", `{"machine":"box","cwd":"/code/app","prompt":"run the Linux tests and report failures"}`)
 	out := resultText(r)
 	if r.IsError || !strings.Contains(out, "session s1") {
@@ -109,6 +109,17 @@ func TestDispatchStartsOnAnotherComputerAndReadsTheResult(t *testing.T) {
 	// Still working: the read says so and does not pass its text off as the result.
 	if out := resultText(dispatchCall(s, "mac", "caller-0001", "dispatch_read", `{"session_id":"s1"}`)); !strings.Contains(out, ": working.") || !strings.Contains(out, "not its result yet") {
 		t.Fatalf("read while working: %q", out)
+	}
+	records, err := store.SettingsPrefix(context.Background(), "placement.")
+	if err != nil || len(records) != 1 {
+		t.Fatalf("dispatch placement count = %d, %v", len(records), err)
+	}
+	for _, raw := range records {
+		var p placement
+		if err := json.Unmarshal(raw, &p); err != nil || p.SessionID != "s1" {
+			t.Fatalf("dispatch placement %s, %v", raw, err)
+		}
+		checkPlacementGolden(t, &p, "v1 report box -> box (requested_machine) | box")
 	}
 	// It stops: its last reply comes back as the result.
 	setStatus(f, "box", "s1", proto.StatusDone)
@@ -383,5 +394,39 @@ func TestDispatchWithoutMainConversationMakesNoTodo(t *testing.T) {
 	}
 	if n := len(s.todosOf(context.Background(), "*")); n != 0 {
 		t.Fatalf("%d todos without a main conversation", n)
+	}
+}
+
+// A dispatched Agent is a supervised task's: on a Claude-family launcher it starts in Allow all, as agent_start's and a
+// planned task's do (dispatchAllowAll); Codex keeps its computer's default, and so does a launcher the computer does
+// not list (nothing is guessed or swapped).
+func TestDispatchClaudeBypassesPermissions(t *testing.T) {
+	for _, tc := range []struct {
+		name, launcher, listed, agent, want string
+	}{
+		{"default Claude", "", "claude", "claude", "bypassPermissions"},
+		{"aliased Claude", "cc-relay", "cc-relay", "claude", "bypassPermissions"},
+		{"Codex", "codex", "codex", "codex", ""},
+		{"not listed", "elsewhere", "claude", "claude", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s, f, _ := newDispatchService(t, true)
+			f.launcherList = []proto.Launcher{{Name: tc.listed, Agent: tc.agent}}
+			input := map[string]any{"machine": "box", "cwd": "/code/app", "prompt": "run the Linux tests"}
+			if tc.launcher != "" {
+				input["launcher"] = tc.launcher
+			}
+			args, err := json.Marshal(input)
+			if err != nil {
+				t.Fatal(err)
+			}
+			r := dispatchCall(s, "mac", "caller-0001", "dispatch_start", string(args))
+			if len(f.starts) != 1 {
+				t.Fatalf("start: %q; starts %v", resultText(r), f.starts)
+			}
+			if got, _ := f.starts[0]["permission_mode"].(string); got != tc.want {
+				t.Fatalf("permission_mode = %q, want %q; start = %v", got, tc.want, f.starts[0])
+			}
+		})
 	}
 }

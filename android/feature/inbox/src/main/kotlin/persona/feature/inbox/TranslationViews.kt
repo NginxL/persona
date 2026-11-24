@@ -14,6 +14,7 @@ import persona.core.contracts.api.ItemTranslation
 import persona.core.contracts.api.TranslationPrefs
 import persona.core.designsystem.*
 import persona.core.designsystem.icons.PhIcons
+import persona.core.inbox.*
 
 /** Settings › Translation on a mail row: the hub's translation of its subject and preview, while mail is translated. */
 @Composable

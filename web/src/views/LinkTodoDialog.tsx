@@ -12,13 +12,13 @@ import {
   linkAgentToTodo,
   linkSpaceToTodo,
   makeSessionLookup,
-  resolveLinkCurrentTodoId,
   todoStatus,
   TODO_TONE_CLASS,
   unlinkAgentFromTodo,
   unlinkSpaceFromTodo,
   type Todo,
 } from "../lib/todos";
+import { resolveLinkCurrentTodoId } from "../lib/todo-details";
 import { todoLook, waitOf } from "../lib/todo-wait-reason";
 import type { Session } from "../lib/types";
 import { hasFinePointer } from "../lib/viewport";

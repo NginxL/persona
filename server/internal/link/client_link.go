@@ -185,15 +185,17 @@ func (l *link) serve(ctx context.Context, c *Config, o Options, rep *reporter, m
 		pairT := time.NewTicker(cmp.Or(o.PairCheck, pairCheck))
 		defer pairT.Stop()
 		// On a fallback route (a proxy, or SSH it need not use), direct candidates are probed now and then to switch
-		// back, and a new proxy setting is followed at once.
-		fallback := l.ep.Kind == KindProxy || (l.ep.Kind == KindSSH && c.SSH != nil && !c.SSH.Always)
+		// back, and a new proxy setting is followed at once. Proxy-only mode keeps a proxy link off direct: it is no
+		// fallback, but still follows the proxy setting.
+		fallback := (l.ep.Kind == KindProxy && !c.ProxyAlways) || (l.ep.Kind == KindSSH && c.SSH != nil && !c.SSH.Always)
+		followProxy := fallback || l.ep.Kind == KindProxy
 		var directC <-chan time.Time
 		if fallback {
 			directT := time.NewTicker(cmp.Or(o.DirectRetryEvery, DirectRetryEvery))
 			defer directT.Stop()
 			directC = directT.C
 		}
-		var seen time.Time
+		var seen fileStamp
 		var looked bool
 		// A ping waits for its pong on its own, so a reconnect or a network change is not held up behind one that is
 		// out (with a slow link's heartbeat, for up to the hub's timeout). One of each kind at a time; the first that
@@ -332,7 +334,7 @@ func (l *link) serve(ctx context.Context, c *Config, o Options, rep *reporter, m
 				// Only the mtime says when to look: endpoints and renames rewrite link.json with the same pairing.
 				if now := stampOf(o.Path); !looked || !now.Equal(seen) {
 					looked, seen = true, now
-					if repaired(o.Path, c, fallback) {
+					if repaired(o.Path, c, followProxy) {
 						reconnect(errRepaired)
 						return
 					}
@@ -405,7 +407,7 @@ func (l *link) serve(ctx context.Context, c *Config, o Options, rep *reporter, m
 func directHandoffConfig(path string, current *Config, ep Endpoint) *Config {
 	next, err := Load(path)
 	if err != nil || next.Hub != current.Hub || next.Machine != current.Machine || next.FP != current.FP ||
-		next.Trust != current.Trust || next.Token != current.Token || !next.SSH.Equal(current.SSH) ||
+		next.Trust != current.Trust || next.Token != current.Token || !next.SSH.Equal(current.SSH) || next.ProxyAlways ||
 		!slices.Contains(next.Endpoints, ep) {
 		return nil
 	}
@@ -483,16 +485,17 @@ func (l *link) pairedAgain() {
 	}
 }
 
-// repaired: link.json now holds another credential, computer, hub or SSH tunnel than c, or another proxy setting for
-// a link on a fallback route (the proxy comes before SSH), or was removed (unpaired). A file that cannot be read for
-// another reason changes nothing: the link stays as it is.
-func repaired(path string, c *Config, fallback bool) bool {
+// repaired: link.json now holds another credential, computer, hub, SSH tunnel or proxy-only setting than c, or
+// another proxy setting for a link that follows it (on the proxy, or on SSH it need not use, as the proxy comes
+// before SSH), or was removed (unpaired). A file that cannot be read for another reason changes nothing: the link
+// stays as it is.
+func repaired(path string, c *Config, followProxy bool) bool {
 	f, err := Read(path)
 	if err != nil {
 		return errors.Is(err, os.ErrNotExist)
 	}
 	return f.Token != c.Token || f.FP != c.FP || f.Trust != c.Trust || f.Machine != c.Machine || !f.SSH.Equal(c.SSH) ||
-		(fallback && f.Proxy != c.Proxy)
+		f.ProxyAlways != c.ProxyAlways || (followProxy && f.Proxy != c.Proxy)
 }
 
 // heartbeat is how a link is pinged: every, and how long a pong may take; hub: the hub said so (endpoints).

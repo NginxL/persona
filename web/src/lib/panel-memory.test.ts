@@ -5,7 +5,7 @@ import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { setAgentOpenMode } from "./agent-open";
-import { closePanel, getPanel, openPanel, type Panel } from "./panel";
+import { canGoBack, closePanel, getPanel, getPanelHistory, openPanel, type Panel } from "./panel";
 import { KEPT, arriving, belongsTo, chatKey, leaving, notePlace, useSessionPanels, type PanelMemory, type SessionPanel } from "./panel-memory";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -164,6 +164,44 @@ describe("moving between sessions", () => {
     show(A);
     expect(getPanel()).toEqual(gitA);
   });
+
+  it("clears session A's back stack when leaving for session B, even if a persistent link stays open", () => {
+    const link: Panel = { kind: "link", url: "https://example.com" };
+    show(A);
+    act(() => openPanel(filesA));
+    act(() => openPanel(link, { push: true }));
+    expect(getPanelHistory()).toEqual([filesA]);
+
+    show(B);
+    expect(getPanel()).toEqual(link);
+    expect(canGoBack()).toBe(false);
+    expect(getPanelHistory()).toEqual([]);
+  });
+
+  it("clears back history on arrival when restoring session B's remembered panel with focus inside the side panel", () => {
+    const gitB: SessionPanel = { kind: "git", mid: "m1", sid: "b", cwd: "/work/b" };
+    const aside = document.createElement("aside");
+    aside.dataset.sidePanel = "";
+    const btn = document.createElement("button");
+    aside.append(btn);
+    document.body.append(aside);
+    try {
+      show(B);
+      act(() => openPanel(gitB));
+      show(A);
+      act(() => openPanel(filesA));
+      act(() => openPanel({ kind: "file", mid: "m1", path: "/work/web/a.ts", sid: "a" }, { push: true }));
+      expect(canGoBack()).toBe(true);
+
+      btn.focus();
+      show(B);
+      expect(getPanel()).toEqual(gitB);
+      expect(canGoBack()).toBe(false);
+      expect(getPanelHistory()).toEqual([]);
+    } finally {
+      aside.remove();
+    }
+  });
 });
 
 // Persona chats (#6199): a task's / agent's chat opened next to one goes and comes back with that chat.
@@ -256,5 +294,50 @@ describe("moving between Persona chats", () => {
     expect(getPanel()).toBeNull();
     show("A");
     expect(getPanel()).toEqual(task);
+  });
+
+  it("clears chat A's back stack when switching to chat B even when a link stays open", () => {
+    const link: Panel = { kind: "link", url: "https://example.com" };
+    show("A");
+    act(() => openPanel(task));
+    act(() => openPanel(link, { push: true }));
+    expect(getPanelHistory()).toEqual([task]);
+
+    show("B");
+    expect(getPanel()).toEqual(link);
+    expect(canGoBack()).toBe(false);
+    expect(getPanelHistory()).toEqual([]);
+  });
+
+  it("clears the back stack on same-key route changes and between non-session routes", () => {
+    const link: Panel = { kind: "link", url: "https://example.com" };
+    const RoutePage = ({ at, pane }: { at: string; pane: { mid: string; sid: string } | null }) => {
+      useSessionPanels(at, pane);
+      return null;
+    };
+    const renderRoute = (at: string, pane: { mid: string; sid: string } | null) =>
+      act(() => root.render(createElement(RoutePage, { at, pane })));
+
+    // Same session key (`m1/a`), different route (`at`: chat -> terminal): keep A's panel but clear stale back stack.
+    renderRoute("m1/a:chat", A);
+    act(() => openPanel(filesA));
+    act(() => openPanel(gitA, { push: true }));
+    expect(getPanelHistory()).toEqual([filesA]);
+
+    renderRoute("m1/a:terminal", A);
+    expect(getPanel()).toEqual(gitA);
+    expect(canGoBack()).toBe(false);
+    expect(getPanelHistory()).toEqual([]);
+
+    // Non-session route to another non-session route (both key === null): drop previous route's back stack.
+    renderRoute("inbox", null);
+    act(() => openPanel(task));
+    act(() => openPanel(link, { push: true }));
+    expect(getPanelHistory()).toEqual([task]);
+
+    renderRoute("todos", null);
+    expect(getPanel()).toEqual(link);
+    expect(canGoBack()).toBe(false);
+    expect(getPanelHistory()).toEqual([]);
   });
 });

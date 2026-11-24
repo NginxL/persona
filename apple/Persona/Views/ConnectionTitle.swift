@@ -164,20 +164,12 @@ struct ConnectionDetails: View {
     static func explanation(_ phase: ConnectionStatus.Phase, stalled: Bool) -> String {
         switch phase {
         case .online: String(localized: "Messages and status are up to date.")
-        #if os(macOS)
-        case .waitingForNetwork: String(localized: "This Mac is offline. It'll reconnect when the network is back, and messages you write in the meantime will be sent automatically.")
-        #else
         case .waitingForNetwork: String(localized: "Your iPhone is offline. It'll reconnect when the network is back, and messages you write in the meantime will be sent automatically.")
-        #endif
         case .connecting:
             stalled ? String(localized: "The network is slow: the hub hasn't responded for several seconds. Waiting for it.")
                 : String(localized: "You're online but can't reach the hub (the hub machine may be off, asleep, or offline). Persona keeps retrying automatically.")
         case .updating: String(localized: "Connected. Catching up on messages and pending requests from while you were disconnected.")
-        #if os(macOS)
-        case .rejected: String(localized: "The hub no longer accepts this Mac's credentials. They may have been revoked in Settings › Devices, or the last pairing didn't finish. Paste the pairing link again to fix it.")
-        #else
         case .rejected: String(localized: "The hub no longer accepts this device's credentials. They may have been revoked in Settings › Devices, or the last pairing didn't finish. Generate a new pairing code on the hub machine and scan it again to fix it.")
-        #endif
         }
     }
 

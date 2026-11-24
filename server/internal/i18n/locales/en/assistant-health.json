@@ -1,5 +1,9 @@
 {
   "notice_title": "Health",
   "notice_body": "New in your health space. Open Persona to see it.",
-  "outbound": "Hand content from your health space to somewhere outside it (once handed over, the copy there is not deleted with the health space):\n\n{what}"
+  "outbound": "Hand content from your health space to somewhere outside it (once handed over, the copy there is not deleted with the health space):\n\n{what}",
+  "sensitive_notice_title": "Persona",
+  "sensitive_notice_body": "There is something new. Open Persona to see it.",
+  "sensitive_outbound": "Hand content that may be personal (health, money, relationships, feelings or legal matters) to somewhere outside this conversation (once handed over, the copy there stays):\n\n{what}",
+  "node_no_track_spaces": "Update Persona Link on {machine} to use this space there. Nothing was written."
 }

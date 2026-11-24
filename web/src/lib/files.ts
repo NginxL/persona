@@ -356,6 +356,8 @@ export function splitDiff(diff: string): Record<string, string> {
   const res: Record<string, string> = {};
   let path: string | null = null;
   let buf: string[] = [];
+  let hdr = false;
+  const unq = (s: string) => (s[0] === '"' ? unquoteGitPath(s.slice(1, -1)) : s);
   const flush = () => {
     if (path !== null) res[path] = buf.join("\n");
   };
@@ -363,10 +365,18 @@ export function splitDiff(diff: string): Record<string, string> {
     if (line.startsWith("diff --git ")) {
       flush();
       buf = [];
+      hdr = true;
       // The -z file list uses raw paths; the diff headers may quote the same names.
-      const quoted = / "b\/((?:[^"\\]|\\.)*)"$/.exec(line);
+      const s = line.slice(11);
+      const m = (s.length - 1) >> 1;
+      const q = / "b\/((?:[^"\\]|\\.)*)"$/.exec(line);
       const i = line.lastIndexOf(" b/");
-      path = quoted ? unquoteGitPath(quoted[1]) : i >= 0 ? line.slice(i + 3) : null;
+      path = q ? unquoteGitPath(q[1]) : s.slice(m, m + 3) === " b/" && s.slice(2, m) === s.slice(m + 3) ? s.slice(m + 3) : i >= 0 ? line.slice(i + 3) : null;
+    } else if (hdr) {
+      if (line.startsWith("@@")) hdr = false;
+      else if (/^(rename|copy) to /.test(line)) path = unq(line.replace(/^(rename|copy) to /, ""));
+      // git ends a ---/+++ line with a tab when the name has a space (for GNU patch); the tab is not part of the name.
+      else if (/^\+\+\+ "?b\//.test(line)) path = unq(line.slice(4).replace(/\t$/, ""))?.slice(2) ?? null;
     }
     buf.push(line);
   }

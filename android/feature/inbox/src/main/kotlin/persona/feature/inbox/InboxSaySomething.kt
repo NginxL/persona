@@ -30,6 +30,7 @@ import persona.core.designsystem.JTextField
 import persona.core.designsystem.LocalAppFeedback
 import persona.core.designsystem.Tokens
 import persona.core.designsystem.icons.PersonaIcons
+import persona.core.inbox.*
 
 /** The handling line's instruction entry: Say something, or Try again with the localized default words on failure. */
 @Composable

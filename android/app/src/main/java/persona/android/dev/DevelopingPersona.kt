@@ -227,7 +227,7 @@ class DevelopingPersona internal constructor(
             override fun onLost(network: Network) { recorder.path(DevNetPath()) }
         }
         networkCallback = callback
-        runCatching { manager.registerDefaultNetworkCallback(callback) }
+        val _ = runCatching { manager.registerDefaultNetworkCallback(callback) }
     }
 
     private fun observePowerAndBattery() {
@@ -236,7 +236,7 @@ class DevelopingPersona internal constructor(
             recorder.device("thermal", mapOf("state" to thermalName(status)))
         }
         thermalListener = thermal
-        runCatching { power.addThermalStatusListener(context.mainExecutor, thermal) }
+        val _ = runCatching { power.addThermalStatusListener(context.mainExecutor, thermal) }
         val changed = object : BroadcastReceiver() {
             override fun onReceive(context: Context?, intent: Intent?) {
                 when (intent?.action) {
@@ -356,9 +356,9 @@ internal fun readOwnLogcat(process: Process, timeoutMillis: Long = 5_000): List<
         emptyList()
     } finally {
         reading.cancel(true)
-        runCatching { process.inputStream.close() }
-        runCatching { process.errorStream.close() }
-        runCatching { process.outputStream.close() }
+        val _ = runCatching { process.inputStream.close() }
+        val _ = runCatching { process.errorStream.close() }
+        val _ = runCatching { process.outputStream.close() }
         if (process.isAlive) {
             process.destroy()
             process.destroyForcibly()

@@ -71,11 +71,12 @@ func isStalledReworkKind(kind string) bool {
 
 // Supervision is a supervised task's ledger, as the apps get it on the todo (supervision).
 type Supervision struct {
-	Supervisor    string             `json:"supervisor"` // the conversation that handed it out
-	DoneWhen      []string           `json:"done_when"`
-	Criteria      []db.TodoCriterion `json:"criteria"`
-	ExpectMinutes int                `json:"expect_minutes,omitempty"`
-	State         string             `json:"state"` // "" going on, or one of review*
+	Supervisor       string             `json:"supervisor"`                  // the conversation currently supervising it
+	SupervisorSource string             `json:"supervisor_source,omitempty"` // "plan" for a planned leader assignment; "explicit" after a move
+	DoneWhen         []string           `json:"done_when"`
+	Criteria         []db.TodoCriterion `json:"criteria"`
+	ExpectMinutes    int                `json:"expect_minutes,omitempty"`
+	State            string             `json:"state"` // "" going on, or one of review*
 	// Parked: what a parked task waits for (parked.go); nil unless State is parked. Read off its latest review each time
 	// the ledger is copied, not kept on its own.
 	Parked              *Parked      `json:"parked,omitempty"`
@@ -93,11 +94,20 @@ type Supervision struct {
 	// its supervisor's to do, and an older one under Needs you (docs/assistant/unified-entry.md "Needs you and In
 	// progress"). nil in every other state, and for a task that waited for review before the hub kept the time.
 	PendingSince *time.Time `json:"pending_since,omitempty"`
-	UpdatedAt    time.Time  `json:"updated_at"`
+	// CardlessToldAt: when the watch handed this pending_review round back to its supervisor because it waits on the
+	// owner with no card they can answer (supervise_cardless.go); one hand-back per review round, nil outside
+	// pending_review and on every new review round.
+	CardlessToldAt *time.Time `json:"cardless_told_at,omitempty"`
+	UpdatedAt      time.Time  `json:"updated_at"`
 	// Progress: what its agent last reported to the supervisor (report_to_supervisor, agent_control.go). A live
 	// reading kept in memory only (the next report brings it back after a restart), and apart from UpdatedAt, which
 	// names the review a task waits for.
 	Progress *TaskProgress `json:"progress,omitempty"`
+}
+
+// assigned records a current ownership decision, rather than a pre-policy legacy ledger.
+func (v *Supervision) assigned() bool {
+	return v != nil && v.Supervisor != "" && v.SupervisorSource != ""
 }
 
 // TaskProgress is a supervised task's agent's latest report: its kind, the step it is on of how many (0: not said),
@@ -148,9 +158,13 @@ type TaskReview struct {
 	WaitingOn string    `json:"waiting_on,omitempty"`
 	Parks     int       `json:"parks,omitempty"`
 	DueAt     time.Time `json:"due_at,omitzero"`
+	// ParkEndedAt is recorded when this wait is replaced or resolved, so its time is excluded from stalled checks.
+	ParkEndedAt time.Time `json:"park_ended_at,omitzero"`
 	// Evidence is absent on legacy parks. A new park records its external wait, inspected source receipt and
 	// recording conversation here, in the existing Reviews JSON; it needs no new state store.
 	Evidence *ParkEvidence `json:"evidence,omitempty"`
+	// Automatic keeps closeout admission and its unchanged-dependency streak in the existing review JSON.
+	Automatic *automaticPark `json:"automatic,omitempty"`
 	// Reply is the source receipt that ended this exact park, committed with the pending-review transition.
 	Reply *connectorwire.LarkReplyObservation `json:"reply,omitempty"`
 	// ExternalPR is this external-event park's observed object, independent of the task's PR associations.
@@ -172,14 +186,24 @@ type TaskReview struct {
 	HoldReleased    bool      `json:"hold_released,omitempty"`
 	// Handoff is an internal wait recorded after session.send was acknowledged.
 	Handoff *taskHandoff `json:"handoff,omitempty"`
+	// SupersededReason records the supervisor's natural-language reason when this task_review superseded an earlier
+	// pending needs_user decision without fabricating an owner selection (#13112).
+	SupersededReason string `json:"superseded_reason,omitempty"`
+	// WithdrewNeedsUser: this accepted review is the supervisor taking back the needs_user it had raised
+	// (task_review withdraw_needs_user): no owner answered it, and nothing was pushed or carded for it.
+	WithdrewNeedsUser bool `json:"withdrew_needs_user,omitempty"`
 }
 
-// OwnerWait is a judgment that a supervised task's stretch of work (begun at Work) stopped on the owner's decision:
-// when it was judged and the judge's reason.
+// OwnerWait is a judgment that a supervised task's stretch of work (begun at Work) stopped on a decision its agent
+// says is the owner's: when it was judged and the judge's reason. It goes to the supervisor, never straight to the
+// owner (noteOwnerWait). PushPending and NotifiedAt are what earlier versions recorded of their own push to the owner;
+// they are read and kept, never set.
 type OwnerWait struct {
-	Work   time.Time `json:"work"`
-	At     time.Time `json:"at"`
-	Reason string    `json:"reason,omitempty"`
+	Work        time.Time  `json:"work"`
+	At          time.Time  `json:"at"`
+	Reason      string     `json:"reason,omitempty"`
+	PushPending bool       `json:"push_pending,omitempty"`
+	NotifiedAt  *time.Time `json:"notified_at,omitempty"`
 }
 
 type ReviewCheck struct {
@@ -205,6 +229,10 @@ func (v *Supervision) clone() *Supervision {
 		out.Reviews[i].Checks = slices.Clone(r.Checks)
 		out.Reviews[i].Options = slices.Clone(r.Options)
 		out.Reviews[i].Evidence = r.Evidence.clone()
+		if r.Automatic != nil {
+			a := *r.Automatic
+			out.Reviews[i].Automatic = &a
+		}
 		if r.Reply != nil {
 			receipt := *r.Reply
 			out.Reviews[i].Reply = &receipt
@@ -232,6 +260,10 @@ func (v *Supervision) clone() *Supervision {
 	if v.PendingSince != nil {
 		at := *v.PendingSince
 		out.PendingSince = &at
+	}
+	if v.CardlessToldAt != nil {
+		at := *v.CardlessToldAt
+		out.CardlessToldAt = &at
 	}
 	out.Parked = out.parked()
 	return &out
@@ -290,8 +322,8 @@ func (s *Service) supervisionDB() supervisionStore {
 }
 
 func supervisionFromRow(r db.TodoSupervisionRow) *Supervision {
-	v := &Supervision{Supervisor: r.Supervisor, DoneWhen: r.DoneWhen, Criteria: r.Criteria, ExpectMinutes: r.ExpectMinutes, State: r.State, Round: r.Round,
-		PendingSince: r.PendingSince, UpdatedAt: r.UpdatedAt}
+	v := &Supervision{Supervisor: r.Supervisor, SupervisorSource: r.SupervisorSource, DoneWhen: r.DoneWhen, Criteria: r.Criteria, ExpectMinutes: r.ExpectMinutes, State: r.State, Round: r.Round,
+		PendingSince: r.PendingSince, CardlessToldAt: r.CardlessToldAt, UpdatedAt: r.UpdatedAt}
 	_ = json.Unmarshal(r.Reviews, &v.Reviews)
 	v.StalledReworkRounds = v.stalledReworkRounds()
 	if len(r.AutoReview) > 0 {
@@ -381,8 +413,8 @@ func (v *Supervision) row(todoID string) db.TodoSupervisionRow {
 	if v.Waits != nil {
 		waits, _ = json.Marshal(v.Waits)
 	}
-	return db.TodoSupervisionRow{TodoID: todoID, Supervisor: v.Supervisor, DoneWhen: v.DoneWhen, Criteria: v.Criteria, ExpectMinutes: v.ExpectMinutes,
-		State: v.State, Round: v.Round, Reviews: raw, AutoReview: auto, Waits: waits, PendingSince: v.PendingSince, UpdatedAt: v.UpdatedAt}
+	return db.TodoSupervisionRow{TodoID: todoID, Supervisor: v.Supervisor, SupervisorSource: v.SupervisorSource, DoneWhen: v.DoneWhen, Criteria: v.Criteria, ExpectMinutes: v.ExpectMinutes,
+		State: v.State, Round: v.Round, Reviews: raw, AutoReview: auto, Waits: waits, PendingSince: v.PendingSince, CardlessToldAt: v.CardlessToldAt, UpdatedAt: v.UpdatedAt}
 }
 
 // cleanDoneWhen is a task's criteria as kept: trimmed, no empty or repeated ones, at most 6 of at most 200 characters.
@@ -397,15 +429,20 @@ func cleanDoneWhen(list []string) []string {
 	return out
 }
 
-// superviseTodo makes todo id a supervised task of conversation supervisor.
-func (s *Service) superviseTodo(ctx context.Context, id, supervisor string, doneWhen []string, expect int) {
+// superviseTodo makes todo id a supervised task of conversation supervisor. A persistence failure leaves its in-memory
+// ledger untouched; callers that must not start untracked work check the returned error.
+func (s *Service) superviseTodo(ctx context.Context, id, supervisor string, doneWhen []string, expect int, source ...string) error {
 	_, _, err := s.updateSupervision(ctx, id, func(v *Supervision) bool {
+		if len(source) > 0 && !v.assigned() {
+			v.SupervisorSource = source[0]
+		}
 		v.Supervisor, v.DoneWhen, v.ExpectMinutes = supervisor, cleanDoneWhen(doneWhen), max(0, min(expect, 24*60))
 		return true
 	})
 	if err != nil {
 		s.logf("task %s: supervision: %v", id, err)
 	}
+	return err
 }
 
 // startSupervisionRound: a plan's task took todo id over to start a new Agent on it (task_plan continues, or its
@@ -422,11 +459,18 @@ func (s *Service) startSupervisionRound(ctx context.Context, id string) {
 		return
 	}
 	if _, _, err := s.updateSupervision(ctx, id, func(v *Supervision) bool {
-		if v.State != reviewAccepted && v.State != reviewCancelled {
-			return false
+		changed := false
+		if v.State == reviewAccepted || v.State == reviewCancelled {
+			v.State, v.Round, v.StalledReworkRounds, v.Waits = "", 0, 0, nil
+			changed = true
 		}
-		v.State, v.Round, v.StalledReworkRounds, v.Waits = "", 0, 0, nil
-		return true
+		// A new Agent round is distinct evidence even when a scope already cleared the terminal state, so there is no
+		// database field left to change. This process-local epoch still prevents a failed takeover restoring acceptance.
+		if s.supervise.roundEpochs == nil {
+			s.supervise.roundEpochs = map[string]uint64{}
+		}
+		s.supervise.roundEpochs[id]++
+		return changed
 	}); err != nil {
 		s.logf("task %s: new supervision round: %v", id, err)
 	}
@@ -446,6 +490,16 @@ func pendingSince(before, after string, since *time.Time, now time.Time) *time.T
 	return since
 }
 
+// cardlessToldSince keeps a card-less hand-back only inside the pending_review round it was raised in: a new round
+// (the way in, before != pending_review) and every other state clear it, so the supervisor is told once per review
+// round. While the same round waits, a write keeps what the change set (the watch stamps it once, supervise_cardless.go).
+func cardlessToldSince(before, after string, told *time.Time) *time.Time {
+	if after != reviewPending || before != reviewPending {
+		return nil
+	}
+	return told
+}
+
 // updateSupervision changes todo id's ledger (a new one when it has none) with change, which says whether it changed
 // anything; the ledger as it is then. Writes are one at a time.
 func (s *Service) updateSupervision(ctx context.Context, id string, change func(*Supervision) bool) (Supervision, bool, error) {
@@ -454,14 +508,35 @@ func (s *Service) updateSupervision(ctx context.Context, id string, change func(
 
 // updateSupervisionAt is updateSupervision at the caller's supervision-pass time.
 func (s *Service) updateSupervisionAt(ctx context.Context, id string, now time.Time, change func(*Supervision) bool) (Supervision, bool, error) {
+	return s.updateSupervisionGuardedAt(ctx, id, now, nil, change)
+}
+
+// updateSupervisionGuarded is updateSupervision with a current-todo guard evaluated in the same write boundary.
+func (s *Service) updateSupervisionGuarded(ctx context.Context, id string, guard func(Todo) bool, change func(*Supervision) bool) (Supervision, bool, error) {
+	return s.updateSupervisionGuardedAt(ctx, id, time.Now().UTC(), guard, change)
+}
+
+// updateSupervisionGuardedAt preserves both the caller's supervision-pass time and the guarded write boundary.
+func (s *Service) updateSupervisionGuardedAt(ctx context.Context, id string, now time.Time, guard func(Todo) bool, change func(*Supervision) bool) (Supervision, bool, error) {
+	if guard != nil {
+		// Match editTodo's write boundary. The guard, stored receipt and in-memory mirror are one admission relative
+		// to a user close; taking writeMu first would invert the todos.writing → writeMu order used by other writers.
+		s.todos.writing.Lock()
+		defer s.todos.writing.Unlock()
+	}
 	b := &s.supervise
 	b.writeMu.Lock()
 	defer b.writeMu.Unlock()
-	return s.updateSupervisionLockedAt(ctx, id, now, change)
+	return s.updateSupervisionGuardedLockedAt(ctx, id, now, guard, change)
 }
 
 // updateSupervisionLockedAt is updateSupervisionAt with supervise.writeMu already held.
 func (s *Service) updateSupervisionLockedAt(ctx context.Context, id string, now time.Time, change func(*Supervision) bool) (Supervision, bool, error) {
+	return s.updateSupervisionGuardedLockedAt(ctx, id, now, nil, change)
+}
+
+// updateSupervisionGuardedLockedAt is the guarded form with supervise.writeMu already held.
+func (s *Service) updateSupervisionGuardedLockedAt(ctx context.Context, id string, now time.Time, guard func(Todo) bool, change func(*Supervision) bool) (Supervision, bool, error) {
 	t, ok := s.todoNow(id)
 	if !ok {
 		return Supervision{}, false, db.ErrTodoNotFound
@@ -470,14 +545,34 @@ func (s *Service) updateSupervisionLockedAt(ctx context.Context, id string, now 
 	if v == nil {
 		v = (&Supervision{}).clone()
 	}
+	if guard != nil && !guard(t) {
+		return *v, false, nil
+	}
 	before := v.State
+	var parkedAt time.Time
+	if p := v.parking(); p != nil {
+		parkedAt = p.At
+	}
 	park := v.parking()
 	if !change(v) {
 		return *v, false, nil
 	}
 	v.Criteria = db.AlignTodoCriteria(v.DoneWhen, v.Criteria)
 	v.UpdatedAt = now.UTC()
+	if p := v.parking(); !parkedAt.IsZero() && (p == nil || !p.At.Equal(parkedAt)) {
+		for i := len(v.Reviews) - 1; i >= 0; i-- {
+			r := &v.Reviews[i]
+			if r.Verdict == reviewParked && r.At.Equal(parkedAt) {
+				r.ParkEndedAt = v.UpdatedAt
+				if i+1 < len(v.Reviews) {
+					r.ParkEndedAt = v.Reviews[i+1].At
+				}
+				break
+			}
+		}
+	}
 	v.PendingSince = pendingSince(before, v.State, v.PendingSince, v.UpdatedAt)
+	v.CardlessToldAt = cardlessToldSince(before, v.State, v.CardlessToldAt)
 	if park != nil && v.State == reviewPending && park.ExternalPR != nil && park.ExternalPR.wakes(park) {
 		// Match the review period after a reload. Postgres stores PendingSince to microsecond precision.
 		park.ExternalPR.PendingSince = v.UpdatedAt.Truncate(time.Microsecond)
@@ -531,9 +626,11 @@ func taskHealth(t Todo, agents []proto.Session, now time.Time) (string, int) {
 	case reviewUserCheck:
 		return "待你验收", 0 // i18n-ignore: the snapshot is the assistant's prompt
 	case reviewNeedsUser:
-		return "等你决定", 0
+		if triageReviewState(t) == reviewNeedsUser {
+			return "等你处理", 0
+		}
 	case reviewPending:
-		return "待验收", 1
+		return "已交付·待看", 1
 	case reviewAccepted:
 		return "已验收", 8
 	case reviewCancelled:
@@ -549,8 +646,16 @@ func taskHealth(t Todo, agents []proto.Session, now time.Time) (string, int) {
 	if t.DoneAt != nil {
 		return "", 8
 	}
-	if v.Waits != nil { // the judge found it stopped on the owner's decision (#1277): not to be accepted as done
-		return "停下等用户拍板，别直接验收", 0 // i18n-ignore: the snapshot is the assistant's prompt
+	if v.Waits != nil { // the judge found it stopped on what its agent says is the owner's decision (#1277)
+		return "Agent 停下说要用户拍板：先判断是不是用户的事，别直接验收", 0 // i18n-ignore: the snapshot is the assistant's prompt
+	}
+	if snapshotDoneRule(t, agents, nil, nil, now, now.Location()) == ruleAccepted {
+		// v.state masks an accepted review after reopening; acceptanceStands inside the shared triage rule still holds
+		// until a newer review. Reopened accepted work is normal, not a second delivery awaiting review (#5732).
+		return "正常", 5 // i18n-ignore: the snapshot is the assistant's prompt
+	}
+	if deliveryAwaitsReview(t, agents) {
+		return "已交付·待看", 1 // i18n-ignore: the snapshot is the assistant's prompt
 	}
 	for _, c := range agents {
 		if c.State == proto.StateNeedsYou || c.PendingInteractions > 0 {

@@ -16,7 +16,7 @@ import (
 func judgedTask(t *testing.T, s *Service, f *fakeHub, text, judge string) (Todo, time.Time) {
 	t.Helper()
 	todo := startedTask(t, s, f)
-	s.taskWorking(context.Background(), "box", "s1")
+	s.taskWorking(context.Background(), "box", "s1", startRow{})
 	s.tasks.mu.Lock()
 	work := s.tasks.working[todo.ID]
 	s.tasks.mu.Unlock()
@@ -36,7 +36,7 @@ func keptCheck(s *Service, id string) *TodoCheck {
 }
 
 // Every automatic judgment is kept on the todo as its check: the verdict, its reason (the hub's own in the user's
-// language), when and the work it judged. Done still closes the todo with its reason.
+// language), when and the work it judged. Done is delivery for review, never closure (#5732).
 func TestAutoFinishKeepsTheCheck(t *testing.T) {
 	for _, tc := range []struct {
 		name, locale, text, judge string
@@ -44,9 +44,9 @@ func TestAutoFinishKeepsTheCheck(t *testing.T) {
 		verdict, reason           string
 		closed                    bool
 	}{
-		{name: "done", text: "PR 已合并", judge: `{"verdict":"done","reason":"PR 已合并"}`, verdict: verdictDone, reason: "PR 已合并", closed: true},
+		{name: "done", text: "PR 已合并", judge: `{"verdict":"done","reason":"PR 已合并"}`, verdict: verdictDone, reason: "PR 已合并"},
 		{name: "done without a reason", locale: "en", text: "Merged", judge: `{"verdict":"done","reason":""}`, verdict: verdictDone,
-			reason: "Done", closed: true},
+			reason: "Done"},
 		{name: "not done", text: "还差两处", judge: `{"verdict":"not_done","reason":"还差两处没改"}`, verdict: verdictNotDone, reason: "还差两处没改"},
 		{name: "waiting", locale: "en", text: "Waiting for CI", judge: `{"verdict":"waiting","reason":"Waiting for CI"}`, verdict: verdictWaiting,
 			reason: "Waiting for CI"},
@@ -99,7 +99,7 @@ func TestAutoFinishKeepsNoStaleCheck(t *testing.T) {
 	f.hookReads(receiptHooks{before: func(int) {
 		if !turned {
 			turned = true
-			s.taskWorking(context.Background(), "box", "s1")
+			s.taskWorking(context.Background(), "box", "s1", startRow{})
 		}
 	}})
 	s.autoFinishTask(todo, work, true)
@@ -120,7 +120,7 @@ func TestTaskCheckClearedByANewTurnAndAReopen(t *testing.T) {
 	if todoNow(s, todo.ID).Check == nil {
 		t.Fatal("no check")
 	}
-	s.taskWorking(ctx, "box", "s1")
+	s.taskWorking(ctx, "box", "s1", startRow{})
 	if got := todoNow(s, todo.ID); got.Check != nil || keptCheck(s, todo.ID) != nil || got.Stage != "develop" {
 		t.Fatalf("after a new turn: %+v %+v", got.Check, keptCheck(s, todo.ID))
 	}
@@ -128,8 +128,14 @@ func TestTaskCheckClearedByANewTurnAndAReopen(t *testing.T) {
 	s2, f2 := newTaskService(t)
 	todo, work = judgedTask(t, s2, f2, "PR 已合并", `{"verdict":"done","reason":"PR 已合并"}`)
 	s2.autoFinishTask(todo, work, true)
-	if got := todoNow(s2, todo.ID); got.DoneAt == nil || got.Check == nil || got.Check.Verdict != verdictDone {
-		t.Fatalf("closed: %+v %+v", got, got.Check)
+	if got := todoNow(s2, todo.ID); got.DoneAt != nil || got.Check == nil || got.Check.Verdict != verdictDone {
+		t.Fatalf("delivered: %+v %+v", got, got.Check)
+	}
+	if w := serve(s2, "PATCH", "/api/v1/todos/"+todo.ID, `{"done":true}`); w.Code != 200 {
+		t.Fatalf("close before reopen: %d %s", w.Code, w.Body)
+	}
+	if got := todoNow(s2, todo.ID); got.DoneAt == nil {
+		t.Fatal("user completion did not close the task")
 	}
 	if err := s2.reopenTodo(ctx, todo.ID); err != nil {
 		t.Fatal(err)

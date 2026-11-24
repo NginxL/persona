@@ -1,4 +1,5 @@
 import { Suspense, type ComponentProps, type ReactNode } from "react";
+import { hasSlashSkillQuery } from "../../lib/composer-commands";
 import type { ImeState } from "../../lib/ime";
 import type { ComposerCommand as Command } from "../../lib/extension-prompts";
 import { t } from "../../i18n";
@@ -52,7 +53,9 @@ export function SlashSkillEntry(props: SlashPaletteInput) {
 
 export function SlashSkillView({ entries, rows, source, status, ...props }: SlashSkillViewProps) {
   const items = entries ?? rows;
+  const withSkills = Boolean(source?.skills) && hasSlashSkillQuery(props.query);
   return <SlashPalette {...props} rows={items} active={Math.min(props.active, items.length - 1)}
-    groups={source?.skills ? c => t("skill" in c ? "chat-composerpanel.skills" : "chat-slashpalette.label") : undefined}
-    status={<SkillCatalogStatus status={status} />} loading={status === "loading"} />;
+    groups={withSkills ? c => t("skill" in c ? "chat-composerpanel.skills" : "chat-slashpalette.label") : undefined}
+    status={withSkills ? <SkillCatalogStatus status={status} /> : undefined}
+    loading={withSkills && status === "loading"} />;
 }

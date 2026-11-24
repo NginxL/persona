@@ -97,7 +97,7 @@ func (s *Service) todoFactsOf(ctx context.Context, list []listedTodo) []projecti
 }
 
 // todoRunCards are the pending cards of the sessions in want (by computer, the session ids), by computer and
-// session, oldest first. A health conversation's card is marked Private on this copy, as the hub's push treats it
+// session, oldest first. A card of a space's conversation is marked Private on this copy, as the hub's push treats it
 // (hub/push_payload.go askQuestion), so the view lets neither be answered from a row or a lock screen.
 func (s *Service) todoRunCards(want map[string]map[string]bool) map[[2]string][]proto.Interaction {
 	if len(want) == 0 {
@@ -106,7 +106,7 @@ func (s *Service) todoRunCards(want map[string]map[string]bool) map[[2]string][]
 	cards := s.pendingOf(want)
 	for _, l := range cards {
 		for i := range l {
-			l[i].Private = l[i].Private || identity.InHealthSpace(l[i].Cwd)
+			l[i].Private = l[i].Private || identity.InSpace(l[i].Cwd)
 		}
 		slices.SortFunc(l, func(a, b proto.Interaction) int {
 			if c := a.CreatedAt.Compare(b.CreatedAt); c != 0 {
@@ -226,7 +226,7 @@ func projectionFacts(t listedTodo, sessions map[[2]string]proto.Session, loc *ti
 		}
 	}
 	if v := t.Supervision; v != nil {
-		f.Supervision = &projection.Supervision{State: v.State, PendingSince: v.PendingSince, UpdatedAt: v.UpdatedAt}
+		f.Supervision = &projection.Supervision{State: v.State, Supervisor: v.Supervisor, PendingSince: v.PendingSince, UpdatedAt: v.UpdatedAt}
 		if p := v.Parked; p != nil {
 			parked := &projection.Parked{Reason: p.Reason, Until: p.Until, WaitingOn: p.WaitingOn}
 			if p.Evidence != nil && p.Evidence.InteractionID != "" {

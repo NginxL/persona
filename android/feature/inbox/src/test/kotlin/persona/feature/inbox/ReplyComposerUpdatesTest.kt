@@ -12,6 +12,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.annotation.Config
+import persona.core.inbox.*
 
 /**
  * Another reply to the same place changing state makes the composer read its delivery again; what the user did while

@@ -163,7 +163,7 @@ func TestEgoExtension(t *testing.T) {
 		t.Fatal("an empty script")
 	}
 
-	// Asked first, when the user set it: unanswered, nothing runs.
+	// Asked first, when the user set it: unanswered, nothing runs, and the model is not told the user declined it.
 	if err := h.extensions.reg.SetConfig(ctx, egoExtensionID, json.RawMessage(`{"machines": ["mac"], "confirm": true}`), "test"); err != nil {
 		t.Fatal(err)
 	}
@@ -172,7 +172,7 @@ func TestEgoExtension(t *testing.T) {
 	short, cancel := context.WithTimeout(ctx, 200*time.Millisecond)
 	defer cancel()
 	if res := h.callBrowserTool(short, "c", "browser_run", json.RawMessage(`{"machine": "mac", "script": "return 1"}`)); !res.IsError ||
-		!strings.Contains(res.Content[0].Text, "declined") {
+		strings.Contains(res.Content[0].Text, "declined") || !strings.Contains(res.Content[0].Text, "did NOT decline") {
 		t.Fatalf("%+v", res)
 	}
 	for _, c := range seen()[before:] {

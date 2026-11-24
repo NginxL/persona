@@ -13,6 +13,8 @@ ci_run 'Frozen migrations' 60 python3 scripts/ci/migration_freeze.py
 ci_run 'Fixed sleeps' 60 python3 scripts/ci/sleep_ratchet.py
 # Hard-coded px font sizes in web/src may stay or fall, never rise (docs/design/task-cards.md 4.1).
 ci_run 'Web font sizes' 60 python3 scripts/ci/web_font_ratchet.py
+# Disables of web/src's feature-module boundary (web/eslint.modules.config.mjs) may stay or fall, never rise (#13434).
+ci_run 'Web module boundary disables' 60 python3 scripts/ci/web_module_boundary_ratchet.py
 ci_run 'Prompt language migration' 60 python3 scripts/ci/prompt_language_ratchet.py
 ci_run 'Case-sensitive paths and external references' 180 bash -c 'python3 scripts/test/test_path_case.py && python3 scripts/test/test_external_service_refs.py'
 # No Apple source imports CallKit and no build setting links it: App Review rejects that for China (#9290,

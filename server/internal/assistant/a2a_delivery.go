@@ -1,6 +1,7 @@
 package assistant
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -71,6 +72,21 @@ func (s *Service) a2aSignal() {
 	}
 }
 
+// Idle notifications shorten only the queued request's check lease. The
+// delivery worker still uses the revision fence and the node's idle guard.
+func (s *Service) a2aRecipientIdle(ctx context.Context, ref a2aRef) {
+	st, err := s.a2aStore()
+	if err != nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(ctx, time.Second)
+	defer cancel()
+	if err := st.A2AReady(ctx, ref.Machine, ref.Session); err != nil {
+		s.logf("A2A idle delivery: %v", err)
+	}
+	s.a2aSignal()
+}
+
 func a2aDeliveryID(task string, seq int) string {
 	return fmt.Sprintf("%s%s-%d", proto.A2ADeliveryPrefix, task, seq)
 }
@@ -122,14 +138,14 @@ func a2aReadTurn(items []proto.Item, current bool) a2aTurnView {
 }
 
 func (s *Service) a2aProcess(ctx context.Context, st a2aStore, cfg assistantwire.A2AConfig, t *a2aTask) error {
-	if t.SourceSession != "" && !s.a2aAllowed(ctx, cfg, t.source()) {
+	if t.SourceSession != "" && !s.a2aTaskEndpointAllowed(ctx, cfg, t.source(), t) {
 		if !a2aTerminal(t.State) && s.a2aEndpointClosed(ctx, cfg, t.source()) {
 			t.fail("The sending session was closed.", false)
 			return s.a2aSave(ctx, st, t)
 		}
 		return nil
 	}
-	if !s.a2aAllowed(ctx, cfg, t.target()) {
+	if !s.a2aTaskEndpointAllowed(ctx, cfg, t.target(), t) {
 		if !t.TargetClosed && s.a2aEndpointClosed(ctx, cfg, t.target()) {
 			t.TargetClosed = true
 			if !a2aTerminal(t.State) {
@@ -140,6 +156,18 @@ func (s *Service) a2aProcess(ctx context.Context, st a2aStore, cfg assistantwire
 		if !t.TargetClosed || !s.a2aMachineAllowed(ctx, cfg, t.TargetMachine) {
 			return nil
 		}
+	}
+	if t.State == a2aQueued {
+		return nil
+	}
+	// If A2A subagent launches were disabled while a launch was still queued (never sent to a node),
+	// fail it explicitly even before the target computer comes back online. Already-attempted launches
+	// keep reconciling normally, and ordinary peer messages or dispatches are unaffected.
+	if t.Launch != nil && t.Launch.Pending && !t.Launch.Dispatch && !a2aTerminal(t.State) &&
+		len(t.Events) > 0 && t.Events[0].Delivery == a2aQueued && !cfg.LaunchAllowed() {
+		t.fail("Starting new A2A subagent sessions is disabled by configuration.", true)
+		s.forgetA2ASubagent(t.ID)
+		return s.a2aSave(ctx, st, t)
 	}
 	machine := s.logicalExecutionMachine(ctx, t.TargetMachine, t.TargetSession)
 	offline := s.computerState(machine).state == standingComputerOffline
@@ -162,6 +190,14 @@ func (s *Service) a2aProcess(ctx context.Context, st a2aStore, cfg assistantwire
 	for i, e := range t.Events {
 		if !a2aActiveDelivery(e) {
 			continue
+		}
+		// Start the bounded delivery wait only when the task is active, not
+		// while it is behind another task in the recipient's FIFO.
+		if e.Kind == "message" && e.Delivery == a2aQueued && e.WaitingSince.IsZero() {
+			t.Events[i].WaitingSince = time.Now().UTC()
+			if err := s.a2aSave(ctx, st, t); err != nil {
+				return err
+			}
 		}
 		to, from := t.target(), t.source()
 		if offline && e.Kind == "message" {
@@ -209,11 +245,22 @@ func (s *Service) a2aEndpointClosed(ctx context.Context, cfg assistantwire.A2ACo
 
 func (s *Service) a2aExpireDelivery(ctx context.Context, st a2aStore, t *a2aTask, i int) (bool, error) {
 	e := &t.Events[i]
-	if e.Delivery == a2aQueued || e.Attempted.IsZero() || time.Since(e.Attempted) < a2aConfirmFor {
+	since := e.Attempted
+	if e.Delivery == a2aQueued {
+		if e.Kind != "message" {
+			return false, nil
+		}
+		since = e.WaitingSince
+	}
+	if since.IsZero() || time.Since(since) < a2aConfirmFor {
 		return false, nil
 	}
 	if e.Kind == "message" && !a2aTerminal(t.State) {
-		t.fail("Persona could not confirm delivery of the request.", true)
+		reason := "Persona could not confirm delivery of the request."
+		if e.Delivery == a2aQueued {
+			reason = "The request could not be delivered within ten minutes of becoming active. " + a2aWaitingReason(*e)
+		}
+		t.fail(reason, true)
 	} else {
 		e.Delivery = a2aExpired
 	}
@@ -298,11 +345,12 @@ func (s *Service) a2aDeliver(ctx context.Context, st a2aStore, t *a2aTask, i int
 	}
 	sess, ok, err := s.sessionNow(ctx, to.Machine, to.Session)
 	if err != nil || !ok {
-		return false, nil
+		return s.a2aExpireDelivery(ctx, st, t, i)
 	}
-	resume := e.Kind != "message" && a2aResumeAllowed(sess)
-	if !resume && (!a2aSendable(sess) || !a2aIdle(sess)) {
-		return false, nil
+	allowSubagent := t.Launch != nil && t.target() == to
+	resume := e.Kind != "message" && a2aResumeAllowed(sess, allowSubagent)
+	if !resume && (!a2aTaskSendable(sess, t, to) || !a2aIdle(sess)) {
+		return s.a2aExpireDelivery(ctx, st, t, i)
 	}
 	if device, remote := strings.CutPrefix(t.Owner, "device:"); remote && e.Kind == "message" {
 		revoked, err := s.hub.CredentialRevoked(ctx, device)
@@ -342,8 +390,12 @@ func (s *Service) a2aDeliver(ctx context.Context, st a2aStore, t *a2aTask, i int
 	return true, s.a2aSendNode(ctx, st, t.ID, e.Seq, to, "session.a2a.send", params)
 }
 
-func a2aResumeAllowed(sess proto.Session) bool {
-	if sess.Status != proto.StatusOffline || !a2aVisible(sess) || sess.Capabilities == nil {
+func a2aResumeAllowed(sess proto.Session, allowSubagent bool) bool {
+	visible := a2aDiscoverable(sess)
+	if allowSubagent {
+		visible = a2aEndpointVisible(sess)
+	}
+	if sess.Status != proto.StatusOffline || !visible || sess.Capabilities == nil {
 		return false
 	}
 	if a2aStopped(sess) {
@@ -359,10 +411,15 @@ func (s *Service) a2aSendNode(ctx context.Context, st a2aStore, taskID string, s
 		Session proto.Session
 	}
 	err := s.call(ctx, to.Machine, method, params, &out)
-	receipt := a2aDelivered
+	receipt, reason := a2aDelivered, ""
 	switch {
 	case err != nil && a2aNoDelivery(err):
 		receipt = a2aQueued
+		reason = "The node could not accept the request; waiting for a live, idle session."
+		var re *rpc.Error
+		if errors.As(err, &re) && re.Code == proto.CodeAgentStopped {
+			reason = "The receiving session was stopped and cannot accept the request."
+		}
 	case err != nil:
 		receipt = a2aUncertain
 	case out.Queued:
@@ -372,7 +429,7 @@ func (s *Service) a2aSendNode(ctx context.Context, st a2aStore, taskID string, s
 	}
 	keep, cancel := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
 	defer cancel()
-	return s.a2aReceipt(keep, st, taskID, seq, receipt)
+	return s.a2aReceipt(keep, st, taskID, seq, receipt, reason)
 }
 
 func a2aMessageSource(from a2aRef) *proto.MessageSource {
@@ -410,6 +467,11 @@ func (s *Service) a2aLaunch(ctx context.Context, st a2aStore, t *a2aTask) error 
 		}
 		return nil
 	}
+	if !t.Launch.Dispatch && !s.a2aConfig(ctx).LaunchAllowed() {
+		t.fail("Starting new A2A subagent sessions is disabled by configuration.", true)
+		s.forgetA2ASubagent(t.ID)
+		return s.a2aSave(ctx, st, t)
+	}
 	dev, ok := s.machineByName(ctx, t.TargetMachine)
 	if !ok || !dev.Online && !dev.Reachable {
 		return nil
@@ -419,9 +481,10 @@ func (s *Service) a2aLaunch(ctx context.Context, st a2aStore, t *a2aTask) error 
 		return err
 	}
 	taskID, mid, sid := t.ID, t.TargetMachine, t.TargetSession
+	permMode := cmp.Or(t.Launch.PermissionMode, "plan")
 	request := map[string]any{"cwd": t.Launch.CWD, "launcher": t.Launch.Launcher, "session_id": sid,
 		"prompt": a2aPrompt(t, e, t.source(), string(s.lang(ctx))), "client_msg_id": a2aDeliveryID(taskID, 1),
-		"message_source": a2aMessageSource(t.source()), "permission_mode": "plan"}
+		"message_source": a2aMessageSource(t.source()), "permission_mode": permMode}
 	go func() {
 		ctx, cancel := context.WithTimeout(s.runCtx(), agentStartTimeout)
 		defer cancel()
@@ -429,7 +492,7 @@ func (s *Service) a2aLaunch(ctx context.Context, st a2aStore, t *a2aTask) error 
 		err := s.applyModel(ctx, "agent.new", request)
 		definite := err != nil
 		if err == nil {
-			err = s.call(ctx, mid, DeviceSessionStart, request, &out)
+			err = s.call(context.WithValue(ctx, placementTaskKey{}, taskID), mid, DeviceSessionStart, request, &out)
 			definite = err != nil && !startResultUnknown(err) && !sendUnknown(err)
 		}
 		keep, stop := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
@@ -465,7 +528,18 @@ func (s *Service) a2aLaunched(ctx context.Context, st a2aStore, t *a2aTask, sess
 			t.Events[0].Delivery = a2aUncertain
 		}
 	}
-	return s.a2aSave(ctx, st, t)
+	if err := s.a2aSave(ctx, st, t); err != nil {
+		return err
+	}
+	if failed {
+		s.forgetA2ASubagent(t.ID)
+	} else if t.TargetSession != "" {
+		s.recordA2ASubagent(t)
+		if s.fleetOn() {
+			go s.publishSessions(t.TargetMachine)
+		}
+	}
+	return nil
 }
 
 func a2aNoDelivery(err error) bool {
@@ -484,7 +558,7 @@ func a2aIdle(sess proto.Session) bool {
 	return !sess.Starting && len(sess.Queued) == 0 && (sess.Status == proto.StatusIdle || sess.Status == proto.StatusDone)
 }
 
-func (s *Service) a2aReceipt(ctx context.Context, st a2aStore, id string, seq int, receipt string) error {
+func (s *Service) a2aReceipt(ctx context.Context, st a2aStore, id string, seq int, receipt string, reasons ...string) error {
 	for range 5 {
 		t, err := decodeA2A(st.A2AGet(ctx, id))
 		if err != nil || t == nil {
@@ -495,6 +569,17 @@ func (s *Service) a2aReceipt(ctx context.Context, st a2aStore, id string, seq in
 			return nil
 		}
 		e.Delivery = receipt
+		if len(reasons) != 0 {
+			e.DeliveryReason = reasons[0]
+		}
+		if receipt == a2aQueued {
+			if changed, err := s.a2aExpireDelivery(ctx, st, t, seq-1); changed || err != nil {
+				if errors.Is(err, errA2AConflict) {
+					continue
+				}
+				return err
+			}
+		}
 		if receipt == a2aDelivered && e.Kind == "message" && t.State == a2aSubmitted {
 			t.append(a2aEvent{ID: randomHex(16), Kind: "status", State: a2aWorking})
 		}
@@ -588,4 +673,11 @@ func a2aStopped(sess proto.Session) bool {
 		return true
 	}
 	return false
+}
+
+func a2aWaitingReason(e a2aEvent) string {
+	if e.DeliveryReason != "" {
+		return e.DeliveryReason
+	}
+	return "Waiting for the receiving session to become live and idle."
 }

@@ -79,7 +79,13 @@ func codexShell(launcher string) string { return codexShellWith(launcher, "app-s
 // assistant_fallback_window.go).
 func codexShellWith(launcher, sub string) string {
 	return `__persona_args=("$@")
-function __persona_codex { builtin command codex "$@" ` + sub + ` "${__persona_args[@]}"; }
+function __persona_codex {
+  if [[ -n "${PERSONA_MODEL_SOURCE_BIN-}" && -n "${PERSONA_MODEL_SOURCE_HOSTS-}" ]]; then
+    "${PERSONA_MODEL_SOURCE_BIN}" model-source codex "$@" ` + sub + ` "${__persona_args[@]}"
+  else
+    builtin command codex "$@" ` + sub + ` "${__persona_args[@]}"
+  fi
+}
 if [[ -n "${ZSH_VERSION-}" ]] && (( $+functions[codex] )); then
   # Keep a user-defined codex() launcher intact while routing its final command through the app-server wrapper.
   # Copy it through the functions table: functions -c needs zsh 5.8, and a subscript never expands aliases.
@@ -104,7 +110,7 @@ func (n *Node) codexAssistantCommand(shell, launcher string, args []string) *exe
 		// Keep the assistant's MCP and provider flags before app-server. Running
 		// personad launch here bypasses the shell's codex wrapper and starts a TUI.
 		argv := append(append(prefix[1:], args...), "app-server")
-		return exec.Command(shell, append([]string{"-ic", `builtin command codex "$@"`, "persona"}, argv...)...)
+		return exec.Command(shell, append([]string{"-ic", `if [[ -n "${PERSONA_MODEL_SOURCE_BIN-}" && -n "${PERSONA_MODEL_SOURCE_HOSTS-}" ]]; then "${PERSONA_MODEL_SOURCE_BIN}" model-source codex "$@"; else builtin command codex "$@"; fi`, "persona"}, argv...)...)
 	}
 	return exec.Command(shell, append([]string{"-ic", codexShell(n.launcherForScript(launcher)), "persona"}, args...)...)
 }
@@ -125,6 +131,9 @@ func (n *Node) spawnCodexWithMode(id, cwd, launcher string, resume, spare bool, 
 	}
 	compaction := n.assistantCompactionPolicy(launcher, cwd, "", execution)
 	args, personaMCPOnly := n.codexAssistantArgs(key, n.dir, cwd, compaction.codexLimit())
+	if instructions := n.assistantCompactInstructions(id); instructions != "" {
+		args = append(args, codexCompactPromptArgs(instructions)...)
+	}
 	cmd := n.codexAssistantCommand(shell, launcher, args)
 	cmd.Dir = root
 	cmd.Env = identity.Environment(os.Environ(), "PERSONA_ASSISTANT=1")
@@ -141,6 +150,7 @@ func (n *Node) spawnCodexWithMode(id, cwd, launcher string, resume, spare bool, 
 		}
 	}()
 	cmd.Env = identity.Environment(cmd.Env, gateEnv...)
+	cmd.Env = identity.Environment(cmd.Env, modelSourceEnvironment(sourceSession(assistantModelSource(execution), id), n.bin)...)
 	cmd.SysProcAttr = osproc.SessionGroupAttr()
 	msysCmdLine(cmd)
 	stdin, err := cmd.StdinPipe()
@@ -246,4 +256,10 @@ func (n *Node) realDir(dir string) string {
 		return dir
 	}
 	return real
+}
+
+// Codex uses this prompt for both manual and automatic compaction; JSON strings are valid TOML basic strings.
+func codexCompactPromptArgs(instructions string) []string {
+	raw, _ := json.Marshal(instructions)
+	return []string{"-c", "compact_prompt=" + string(raw)}
 }

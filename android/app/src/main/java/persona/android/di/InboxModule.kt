@@ -29,6 +29,8 @@ import kotlinx.serialization.json.jsonObject
 import java.io.File
 import javax.inject.Inject
 import javax.inject.Singleton
+import persona.core.inbox.*
+import persona.feature.inbox.InboxRepository
 
 @Module
 @InstallIn(SingletonComponent::class)
@@ -124,7 +126,7 @@ class InboxDataOwner @Inject constructor(
                 HttpLarkConversationTransport(transport, it.endpoint.url, data.credentials.deviceToken,
                     socket.http.client) { isCurrent() && socket.route.value == route }
             } }.stateIn(data.coroutineScope, SharingStarted.Eagerly, null)
-            val wrapped = LarkInboxRepository(realInbox, lark, runtime.state,
+            val wrapped = LarkInboxRepository(realInbox.forPages(), lark, runtime.state,
                 socket.events.filterIsInstance<persona.core.contracts.LarkEvent>().map { LarkInvalidation(it.feedIds.toSet()) },
                 FileLarkWindowCache(File(data.noBackupDirectory, "lark-windows")) { write -> data.withInboxFiles(write) },
                 localMessages = realInbox::larkOutbox, onMessages = realInbox::acceptLarkWindow)
@@ -247,7 +249,7 @@ class InboxDataOwner @Inject constructor(
         override suspend fun setDone(itemId: String, done: Boolean) = use { it.inbox.setDone(itemId, done) }
         override suspend fun item(itemId: String) = use { it.inbox.item(itemId) }
         override suspend fun setDone(items: List<persona.core.contracts.api.InboxDoneTarget>, done: Boolean) = use { it.inbox.setDone(items, done) }
-        override suspend fun doneHistory(manager: String?, cursor: persona.feature.inbox.InboxDoneCursor?) = use { it.inbox.doneHistory(manager, cursor) }
+        override suspend fun doneHistory(manager: String?, cursor: persona.core.inbox.InboxDoneCursor?) = use { it.inbox.doneHistory(manager, cursor) }
         override suspend fun doneDays(manager: String?, zone: java.time.ZoneId) = use { it.inbox.doneDays(manager, zone) }
         override suspend fun bulk(items: List<persona.core.contracts.api.InboxDoneTarget>, action: persona.core.contracts.api.InboxBulkAction) = use { it.inbox.bulk(items, action) }
         override suspend fun readDraft(target: ReplyTarget) = use { it.inbox.readDraft(target) }
@@ -271,15 +273,15 @@ class InboxDataOwner @Inject constructor(
         override suspend fun quickReactions() = use { it.inbox.quickReactions() }
         override suspend fun emojis() = use { it.inbox.emojis() }
         override suspend fun inboxMutes(manager: String?) = use { it.inbox.inboxMutes(manager) }
-        override suspend fun mute(record: persona.feature.inbox.InboxRecord, option: persona.feature.inbox.InboxMuteOption) =
+        override suspend fun mute(record: persona.core.inbox.InboxRecord, option: persona.core.inbox.InboxMuteOption) =
             use { it.inbox.mute(record, option) }
         override suspend fun unmute(id: String, manager: String?) = use { it.inbox.unmute(id, manager) }
-        override suspend fun inboxPolicies(record: persona.feature.inbox.InboxRecord?, manager: String?) =
+        override suspend fun inboxPolicies(record: persona.core.inbox.InboxRecord?, manager: String?) =
             use { it.inbox.inboxPolicies(record, manager) }
         override suspend fun savePolicy(
-            target: persona.feature.inbox.InboxPolicyTarget,
-            tier: persona.feature.inbox.InboxPolicyTier,
-            twin: persona.feature.inbox.InboxPolicyTwin,
+            target: persona.core.inbox.InboxPolicyTarget,
+            tier: persona.core.inbox.InboxPolicyTier,
+            twin: persona.core.inbox.InboxPolicyTwin,
         ) = use { it.inbox.savePolicy(target, tier, twin) }
         override suspend fun removePolicy(id: String, manager: String?) = use { it.inbox.removePolicy(id, manager) }
         override suspend fun larkChatPins(feedId: String, accountId: String?, cursor: String?) = use { it.inbox.larkChatPins(feedId, accountId, cursor) }

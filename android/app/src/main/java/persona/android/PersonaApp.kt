@@ -101,7 +101,7 @@ class PersonaApp : Application() {
         errorReporting.start(scope, hub)
         scope.launch {
             connection.state.map { it == persona.core.contracts.api.ConnectionState.Online }.distinctUntilChanged()
-                .collect { online -> if (online) runCatching { personas.refresh() } }
+                .collect { online -> if (online) { val _ = runCatching { personas.refresh() } } }
         }
         // Theme color for the app's other windows (share, the capsule, dialogs): the main one provides the same accent itself.
         scope.launch {
@@ -116,9 +116,9 @@ class PersonaApp : Application() {
         scope.launch {
             connection.events.filter { it is persona.core.contracts.PersonasEvent || it is persona.core.contracts.LookEvent }
                 .buffer(kotlinx.coroutines.channels.Channel.UNLIMITED).collect { event ->
-                    if (event is persona.core.contracts.PersonasEvent) runCatching { personas.refresh() }
+                    if (event is persona.core.contracts.PersonasEvent) { val _ = runCatching { personas.refresh() } }
                     // Another device chose a look (#3200): this phone shows it too.
-                    if (event is persona.core.contracts.LookEvent) runCatching { personas.follow(event.id) }
+                    if (event is persona.core.contracts.LookEvent) { val _ = runCatching { personas.follow(event.id) } }
                 }
         }
     }
@@ -134,7 +134,7 @@ class PersonaApp : Application() {
             true -> android.app.UiModeManager.MODE_NIGHT_YES
             false -> android.app.UiModeManager.MODE_NIGHT_NO
         }
-        runCatching { getSystemService(android.app.UiModeManager::class.java)?.setApplicationNightMode(mode) }
+        val _ = runCatching { getSystemService(android.app.UiModeManager::class.java)?.setApplicationNightMode(mode) }
     }
 
     val deviceName: String get() = "${Build.MANUFACTURER} ${Build.MODEL}".trim()

@@ -1,29 +1,15 @@
 import SwiftUI
 import Testing
-#if os(macOS)
-import AppKit
-#else
 import UIKit
-#endif
 @testable import Persona
 
 @MainActor @Suite(.serialized)
 struct CalmAttentionTests {
     private func components(_ color: Color, dark: Bool) -> [Double] {
-        #if os(macOS)
-        let appearance = NSAppearance(named: dark ? .darkAqua : .aqua)!
-        var result: [Double] = []
-        appearance.performAsCurrentDrawingAppearance {
-            let c = NSColor(color).usingColorSpace(.sRGB)!
-            result = [Double(c.redComponent), Double(c.greenComponent), Double(c.blueComponent)]
-        }
-        return result
-        #else
         let c = UIColor(color).resolvedColor(with: UITraitCollection(userInterfaceStyle: dark ? .dark : .light))
         var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
         c.getRed(&r, green: &g, blue: &b, alpha: &a)
         return [Double(r), Double(g), Double(b)]
-        #endif
     }
 
     private func contrast(_ foreground: Color, _ background: Color, dark: Bool) -> Double {

@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="chat_overview_title">Session overview</string>
+    <string name="chat_overview_section_environment">Environment</string>
+    <string name="chat_overview_section_context">Context</string>
+    <string name="chat_overview_section_subagents">Subagents</string>
+    <string name="chat_overview_section_background">Background tasks</string>
+    <string name="chat_overview_computer">Computer</string>
+    <string name="chat_overview_subagents_running_count">%1$d running</string>
+    <string name="chat_overview_subagents_ended_count">%1$d ended</string>
+    <string name="chat_overview_subagents_running_group">Running · %1$d</string>
+    <string name="chat_overview_subagents_ended_group">Ended · %1$d</string>
+    <string name="chat_overview_subagents_needs_you">Needs you</string>
+    <string name="chat_overview_subagents_button_running">Subagents: %1$d running</string>
+    <string name="chat_overview_subagents_button_needs_you">Subagents: %1$d need you</string>
+    <string name="chat_overview_background_open_all">View all background tasks</string>
+    <string name="chat_subagent_view_full">View full</string>
+</resources>

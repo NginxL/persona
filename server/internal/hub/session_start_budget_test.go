@@ -3,6 +3,7 @@ package hub
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -85,6 +86,230 @@ func TestSessionStartBudgetMatchesNodeStartup(t *testing.T) {
 	}
 }
 
+func TestDesktopCreationBudgetIncludesImportAndFirstMessage(t *testing.T) {
+	for _, launcher := range []string{"claude-desktop", "codex-app"} {
+		for _, async := range []bool{true, false} {
+			if budget := startBudgetForLauncher(async, launcher); budget < 165*time.Second {
+				t.Fatalf("%s async=%v: budget %s cannot complete native creation", launcher, async, budget)
+			}
+		}
+	}
+	if got := startBudgetForLauncher(true, "claude"); got != startBudget(true) {
+		t.Fatalf("ordinary async startup budget changed: %s", got)
+	}
+}
+
+// Observe the hub's actual context before the RPC transport drops its deadline.
+type sessionStartBudgetCaller struct {
+	nodeCaller
+	beforeStart func(context.Context, any) error
+}
+
+func (c *sessionStartBudgetCaller) Call(ctx context.Context, method string, params, out any) error {
+	if method == "session.start" {
+		if err := c.beforeStart(ctx, params); err != nil {
+			return err
+		}
+	}
+	return c.nodeCaller.Call(ctx, method, params, out)
+}
+
+func observeSessionStartBudget(t *testing.T, m *Machine, before func(context.Context, any) error) {
+	t.Helper()
+	m.mu.Lock()
+	original := m.peer
+	m.peer = &sessionStartBudgetCaller{nodeCaller: original, beforeStart: before}
+	m.mu.Unlock()
+	t.Cleanup(func() {
+		m.mu.Lock()
+		m.peer = original
+		m.mu.Unlock()
+	})
+}
+
+func TestSessionStartUsesManagerResolvedBudget(t *testing.T) {
+	for _, launcher := range []string{"claude-desktop", "codex-app", "configured-codex"} {
+		for _, parentMode := range []string{"ordinary", "deadline", "canceled"} {
+			t.Run(launcher+"/"+parentMode, func(t *testing.T) {
+				h := newTestHub(t)
+				h.store = &newAgentStore{memStore: newMemStore(), b: assistantwire.ModelBinding{Provider: "launcher." + launcher}}
+				startReceiptNode(t, h, func(context.Context, json.RawMessage) (any, error) {
+					return map[string]any{"session": proto.Session{SessionID: "created"}}, nil
+				})
+				m := h.byID["machine"]
+				if launcher == "configured-codex" {
+					m.cfg.Launchers = []assistantwire.ConfiguredLauncher{{Launcher: proto.Launcher{Name: launcher}, AgentType: "codex"}}
+				}
+				connectAssistant(t, h)
+				type contextKey struct{}
+				parent := context.WithValue(context.Background(), contextKey{}, "request")
+				var parentDeadline time.Time
+				if parentMode == "deadline" {
+					parentDeadline = time.Now().Add(30 * time.Second)
+					var cancel context.CancelFunc
+					parent, cancel = context.WithDeadline(parent, parentDeadline)
+					t.Cleanup(cancel)
+				}
+				parent, cancelParent := context.WithCancel(parent)
+				t.Cleanup(cancelParent)
+				observed := false
+				observeSessionStartBudget(t, m, func(ctx context.Context, raw any) error {
+					observed = true
+					params := raw.(map[string]any)
+					if params["launcher"] != launcher || params["async"] != false {
+						t.Errorf("resolved start = %+v, want %s synchronous", params, launcher)
+					}
+					if launcher == "configured-codex" && params["agent_type"] != "codex" {
+						t.Errorf("resolved agent_type = %v, want codex", params["agent_type"])
+					}
+					deadline, ok := ctx.Deadline()
+					if !ok {
+						t.Error("node dispatch has no deadline")
+					} else if !parentDeadline.IsZero() {
+						if !deadline.Equal(parentDeadline) {
+							t.Errorf("dispatch deadline = %s, want parent %s", deadline, parentDeadline)
+						}
+					} else {
+						budget := 3 * time.Minute
+						if launcher == "configured-codex" {
+							budget = 100 * time.Second
+						}
+						if remaining := time.Until(deadline); remaining < budget-15*time.Second || remaining > budget {
+							t.Errorf("dispatch budget = %s, want up to %s", remaining, budget)
+						}
+					}
+					if ctx.Value(contextKey{}) != "request" {
+						t.Error("request context value was lost")
+					}
+					if parentMode == "canceled" {
+						cancelParent()
+						if !errors.Is(ctx.Err(), context.Canceled) {
+							t.Errorf("dispatch ignored request cancellation: %v", ctx.Err())
+						}
+						return ctx.Err()
+					}
+					return nil
+				})
+				r := httptest.NewRequest("POST", "/api/v1/sessions", strings.NewReader(`{"machine_id":"machine","cwd":"/code","async":true,"prompt":"hello","tab_name":"test"}`)).WithContext(parent)
+				w := httptest.NewRecorder()
+				h.startSession(w, r)
+				if !observed {
+					t.Fatalf("start never reached node: %d %s", w.Code, w.Body)
+				}
+				if parentMode == "canceled" {
+					if w.Code == http.StatusOK {
+						t.Fatalf("canceled start succeeded: %s", w.Body)
+					}
+				} else if w.Code != http.StatusOK {
+					t.Fatalf("start = %d %s", w.Code, w.Body)
+				}
+			})
+		}
+	}
+}
+
+func TestSessionStartResolvedSyncKeepsNameAndCompletion(t *testing.T) {
+	for _, fallback := range []bool{false, true} {
+		t.Run(map[bool]string{false: "manager disables async", true: "fallback changes inferred type"}[fallback], func(t *testing.T) {
+			h := newTestHub(t)
+			h.bus.idents = &memIdents{}
+			mux := http.NewServeMux()
+			h.busRoutes(mux)
+			srv := httptest.NewServer(mux)
+			t.Cleanup(srv.Close)
+			startReceiptNode(t, h, func(context.Context, json.RawMessage) (any, error) {
+				return map[string]any{"session": proto.Session{SessionID: "created"}}, nil
+			})
+			m := h.byID["machine"]
+			m.owner = "m-budget"
+			h.cfg.Machines = []MachineConfig{m.cfg}
+			h.devices.assign = map[string]string{m.cfg.ID: m.owner}
+			h.devices.assignRead = true
+			m.cfg.Launchers = []assistantwire.ConfiguredLauncher{
+				{Launcher: proto.Launcher{Name: "old"}, AgentType: "claude"},
+				{Launcher: proto.Launcher{Name: "resolved"}, AgentType: "codex"},
+			}
+			resolvedAt := make(chan time.Time, 1)
+			names := make(chan string, 1)
+			manager := connectGuardManager(t, h, srv.URL, m.owner, func(method string, raw json.RawMessage) (any, error) {
+				switch method {
+				case assistantwire.MethodAgentStartParams:
+					var in assistantwire.AgentStartParams
+					if err := json.Unmarshal(raw, &in); err != nil {
+						return nil, err
+					}
+					if in.NameFrom != "" {
+						t.Errorf("initial async resolution asked for name %q", in.NameFrom)
+					}
+					if fallback {
+						in.Params["launcher"] = "resolved"
+					} else {
+						in.Params["async"] = false
+					}
+					resolvedAt <- time.Now()
+					return map[string]any{"params": in.Params}, nil
+				case assistantwire.MethodAgentTabName:
+					var in struct {
+						Prompt string `json:"prompt"`
+					}
+					if err := json.Unmarshal(raw, &in); err != nil {
+						return nil, err
+					}
+					names <- in.Prompt
+					return map[string]any{"name": "resolved-name"}, nil
+				}
+				return map[string]any{}, nil
+			})
+			events := make(chan string, 4)
+			manager.mu.Lock()
+			manager.onEvent = func(method string, _ json.RawMessage) {
+				if method == assistantwire.EventStartEnded || method == assistantwire.EventModelUsed {
+					events <- method
+				}
+			}
+			manager.mu.Unlock()
+			observed := false
+			observeSessionStartBudget(t, m, func(ctx context.Context, raw any) error {
+				observed = true
+				params := raw.(map[string]any)
+				if params["async"] != false || params["tab_name"] != "resolved-name" {
+					t.Errorf("synchronous start not normalized: %+v", params)
+				}
+				if fallback && params["agent_type"] != "codex" {
+					t.Errorf("fallback retained old inferred type: %+v", params)
+				}
+				deadline, ok := ctx.Deadline()
+				if resolved := <-resolvedAt; !ok || deadline.After(resolved.Add(100*time.Second)) || time.Until(deadline) < 85*time.Second {
+					t.Errorf("deadline %s should use the original start time and resolved synchronous budget", deadline)
+				}
+				return nil
+			})
+			r := httptest.NewRequest("POST", "/api/v1/sessions", strings.NewReader(`{"machine_id":"machine","cwd":"/code","launcher":"old","model":"chosen","async":true,"prompt":"hello"}`))
+			w := httptest.NewRecorder()
+			h.startSession(w, r)
+			if w.Code != http.StatusOK || !observed {
+				t.Fatalf("start = %d %s; observed=%v", w.Code, w.Body, observed)
+			}
+			select {
+			case name := <-names:
+				if name != "hello" {
+					t.Errorf("name prompt = %q, want hello", name)
+				}
+			default:
+				t.Error("owning manager was not asked to name the synchronous start")
+			}
+			seen := map[string]bool{}
+			for len(seen) < 2 {
+				select {
+				case event := <-events:
+					seen[event] = true
+				case <-time.After(time.Second):
+					t.Fatalf("synchronous completion events missing: %v", seen)
+				}
+			}
+		})
+	}
+}
 func TestSessionStartAgyUsesSynchronousBudget(t *testing.T) {
 	for _, tc := range []struct {
 		name, requested, resolved, agent string

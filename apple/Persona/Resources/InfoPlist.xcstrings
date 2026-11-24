@@ -168,19 +168,19 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Persona lets Claude read health summaries when you ask, for example how many steps you walked this week or how long you slept last night. With rolling recording on, Persona also checks heart rate, HRV, steps, workouts and the moods you log, on your iPhone only, to keep the minutes around them."
+            "value": "Persona lets Claude read health summaries when you ask, for example how many steps you walked this week or how long you slept last night. With rolling recording on, Persona also checks heart rate, HRV, steps, workouts and the moods you log, on your iPhone only, to keep the minutes around them. The Health home and widgets show Activity rings, steps and sleep."
           }
         },
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "依頼したときにClaudeがヘルスケアの概要を読み取れるようにします。たとえば今週の歩数や昨夜の睡眠時間です。ローリング録音をオンにすると、心拍、HRV、歩数、ワークアウト、記録した気分もiPhone上だけで確認し、その前後の数分を残します。"
+            "value": "依頼したときにClaudeがヘルスケアの概要を読み取れるようにします。たとえば今週の歩数や昨夜の睡眠時間です。ローリング録音をオンにすると、心拍、HRV、歩数、ワークアウト、記録した気分もiPhone上だけで確認し、その前後の数分を残します。健康のホームとウィジェットには、アクティビティリング、歩数、睡眠が表示されます。"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "你让 Claude 看健康数据时，Persona 允许它读取健康摘要，比如这周走了多少步、昨晚睡了多久。开启滚动录音后，还会在 iPhone 本机查看心率、HRV、步数、锻炼和你记下的心境，用来保留这些信号前后几分钟。"
+            "value": "你让 Claude 看健康数据时，Persona 允许它读取健康摘要，比如这周走了多少步、昨晚睡了多久。开启滚动录音后，还会在 iPhone 本机查看心率、HRV、步数、锻炼和你记下的心境，用来保留这些信号前后几分钟。健康主页和小组件会显示健身圆环、步数和睡眠。"
           }
         }
       }
@@ -191,19 +191,19 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Persona saves health data only after you approve it on your iPhone, one entry at a time, for example a weight or last night's sleep you told Claude about."
+            "value": "Persona saves individual health samples after you confirm them on your iPhone. When you turn on sync, Persona also automatically writes your water and protein records to Apple Health on this iPhone."
           }
         },
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "Personaがヘルスケアにデータを保存するのは、iPhoneで1件ずつ承認したときだけです。たとえばClaudeに伝えた体重や昨夜の睡眠です。"
+            "value": "PersonaはiPhoneで確認した健康データを1件ずつ保存します。同期をオンにすると、水分とたんぱく質の記録もこのiPhoneのAppleヘルスケアに自動で書き込みます。"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "Persona 只在你在 iPhone 上逐条批准后才写入健康数据，比如你告诉 Claude 的体重或昨晚的睡眠。"
+            "value": "Persona 会在你在 iPhone 上确认后保存单条健康数据。打开同步后，Persona 还会自动将饮水和蛋白质记录写入这台 iPhone 的 Apple 健康。"
           }
         }
       }
@@ -250,6 +250,29 @@
           "stringUnit": {
             "state": "translated",
             "value": "Persona 在你和电脑连着同一个 Wi-Fi 时直接连到电脑，让电脑屏幕显示得更快。"
+          }
+        }
+      }
+    },
+    "NSLocationAlwaysAndWhenInUseUsageDescription": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Persona reads your location only when the assistant needs it to answer you, for example when you ask “How far am I from home?” while Persona isn't open. When you move a long way, iOS may wake Persona in the background, but it doesn't record where you go."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Personaが位置情報を読み取るのは、アシスタントが質問に答えるのに必要なときだけです。たとえばPersonaを開いていないときに「家まであとどれくらい？」と尋ねた場合です。大きく移動したときは、iOSがバックグラウンドでPersonaを起動することがありますが、移動の記録は残しません。"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "只在助手需要回答你的问题时才读取位置，例如你没打开 Persona 时问「我离家还有多远」。你移动较远时，iOS 可能会在后台唤醒 Persona，但它不会记录你的行踪。"
           }
         }
       }

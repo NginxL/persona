@@ -309,7 +309,7 @@ class HomeChromeTest {
     private fun assertTextNotEllipsized(text: String, case: String, expectedSize: Float? = null) {
         val layouts = mutableListOf<TextLayoutResult>()
         placedText(text, useUnmergedTree = true)
-            .performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(layouts) }
+            .performSemanticsAction(SemanticsActions.GetTextLayoutResult) { val _ = it(layouts) }
         val result = layouts.single()
         val actualSize = result.layoutInput.style.fontSize.value * result.layoutInput.density.fontScale
         assertTrue("$text is ellipsized: $case; expectedSize=$expectedSize actualSize=$actualSize layoutWidth=${result.size.width}", !result.isLineEllipsized(0))
@@ -475,17 +475,24 @@ class HomeChromeTest {
             }
         }
         for (s in AppStyle.entries) for (label in listOf("Assistant", "助手")) {
-            val widths = if (s == AppStyle.Brief && label == "助手") listOf(200.dp, 320.dp) else listOf(200.dp, 360.dp)
-            for (w in widths) {
-            rule.runOnIdle { style = s; assistant = label; width = w }
-            rule.waitForIdle()
-            rule.onNodeWithTag("home-level-stacked").assertExists("expected stacked layout: $s $label $w")
-            val pane = rule.onNodeWithTag("pane").getBoundsInRoot()
-            val switcher = rule.onNodeWithTag("home-switcher").getBoundsInRoot()
-            val paneCenter = (pane.left.value + pane.right.value) / 2
-            val switcherCenter = (switcher.left.value + switcher.right.value) / 2
-            assertTrue("$s $label $w stacked center is off by ${switcherCenter - paneCenter}dp",
-                kotlin.math.abs(switcherCenter - paneCenter) <= 0.51f)
+            for (w in listOf(200.dp, 280.dp, 320.dp, 360.dp)) {
+                rule.runOnIdle { style = s; assistant = label; width = w }
+                rule.waitForIdle()
+                val expectedStacked = when {
+                    w == 200.dp -> true
+                    s == AppStyle.Brief && label == "助手" && w >= 320.dp -> false
+                    s == AppStyle.Board && label == "助手" && w == 360.dp -> false
+                    else -> true
+                }
+                val stacked = rule.onAllNodesWithTag("home-level-stacked").fetchSemanticsNodes().isNotEmpty()
+                assertEquals("layout at the capped scale: $s $label $w", expectedStacked, stacked)
+                if (!expectedStacked) continue
+                val pane = rule.onNodeWithTag("pane").getBoundsInRoot()
+                val switcher = rule.onNodeWithTag("home-switcher").getBoundsInRoot()
+                val paneCenter = (pane.left.value + pane.right.value) / 2
+                val switcherCenter = (switcher.left.value + switcher.right.value) / 2
+                assertTrue("$s $label $w stacked center is off by ${switcherCenter - paneCenter}dp",
+                    kotlin.math.abs(switcherCenter - paneCenter) <= 0.51f)
             }
         }
     }
@@ -518,7 +525,7 @@ class HomeChromeTest {
             rule.waitForIdle()
             rule.onNodeWithTag("home-level-stacked").assertExists()
             val switcher = rule.onNodeWithTag("home-switcher").getBoundsInRoot()
-            val scale = (scale * HomeTokens.shellTextStep).coerceAtMost(HomeTokens.shellScaleMaximum)
+            val scale = (minOf(fontScale, InterfaceFontScaleCap) * HomeTokens.shellTextStep).coerceAtMost(HomeTokens.shellScaleMaximum)
             val mainSegment = HomeTokens.segmentWidth * scale + if (fontScale > 1f) Tokens.Space.s else 0.dp
             val fullWidth = mainSegment * 2 + Tokens.Space.xs * 2
             assertTrue("stacked capsule exceeds main full width: $w / $fontScale / $switcher / $fullWidth",
@@ -562,7 +569,7 @@ class HomeChromeTest {
         }
         val layouts = mutableListOf<TextLayoutResult>()
         placedText("Agents", useUnmergedTree = true)
-            .performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(layouts) }
+            .performSemanticsAction(SemanticsActions.GetTextLayoutResult) { val _ = it(layouts) }
         val result = layouts.single()
         assertTrue("Agents is ellipsized at 240dp / 1.45", !result.isLineEllipsized(0))
         assertEquals("240dp / 1.45 shrank below main", expectedSize,
@@ -644,7 +651,7 @@ class HomeChromeTest {
     private fun isTextEllipsized(text: String): Boolean {
         val layouts = mutableListOf<TextLayoutResult>()
         placedText(text, useUnmergedTree = true)
-            .performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(layouts) }
+            .performSemanticsAction(SemanticsActions.GetTextLayoutResult) { val _ = it(layouts) }
         return layouts.single().isLineEllipsized(0)
     }
 

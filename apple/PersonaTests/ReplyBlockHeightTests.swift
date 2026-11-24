@@ -1,4 +1,3 @@
-#if os(iOS)
 import MarkdownUI
 import Observation
 import PersonaKit
@@ -168,4 +167,3 @@ struct ReplyBlockHeightTests {
 private final class ReplyHeightBox {
     var height: CGFloat = 0
 }
-#endif

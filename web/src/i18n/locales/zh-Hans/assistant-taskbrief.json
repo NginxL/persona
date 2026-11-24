@@ -31,6 +31,8 @@
   "scope_approved": "经你同意",
   "lineage_title": "谁做过",
   "lineage_current": "当前任务",
+  "lineage_continues": "接手自：{title}",
+  "lineage_superseded": "由新卡接手：{title}",
   "lineage_untitled": "未命名任务",
   "lineage_on": "{agent}，在 {machine}",
   "lineage_period": "{from} 至 {to}",

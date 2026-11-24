@@ -13,6 +13,7 @@ import org.junit.runner.RunWith
 import org.robolectric.annotation.Config
 import persona.core.designsystem.PersonaTheme
 import java.io.ByteArrayOutputStream
+import persona.core.inbox.*
 
 @RunWith(AndroidJUnit4::class)
 @Config(sdk = [35], qualifiers = "zh")

@@ -289,8 +289,17 @@ func (h *Hub) pendingCount() int {
 // for it must not let another computer be it). added: it was added now. With add.manager (addTarget checked it), the
 // computer is that manager's: added to it, or the one used again moved to it.
 func (h *Hub) computerFor(ctx context.Context, machine string, add *machineAddRequest, fromDevice bool, actor string) (id string, added bool, err error) {
+	return h.computerForScoped(ctx, machine, add, fromDevice, actor, "")
+}
+
+// computerForScoped resolves or creates a link computer as computerFor does, enforcing ownerScope when non-empty so
+// extension requests cannot inspect, re-issue, reuse, or overwrite entries owned by another manager.
+func (h *Hub) computerForScoped(ctx context.Context, machine string, add *machineAddRequest, fromDevice bool, actor, ownerScope string) (id string, added bool, err error) {
 	if add == nil {
 		mc := h.knownEntry(machine)
+		if mc != nil && ownerScope != "" && h.entryOwner(machine) != ownerScope {
+			return "", false, refuseAdd(http.StatusForbidden, codeOtherManager, errOtherManager)
+		}
 		if mc == nil || mc.Kind != kindLink {
 			if fromDevice {
 				return "", false, refuseAdd(http.StatusNotFound, "not_found", i18n.Err("hub-pairing.no_computer"))
@@ -328,6 +337,9 @@ func (h *Hub) computerFor(ctx context.Context, machine string, add *machineAddRe
 	// reuse is the code for a computer there is already: a device's revokes what an earlier code of it gave. Asked
 	// for another manager's, it moves there first.
 	reuse := func(id string) (string, bool, error) {
+		if ownerScope != "" && h.entryOwner(id) != ownerScope {
+			return "", false, refuseAdd(http.StatusForbidden, codeOtherManager, errOtherManager)
+		}
 		if target != "" && h.entryOwner(id) != target {
 			if _, err := h.moveMachine(ctx, id, target); err != nil {
 				return "", false, toManagerErr(err)
@@ -344,8 +356,13 @@ func (h *Hub) computerFor(ctx context.Context, machine string, add *machineAddRe
 		if !adminMachineID.MatchString(id) {
 			return "", false, refuseAdd(http.StatusBadRequest, "invalid_id", i18n.Err("hub-admin_machines.invalid_id"))
 		}
-		if mc := h.knownEntry(id); reusable(mc) {
-			return reuse(id)
+		if mc := h.knownEntry(id); mc != nil {
+			if ownerScope != "" && h.entryOwner(id) != ownerScope {
+				return "", false, refuseAdd(http.StatusForbidden, codeOtherManager, errOtherManager)
+			}
+			if reusable(mc) {
+				return reuse(id)
+			}
 		}
 		if h.machineIDTaken(id) {
 			return "", false, refuseAdd(http.StatusConflict, "exists", i18n.Err("hub-admin_machines.exists"))
@@ -362,7 +379,9 @@ func (h *Hub) computerFor(ctx context.Context, machine string, add *machineAddRe
 			}
 			// The one this name made before and that never connected: its code again, not a second computer.
 			if mc := h.knownEntry(id); mc != nil && mc.Name == name && reusable(mc) {
-				return reuse(id)
+				if ownerScope == "" || h.entryOwner(id) == ownerScope {
+					return reuse(id)
+				}
 			}
 			if !h.machineIDTaken(id) {
 				break

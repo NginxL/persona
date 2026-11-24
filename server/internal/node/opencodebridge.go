@@ -32,9 +32,18 @@ const (
 var (
 	opencodeBridgeRestartMin = time.Second
 	opencodeBridgeRestartMax = time.Minute
+	// opencodeBridgeFailedMax caps the wait after a companion that exited without ever saying hello on runtime.sock.
+	// Such an exit repeats on every start until something on the machine changes (#12848: an entry check that skipped
+	// main() under a symlinked home exited 0 within a second, once a minute, for good), so the wait keeps doubling
+	// up to an hour instead of a minute. A node restart, an upgrade or the built-in switch starts over from a second.
+	opencodeBridgeFailedMax  = time.Hour
 	opencodeBridgeProbeEvery = 30 * time.Second
 	opencodeBridgeSteady     = 5 * time.Minute
 	opencodeBridgeStopWait   = 3 * time.Second
+
+	// The restart loop's clock, replaced in tests so they need not wait.
+	opencodeBridgeNow   = time.Now
+	opencodeBridgeAfter = time.After
 )
 
 var opencodeInstanceSeq atomic.Uint64
@@ -45,6 +54,7 @@ type opencodeBridge struct {
 	done       chan struct{}
 	instance   string
 	bin        string
+	connected  bool // the companion started as instance has said hello on runtime.sock
 	wakeCh     chan struct{}
 	yieldGrace time.Duration
 	takeover   sync.Mutex
@@ -54,6 +64,19 @@ func (rh *RuntimeHost) builtinOpencodeInstance() string {
 	rh.opencode.mu.Lock()
 	defer rh.opencode.mu.Unlock()
 	return rh.opencode.instance
+}
+
+// noteOpencodeHello records that the built-in companion's current instance reached runtime.sock, so its exit is not
+// mistaken for one that never started up.
+func (rh *RuntimeHost) noteOpencodeHello(hello runtimeHello) {
+	if hello.Runtime != opencodeRuntimeID || hello.Instance == "" {
+		return
+	}
+	rh.opencode.mu.Lock()
+	if rh.opencode.instance == hello.Instance {
+		rh.opencode.connected = true
+	}
+	rh.opencode.mu.Unlock()
 }
 
 func (rh *RuntimeHost) wakeOpencodeBridge() {
@@ -215,69 +238,93 @@ func (rh *RuntimeHost) opencodeBridgeLoop(ctx context.Context, done chan struct{
 			}
 			continue
 		}
-		started := time.Now()
-		yielded, err := rh.runOpencodeBridge(ctx, opencodeBin, wake)
+		started := opencodeBridgeNow()
+		run, err := rh.runOpencodeBridge(ctx, opencodeBin, wake)
 		if ctx.Err() != nil {
 			return
 		}
-		if yielded {
+		if run.yielded {
 			wait = opencodeBridgeRestartMin
 			continue
 		}
-		if time.Since(started) > opencodeBridgeSteady {
-			wait = opencodeBridgeRestartMin
-		}
-		if err != nil {
-			if strings.Contains(err.Error(), "Node.js") {
-				if !loggedMissingJS {
-					loggedMissingJS = true
-					rh.logger.Printf("opencode runtime: %v", err)
+		ran := opencodeBridgeNow().Sub(started)
+		limit := opencodeBridgeRestartMax
+		if run.exit != "" && !run.connected {
+			// It ran but never reached the node: say so even for exit 0, and back off far longer (#12848).
+			limit = opencodeBridgeFailedMax
+			rh.logger.Printf("opencode runtime: companion exited (%s) after %s without connecting to %s (again in %s)",
+				run.exit, ran.Round(time.Millisecond), rh.path, wait)
+		} else {
+			if ran > opencodeBridgeSteady {
+				wait = opencodeBridgeRestartMin
+			}
+			wait = min(wait, limit)
+			if err != nil {
+				if strings.Contains(err.Error(), "Node.js") {
+					if !loggedMissingJS {
+						loggedMissingJS = true
+						rh.logger.Printf("opencode runtime: %v", err)
+					}
+				} else {
+					rh.logger.Printf("opencode runtime: %v (again in %s)", err, wait)
 				}
-			} else {
-				rh.logger.Printf("opencode runtime: %v (again in %s)", err, wait)
 			}
 		}
 		select {
 		case <-ctx.Done():
 			return
-		case <-time.After(wait):
+		case <-opencodeBridgeAfter(wait):
 		}
-		wait = min(wait*2, opencodeBridgeRestartMax)
+		wait = min(wait*2, limit)
 	}
 }
 
-func (rh *RuntimeHost) runOpencodeBridge(ctx context.Context, opencodeBin string, wake <-chan struct{}) (bool, error) {
+// opencodeRun is how one run of the built-in companion ended.
+type opencodeRun struct {
+	yielded   bool   // stopped for an external opencode runtime
+	connected bool   // said hello on runtime.sock at some point
+	exit      string // the process's exit status ("exit status 0"), set once it ran and exited by itself
+}
+
+func (rh *RuntimeHost) runOpencodeBridge(ctx context.Context, opencodeBin string, wake <-chan struct{}) (opencodeRun, error) {
 	instance := fmt.Sprintf("builtin-opencode-%d-%d", os.Getpid(), opencodeInstanceSeq.Add(1))
 	rh.opencode.mu.Lock()
 	rh.opencode.instance = instance
 	rh.opencode.bin = opencodeBin
+	rh.opencode.connected = false
 	rh.opencode.mu.Unlock()
 	defer func() {
 		rh.opencode.mu.Lock()
 		if rh.opencode.instance == instance {
 			rh.opencode.instance = ""
 			rh.opencode.bin = ""
+			rh.opencode.connected = false
 		}
 		rh.opencode.mu.Unlock()
 	}()
+	connected := func() bool {
+		rh.opencode.mu.Lock()
+		defer rh.opencode.mu.Unlock()
+		return rh.opencode.instance == instance && rh.opencode.connected
+	}
 
 	cmd, err := opencodeBridgeCommand(ctx, rh, opencodeBin, instance)
 	if err != nil {
-		return false, err
+		return opencodeRun{}, err
 	}
 	cmd.SysProcAttr = osproc.GroupAttr()
 	out, err := cmd.StdoutPipe()
 	if err != nil {
-		return false, err
+		return opencodeRun{}, err
 	}
 	cmd.Stderr = cmd.Stdout
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
-		return false, err
+		return opencodeRun{}, err
 	}
 	defer stdin.Close()
 	if err := cmd.Start(); err != nil {
-		return false, fmt.Errorf("start: %w", err)
+		return opencodeRun{}, fmt.Errorf("start: %w", err)
 	}
 	rh.logger.Printf("opencode runtime: running (pid %d, opencode %s)", cmd.Process.Pid, opencodeBin)
 	logged := make(chan struct{})
@@ -314,15 +361,21 @@ func (rh *RuntimeHost) runOpencodeBridge(ctx context.Context, opencodeBin string
 					drop()
 				}
 			}
-			return true, nil
+			return opencodeRun{yielded: true, connected: connected()}, nil
 		}
 		select {
 		case err := <-exited:
-			return false, err
+			status := "exited"
+			if cmd.ProcessState != nil {
+				status = cmd.ProcessState.String()
+			} else if err != nil {
+				status = err.Error()
+			}
+			return opencodeRun{connected: connected(), exit: status}, err
 		case <-wake:
 		case <-ctx.Done():
 			stopChild()
-			return false, ctx.Err()
+			return opencodeRun{connected: connected()}, ctx.Err()
 		}
 	}
 }

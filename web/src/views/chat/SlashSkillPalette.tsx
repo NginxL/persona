@@ -1,6 +1,6 @@
-// Skill-aware second stage of the / palette, loaded only after the palette opens.
+// Skill-aware second stage of the / palette, loaded only after a keyword is typed after /.
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { rankCommands } from "../../lib/composer-commands";
+import { hasSlashSkillQuery, rankSlashSkills } from "../../lib/composer-commands";
 import { imeKey, type ImeState } from "../../lib/ime";
 import type { ComposerCommand as Command } from "../../lib/extension-prompts";
 import type { MentionSkill } from "../../lib/skill-mentions";
@@ -14,13 +14,14 @@ const attached = (row: Command | undefined) => row && (row as SkillCommand).skil
 export function SlashSkillPalette(input: SlashPaletteInput) {
   const { source, machineId } = input;
   const query = input.query ?? "";
-  const catalog = useSkillCatalog(source?.skills, machineId, source?.cwd, input.memory);
-  const skillRows = useMemo(() => {
-    const candidates: SkillCommand[] = (catalog.catalog?.skills ?? []).map((skill) => ({
+  const searchingSkills = hasSlashSkillQuery(query);
+  const catalog = useSkillCatalog(source?.skills, machineId, source?.cwd, input.memory, searchingSkills);
+  const skillRows = useMemo<SkillCommand[]>(
+    () => rankSlashSkills(catalog.catalog?.skills ?? [], query).map((skill) => ({
       key: `skill:${skill.id}`, word: skill.name, desc: skill.description ?? "", text: skill.name, source: skill.source, skill,
-    }));
-    return rankCommands(candidates, query, candidates.length);
-  }, [catalog.catalog, query]);
+    })),
+    [catalog.catalog, query],
+  );
   const entries = useMemo<Command[]>(() => [...input.rows, ...skillRows], [input.rows, skillRows]);
   const [selection, setSelection] = useState<{ query: string; key: string }>();
   const rowKey = (row: Command) => row.key ?? row.word;
@@ -95,7 +96,7 @@ export function SlashSkillPalette(input: SlashPaletteInput) {
       active={current}
       onHover={select}
       onPick={pick}
-      status={catalog.status}
+      status={searchingSkills ? catalog.status : undefined}
       renderDetail={(row) => { const skill = attached(row); return skill && <SkillDetail skill={skill} />; }}
       renderRow={(row, common) => {
         const skill = attached(row);

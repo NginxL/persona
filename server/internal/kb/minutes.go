@@ -93,6 +93,13 @@ type MinutesAction struct {
 // (#7980)"); the recordings' summaries and the day recap stay on kb.compress.
 const PurposeMeetingMinutes = "meeting.minutes"
 
+// PurposeMeetingAnswer is the model purpose a question asked during a meeting is answered on, and PurposeMeetingRoom the
+// one an attended meeting's room conversation starts on (#7980); the meeting recording module asks for them.
+const (
+	PurposeMeetingAnswer = "meeting.answer"
+	PurposeMeetingRoom   = "meeting.room"
+)
+
 var (
 	// ErrMinutesStale: the minutes were written again since the version a request names.
 	ErrMinutesStale = errors.New("the minutes changed since; read them again")

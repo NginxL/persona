@@ -29,7 +29,7 @@ import persona.core.contracts.api.EndpointOverrides
 import persona.core.contracts.api.MessageRequest
 import persona.core.contracts.api.MessageTransport
 import persona.core.contracts.api.MessageTransportResult
-import persona.feature.inbox.InboxHandOffRequest
+import persona.core.inbox.InboxHandOffRequest
 
 /** A group merge carries an unsent hand-off's durable identity and item route with its outbox row. */
 @RunWith(RobolectricTestRunner::class)

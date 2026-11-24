@@ -20,6 +20,8 @@ data class ApiErrorInfo(
     val requestId: String?,
     val session: String?,
     val raw: String,
+    /** An older hub has no `turn_error_code`; the same raw 400 recognition as the web keeps its tool-search remedy. */
+    val toolSearchUnsupported: Boolean = false,
 ) {
     /** Two errors are "the same" for folding when these match. */
     val signature: String get() = "${status ?: 0}|${reason.key}"
@@ -34,6 +36,8 @@ data class ApiErrorInfo(
         }
 
         private val statusPattern = Regex("""^\s*(\d{3})\b""")
+        private val badRequestPattern = Regex("""^\s*400\b""")
+        private val toolSearchMarkers = listOf("toolsearch", "tool_search", "tool search", "defer_loading", "tool_reference")
         /** One short sentence, then the error ("Failed to authenticate. API Error:"), not prose that mentions one. */
         private val lead = Regex("""^[A-Z][A-Za-z ]{2,40}\.\s+API Error:""")
         private val requestPattern = Regex("""(?i)\b(?:req(?:uest)?(?:[ _-]?id)?)[:=\s"]+([A-Za-z0-9_-]{8,})""")
@@ -50,9 +54,13 @@ data class ApiErrorInfo(
                 else -> lead.find(trimmed)?.let { trimmed.substring(it.range.last + 1) } ?: return null
             }
             val status = statusPattern.find(body)?.groupValues?.get(1)?.toIntOrNull()
-            val (reason, transient) = explain(body.lowercase(), status)
+            val lower = body.lowercase()
+            val (reason, transient) = explain(lower, status)
+            val toolSearchUnsupported = (badRequestPattern.containsMatchIn(lower) || "not representable" in lower) &&
+                toolSearchMarkers.any { it in lower }
             return ApiErrorInfo(status, reason, transient,
-                requestPattern.find(body)?.groupValues?.get(1), sessionPattern.find(body)?.groupValues?.get(1), trimmed)
+                requestPattern.find(body)?.groupValues?.get(1), sessionPattern.find(body)?.groupValues?.get(1), trimmed,
+                toolSearchUnsupported)
         }
 
         /** What went wrong, as a person would say it, and whether it is likely to pass (the iOS wording). */

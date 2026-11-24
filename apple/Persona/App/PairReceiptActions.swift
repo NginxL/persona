@@ -215,29 +215,18 @@ nonisolated enum PairReceiptActions {
 extension AppModel {
     /// Opens what a tapped pairing receipt is about (`PairReceiptActions.destination`).
     func openPair(_ destination: PairReceiptActions.Destination) {
-        #if os(macOS)
-        MacShellState.shared.showMain() // the main window may have been closed
-        #endif
         switch destination {
         case .confirmComputer(let ref):
             openConfirmComputer(ref)
         case .devices:
             settingsPath = NavigationPath([SettingsPage.devices])
-            #if os(macOS)
-            MacShellState.shared.go(.settings, self)
-            #else
             selectedTab = .settings
-            #endif
         case .machine(let ref):
-            #if os(macOS)
-            MacShellState.shared.go(.machines, self) // the Mac's machines section keeps its own stack
-            #else
             var path = NavigationPath()
             path.append(MachineListRoute())
             path.append(MachineDetailRoute(ref))
             settingsPath = path
             selectedTab = .settings
-            #endif
         }
     }
 }

@@ -58,6 +58,7 @@ func rowsWith(rows []auditRow, action string) []auditRow {
 // features only when they change, a pairing code issued, the owner paired (by the Feishu account that sent the code)
 // and removed, and the owner dropped by a different app; the assistant's own switch calls are the assistant's (#5353).
 func TestBotChangesAreAudited(t *testing.T) {
+	needsLarkModule(t)
 	w := newBotWorld(t)
 	st := w.h.store.(*botStore)
 	rows := st.takeAudit()
@@ -170,6 +171,7 @@ func TestBotChangesAreAudited(t *testing.T) {
 
 // Codes guessed until the pairing is dropped are recorded, by the Feishu account that guessed.
 func TestBotPairGuessesAreAudited(t *testing.T) {
+	needsLarkModule(t)
 	w := newBotWorld(t)
 	st := w.h.store.(*botStore)
 	if code, out := w.do(t, "POST", "/api/v1/bots/feishu/pair", ""); code != 200 {

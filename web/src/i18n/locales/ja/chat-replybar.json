@@ -11,6 +11,7 @@
   "cache_line": "キャッシュ内訳: 読み取り {read} · 書き込み {write} · ヒット率 {rate}",
   "cache_line_no_rate": "キャッシュ内訳: 読み取り {read} · 書き込み {write}",
   "time_line": "時間 {duration}",
+  "ttft_line": "初回トークン {ttft}",
   "model_line": "モデル: {model}",
   "models_other": "{count} 個のモデル",
   "suggestion_line": "提案: {suggestion}",

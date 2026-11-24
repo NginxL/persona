@@ -15,8 +15,8 @@ import org.robolectric.annotation.Config
 import persona.core.contracts.api.AssistantManagerChoice
 import persona.core.contracts.api.InboxAssistantTransport
 import persona.core.contracts.api.RequestManager
-import persona.feature.inbox.LarkContentSource
-import persona.feature.inbox.LarkPart
+import persona.core.inbox.LarkContentSource
+import persona.core.inbox.LarkPart
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [35])

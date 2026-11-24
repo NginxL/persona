@@ -50,6 +50,7 @@ func (k *kitHub) last(op string) map[string]any {
 func streamHub(t *testing.T) (*Service, *[]map[string]any, *kitHub) {
 	t.Helper()
 	s, posts, _ := cotHub(t, false)
+	s.setLarkTiming("kit_check_every", kitCheckEvery)
 	k := &kitHub{}
 	f := s.hub.(*fakeHub)
 	for _, m := range []struct{ method, op string }{{FeishuCardCreate, "create"}, {FeishuCardUpdate, "update"},
@@ -89,6 +90,7 @@ func seqOf(p map[string]any) int64 {
 // A run's progress card is a card entity: made with its live text in an element of its own and streaming on, sent by
 // its id, and remembered by the run.
 func TestProgressCardIsACardEntity(t *testing.T) {
+	needsLarkLayer(t)
 	s, posts, k := streamHub(t)
 	r, _ := cotRun(s)
 	feishuSink{s}.progress(context.Background(), r, time.Second, []string{"运行 `ls`"}, "我先看一下")
@@ -116,6 +118,7 @@ func TestProgressCardIsACardEntity(t *testing.T) {
 // changes; a step (or the time it has taken) that changes the card writes it whole (its text as already streamed),
 // then streams on. Every write's sequence is larger than the one before.
 func TestProgressStreamsTheText(t *testing.T) {
+	needsLarkLayer(t)
 	s, posts, k := streamHub(t)
 	r, _ := cotRun(s)
 	sink := feishuSink{s}
@@ -160,6 +163,7 @@ func TestProgressStreamsTheText(t *testing.T) {
 
 // CardKit turns streaming off ten minutes after it was turned on: it is turned on again and the text written.
 func TestProgressTurnsAClosedStreamOnAgain(t *testing.T) {
+	needsLarkLayer(t)
 	s, _, k := streamHub(t)
 	r, _ := cotRun(s)
 	ctx := context.Background()
@@ -182,6 +186,7 @@ func TestProgressTurnsAClosedStreamOnAgain(t *testing.T) {
 // Any other failure of CardKit sends the run back to updating its card as a message, which a card sent as an entity
 // still takes: the text is not lost and nothing waits on CardKit.
 func TestProgressFallsBackToTheMessage(t *testing.T) {
+	needsLarkLayer(t)
 	s, posts, k := streamHub(t)
 	r, _ := cotRun(s)
 	ctx := context.Background()
@@ -211,6 +216,7 @@ func TestProgressFallsBackToTheMessage(t *testing.T) {
 
 // Without CardKit (the app lacks its permission, an older hub) the card is sent and updated as before.
 func TestProgressWithoutCardKit(t *testing.T) {
+	needsLarkLayer(t)
 	s, posts, k := streamHub(t)
 	k.fail = func(op string, _ int) error {
 		if op == "create" {
@@ -237,6 +243,7 @@ func TestProgressWithoutCardKit(t *testing.T) {
 
 // The answer ends the streaming before it goes into the card, which then is the answer as any other.
 func TestAnswerEndsTheStream(t *testing.T) {
+	needsLarkLayer(t)
 	s, posts, k := streamHub(t)
 	r, _ := cotRun(s)
 	feishuSink{s}.progress(context.Background(), r, time.Second, []string{"运行 `ls`"}, "我先")
@@ -280,6 +287,7 @@ func answerMessages(s *Service, fn func() (any, error)) *int {
 // every kitCheckEvery: one gone is forgotten, entity and all, and the next tick posts a new card, as a message update
 // that finds it gone does.
 func TestProgressNoticesAWithdrawnEntity(t *testing.T) {
+	needsLarkLayer(t)
 	for _, tc := range []struct {
 		name string
 		read func() (any, error)
@@ -322,6 +330,7 @@ func TestProgressNoticesAWithdrawnEntity(t *testing.T) {
 
 // A read that fails for another reason (a rate limit, the hub away) says nothing of the card: it goes on streaming.
 func TestProgressKeepsTheEntityWhenTheReadFails(t *testing.T) {
+	needsLarkLayer(t)
 	s, posts, k := streamHub(t)
 	now := time.Unix(1_800_000_000, 0)
 	s.chans.now = func() time.Time { return now }
@@ -341,6 +350,7 @@ func TestProgressKeepsTheEntityWhenTheReadFails(t *testing.T) {
 // A progress card sent as a message has no entity, even when an earlier card of the run had one: the old card_id is
 // dropped, so its later ticks update the message rather than stream into a card nobody sees (also after a restart).
 func TestProgressAsAMessageForgetsAnOldEntity(t *testing.T) {
+	needsLarkLayer(t)
 	s, posts, k := streamHub(t)
 	k.fail = func(op string, _ int) error {
 		if op == "create" {
@@ -363,3 +373,6 @@ func TestProgressAsAMessageForgetsAnOldEntity(t *testing.T) {
 		t.Fatalf("last %v: want the message updated", last)
 	}
 }
+
+// kitCheckEvery is the lark module's kit_check_every, which these tests read the entity's message back by.
+const kitCheckEvery = 30 * time.Second

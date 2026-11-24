@@ -41,8 +41,8 @@ func (s *Service) pendingIDs(ctx context.Context) map[string]bool {
 	return out
 }
 
-// checkChannelRun answers a run whose turn ended (channel.Run.Check and Decide).
-func (s *Service) checkChannelRun(id string) {
+// checkChannelRun answers a run whose turn ended (channel.Run.Check and Decide), reporting a completed unrelated end.
+func (s *Service) checkChannelRun(id string) (unrelated bool) {
 	r, prog := s.channelRunByID(id)
 	if r == nil || prog == nil {
 		return
@@ -87,6 +87,13 @@ func (s *Service) checkChannelRun(id string) {
 		c.mu.Unlock()
 		return
 	case channel.Finish:
+		if step.End == channel.EndGone {
+			// The run ends without reading the conversation: its answer, and those of the messages folded into it, never
+			// go out. Said in the log, so a conversation its node does not list (a session scope it runs outside of) can
+			// be told from one that was really closed.
+			s.logf("channels: %s: %s/%s is not listed while its machine is online, %s after it was asked: ending the run (%d messages) as gone",
+				snap.ID, snap.MachineID, snap.SessionID, look.Now.Sub(snap.WaitFrom()).Round(time.Second), max(len(snap.MsgIDs), 1))
+		}
 		s.finishChannelRun(r, &channel.Result{Note: step.Note, Quiet: step.Note == "", End: step.End})
 		return
 	}
@@ -156,7 +163,7 @@ func (s *Service) checkChannelRun(id string) {
 			res.Answer = i18n.T(look.Lang, "assistant-channels_runs.no_answer", i18n.Args{"reason": reason})
 		}
 	}
-	s.finishChannelRun(r, res)
+	return s.finishChannelRun(r, res)
 }
 
 // askAgain sends the conversation of a turn that ended without an answer (nothing, or a placeholder like "No
@@ -238,7 +245,8 @@ func (s *Service) readTurn(ctx context.Context, r *channel.Run) (channel.Reading
 // The run stays until its answer is handed to the hub: a sink that can't be reached now (the bus, the hub, a
 // plugin's program restarting) is tried again on the next look, for a while (channelAnswerTries), with the same
 // refs (a plugin sends a ref once).
-func (s *Service) finishChannelRun(r *channel.Run, res *channel.Result) {
+// It reports an unrelated end only after its cleanup completed; a pending retry still owns the turn.
+func (s *Service) finishChannelRun(r *channel.Run, res *channel.Result) (unrelated bool) {
 	c := &s.chans
 	c.mu.Lock()
 	prog := c.live[r.ID]
@@ -312,7 +320,10 @@ func (s *Service) finishChannelRun(r *channel.Run, res *channel.Result) {
 		prog.steps, prog.live, prog.dirty = nil, "", false
 		prog.from, prog.upTo = 0, 0
 		prog.open, prog.calls, prog.read, prog.edited, prog.subs, prog.subsMore = nil, 0, nil, nil, nil, 0
-		prog.items, prog.cot = nil, cotProgress{}
+		prog.items = nil
+		if n, ok := prog.sink.(interface{ NextTurn() }); ok {
+			n.NextTurn() // the sink's agent message of the turn goes with it
+		}
 	} else {
 		prog.finished = true
 		delete(c.live, r.ID)
@@ -325,7 +336,10 @@ func (s *Service) finishChannelRun(r *channel.Run, res *channel.Result) {
 				delete(c.answered, k)
 			}
 		}
-		c.answered[[2]string{r.MachineID, r.SessionID}] = now
+		// An unrelated end closes an older wait; it did not answer the conversation's new turn.
+		if res.End != channel.EndUnrelated {
+			c.answered[[2]string{r.MachineID, r.SessionID}] = now
+		}
 	}
 	others := slices.ContainsFunc(c.st.Runs, func(o *channel.Run) bool { return o.Channel == r.Channel })
 	s.saveChannelStateLocked()
@@ -341,6 +355,7 @@ func (s *Service) finishChannelRun(r *channel.Run, res *channel.Result) {
 	if ts, ok := sink.(channelTyping); ok && !others {
 		ts.typing(ctx, false)
 	}
+	return res.End == channel.EndUnrelated
 }
 
 // channelAnswerTries is how long an answer that can't be handed over is tried again before the run gives up on it.
@@ -416,10 +431,15 @@ func (s *Service) channelTurnEnded(ctx context.Context, machine, session string)
 		}
 	}
 	c.mu.Unlock()
+	unrelated := false
 	for _, id := range ids {
-		s.checkChannelRun(id)
+		if s.checkChannelRun(id) {
+			unrelated = true
+		}
 	}
-	if len(ids) == 0 && !s.quietTaskTurn(ctx, machine, session) && !s.channelAnswered(ctx, machine, session) {
+	// An old held wait can end during these checks. Reconsider the new turn only for that confirmed unrelated end;
+	// a remaining run or an answer actually sent still suppresses its mirrors through channelAnswered.
+	if (len(ids) == 0 || unrelated) && !s.quietTaskTurn(ctx, machine, session) && !s.channelAnswered(ctx, machine, session) {
 		s.feishuMirror(ctx, machine, session)
 		s.extensionMirror(ctx, machine, session)
 	}

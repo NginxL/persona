@@ -25,6 +25,7 @@ import org.junit.runner.RunWith
 import org.robolectric.annotation.Config
 import persona.core.designsystem.AppStyle
 import persona.core.designsystem.PersonaTheme
+import persona.core.inbox.*
 
 /**
  * #4093: a tap on the blank space of the inbox reply, connector reply and document comment boxes puts the caret in the

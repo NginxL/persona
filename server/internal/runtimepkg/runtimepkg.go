@@ -524,7 +524,14 @@ func byDirectory(files []File) []partFiles {
 // the tar entries carry mode 0644, time 0 and no owner; the gzip header (left zero) carries no name and time 0.
 func pack(files []File) ([]byte, error) {
 	sorted := append([]File(nil), files...)
-	sort.Slice(sorted, func(i, j int) bool { return sorted[i].Path < sorted[j].Path })
+	// Keep small files and their tar headers together in the gzip window. Paths break ties for reproducibility.
+	sort.Slice(sorted, func(i, j int) bool {
+		a, b := sorted[i], sorted[j]
+		if len(a.Data) != len(b.Data) {
+			return len(a.Data) < len(b.Data)
+		}
+		return a.Path < b.Path
+	})
 	var buf bytes.Buffer
 	zw, err := gzip.NewWriterLevel(&buf, gzip.BestCompression)
 	if err != nil {

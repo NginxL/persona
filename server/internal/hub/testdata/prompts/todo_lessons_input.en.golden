@@ -30,3 +30,6 @@ Fixed: the page used a fixed width.
 
 Lessons this project already has:
 - [lesson-1] missing_context: Use the stock simulator for layout bugs.
+
+Lessons the user deleted (do not learn these again):
+- [lesson-retired-2] wasted_step: Rebuild all targets before testing.

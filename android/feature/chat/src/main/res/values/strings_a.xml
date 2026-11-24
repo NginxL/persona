@@ -125,6 +125,7 @@
     <string name="chat_source_no_phone_approval">This session can\'t be approved on the phone. Approve it on the computer.</string>
     <string name="chat_source_read_only_reason">View only: %1$s</string>
     <string name="chat_starting_failed">Didn\'t start: %1$s</string>
+    <string name="chat_start_failed_title">Couldn\'t start</string>
     <string name="chat_starting">Starting %1$s. Messages go out once it\'s ready.</string>
     <string name="chat_tabs_tab_description">%1$s, %2$s</string>
     <string name="chat_tabs_launcher_chip">%1$s Lead</string>

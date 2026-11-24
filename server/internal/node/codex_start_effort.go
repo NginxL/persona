@@ -19,12 +19,6 @@ import (
 	"github.com/nwverse/persona/server/internal/shellcmd"
 )
 
-// A purpose's or tier's effort reaches a new Codex as `-c model_reasoning_effort=<effort>` (control.go), but any -c
-// keeps a 0.163+ Codex off the shared app-server: it runs one of its own in the pane (codexConfigFlags), so Persona
-// gets only the terminal route, and Codex starts up with the pane's environment instead of the daemon's. Where only
-// the daemon had the proxy Codex needs, such a start failed before its first turn ("workspace routing discovery timed
-// out", #4860). An effort Codex would run at anyway is therefore left out.
-
 // codexProfileKey matches a line that selects a Codex profile (`profile = "…"`, quoted or not), in any table.
 var codexProfileKey = lazyre.New(`(?m)^[ \t]*"?profile"?[ \t]*=`)
 
@@ -80,7 +74,26 @@ func (n *Node) codexEffortInherited(ctx context.Context, argv, pane []string, cw
 	if runtime.GOOS == "windows" {
 		return true
 	}
+	exe, home := n.codexStartCLI(ctx, words, pane, argv[:len(argv)-len(words)], cwd)
+	return exe != "" && sameDir(home, n.codexHome())
+}
+
+// codexStartCLI resolves the native executable and home under the same rc files as codex-start.
+// Opaque wrappers can change provider, home or permissions before invoking the CLI.
+func (n *Node) codexStartCLI(ctx context.Context, words, pane, assignments []string, cwd string) (string, string) {
 	exe := words[0]
+	home := firstNonEmpty(os.Getenv("CODEX_HOME"), n.codexHome())
+	if runtime.GOOS == "windows" {
+		path, err := exec.LookPath(exe)
+		if err != nil {
+			return "", ""
+		}
+		path, _, err = codexStartProgram(path, true, nil)
+		if err != nil || !strings.EqualFold(filepath.Ext(path), ".exe") {
+			return "", ""
+		}
+		return path, home
+	}
 	if exe == "codex" {
 		// codex-start preserves a same-name shell function. Its flags are not in argv and may select another effort.
 		// Otherwise its shell runs the first codex on its PATH, which the pane's rc files may change.
@@ -96,26 +109,34 @@ elif [ -n "${BASH_VERSION-}" ]; then
 else
   exit 0
 fi
-printf '\001persona-codex-unshadowed\001%s\001' "$p"
+printf '\001persona-codex-unshadowed\001%s\001%s\001' "$p" "${CODEX_HOME:-$HOME/.codex}"
 `)
 		cmd.Dir = cwd
-		cmd.Env = append(append(cmd.Environ(), pane...), argv[:len(argv)-len(words)]...)
+		cmd.Env = append(append(cmd.Environ(), pane...), assignments...)
+		cmd.Env = append(cmd.Env, codexStartMarker)
 		killGroupOnCancel(cmd)
 		out, err := cmd.Output()
 		_, found, ok := bytes.Cut(out, []byte("\x01persona-codex-unshadowed\x01"))
 		if err != nil || !ok {
-			return false
+			return "", ""
 		}
-		found, _, ok = bytes.Cut(found, []byte("\x01"))
+		path, rest, ok := bytes.Cut(found, []byte("\x01"))
 		if !ok {
-			return false
+			return "", ""
 		}
-		exe = string(found)
+		homeBytes, _, ok := bytes.Cut(rest, []byte("\x01"))
+		if !ok {
+			return "", ""
+		}
+		exe, home = string(path), string(homeBytes)
 	}
 	if !filepath.IsAbs(exe) {
 		exe = filepath.Join(cwd, exe)
 	}
-	return codexCLIExecutable(exe)
+	if !codexCLIExecutable(exe) {
+		return "", ""
+	}
+	return exe, home
 }
 
 // codexPaneEnv is what a pane of launch's engine holds before its shell reads the rc files, which may choose another

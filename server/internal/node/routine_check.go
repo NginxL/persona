@@ -16,6 +16,12 @@ import (
 	"github.com/nwverse/persona/server/internal/proto"
 )
 
+func init() {
+	nodeRPC(proto.MethodRoutineCheck, func(_ *Node, ctx context.Context, raw json.RawMessage) (proto.RoutineCheckResult, error) {
+		return routineCheck(ctx, raw)
+	})
+}
+
 func routineCheck(ctx context.Context, raw json.RawMessage) (proto.RoutineCheckResult, error) {
 	var p proto.RoutineCheckParams
 	if err := json.Unmarshal(raw, &p); err != nil {

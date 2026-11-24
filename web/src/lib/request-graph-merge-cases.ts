@@ -59,6 +59,8 @@ export interface MergeCase {
   merged: boolean;
   /** Filed under Done. */
   done: boolean;
+  /** Filed under Cancelled instead of active or Done. */
+  cancelled?: boolean;
 }
 
 /** Every root × piece, with what it must be. `merged` holds only while both are closed or both open as stored, and a
@@ -70,7 +72,7 @@ export const MERGE_CASES: MergeCase[] = [
     { root, piece: "working", state: "working", merged: true, done: false },
     { root, piece: "done", state: "done", merged: false, done: false },
     { root, piece: "review_done", state: "done", merged: false, done: false },
-    { root, piece: "cancelled", state: "done", merged: false, done: false },
+    { root, piece: "cancelled", state: "cancelled", merged: false, done: false },
     { root, piece: "auto_seen", state: "done", merged: false, done: false },
     { root, piece: "auto_unseen", state: "review", merged: false, done: false },
     { root, piece: "reopened", state: "ready", merged: true, done: false },
@@ -83,7 +85,7 @@ export const MERGE_CASES: MergeCase[] = [
     { root, piece: "working", state: "working", merged: false, done: false },
     { root, piece: "done", state: "done", merged: true, done: true },
     { root, piece: "review_done", state: "done", merged: true, done: true },
-    { root, piece: "cancelled", state: "done", merged: true, done: true },
+    { root, piece: "cancelled", state: "cancelled", merged: true, done: false, cancelled: true },
     { root, piece: "auto_seen", state: "done", merged: true, done: true },
     { root, piece: "auto_unseen", state: "review", merged: true, done: false },
     { root, piece: "reopened", state: "ready", merged: false, done: false },

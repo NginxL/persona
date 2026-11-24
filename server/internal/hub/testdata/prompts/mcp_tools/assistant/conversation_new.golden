@@ -1,6 +1,6 @@
 {
   "name": "conversation_new",
-  "description": "Open a Persona conversation with a first message; returns its id. For threads the user asks for. Marked as from this one; named after its first turn and told to report with conversation_send. Failure or no report leaves one notice. A read-only policy may refuse: follow it, do not retry. Add `tags` only if asked.",
+  "description": "Open a chat the owner requested. Returns its ID and preset configuration. It reports via conversation_send; failure or silence leaves one notice. Respect read-only refusals.",
   "input_schema": {
     "type": "object",
     "required": [
@@ -9,18 +9,26 @@
     "properties": {
       "text": {
         "type": "string",
-        "description": "everything the new conversation needs; it does not see this one"
+        "description": "Self-contained first message"
       },
       "tags": {
         "type": "array",
         "items": {
           "type": "string"
         },
-        "description": "initial tags; trimmed and de-duplicated, at most 10 of 32 characters each"
+        "description": "Only if asked; up to 10 tags, 32 characters each"
+      },
+      "tier": {
+        "type": "string",
+        "description": "Active profile preset; unknown or assistant-incompatible presets are refused"
+      },
+      "pin": {
+        "type": "boolean",
+        "description": "Ask for approval to pin after the first turn"
       },
       "quote": {
         "type": "string",
-        "description": "\"latest\" (this turn), a message id or the user's exact words"
+        "description": "“latest”, a message ID or the owner’s exact words"
       }
     }
   }

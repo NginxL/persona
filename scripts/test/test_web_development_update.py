@@ -2,6 +2,7 @@
 import contextlib
 import fcntl
 import gzip
+import hashlib
 import importlib.util
 import io
 import json
@@ -79,21 +80,44 @@ if pathlib.Path(sys.argv[0]).name == 'npm' and args == ['run', 'build:developmen
     pathlib.Path('dist').mkdir(); pathlib.Path('dist/index.html').write_text('fixture web')
 if pathlib.Path(sys.argv[0]).name == 'go' and args[0] == 'build':
     pathlib.Path(args[args.index('-o')+1]).write_text(subprocess.check_output(['git','rev-parse','HEAD'], text=True))
+if args == ['tool', 'dist', 'list']:
+    print('linux/amd64', 'linux/riscv64', 'darwin/arm64', 'windows/amd64', sep=chr(10))
 '''
         self.tool("go", fixture)
         self.tool("npm", fixture)
         work = self.root / "build"
         work.mkdir()
+        events = []
         with patch.object(webdev, "HISTORY_LIMIT", 1):
-            built = webdev.build({"platforms":["linux-amd64", "darwin-arm64"], "work":str(work), "candidate":selected,
-                                  "version":"web-dev-fixture", "build":202611130001, "platform":"linux-amd64"})
+            built = webdev.build({"platforms":["linux-amd64", "linux-riscv64", "darwin-arm64", "windows-amd64"], "work":str(work), "candidate":selected,
+                                  "version":"web-dev-fixture", "build":202611130001, "platform":"linux-amd64"},
+                                 webdev.Progress("building", events.append))
+        self.assertEqual(list(dict.fromkeys(event["step"] for event in events)),
+                         ["fetch", "npm_install", "web_build", "runtime_packages", "go_build", "manifest"])
+        targets = [event for event in events if event.get("item_label")]
+        self.assertEqual(targets[0]["item_label"], "personad (darwin-arm64)")
+        self.assertEqual((targets[0]["item_done"], targets[0]["item_total"]), (0, 13))
+        self.assertNotIn(str(self.root), json.dumps(events))
         self.assertEqual(built["ancestors"], [selected["commit"]])
         self.assertEqual(subprocess.check_output(["git", "-C", str(work/"source"), "rev-list", "--count", "HEAD"], text=True).strip(), "1")
         self.assertEqual((work / "personad-linux-amd64").read_text().strip(), selected["commit"])
         self.assertNotEqual(selected["commit"], self.git("rev-parse", "HEAD"))
         self.assertEqual({p.name for p in Path(built["artifacts"]).glob("*.gz")}, {
-            "personad-linux-amd64.gz", "personad-darwin-arm64.gz",
-            "persona-hub-linux-amd64.gz", "persona-manager-linux-amd64.gz"})
+            "personad-linux-amd64.gz", "personad-darwin-arm64.gz", "personad-windows-amd64.exe.gz",
+            "persona-node-linux-amd64.gz", "persona-node-darwin-arm64.gz", "persona-node-windows-amd64.exe.gz",
+            "persona-manager-linux-amd64.gz", "persona-manager-darwin-arm64.gz", "persona-manager-windows-amd64.exe.gz",
+            "personad-linux-riscv64.gz", "persona-node-linux-riscv64.gz", "persona-manager-linux-riscv64.gz",
+            "persona-hub-linux-amd64.gz"})
+        artifacts = Path(built["artifacts"])
+        manifest = json.loads((artifacts / "manifest.json").read_text())
+        self.assertEqual((manifest["commit"], manifest["version"], manifest["build"]),
+                         (selected["commit"], "web-dev-fixture", 202611130001))
+        for files in (manifest["files"], *manifest["nodes"].values(), *manifest["programs"].values()):
+            for entry in files.values():
+                archive = (artifacts / entry["name"]).read_bytes()
+                self.assertEqual(entry["size"], len(archive))
+                self.assertEqual(entry["sha256"], hashlib.sha256(archive).hexdigest())
+                self.assertEqual(entry["binary_sha256"], hashlib.sha256(gzip.decompress(archive)).hexdigest())
         commands = [json.loads(line) for line in trace.read_text().splitlines()]
         self.assertFalse(any("test" in args or "vet" in args for _, args in commands))
         self.git("branch", "-m", "other")
@@ -121,6 +145,51 @@ if pathlib.Path(sys.argv[0]).name == 'go' and args[0] == 'build':
         hook = self.tool("writer-hook", "import pathlib,sys\np=pathlib.Path(sys.argv[1]);p.write_text((p.read_text() if p.exists() else '')+sys.argv[2]+'\\n')\n")
         return {"runtime": str(runtime), "hub_database":"effective-fixture-database", "executables":{"personad":str(binary)}, "candidate":{"commit":"a"*40}, "config":{"backup":{
             "quiesce":[hook,str(events),"pause"], "resume":[hook,str(events),"resume"]}}}
+
+    def test_history_progress_counts_regular_files_and_skips_excluded_trees(self):
+        root = self.root / "history"
+        root.mkdir()
+        (root / "keep").write_bytes(b"a" * (2 * 1024 * 1024))
+        (root / "empty").touch()
+        (root / "link").symlink_to("keep")
+        (root / "skip").mkdir()
+        (root / "skip/excluded").write_bytes(b"discard")
+        os.mkfifo(root / "fifo")
+        elapsed = iter(range(100))
+        events = []
+        with patch.object(webdev.time, "monotonic", side_effect=lambda: next(elapsed)):
+            progress = webdev.Progress("backing_up", events.append)
+            progress.step("archive_files")
+            archive = self.root / "files.tar.gz"
+            webdev.archive_history([root], {root / "skip"}, archive, progress)
+        first = next(event for event in events if "bytes_total" in event)
+        self.assertEqual((first["bytes_done"], first["bytes_total"], first["item_total"]), (0, 2 * 1024 * 1024, 2))
+        self.assertTrue(any(0 < event.get("percent", 0) < 100 and event["bytes_per_second"] > 0 for event in events))
+        self.assertEqual((events[-1]["item_done"], events[-1]["percent"]), (2, 100))
+        self.assertNotIn(str(root), json.dumps(events))
+        with tarfile.open(archive) as stream:
+            self.assertEqual(stream.getnames(), ["root-0", "root-0/empty", "root-0/keep", "root-0/link"])
+
+    def test_progress_throttles_counters_and_resets_metrics_on_step_change(self):
+        elapsed = 0
+        events = []
+        with patch.object(webdev.time, "monotonic", side_effect=lambda: elapsed):
+            progress = webdev.Progress("backing_up", events.append)
+            progress.step("database_dump", item_done=0, item_total=2, bytes_done=0)
+            elapsed = 0.5
+            progress.add_bytes(200)
+            self.assertEqual(len(events), 1)
+            elapsed = 0.75
+            progress.add_bytes(100)
+            self.assertEqual(events[-1]["bytes_per_second"], 400)
+            self.assertNotIn("percent", events[-1])
+            elapsed = 1.5
+            progress.emit()
+            self.assertEqual(events[-1]["bytes_per_second"], 260)
+            progress.step("archive_files")
+        self.assertEqual(events[-1]["elapsed_seconds"], 1)
+        self.assertNotIn("bytes_done", events[-1])
+        self.assertNotIn("item_total", events[-1])
 
     def wait_file(self, path, process):
         deadline = time.monotonic() + 10
@@ -275,6 +344,64 @@ pathlib.Path({str(resumed)!r}).touch()
         with self.assertRaisesRegex(ValueError, "quiesce"):
             webdev.snapshot(request)
 
+    def test_existing_backslash_runtime_and_backup_directory(self):
+        request = self.history_fixture()
+        original_runtime = Path(request["runtime"])
+        runtime = self.root / r"persona\prod"
+        original_runtime.rename(runtime)
+        request["runtime"] = str(runtime)
+        recommended = runtime / "update" / "development-backups"
+        request["config"]["backup"] = {"builtin": True, "directory": str(recommended)}
+        receipt = webdev.snapshot(request)
+        manifest = webdev.verify(recommended / receipt["id"])
+        self.assertEqual(manifest["roots"], [str(runtime.resolve())])
+
+        existing_store = self.root / r"existing\store"
+        existing_store.mkdir(mode=0o700)
+        request["config"]["backup"] = {"builtin": True, "directory": str(existing_store)}
+        receipt2 = webdev.snapshot(request)
+        webdev.verify(existing_store / receipt2["id"])
+
+        for bad in (
+            str(runtime / r"new\dir"),
+            str(runtime / r"new\dir" / "snapshots"),
+            str(runtime) + "//update/development-backups",
+            str(runtime / "update" / ".." / "escape"),
+            str(runtime / "bad\x00dir"),
+        ):
+            request["config"]["backup"] = {"builtin": True, "directory": bad}
+            with self.assertRaisesRegex(ValueError, "invalid backup directory"):
+                webdev.backup_store(request)
+
+    def test_builtin_quiesce_refuses_extra_sources_and_other_local_managers(self):
+        request = self.history_fixture()
+        external = dict(request["config"]["backup"])
+        runtime = Path(request["runtime"])
+        extra_root = self.root / "extra-root"
+        extra_root.mkdir()
+        (extra_root / "note.txt").write_text("extra")
+
+        # Built-in pause refuses extra_databases and extra_roots.
+        for extra in ({"extra_databases": ["extra-db"]}, {"extra_roots": [str(extra_root)]}):
+            request["config"]["backup"] = dict(extra, builtin=True)
+            with self.assertRaisesRegex(ValueError, "built-in writer pause"):
+                webdev.snapshot(request)
+
+        # Built-in pause refuses another local manager even with no owned machines.
+        other = runtime / "managers" / "m-other"
+        other.mkdir(parents=True)
+        (other / "manager.json").write_text(json.dumps({"database_url": "other-manager-db"}))
+        request["config"]["backup"] = {"builtin": True}
+        with self.assertRaisesRegex(ValueError, "other local managers"):
+            webdev.snapshot(request)
+
+        # External quiesce/resume hooks still work with extra sources and another local manager.
+        request["config"]["backup"] = dict(external, extra_databases=["extra-db"], extra_roots=[str(extra_root)])
+        receipt = webdev.snapshot(request)
+        manifest = webdev.verify(runtime / "update/development-backups" / receipt["id"])
+        self.assertEqual(manifest["databases"], 3)
+        self.assertIn(str(extra_root.resolve()), manifest["roots"])
+
     def test_store_may_not_be_or_contain_a_collected_root(self):
         request = self.history_fixture()
         runtime = Path(request["runtime"])
@@ -320,10 +447,21 @@ pathlib.Path({str(resumed)!r}).touch()
         # Preparation must neither restore a database nor pause current writers.
         self.tool("pg_restore", "raise SystemExit('must not restore data')\n")
         events = (self.root/"events").read_bytes()
-        built = webdev.prepare_backup(dict(request, work=str(work), backup_id=receipt["id"],
-                                           candidate={"commit":"b"*40}, version="web-dev-old", build=202611120001,
-                                           platforms=["linux-amd64", "linux-arm64"]))
+        progress = []
+        clock = iter(range(100))
+        with patch.object(webdev.time, "monotonic", side_effect=lambda: next(clock)):
+            built = webdev.prepare_backup(dict(request, work=str(work), backup_id=receipt["id"],
+                                               candidate={"commit":"b"*40}, version="web-dev-old", build=202611120001,
+                                               platforms=["linux-amd64", "linux-arm64"]),
+                                          webdev.Progress("applying_backup", progress.append))
         artifacts = Path(built["artifacts"])
+        self.assertEqual({p["step"] for p in progress}, {"verify_snapshot", "prepare_artifacts"})
+        self.assertGreater(max(p.get("bytes_per_second", 0) for p in progress if p["step"] == "prepare_artifacts"), 0)
+        self.assertEqual(progress[-1]["item_total"], 2)
+        self.assertEqual(progress[-1]["item_done"], 2)
+        self.assertEqual(progress[-1]["bytes_done"], sum(p.stat().st_size for p in artifacts.iterdir()))
+        self.assertEqual(progress[-1]["bytes_done"], progress[-1]["bytes_total"])
+        self.assertNotIn(str(self.root), json.dumps(progress))
         self.assertEqual(gzip.decompress((artifacts/"personad-linux-amd64.gz").read_bytes()), b"fixture installed program")
         self.assertEqual(gzip.decompress((artifacts/"personad-linux-arm64.gz").read_bytes()), b"old arm64 node")
         self.assertEqual((self.root/"events").read_bytes(), events)

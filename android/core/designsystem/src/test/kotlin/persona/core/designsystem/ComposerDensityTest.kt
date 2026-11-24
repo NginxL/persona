@@ -16,16 +16,21 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.performClick
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.height
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -79,6 +84,114 @@ class ComposerDensityTest {
         assertEquals(48f, (keyboard.right - keyboard.left).value, 0.5f)
         assertEquals(0f, (keyboard.left - openAttach.right).value, 0.5f)
         assertEquals(36f, (open.bottom - (keyboard.bottom + keyboard.top) / 2).value, 0.5f)
+    }
+
+    @Test fun emptyAccessoryAddsNoExtraHeightInAnyStyle() {
+        var style by mutableStateOf(AppStyle.Glass)
+        var home by mutableStateOf(false)
+        rule.setContent {
+            LayoutDensity.apply(LayoutDensity.Standard)
+            CompositionLocalProvider(LocalHomeChrome provides if (home) HomeChrome(emptyList(), "chat", {}, {}) else null) {
+                PersonaTheme(style = style, reduceMotion = true) {
+                    Column(Modifier.width(360.dp)) {
+                        ComposerFrame(Modifier.testTag("null-acc"), accessory = null) { Text("Message") }
+                        ComposerFrame(Modifier.testTag("empty-acc"), accessory = {}) { Text("Message") }
+                    }
+                }
+            }
+        }
+        for (s in AppStyle.entries) for (isHome in listOf(false, true)) {
+            rule.runOnIdle { style = s; home = isHome }
+            val withoutAcc = rule.onNodeWithTag("null-acc").getUnclippedBoundsInRoot().height
+            val withEmpty = rule.onNodeWithTag("empty-acc").getUnclippedBoundsInRoot().height
+            assertEquals("$s home=$isHome: empty accessory must not add vertical padding", withoutAcc.value, withEmpty.value, 0.5f)
+        }
+    }
+
+    @Test fun briefAndBoardExpandedComposerKeepCompactVerticalDepthAndTouchTargets() {
+        var style by mutableStateOf(AppStyle.Brief)
+        var expanded by mutableStateOf(false)
+        rule.setContent {
+            LayoutDensity.apply(LayoutDensity.Standard)
+            PersonaTheme(style = style, reduceMotion = true) {
+                ComposerFrame(
+                    modifier = Modifier.width(360.dp).testTag("frame"),
+                    expanded = expanded,
+                    accessory = {},
+                    leading = {
+                        JIconButton(PhIcons.Plus, "Add", {}, Modifier.testTag("add"))
+                        if (expanded) JIconButton(PhIcons.At, "Mention", {}, Modifier.testTag("mention"))
+                    },
+                    trailing = {
+                        JIconButton(PhIcons.Microphone, "Dictate", {}, Modifier.testTag("mic"))
+                        SendButton({}, Modifier.testTag("send"))
+                    },
+                ) {
+                    Text("Ask Persona", Modifier.testTag("field"))
+                }
+            }
+        }
+        for (s in listOf(AppStyle.Brief, AppStyle.Board)) {
+            rule.runOnIdle { style = s; expanded = false }
+            val idleFrame = rule.onNodeWithTag("frame").getUnclippedBoundsInRoot()
+            val idleSend = rule.onNodeWithTag("send").getUnclippedBoundsInRoot()
+            assertTrue("$s idle send touch height >= 48dp", idleSend.height >= Tokens.MinTouch.android)
+            // Compact idle height: top(4) + 48dp input row + bottom(6) = 58dp (down from 64–72dp).
+            assertTrue("$s idle frame height (${idleFrame.height}) <= 60dp", idleFrame.height <= 60.dp)
+
+            rule.runOnIdle { expanded = true }
+            val openFrame = rule.onNodeWithTag("frame").getUnclippedBoundsInRoot()
+            val openAdd = rule.onNodeWithTag("add").getUnclippedBoundsInRoot()
+            val openMention = rule.onNodeWithTag("mention").getUnclippedBoundsInRoot()
+            val openSend = rule.onNodeWithTag("send").getUnclippedBoundsInRoot()
+            assertTrue("$s expanded add touch height >= 48dp", openAdd.height >= Tokens.MinTouch.android)
+            assertTrue("$s expanded mention touch height >= 48dp", openMention.height >= Tokens.MinTouch.android)
+            assertTrue("$s expanded toolbar sits below input row without overlap", openAdd.top >= openSend.bottom - 0.5.dp)
+            // Compact expanded height: top(4) + 48dp input + 48dp toolbar + bottom(2) = 102dp (down from 124–136dp).
+            assertTrue("$s expanded frame height (${openFrame.height}) <= 106dp", openFrame.height <= 106.dp)
+        }
+    }
+
+    @Test fun singleItemQueueStripStaysCompactAndInteractiveAcrossStylesAndLargeText() {
+        var style by mutableStateOf(AppStyle.Brief)
+        var fontScale by mutableStateOf(1f)
+        val picked = mutableListOf<Int>()
+        rule.setContent {
+            LayoutDensity.apply(LayoutDensity.Standard)
+            CompositionLocalProvider(LocalDensity provides Density(LocalDensity.current.density, fontScale = fontScale)) {
+                PersonaTheme(style = style, reduceMotion = true) {
+                    QueueStrip(
+                        title = "排队中 1 条 · Persona 忙完会依次处理",
+                        items = listOf("为什么这条排队消息占了这么高"),
+                        onItem = { picked += it },
+                        modifier = Modifier.width(360.dp).testTag("queue"),
+                        initiallyExpanded = true,
+                    )
+                }
+            }
+        }
+        for (s in AppStyle.entries) {
+            rule.runOnIdle { style = s; fontScale = 1f }
+            val strip = rule.onNodeWithTag("queue").getUnclippedBoundsInRoot()
+            val row = rule.onNodeWithContentDescription("第 1 条：为什么这条排队消息占了这么高")
+            val rowBounds = row.getUnclippedBoundsInRoot()
+            val minRow = if (s == AppStyle.Glass) JChipTokens.height else Tokens.Size.slimBar
+            assertTrue("$s queue row height (${rowBounds.height}) >= $minRow", rowBounds.height >= minRow)
+            if (s != AppStyle.Glass) {
+                // Single-line PlainQueueStrip tightened from ~88dp to <= 76dp.
+                assertTrue("$s single-item queue height (${strip.height}) <= 76dp", strip.height <= 76.dp)
+            }
+            picked.clear()
+            row.performClick()
+            rule.waitForIdle()
+            assertEquals("$s row click delivers index", listOf(0), picked)
+
+            // 2.0x system font scale stays readable, unclipped, and clickable.
+            rule.runOnIdle { fontScale = 2f }
+            row.assertIsDisplayed()
+            val largeBounds = row.getUnclippedBoundsInRoot()
+            assertTrue("$s 2.0x row fits inside strip bounds", largeBounds.top >= strip.top && largeBounds.bottom <= rule.onNodeWithTag("queue").getUnclippedBoundsInRoot().bottom)
+        }
     }
 
     @Test fun writesHomeGlassFramesForInspection() {

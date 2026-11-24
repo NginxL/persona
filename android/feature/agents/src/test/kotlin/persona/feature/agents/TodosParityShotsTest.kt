@@ -28,9 +28,14 @@ import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
 import persona.core.contracts.Machine
 import persona.core.contracts.Session
+import persona.core.contracts.Supervision
+import persona.core.contracts.TaskReview
 import persona.core.contracts.Todo
 import persona.core.contracts.TodoAgent
+import persona.core.contracts.TodoAsk
 import persona.core.contracts.TodoDelivery
+import persona.core.contracts.TodoLineageStep
+import persona.core.contracts.TodoPRStatus
 import persona.core.contracts.TodoSpace
 import persona.core.designsystem.AppStyle
 import persona.core.designsystem.PersonaTheme
@@ -66,13 +71,34 @@ class TodosParityShotsTest {
                 TodoAgent("mac", "s2", title = "补测试", cwd = "/code/app", source = "spawned", via = "mac/s1"))),
         // Done as asked, held at its PR (#3306): the row and the page say where and who can unhold it.
         Todo("t2", title = "写发布说明", notes = "这周合并的 PR 都要提到", createdAt = ago(300), spaces = emptyList(), origin = "conv",
+            prUrl = "https://example.com/pull/2", prStatus = TodoPRStatus(url = "https://example.com/pull/2", state = "open", checkedAt = ago(0)),
             delivery = TodoDelivery("pr", gate = "等你批准合并", unblock = "user", at = ago(20))),
         Todo("t3", title = "轮换 API Key", createdAt = ago(400), spaces = emptyList()),
+        Todo("delivered", title = "验证交付状态", createdAt = ago(390), updatedAt = ago(8), spaces = emptyList(), origin = "conv",
+            supervision = Supervision(supervisor = "main", state = "pending_review"),
+            delivery = TodoDelivery("live", at = ago(8))),
         Todo("t4", title = "整理崩溃报告", createdAt = ago(600), doneAt = ago(120), doneBy = "auto", doneReason = "Agent 已经把报告整理好并发到群里",
             spaces = emptyList()),
         // An open PR that is not held for the owner's approval belongs to PR to merge, not Needs you or Shelved.
         Todo("t5", title = "发布补丁", createdAt = ago(80), updatedAt = ago(5), origin = "conv", spaces = emptyList(),
+            prUrl = "https://example.com/pull/5", prStatus = TodoPRStatus(url = "https://example.com/pull/5", state = "open", checkedAt = ago(0)),
             delivery = TodoDelivery("pr", unblock = "agent", at = ago(5))),
+    )
+
+    private val cancelled = Todo(
+        "new", title = "按新方案重新验证", notes = "旧方案已由新卡接手", createdAt = ago(180), doneAt = ago(10),
+        doneBy = "cancelled", cancelledAt = ago(10), cancelledReason = "需求调整，按新方案重新验证", spaces = emptyList(),
+        lineage = listOf(
+            TodoLineageStep("old", title = "验证原方案", supersededBy = "new"),
+            TodoLineageStep("new", title = "按新方案重新验证", continues = "old", current = true),
+        ),
+    )
+
+    private val acceptedOwner = Todo(
+        "accepted-owner", title = "决定重新打开后的发布范围", createdAt = ago(90), updatedAt = ago(5), origin = "conv", spaces = emptyList(),
+        supervision = Supervision(supervisor = "main", state = "accepted",
+            reviews = listOf(TaskReview(at = ago(10), verdict = "accepted"))),
+        ask = TodoAsk(outcome = "decide", verdict = "选择发布范围", askedAt = ago(5), question = "这次发布包含哪些改动？"),
     )
 
     /** Agents that never started (#3713): one waits on the owner; the other's work finished in a to-do of its plan. */
@@ -90,7 +116,7 @@ class TodosParityShotsTest {
         persona.core.contracts.api.HubManager("m-8b04d2", "家里", online = false, lastSeen = Instant.now().minusSeconds(3 * 3600).toString()),
     ), "assistant"), persona.core.contracts.api.AssistantManagerChoice.Choice("hub", "m-8b04d2", "assistant"))
 
-    private fun shot(scene: String, style: AppStyle, dark: Boolean, expected: String) {
+    private fun shot(scene: String, style: AppStyle, dark: Boolean, expected: String, suffix: String = "") {
         rule.setContent {
             PersonaTheme(darkTheme = dark, reduceMotion = true, style = style) {
                 Box(Modifier.testTag("shot").width(400.dp).height(1400.dp).background(PersonaTheme.palette.background)) {
@@ -102,6 +128,11 @@ class TodosParityShotsTest {
                         "offline" -> TodosScreen(emptyList(), emptyList(), null, onBack = {}, onOpenTodo = {}, now = now, assistant = offline)
                         "held" -> TodoDetailScreen("t2", todos, machines, sessions, null, onBack = {}, onOpenSession = {}, onHandOff = {}, now = now)
                         "detail" -> TodoDetailScreen("t1", todos, machines, sessions, null, onBack = {}, onOpenSession = {}, onHandOff = {}, now = now)
+                        "cancelled-list" -> TodosScreen(listOf(cancelled), sessions, null, onBack = {}, onOpenTodo = {}, now = now)
+                        "lineage" -> TodoDetailScreen("new", listOf(cancelled), machines, sessions, null, onBack = {}, onOpenSession = {}, onHandOff = {}, now = now)
+                        "accepted-owner-list" -> TodosScreen(listOf(acceptedOwner), emptyList(), null, onBack = {}, onOpenTodo = {}, now = now)
+                        "accepted-owner-detail" -> TodoDetailScreen("accepted-owner", listOf(acceptedOwner), machines, emptyList(), null,
+                            onBack = {}, onOpenSession = {}, onHandOff = {}, now = now)
                         "picker" -> TodoPickerSheet(todos, { k -> sessions.firstOrNull { it.key == k } }, onDismiss = {}, onPick = {},
                             onCreate = {}, unlink = "移出待办" to {})
                     }
@@ -109,6 +140,7 @@ class TodosParityShotsTest {
             }
         }
         rule.waitForIdle()
+        if (scene == "cancelled-list") { rule.onNodeWithText("已取消").performClick(); rule.waitForIdle() }
         if (scene == "picker") { rule.onNodeWithText("新建待办…").performClick(); rule.waitForIdle() }
         if (scene == "list-sections") {
             // The actual PR section can be below the initial viewport. Bring it into view without changing triage,
@@ -118,7 +150,7 @@ class TodosParityShotsTest {
         assertTrue("$scene: no 「$expected」", rule.onAllNodesWithText(expected, substring = true, useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty())
         val node = if (scene == "picker") rule.onNode(isDialog()) else rule.onNodeWithTag("shot")
         val bitmap = node.captureToImage().asAndroidBitmap()
-        File(out(), "todos-$scene-${style.name.lowercase()}-${if (dark) "dark" else "light"}.png").outputStream()
+        File(out(), "todos-$scene-${style.name.lowercase()}-${if (dark) "dark" else "light"}$suffix.png").outputStream()
             .use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
     }
 
@@ -140,7 +172,7 @@ class TodosParityShotsTest {
     @Test fun heldBoardDark() = shot("held", AppStyle.Board, true, "卡在「等你批准合并」")
 
     @Test fun listSectionsGlass() = shot("list-sections", AppStyle.Glass, false, "PR 待合并")
-    @Test fun listSectionsGlassDark() = shot("list-sections", AppStyle.Glass, true, "刚做完")
+    @Test fun listSectionsGlassDark() = shot("list-sections", AppStyle.Glass, true, "已交付·待看")
 
     @Test fun failedGlass() = shot("failed", AppStyle.Glass, false, "部署自托管面板")
     @Test fun failedGlassDark() = shot("failed", AppStyle.Glass, true, "部署自托管面板")
@@ -163,6 +195,40 @@ class TodosParityShotsTest {
     @Test fun detailBriefDark() = shot("detail", AppStyle.Brief, true, "由 修登录页 派出")
     @Test fun detailBoard() = shot("detail", AppStyle.Board, false, "由 修登录页 派出")
     @Test fun detailBoardDark() = shot("detail", AppStyle.Board, true, "由 修登录页 派出")
+
+    @Test fun cancelledListGlass() = shot("cancelled-list", AppStyle.Glass, false, "取消原因：需求调整，按新方案重新验证")
+    @Test fun cancelledListGlassDark() = shot("cancelled-list", AppStyle.Glass, true, "取消原因：需求调整，按新方案重新验证")
+    @Test fun cancelledListBrief() = shot("cancelled-list", AppStyle.Brief, false, "取消原因：需求调整，按新方案重新验证")
+    @Test fun cancelledListBriefDark() = shot("cancelled-list", AppStyle.Brief, true, "取消原因：需求调整，按新方案重新验证")
+    @Test fun cancelledListBoard() = shot("cancelled-list", AppStyle.Board, false, "取消原因：需求调整，按新方案重新验证")
+    @Test fun cancelledListBoardDark() = shot("cancelled-list", AppStyle.Board, true, "取消原因：需求调整，按新方案重新验证")
+
+    @Test fun lineageGlass() = shot("lineage", AppStyle.Glass, false, "接手自 验证原方案")
+    @Test fun lineageGlassDark() = shot("lineage", AppStyle.Glass, true, "接手自 验证原方案")
+    @Test fun lineageBrief() = shot("lineage", AppStyle.Brief, false, "接手自 验证原方案")
+    @Test fun lineageBriefDark() = shot("lineage", AppStyle.Brief, true, "接手自 验证原方案")
+    @Test fun lineageBoard() = shot("lineage", AppStyle.Board, false, "接手自 验证原方案")
+    @Test fun lineageBoardDark() = shot("lineage", AppStyle.Board, true, "接手自 验证原方案")
+
+    @Test @Config(fontScale = 1.3f)
+    fun lineageLargeFont() = shot("lineage", AppStyle.Glass, false, "接手自 验证原方案", suffix = "-large")
+
+    @Test @Config(fontScale = 1.3f)
+    fun cancelledListLargeFontDark() = shot("cancelled-list", AppStyle.Glass, true, "取消原因：需求调整，按新方案重新验证", suffix = "-large")
+
+    @Test fun acceptedOwnerListGlass() = shot("accepted-owner-list", AppStyle.Glass, false, "等你处理")
+    @Test fun acceptedOwnerListGlassDark() = shot("accepted-owner-list", AppStyle.Glass, true, "等你处理")
+    @Test fun acceptedOwnerListBrief() = shot("accepted-owner-list", AppStyle.Brief, false, "等你处理")
+    @Test fun acceptedOwnerListBriefDark() = shot("accepted-owner-list", AppStyle.Brief, true, "等你处理")
+    @Test fun acceptedOwnerListBoard() = shot("accepted-owner-list", AppStyle.Board, false, "等你处理")
+    @Test fun acceptedOwnerListBoardDark() = shot("accepted-owner-list", AppStyle.Board, true, "等你处理")
+
+    @Test fun acceptedOwnerDetailGlass() = shot("accepted-owner-detail", AppStyle.Glass, false, "等你处理")
+    @Test fun acceptedOwnerDetailGlassDark() = shot("accepted-owner-detail", AppStyle.Glass, true, "等你处理")
+    @Test fun acceptedOwnerDetailBrief() = shot("accepted-owner-detail", AppStyle.Brief, false, "等你处理")
+    @Test fun acceptedOwnerDetailBriefDark() = shot("accepted-owner-detail", AppStyle.Brief, true, "等你处理")
+    @Test fun acceptedOwnerDetailBoard() = shot("accepted-owner-detail", AppStyle.Board, false, "等你处理")
+    @Test fun acceptedOwnerDetailBoardDark() = shot("accepted-owner-detail", AppStyle.Board, true, "等你处理")
 
     @Test fun pickerGlass() = shot("picker", AppStyle.Glass, false, "创建并挂上")
     @Test fun pickerGlassDark() = shot("picker", AppStyle.Glass, true, "创建并挂上")

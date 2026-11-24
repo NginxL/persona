@@ -69,7 +69,7 @@ struct NewAgentAttachmentsTests {
         a.uploaded(.init(name: "late.log", path: "/tmp/late-1.log", size: 1), on: "macbook")
         #expect(a.files.isEmpty)
         // Switching back finds nothing to take out: no new note.
-        a.add(UIImage(), model: model)
+        a.add(UIImage(), model: model, to: MachineRef(path: "macbook"))
         #expect(a.note == nil)
         a.computerChanged(to: "macbook") { names[$0] }
         #expect(a.note == nil)

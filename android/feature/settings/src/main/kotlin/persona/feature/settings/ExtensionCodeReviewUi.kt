@@ -272,7 +272,7 @@ private fun ReviewComment(c: ExtensionViewComment, original: List<String>) {
     Column(Modifier.fillMaxWidth().padding(start = rowPadding + Tokens.Space.xl + Tokens.Space.m, end = rowPadding, bottom = Tokens.Space.s)) {
         parts.forEach { p ->
             when (p) {
-                is BodyPart.Text -> ExtensionMarkdown(p.text)
+                is BodyPart.Text -> ReadingContent { ExtensionMarkdown(p.text) }
                 is BodyPart.Suggestion -> Suggestion(original, p.lines)
             }
         }

@@ -67,6 +67,9 @@ type relayResult struct{ gone bool }
 // errNotSent marks a push that never left the hub (sendFailure).
 var errNotSent = errors.New("push not sent")
 
+// errRelayOff: office network mode never posts to a relay (Pusher.privateOnly).
+var errRelayOff = fmt.Errorf("%w: office network mode pushes only with the hub's own APNs key", errNotSent)
+
 var errRegistrationChanged = fmt.Errorf("%w: push registration changed before dispatch", errNotSent)
 
 // relayRefusal is the relay's answer to a push it did not take: a status other than 200 and 410 (postRelayOnce).
@@ -134,6 +137,9 @@ func relayRetryable(status int) bool {
 }
 
 func (p *Pusher) postRelayOnce(d Device, req relayproto.PushRequest) (relayResult, int, error) {
+	if p.privateOnly {
+		return relayResult{}, -1, errRelayOff
+	}
 	body, _ := json.Marshal(req)
 	hr, err := http.NewRequest("POST", d.RelayURL+"/v1/push", bytes.NewReader(body))
 	if err != nil {
@@ -171,6 +177,9 @@ func (p *Pusher) postRelayOnce(d Device, req relayproto.PushRequest) (relayResul
 
 // renewGrant registers the device's token with its relay again and keeps the new grant.
 func (p *Pusher) renewGrant(d Device) (Device, error) {
+	if p.privateOnly {
+		return d, errRelayOff
+	}
 	if d.APNSToken == "" || d.Topic == "" {
 		return d, fmt.Errorf("device has no token to register")
 	}

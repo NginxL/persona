@@ -28,6 +28,7 @@
   "empty_body": "アシスタントが依頼をいくつかの ToDo に分けると、各作業がここに表示されます。担当と待っている作業もわかります。",
   "all_done": "手元の依頼はすべて完了しました。",
   "done_fold_other": "完了した依頼 {count} 件",
+  "cancelled_fold_other": "キャンセルした依頼 {count} 件",
   "show_more_other": "さらに {count} 件表示",
   "queued": "待機中",
   "why_ready": "着手できます。まだ Agent に渡していません"

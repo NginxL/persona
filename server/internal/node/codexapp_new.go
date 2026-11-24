@@ -19,6 +19,7 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/nwverse/persona/server/internal/assistantskills"
 	"github.com/nwverse/persona/server/internal/proto"
 )
 
@@ -59,6 +60,11 @@ var (
 	// codexAppCLI is the Codex CLI the App bundles (the same version as the App's own app-server), else one on PATH or
 	// where Codex installs (a variable: tests use their own).
 	codexAppCLI = func() (string, error) {
+		if runtime.GOOS == "windows" {
+			if p := bundledCodexAppCLI(); p != "" {
+				return p, nil
+			}
+		}
 		if p := bundledCodexCLI(); p != "" {
 			return p, nil
 		}
@@ -80,7 +86,8 @@ var (
 
 	// seedCodexAppChat starts a chat named title in dir with codex in home, and returns its thread id (a variable:
 	// tests start their own).
-	seedCodexAppChat = startCodexAppChat
+	seedCodexAppChat          = startCodexAppChat
+	seedCodexAppChatInProject = startCodexAppChatInProject
 )
 
 // isCodexAppLauncher: name is the Codex App's launcher, not a login shell's of that name.
@@ -89,10 +96,10 @@ func isCodexAppLauncher(name string) bool {
 }
 
 // withCodexAppLauncher is list with the Codex App's launcher after it, on a computer whose App runs for this node's
-// Codex home (its bus socket is there) and where a Codex CLI to start chats with is found; added reports whether it was.
+// Codex home (its bus accepts connections) and where a Codex CLI to start chats with is found; added reports whether it was.
 // A launcher of the login shell's with its name is left as it is: that one runs.
 func (n *Node) withCodexAppLauncher(list []proto.Launcher) (out []proto.Launcher, added bool) {
-	if !codexDesktopAvailable(n.codexHome()) || slices.ContainsFunc(list, func(l proto.Launcher) bool { return l.Name == codexAppLauncher }) {
+	if n.sessionScope != nil || !codexDesktopAvailable(n.codexHome()) || slices.ContainsFunc(list, func(l proto.Launcher) bool { return l.Name == codexAppLauncher }) {
 		return list, false
 	}
 	if _, err := codexAppCLI(); err != nil {
@@ -112,9 +119,16 @@ func (n *Node) startInCodexApp(ctx context.Context, p runtimeStartParams, nameHi
 }
 
 func (n *Node) newCodexAppChat(ctx context.Context, p runtimeStartParams, nameHint string) (*proto.Session, error) {
+	if n.sessionScope != nil {
+		return nil, refusal("desktop_scope_unavailable", "Desktop sessions are unavailable in a scoped node.", nil)
+	}
 	home := n.codexHome()
+	projectID, err := parseCodexDesktopProjectID(home, p.DesktopProjectID)
+	if err != nil {
+		return nil, err
+	}
 	if !codexDesktopAvailable(home) {
-		return nil, refusal("codex_read_only", "电脑上的 Codex App 没在运行，不能在 App 里新开对话，这次没有发送。", nil)
+		return nil, codexDesktopUnavailable(ctx)
 	}
 	if p.PermissionMode == "plan" {
 		// The App runs the chat in its own mode, and a plan waiting for approval there could not be answered here.
@@ -123,7 +137,7 @@ func (n *Node) newCodexAppChat(ctx context.Context, p runtimeStartParams, nameHi
 	prompt := strings.TrimSpace(p.Prompt)
 	if prompt == "" {
 		// The App lists a chat once it has a message: one with none would be nowhere to be seen.
-		return nil, errors.New("在 Codex App 里新开对话需要第一条消息，这次没有发送。")
+		return nil, refusal("codex_needs_prompt", "在 Codex App 里新开对话需要第一条消息，这次没有发送。", nil)
 	}
 	model, effort := strings.TrimSpace(p.Model), strings.TrimSpace(p.Effort)
 	if model != "" && !proto.ValidModelID(model) {
@@ -138,27 +152,100 @@ func (n *Node) newCodexAppChat(ctx context.Context, p runtimeStartParams, nameHi
 	if err != nil {
 		return nil, err
 	}
-	thread, err := seedCodexAppChat(ctx, cli, home, dir, title)
-	if err != nil {
+	var thread string
+	if projectID == "" {
+		thread, err = seedCodexAppChat(ctx, cli, home, dir, title)
+	} else {
+		thread, err = seedCodexAppChatInProject(ctx, cli, home, dir, title, projectID)
+	}
+	if err != nil && !validID(thread) {
+		if maybeDelivered(err) {
+			return nil, err
+		}
 		return nil, fmt.Errorf("Codex 没能新开对话：%v", err)
+	}
+	if !validID(thread) {
+		return nil, uncertain(errors.New("Codex returned no valid identifier for the new desktop chat"))
+	}
+	s := &proto.Session{SessionID: n.codexPublicID(home, thread), Cwd: dir, Title: title, Agent: "codex",
+		Launcher: codexAppLauncher, Status: proto.StatusIdle, StartedByPersona: true, UpdatedAt: time.Now().UTC()}
+	n.state.put(s.SessionID, sessionState{Launcher: codexAppLauncher, Cwd: dir, StartedAt: s.UpdatedAt,
+		DesktopPendingModel: model, DesktopPendingEffort: effort})
+	if err != nil {
+		return s, desktopCreatedError(s, err, false)
 	}
 	log.Printf("new Codex App chat %s in %s", thread, dir)
 	publicID := n.codexPublicID(home, thread)
 	src := codexSource{home: home, thread: thread, path: rolloutPath(home, thread)}
-	if model != "" || effort != "" {
-		if err := n.setCodexDesktopSettings(ctx, publicID, src, model, effort); err != nil {
-			log.Printf("new Codex App chat %s: initial settings (%q, %q) did not take: %v", thread, model, effort, err)
-			return nil, err
-		}
+	if err := n.finishCreatedCodexAppSettings(ctx, publicID, src); err != nil {
+		log.Printf("new Codex App chat %s: initial settings (%q, %q) did not take: %v", thread, model, effort, err)
+		return s, desktopCreatedError(s, err, false)
+	}
+	s.Model, s.Effort = model, effort
+	if pick := n.codexAppPickOf(publicID); pick != nil {
+		s.Model, s.Effort = cmp.Or(pick.model, s.Model), cmp.Or(pick.effort, s.Effort)
 	}
 	if err := n.sendCodexDesktop(ctx, src, p.Prompt, nil); err != nil {
 		log.Printf("new Codex App chat %s: the first message did not go in: %v", thread, err)
-		return nil, err
+		return s, desktopCreatedError(s, err, true)
 	}
 	n.notifyCodex()
-	return &proto.Session{SessionID: publicID, Cwd: dir, Title: title, Agent: "codex",
-		Launcher: codexAppLauncher, Model: model, Effort: effort,
-		Status: proto.StatusWorking, StartedByPersona: true, UpdatedAt: time.Now().UTC()}, nil
+	s.Status = proto.StatusWorking
+	return s, nil
+}
+
+// A thread whose creation reached the desktop may have no rollout yet (for example, naming failed).
+// Keep its first-message retry on the owning App even before the normal catalog can recognize it.
+func (n *Node) sendCreatedCodexApp(ctx context.Context, id, text string, images []proto.Image) (bool, error) {
+	if n.state == nil {
+		return false, nil
+	}
+	if err := n.state.loaded(ctx); err != nil {
+		return true, err
+	}
+	state, known := n.state.get(id)
+	if !known || state.Launcher != codexAppLauncher {
+		return false, nil
+	}
+	if n.sessionScope != nil || n.codexBlocked(id) {
+		return true, refusal("codex_read_only", "The desktop session is outside this node's scope or has an identity conflict.", nil)
+	}
+	refs, err := assistantskills.References(text)
+	if err != nil {
+		return true, skillSelectionError(err)
+	}
+	if len(refs) > 0 {
+		return true, skillSelectionError(assistantskills.ErrReference)
+	}
+	src, known := n.codexSource(id)
+	if !known {
+		return true, refusal("codex_read_only", "The desktop session's source is not available yet. Reopen it in Codex before sending.", nil)
+	}
+	if err := n.finishCreatedCodexAppSettings(ctx, id, src); err != nil {
+		return true, err
+	}
+	return true, n.sendCodexDesktop(ctx, src, text, images)
+}
+
+// finishCreatedCodexAppSettings recovers initial setup on the original native thread. Requested values are kept
+// separately from confirmed settings, so a failed readback never silently sends its first message on another model.
+func (n *Node) finishCreatedCodexAppSettings(ctx context.Context, id string, src codexSource) error {
+	state, _ := n.state.get(id)
+	model, effort := state.DesktopPendingModel, state.DesktopPendingEffort
+	if model == "" && effort == "" {
+		return nil
+	}
+	if err := n.setCodexDesktopSettings(ctx, id, src, model, effort); err != nil {
+		return err
+	}
+	n.state.update(id, func(cur *sessionState) bool {
+		if cur.DesktopPendingModel != model || cur.DesktopPendingEffort != effort {
+			return false
+		}
+		cur.DesktopPendingModel, cur.DesktopPendingEffort = "", ""
+		return true
+	})
+	return nil
 }
 
 // codexAppStartDir is where a new chat of the App runs: dir as for the desktop app's (desktopStartDir: there, or a new
@@ -214,55 +301,84 @@ func codexAppSlug(title string) string {
 // startCodexAppChat runs `codex app-server` (stdio, JSON lines) in dir for home, starts a thread there and names it
 // title, which writes it, then ends the app-server. It never starts a turn.
 func startCodexAppChat(ctx context.Context, cli, home, dir, title string) (string, error) {
-	ctx, cancel := context.WithTimeout(ctx, codexAppSeedWait)
-	defer cancel()
-	s, err := startCodexStdio(ctx, cli, home, dir)
-	if err != nil {
-		return "", err
-	}
-	defer s.close()
-	var started struct {
-		Thread struct {
-			ID string `json:"id"`
-		} `json:"thread"`
-	}
-	if err := s.call(ctx, "thread/start", map[string]any{"cwd": dir}, &started); err != nil {
-		return "", err
-	}
-	if started.Thread.ID == "" {
-		return "", errors.New("thread/start: no thread")
-	}
-	if err := s.call(ctx, "thread/name/set", map[string]any{"threadId": started.Thread.ID, "name": title}, nil); err != nil {
-		return "", err
-	}
-	return started.Thread.ID, nil
+	return startCodexAppChatInProject(ctx, cli, home, dir, title, "")
 }
 
-// codexStdio is a `codex app-server` over stdio (JSON lines) for a short exchange, as the App's client
-// (codexAppClient): started in dir for home and initialized; close ends it. Its calls end when ctx does (the
-// app-server is killed).
+func startCodexAppChatInProject(ctx context.Context, cli, home, dir, title, projectID string) (string, error) {
+	thread := ""
+	err := withCodexAppServer(ctx, cli, home, dir, func(call codexAppCall) error {
+		params := map[string]any{"cwd": dir}
+		projects, err := listCodexDesktopProjects(call)
+		if err != nil {
+			var rpcErr *codexAppServerError
+			if projectID != "" || !errors.As(err, &rpcErr) || rpcErr.Code != -32601 {
+				return err
+			}
+		} else {
+			project, err := selectCodexDesktopProject(projects, dir, projectID)
+			if err != nil {
+				return err
+			}
+			if project != "" {
+				params["projectId"] = project
+			}
+		}
+		var started struct {
+			Thread struct {
+				ID string `json:"id"`
+			} `json:"thread"`
+		}
+		if err := call("thread/start", params, &started); err != nil {
+			var rejected *codexAppServerError
+			if !errors.As(err, &rejected) {
+				return uncertain(fmt.Errorf("the desktop may have created the chat before its response was lost: %w", err))
+			}
+			return err
+		}
+		if !validID(started.Thread.ID) {
+			return errors.New("thread/start: no valid thread")
+		}
+		thread = started.Thread.ID
+		return call("thread/name/set", map[string]any{"threadId": thread, "name": title}, nil)
+	})
+	return thread, err
+}
+
+// codexStdio is a short-lived, initialized app-server client used by both native metadata operations and model/list.
+// Requests are sequential and bounded; it never resumes a desktop-owned thread or sends its model turns.
 type codexStdio struct {
-	cmd   *exec.Cmd
-	in    io.WriteCloser
-	lines *bufio.Reader
-	next  int
+	ctx    context.Context
+	cancel context.CancelFunc
+	cmd    *exec.Cmd
+	in     io.WriteCloser
+	lines  *bufio.Scanner
+	next   int
 }
 
 func startCodexStdio(ctx context.Context, cli, home, dir string) (*codexStdio, error) {
-	cmd := exec.CommandContext(ctx, cli, "app-server")
-	cmd.Dir = dir
-	cmd.Env = append(desktopSeedEnv(os.Environ()), "CODEX_HOME="+home)
+	ctx, cancel := context.WithTimeout(ctx, codexAppSeedWait)
+	program, env, err := codexStartProgram(cli, true, append(desktopSeedEnv(os.Environ()), "CODEX_HOME="+home))
+	if err != nil {
+		cancel()
+		return nil, err
+	}
+	cmd := exec.CommandContext(ctx, program, "app-server")
+	cmd.Dir, cmd.Env = dir, env
 	if bin := codexAppNodeBin(cli); bin != "" {
 		path := withDirsAfter(envValue(cmd.Env, "PATH"), []string{bin})
 		cmd.Env = append(withoutEnv(cmd.Env, []string{"PATH"}), "PATH="+path)
 	}
 	killGroupOnCancel(cmd)
+	prepareDesktopChild(cmd)
 	in, err := cmd.StdinPipe()
 	if err != nil {
+		cancel()
 		return nil, err
 	}
 	out, err := cmd.StdoutPipe()
 	if err != nil {
+		cancel()
+		_ = in.Close()
 		return nil, err
 	}
 	stopGroup := cmd.Cancel
@@ -276,15 +392,22 @@ func startCodexStdio(ctx context.Context, cli, home, dir string) (*codexStdio, e
 		return nil
 	})
 	if err := cmd.Start(); err != nil {
+		cancel()
+		_ = in.Close()
+		_ = out.Close()
 		return nil, err
 	}
-	s := &codexStdio{cmd: cmd, in: in, lines: bufio.NewReaderSize(out, 1<<20)}
-	if err := s.call(ctx, "initialize", map[string]any{"clientInfo": map[string]any{"name": codexAppClient, "title": "Persona", "version": "1"}}, nil); err != nil {
+	lines := bufio.NewScanner(out)
+	lines.Buffer(make([]byte, 64<<10), 64<<20)
+	s := &codexStdio{ctx: ctx, cancel: cancel, cmd: cmd, in: in, lines: lines}
+	if err := s.call(ctx, "initialize", map[string]any{
+		"clientInfo":   map[string]any{"name": codexAppClient, "title": "Persona", "version": "1"},
+		"capabilities": map[string]any{"experimentalApi": true}, // project/* requires this capability
+	}, nil); err != nil {
 		s.close()
 		return nil, err
 	}
-	b, _ := json.Marshal(map[string]any{"method": "initialized"})
-	if _, err := in.Write(append(b, '\n')); err != nil {
+	if _, err := in.Write([]byte("{\"method\":\"initialized\"}\n")); err != nil {
 		s.close()
 		return nil, err
 	}
@@ -316,40 +439,57 @@ func codexAppNodeBin(cli string) string {
 }
 
 func (s *codexStdio) close() {
+	s.cancel()
 	_ = s.cmd.Cancel()
 	_ = s.cmd.Wait()
 }
 
-// call sends one request and reads up to its answer, into into (nil: none wanted); notifications and others' answers
-// are skipped.
-func (s *codexStdio) call(_ context.Context, method string, params, into any) error {
+// call skips notifications and other responses until this request's answer. Canceling a call ends the short exchange.
+func (s *codexStdio) call(ctx context.Context, method string, params, into any) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	stop := context.AfterFunc(ctx, s.cancel)
+	defer stop()
 	s.next++
 	id := s.next
-	b, _ := json.Marshal(map[string]any{"id": id, "method": method, "params": params})
+	b, err := json.Marshal(map[string]any{"id": id, "method": method, "params": params})
+	if err != nil {
+		return err
+	}
 	if _, err := s.in.Write(append(b, '\n')); err != nil {
 		return err
 	}
-	for {
-		line, err := s.lines.ReadBytes('\n')
-		if err != nil {
-			return fmt.Errorf("%s: %v", method, err)
-		}
+	for s.lines.Scan() {
 		var m struct {
 			ID     *int            `json:"id"`
 			Result json.RawMessage `json:"result"`
 			Error  *struct {
+				Code    int    `json:"code"`
 				Message string `json:"message"`
 			} `json:"error"`
 		}
-		if json.Unmarshal(line, &m) != nil || m.ID == nil || *m.ID != id {
-			continue // a notification, or another's
+		if json.Unmarshal(s.lines.Bytes(), &m) != nil || m.ID == nil || *m.ID != id {
+			continue
 		}
 		if m.Error != nil {
-			return fmt.Errorf("%s: %s", method, m.Error.Message)
+			return &codexAppServerError{Method: method, Code: m.Error.Code, Message: m.Error.Message}
 		}
-		if into == nil {
-			return nil
+		if into != nil {
+			if err := json.Unmarshal(m.Result, into); err != nil {
+				return fmt.Errorf("%s: invalid response: %w", method, err)
+			}
 		}
-		return json.Unmarshal(m.Result, into)
+		return nil
 	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if err := s.ctx.Err(); err != nil {
+		return err
+	}
+	if err := s.lines.Err(); err != nil {
+		return fmt.Errorf("%s: %w", method, err)
+	}
+	return fmt.Errorf("%s: app-server closed before answering", method)
 }

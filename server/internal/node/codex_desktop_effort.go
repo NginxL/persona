@@ -185,7 +185,41 @@ func (n *Node) codexDesktopModes(ctx context.Context, id string, src codexSource
 	if mode != "" {
 		return fmt.Errorf("Codex 的会话在手机上只能改思考强度和模型，权限模式要在电脑上改")
 	}
-	return n.setCodexDesktopSettings(ctx, id, src, model, effort)
+	model, effort = strings.TrimSpace(model), strings.TrimSpace(effort)
+	if model == "" && effort == "" {
+		return nil
+	}
+	var pending sessionState
+	if n.state != nil {
+		if err := n.state.loaded(ctx); err != nil {
+			return err
+		}
+		pending, _ = n.state.get(id)
+	}
+	wantedEffort := cmp.Or(effort, pending.DesktopPendingEffort)
+	if model != "" && effort == "" && pending.DesktopPendingEffort != "" {
+		if meta, known := n.codexAppModelMeta(src.home, model); known && !slices.Contains(meta.levels, pending.DesktopPendingEffort) {
+			// Changing the model supersedes an initial effort that the new model cannot use, just as a normal model
+			// change reconciles the current effort. The UI may choose its new effort in a subsequent request.
+			wantedEffort = reconcileCodexEffort(meta)
+		}
+	}
+	// A partial change also resolves the rest of the original setup before acknowledging it. Otherwise the first
+	// message could replay older settings or reconcile its effort against a model the change never read back.
+	if err := n.setCodexDesktopSettings(ctx, id, src,
+		cmp.Or(model, pending.DesktopPendingModel), wantedEffort); err != nil {
+		return err
+	}
+	if n.state != nil && (pending.DesktopPendingModel != "" || pending.DesktopPendingEffort != "") {
+		n.state.update(id, func(cur *sessionState) bool {
+			if cur.DesktopPendingModel != pending.DesktopPendingModel || cur.DesktopPendingEffort != pending.DesktopPendingEffort {
+				return false
+			}
+			cur.DesktopPendingModel, cur.DesktopPendingEffort = "", ""
+			return true
+		})
+	}
+	return nil
 }
 
 func (n *Node) setCodexDesktopEffort(ctx context.Context, id string, src codexSource, effort string) error {
@@ -199,6 +233,9 @@ func (n *Node) setCodexDesktopSettings(ctx context.Context, id string, src codex
 	model, effort = strings.TrimSpace(model), strings.TrimSpace(effort)
 	if model == "" && effort == "" {
 		return nil
+	}
+	if !codexDesktopAvailable(src.home) {
+		return codexDesktopUnavailable(ctx)
 	}
 	if model != "" && !proto.ValidModelID(model) {
 		return fmt.Errorf("invalid model %q", model)
@@ -252,7 +289,7 @@ func (n *Node) setCodexDesktopSettings(ctx context.Context, id string, src codex
 	defer cancel()
 	c, err := dialCodexDesktop(ctx, src.home)
 	if err != nil {
-		return refusal("codex_read_only", "连不上电脑上的 Codex App："+err.Error(), nil)
+		return codexDesktopUnavailable(ctx)
 	}
 	defer c.close()
 	owner, err := c.loadedOwner(ctx, src.thread)

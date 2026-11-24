@@ -220,6 +220,21 @@
     <string name="machines_usage_problem_error">The gateway couldn\'t read this account just now; these are the numbers it had stored</string>
     <plurals name="machines_health_summary_attention"><item quantity="one">%d feature needs attention</item><item quantity="other">%d features need attention</item></plurals>
     <plurals name="machines_health_fixed"><item quantity="one">Regenerated %d file</item><item quantity="other">Regenerated %d files</item></plurals>
+    <string name="machines_usage_provider_other">Other</string>
+    <string name="machines_usage_types_title">Account types shown</string>
+    <string name="machines_usage_types_hint">Only changes what this phone shows.</string>
+    <string name="machines_usage_timeline_window">%1$s · %2$s</string>
+    <plurals name="machines_usage_accounts"><item quantity="one">%d account</item><item quantity="other">%d accounts</item></plurals>
+    <string name="machines_usage_days">%1$dd</string>
+    <string name="machines_usage_hours_tenths">%1$sh</string>
+    <string name="machines_usage_axis_now">Now</string>
+    <string name="machines_usage_chart_title">Reset timeline</string>
+    <string name="machines_usage_chart_row">%1$s: %2$s</string>
+    <string name="machines_usage_legend_five">5h window recovers</string>
+    <string name="machines_usage_legend_week">7d window recovers</string>
+    <string name="machines_usage_legend_now">Now</string>
+    <string name="machines_usage_legend_protect">Protect line (work pauses here)</string>
+    <string name="machines_usage_protect">Protect %1$d%%</string>
     <plurals name="machines_usage_age_seconds"><item quantity="one">%d second ago</item><item quantity="other">%d seconds ago</item></plurals>
     <plurals name="machines_usage_age_minutes"><item quantity="one">%d minute ago</item><item quantity="other">%d minutes ago</item></plurals>
     <plurals name="machines_usage_age_hours"><item quantity="one">%d hour ago</item><item quantity="other">%d hours ago</item></plurals>
@@ -282,4 +297,9 @@
     <string name="machines_link_switch_why_unknown">Something went wrong.</string>
     <string name="machines_link_switch_why_unavailable">This computer can\'t switch to Persona Link right now.</string>
     <string name="machines_manager_offline">Its assistant “%1$s” is offline. It comes back online once the assistant is back.</string>
+    <string name="machines_tokens_today_title">Today\'s tokens</string>
+    <string name="machines_tokens_total">Total</string>
+    <string name="machines_tokens_now">Now</string>
+    <string name="machines_tokens_cache_hit_rate">Cache hit rate</string>
+    <string name="machines_tokens_per_minute">%1$s/min</string>
 </resources>

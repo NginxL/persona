@@ -10,6 +10,9 @@ import { clientKeys, i18nCatalogs, startupEntries } from "./i18n-catalogs";
 import { pageTokensPlugin } from "./page-tokens";
 import { thirdPartyLicenses } from "./third-party-licenses";
 import { compatBootstrap } from "./compat-bootstrap";
+import { testWorkerLimit } from "./test-scheduling";
+import { CORE_ONLY, coreOnly } from "./core-only";
+import { configDefaults } from "vitest/config";
 
 // `npm run dev` talks to a hub through Vite's proxy: PERSONA_HUB_URL (eval "$(python3 ../scripts/persona_config.py env)").
 const environment = (globalThis as { process?: { env: Record<string, string | undefined> } }).process?.env ?? {};
@@ -240,7 +243,7 @@ const holdLazyImports: Plugin = {
 };
 
 export default defineConfig({
-  plugins: [katexFonts, i18nCatalogs, pageTokensPlugin, react(), tailwindcss(), adminFallback, showcaseImages, startupPreload(), holdLazyImports, classicWorker, buildStamp, thirdPartyLicenses,
+  plugins: [coreOnly(), testWorkerLimit(), katexFonts, i18nCatalogs, pageTokensPlugin, react(), tailwindcss(), adminFallback, showcaseImages, startupPreload(), holdLazyImports, classicWorker, buildStamp, thirdPartyLicenses,
     compatBootstrap(fileURLToPath(new URL("./public/compatibility-bootstrap.js", import.meta.url)))],
   // Text size (src/lib/text-scale.ts): font sizes become calc(size * var(--text-scale, 1)), after Tailwind wrote them.
   css: { postcss: { plugins: [textScale()] } },
@@ -257,7 +260,13 @@ export default defineConfig({
   // Tests run in zh-Hans, the source language, so their expectations read like the interface (src/i18n/test-setup.ts).
   // Node 25+ has its own localStorage, undefined without --localstorage-file, and it hides jsdom's: turn it off.
   // A node_modules that isn't what package-lock.json pins stops the run before any test (scripts/installed-deps.mjs, #4776).
-  test: { globalSetup: ["scripts/installed-deps.mjs"], setupFiles: ["src/i18n/test-setup.ts"], execArgv: ["--no-experimental-webstorage"] },
+  // The core-only lane (web/core-only.ts, #13932) leaves the modules' own tests out: their code is not in that build.
+  test: {
+    globalSetup: ["scripts/installed-deps.mjs"],
+    setupFiles: ["src/i18n/test-setup.ts"],
+    execArgv: ["--no-experimental-webstorage"],
+    ...(CORE_ONLY ? { exclude: [...configDefaults.exclude, "src/modules/**"] } : {}),
+  },
   build: {
     target: "es2022",
     sourcemap: false,

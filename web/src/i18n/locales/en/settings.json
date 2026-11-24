@@ -13,6 +13,8 @@
   "agent_preferences": "Agent preferences",
   "reply_motion": "Reply animation",
   "reply_motion_hint": "New replies fade in word by word. Off when the system's Reduce motion is on.",
+  "starred_messages": "Starred messages",
+  "starred_messages_hint": "Show Starred in the sidebar and Star / Unstar in the message menu. Your saved messages are kept while it's off.",
   "sidebar_terminals": "Show terminals in sidebar",
   "sidebar_terminals_hint": "When agents are grouped by machine, each computer lists the plain shells in its terminal under its agents; click one to open its Terminal page. Off by default; applies to this browser only.",
   "avatar": "Avatar",
@@ -154,6 +156,9 @@
   "sidebar_pages_up": "Move {name} up",
   "sidebar_pages_down": "Move {name} down",
   "sidebar_pages_show": "Show {name} in the sidebar",
+  "sidebar_more_show": "Show More",
+  "sidebar_more_hint_on": "Pages put away can be opened from More.",
+  "sidebar_more_hint_off": "More is hidden. Its pages are still available through search or existing links. Turn it on to restore them.",
   "sidebar_groups_new": "New group",
   "sidebar_groups_name": "Group name",
   "sidebar_groups_save": "Save",
@@ -189,5 +194,9 @@
   "herdr_tab_name_saving": "Saving session naming preference…",
   "show_botmux_inventory": "A computer’s “Also show botmux sessions” switch controls which sessions reach the hub.",
   "show_botmux_computers": "Open Computers",
-  "botmux_saving": "Saving…"
+  "botmux_saving": "Saving…",
+  "sort_by_activity": "Sort Agents by recent activity",
+  "sort_by_activity_hint": "Off keeps the stable order. On orders by latest activity, moving only while the pointer is off the sidebar.",
+  "show_agents_filter": "Show the Filter on the Agents list",
+  "show_agents_filter_hint": "Adds a Filter button and chips to the Agents list. Off hides them and clears any filter."
 }

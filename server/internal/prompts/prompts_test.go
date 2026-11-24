@@ -52,6 +52,25 @@ func ToolNames() []string {
 // Each prompt's output is pinned by the golden tests of the package that uses it (hub, kb, node: *_golden_test.go);
 // these check the package's own rules.
 
+func TestTaskPlanSchemaIncludesScopeRevision(t *testing.T) {
+	tool := Tool("task_plan")
+	var schema struct {
+		Properties struct {
+			Tasks struct {
+				Items struct {
+					Properties map[string]json.RawMessage `json:"properties"`
+				} `json:"items"`
+			} `json:"tasks"`
+		} `json:"properties"`
+	}
+	if err := json.Unmarshal(tool.InputSchema, &schema); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := schema.Properties.Tasks.Items.Properties["scope_revision"]; !ok {
+		t.Fatal("task_plan continuations cannot pass the scope_revision that the hub validates")
+	}
+}
+
 // Every file ends with a newline (it is dropped), so adding one in an editor never changes a prompt.
 func TestFilesEndWithANewline(t *testing.T) {
 	err := fs.WalkDir(files, ".", func(path string, d fs.DirEntry, err error) error {

@@ -131,5 +131,9 @@
   "follow_assistant": "Follow Assistant",
   "follow_launcher": "Agent default",
   "daily_hint_zone": "{days} at {time}, in {zone} time.",
-  "cron_hint_named": "Minute, hour, day of month, month, day of week, in {zone} time. When both day fields are set, a day matching either runs."
+  "cron_hint_named": "Minute, hour, day of month, month, day of week, in {zone} time. When both day fields are set, a day matching either runs.",
+  "input_hint": "Use @ for files and skills, or / for skills and saved prompts. Each run uses the current selection.",
+  "input_loading": "Checking the task’s computer and working directory…",
+  "input_unsupported": "File and skill selections are unavailable with these execution settings. You can still use text and reusable prompts.",
+  "input_changed": "This file belongs to a different computer, folder or agent. Remove it and select it again."
 }

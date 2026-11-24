@@ -7,12 +7,20 @@ import (
 	"fmt"
 	"net/http"
 	"slices"
+	"sync"
 	"time"
 
 	"github.com/nwverse/persona/server/internal/assistantwire"
 	"github.com/nwverse/persona/server/internal/proto"
 	"github.com/nwverse/persona/server/internal/rpc"
 )
+
+type assistantProfileSaveState struct {
+	mu      sync.Mutex
+	writeMu sync.Mutex // serializes normal and resumed PutSetting writes
+	pending *assistantwire.Profile
+	gen     uint64
+}
 
 // The assistant's settings are its own (internal/assistant, profile.go): the hub keeps the profile it last reported
 // (Snapshot.Profile) for its own features — the model configuration runs the main chat on the assistant's machine, a phone's
@@ -58,9 +66,68 @@ func (h *Hub) keepAssistantProfile(ctx context.Context, p *assistantwire.Profile
 	if h.store == nil || p == nil {
 		return
 	}
-	if err := h.store.PutSetting(ctx, assistantProfileKey, p); err != nil {
-		h.logf("assistant: keep the profile: %v", err)
+	cp := *p
+	h.assistantProfileSave.mu.Lock()
+	h.assistantProfileSave.pending = &cp
+	h.assistantProfileSave.gen++
+	h.assistantProfileSave.mu.Unlock()
+	h.flushAssistantProfile(ctx)
+}
+
+func (h *Hub) flushAssistantProfile(ctx context.Context) {
+	if h.store == nil {
+		return
 	}
+	h.assistantProfileSave.writeMu.Lock()
+	defer h.assistantProfileSave.writeMu.Unlock()
+	for {
+		h.assistantProfileSave.mu.Lock()
+		p := h.assistantProfileSave.pending
+		gen := h.assistantProfileSave.gen
+		h.assistantProfileSave.pending = nil
+		h.assistantProfileSave.mu.Unlock()
+		if p == nil {
+			return
+		}
+		if !h.quiesce.beginOrDefer(func() {
+			h.assistantProfileSave.mu.Lock()
+			if h.assistantProfileSave.gen == gen {
+				h.assistantProfileSave.pending = p
+			}
+			h.assistantProfileSave.mu.Unlock()
+		}) {
+			return
+		}
+		wctx := ctx
+		var cancel context.CancelFunc
+		if wctx == nil || wctx.Err() != nil {
+			wctx, cancel = context.WithTimeout(context.Background(), 5*time.Second)
+		}
+		if err := h.store.PutSetting(wctx, assistantProfileKey, p); err != nil {
+			h.logf("assistant: keep the profile: %v", err)
+		}
+		if cancel != nil {
+			cancel()
+		}
+		h.quiesce.end()
+	}
+}
+
+func (h *Hub) resumeAssistantProfile() {
+	if h.store == nil {
+		return
+	}
+	h.assistantProfileSave.mu.Lock()
+	hasPending := h.assistantProfileSave.pending != nil
+	h.assistantProfileSave.mu.Unlock()
+	if !hasPending {
+		return
+	}
+	h.nodeWorkers.Add(1)
+	go func() {
+		defer h.nodeWorkers.Done()
+		h.flushAssistantProfile(nil)
+	}()
 }
 
 // assistantProfile is the assistant's settings as it last reported them (or as the hub kept them from before a

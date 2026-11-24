@@ -1,0 +1,8 @@
+{
+  "$schema": "../../../../schema/module.schema.json",
+  "id": "lark",
+  "api": 1,
+  "origin": "builtin",
+  "title": "Feishu / Lark",
+  "feature": "module.lark"
+}

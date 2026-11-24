@@ -55,6 +55,33 @@ func TestDefaultIndependent(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestDirectoryBindingIdentityUsesRemotePlatform(t *testing.T) {
+	for _, tc := range []struct {
+		first, second string
+		duplicate     bool
+	}{
+		{`C:\Projects\Example`, `c:/projects/example`, true},
+		{`\\Server\Share\Example`, `//server/share/EXAMPLE`, true},
+		{"/projects/Example", "/projects/example", false},
+		{"/:Project", "/:project", false},
+	} {
+		s := Default()
+		s.Cards = []Card{{ID: "existing", MachineID: "computer", WorkspaceID: "existing", Title: "Example", Cwd: tc.first, Source: "directory", ColumnID: "todo"}}
+		_, err := Apply(s, Mutation{Action: "add_card", ID: "new", MachineID: "computer", WorkspaceID: "new", Title: text("Example"), Cwd: tc.second, Source: "directory", ColumnID: "todo"})
+		if (err != nil) != tc.duplicate {
+			t.Fatalf("binding %q and %q: %v", tc.first, tc.second, err)
+		}
+		both := Default()
+		both.Cards = []Card{
+			{ID: "existing", MachineID: "computer", WorkspaceID: "existing", Title: "Example", Cwd: tc.first, Source: "directory", ColumnID: "todo"},
+			{ID: "new", MachineID: "computer", WorkspaceID: "new", Title: "Example", Cwd: tc.second, Source: "directory", ColumnID: "todo"},
+		}
+		if err := Validate(both); errors.Is(err, ErrInvalid) != tc.duplicate || (err != nil && !tc.duplicate) {
+			t.Fatalf("Validate(%q, %q) = %v, duplicate=%v", tc.first, tc.second, err, tc.duplicate)
+		}
+	}
+}
 func TestMoveOrderAndInput(t *testing.T) {
 	original := fixture()
 	before, _ := json.Marshal(original)

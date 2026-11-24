@@ -13,6 +13,10 @@ import (
 
 func externalAdapterPlatformSupported() bool { return true }
 
+// Production always checks from the OS root. A test may substitute its own owned
+// fixture root when the host's root or non-sticky temporary directory is untrusted.
+var externalAdapterTrustRoot = "/"
+
 // The final registry file must not be a symlink. Ancestors (including macOS's
 // /var and /tmp aliases), fixed programs and fixed script paths may be links,
 // but every link and every directory traversed must still be locally trusted.
@@ -21,9 +25,34 @@ func externalAdapterTrustedPath(name string, executable, finalLink bool) (string
 	if !filepath.IsAbs(name) || name != filepath.Clean(name) || len(name) > 4096 || strings.ContainsRune(name, '\x00') {
 		return fail()
 	}
+	root := externalAdapterTrustRoot
+	roots := []string{root}
+	if root != "/" {
+		canonical, err := filepath.EvalSymlinks(root)
+		if err != nil {
+			return fail()
+		}
+		roots = append(roots, canonical)
+	}
+	within := func(path string) bool {
+		for _, base := range roots {
+			rel, err := filepath.Rel(base, path)
+			if err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
+				return true
+			}
+		}
+		return false
+	}
+	if !within(name) {
+		return fail()
+	}
+	trusted := func(path string, info os.FileInfo, directory, executable bool) bool {
+		// A fixture root replaces the host's ancestors, not the checks at or below itself.
+		return !within(path) || externalAdapterTrustedInfo(info, directory, executable)
+	}
 	parts, current, links := strings.Split(strings.TrimPrefix(name, "/"), "/"), "/", 0
-	root, err := os.Lstat(current)
-	if err != nil || !externalAdapterTrustedInfo(root, true, false) {
+	info, err := os.Lstat(current)
+	if err != nil || !trusted(current, info, true, false) {
 		return fail()
 	}
 	for len(parts) > 0 {
@@ -48,14 +77,20 @@ func externalAdapterTrustedPath(name string, executable, finalLink bool) (string
 				target = filepath.Join(current, target)
 			}
 			target = filepath.Clean(target)
+			if within(next) && !within(target) {
+				return fail()
+			}
 			parts = append(strings.Split(strings.TrimPrefix(target, "/"), "/"), parts...)
 			current = "/"
 			continue
 		}
-		if !externalAdapterTrustedInfo(info, !last, executable && last) {
+		if !trusted(next, info, !last, executable && last) {
 			return fail()
 		}
 		current = next
+	}
+	if !within(current) {
+		return fail()
 	}
 	return current, nil
 }

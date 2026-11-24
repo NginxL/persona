@@ -124,9 +124,12 @@ type UserSpokeParams struct {
 // node's connection, never from the node's params. With Ack the call only confirms that a message carrying those
 // view errors (ContextResult.ViewErrors) was delivered, and answers nothing.
 type ContextParams struct {
-	SessionID string             `json:"session_id"`
-	MachineID string             `json:"machine_id,omitempty"`
-	Ack       []ViewErrorReceipt `json:"ack,omitempty"`
+	RecoveryID      string             `json:"recovery_id,omitempty"`
+	RecoveryOnly    bool               `json:"recovery_only,omitempty"`
+	PrepareRecovery bool               `json:"prepare_recovery,omitempty"`
+	SessionID       string             `json:"session_id"`
+	MachineID       string             `json:"machine_id,omitempty"`
+	Ack             []ViewErrorReceipt `json:"ack,omitempty"`
 }
 
 // ContextResult is assistant.context's answer: the <persona-context> text, and the <persona-view-errors> block of the
@@ -135,9 +138,12 @@ type ContextParams struct {
 // Receipts also carry what else the hub wants confirmed as delivered with the message (the background supervisor's
 // announcement, item_id "background_supervisor"): the node sends them all back as they are.
 type ContextResult struct {
-	Text       string             `json:"text"`
-	ViewErrors string             `json:"view_errors,omitempty"`
-	Receipts   []ViewErrorReceipt `json:"view_error_receipts,omitempty"`
+	RecoveryID          string             `json:"recovery_id,omitempty"`
+	Recovery            string             `json:"recovery,omitempty"`
+	CompactInstructions string             `json:"compact_instructions,omitempty"`
+	Text                string             `json:"text"`
+	ViewErrors          string             `json:"view_errors,omitempty"`
+	Receipts            []ViewErrorReceipt `json:"view_error_receipts,omitempty"`
 }
 
 // ViewErrorReceipt names the reported errors of one reply as they were read: an ack whose digest no longer matches
@@ -210,7 +216,7 @@ type MessageCard struct {
 // it has no credentials (a model of its own, "<synthetic>"): the turn did not run, the user must sign in
 // (docs/assistant/onboarding.md 4.4). Its separator is in the marker, so a reply that talks about being logged out is a reply.
 var APIErrorMarkers = []string{"API Error:", "There's an issue with the selected model", "Failed to authenticate",
-	"OAuth token has expired", "Invalid API key", "Not logged in ·"}
+	"OAuth token has expired", "Invalid API key", "Not logged in ·", "Request too large"}
 
 // refusalMarkers start the other lines Claude Code writes itself instead of an answer when the request was refused
 // before the model ran: a sign-in that is gone ("Please run /login · API Error: 403", "Login expired · Please run

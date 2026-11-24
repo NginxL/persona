@@ -46,6 +46,9 @@ const (
 	// errKindUsageLimit: the subscription's usage limit is used up (LauncherHealth.ResetsAt, when known). Unusable until
 	// it resets, then checked again; never repaired: nothing on the machine is broken.
 	errKindUsageLimit = "usage_limit"
+	// errKindUpstream: the gateway reported an exhausted upstream account pool (#13372). Never repaired: nothing on the
+	// machine is broken.
+	errKindUpstream = "upstream"
 	// errKindNotInTerminal: a start's new terminal tab could not run the launcher, or its claude (node/shellmiss.go,
 	// #1642): the terminal reads other startup files than the login shell the launchers are listed and checked in, so
 	// a check passing says nothing of it, and no repair the manager has reaches it. Blocked at once; a start with it
@@ -440,6 +443,9 @@ var launcherErrorKinds = []struct {
 	// Codex's (its message, its error kinds in a rollout and the app-server). A gateway's 429, "rate limit" or "quota"
 	// is not a subscription's limit and stays in its class.
 	{errKindUsageLimit, lazyre.New(`(?i)\byou(?:'|’)ve hit your [^·\n.]{0,40}\blimit\b|usage limit reached|usage_limit_exceeded|usageLimitExceeded`)},
+	// Before model_route: an exhausted upstream pool message may also name the requested model ("no eligible upstream
+	// account for model …"), which is a pool outage rather than a bad model name (#13372).
+	{errKindUpstream, lazyre.New(`(?i)no other eligible account|no eligible upstream|upstream attempt budget`)},
 	{errKindModelRoute, lazyre.New(`(?i)bare claude model name|cannot be routed|no account match|model[^.\n]{0,60}(not found|not supported|not available|does not exist|unknown)|unknown model|invalid model`)},
 	{errKindAuth, lazyre.New(`(?i)\b40[13]\b|invalid (or missing )?(api[ _-]?key|x-api-key|token|bearer)|authentication_error|unauthori[sz]ed|not logged in|please run /login|token (has )?expired|permission_error|forbidden|requires \w+ auth|no \w+ auth token|auth login`)},
 	{errKindCLIOutdated, lazyre.New(`(?i)unknown option|unrecognized option|unexpected argument|please (update|upgrade)|(update|upgrade) (claude|codex|your)|version[^.\n]{0,40}(too old|no longer supported|not supported|outdated)|minimum (required )?version|requires (a )?newer`)},
@@ -456,12 +462,12 @@ func classifyLauncherError(text string) string {
 	return errKindOther
 }
 
-// repairNow: a failure the repairs know right away; the others wait for a second one in a row. Never a usage limit,
-// however many in a row: nothing on the machine is broken, it waits for the reset. The same for an unfinished
-// first-run setup: only a person at the machine can finish it.
+// repairNow: a failure the repairs know right away; the others wait for a second one in a row. Never a usage limit or
+// an exhausted upstream account pool, however many in a row: nothing on the machine is broken. The same for an
+// unfinished first-run setup: only a person at the machine can finish it.
 func (r LauncherHealth) repairNow() bool {
 	switch r.Kind {
-	case errKindUsageLimit, errKindOnboarding:
+	case errKindUsageLimit, errKindOnboarding, errKindUpstream:
 		return false
 	case errKindModelRoute, errKindAuth, errKindCLIOutdated:
 		return true

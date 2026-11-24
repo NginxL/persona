@@ -4,6 +4,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
 import persona.core.contracts.LarkFeatures
+import persona.core.inbox.*
 
 /** Feishu links open in native views only while the hub has the Lark extension's features (#1530). */
 class LarkNativeLinkTest {

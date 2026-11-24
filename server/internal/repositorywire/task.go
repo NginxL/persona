@@ -33,6 +33,29 @@ const (
 	LayoutContainer Layout = "container"
 )
 
+// TaskWorkflow declares a repository's optional default task-collaboration cadence.
+// Unset ("") and TaskWorkflowIsolated preserve existing default behavior; TaskWorkflowSharedBranch
+// cooperates with serial workspace queueing (#13142) and multi-repository container workspaces (#13143).
+const (
+	TaskWorkflowIsolated     = "isolated"
+	TaskWorkflowSharedBranch = "shared_branch"
+)
+
+// NormalizeTaskWorkflow validates an optional per-repository task_workflow preference.
+// Empty means unset (default); "isolated" and "shared_branch" are accepted.
+func NormalizeTaskWorkflow(workflow string) (string, Problem) {
+	switch strings.TrimSpace(workflow) {
+	case "":
+		return "", ""
+	case TaskWorkflowIsolated:
+		return TaskWorkflowIsolated, ""
+	case TaskWorkflowSharedBranch:
+		return TaskWorkflowSharedBranch, ""
+	default:
+		return "", Problem("invalid")
+	}
+}
+
 // CatalogEntry shares the existing catalog wire shape, including its optional transport.
 type CatalogEntry struct {
 	Identity
@@ -40,6 +63,8 @@ type CatalogEntry struct {
 	CloneURL string `json:"clone_url,omitempty"`
 	// ProviderName is an extension provider's name when the entry was saved (absent for the built-ins).
 	ProviderName string `json:"provider_name,omitempty"`
+	// TaskWorkflow is an optional per-repository default task-collaboration preference ("" / "isolated" / "shared_branch").
+	TaskWorkflow string `json:"task_workflow,omitempty"`
 }
 type Catalog struct {
 	Revision     int64          `json:"revision"`
@@ -359,18 +384,21 @@ func extensionLink(identity Identity, in LinkInput, role string) (TaskLink, erro
 	return link, nil
 }
 
-// PreserveLinkTitles keeps metadata when older clients send only link identities.
-// Removing a link still removes its title; a nonempty title replaces the saved title.
-func PreserveLinkTitles(current, next []TaskLink) {
+// PreserveLinkTitles keeps metadata when older clients send only link identities. The raw inputs carry whether a role
+// was present at all: NormalizeLink stores an explicit delivery role as the empty value, so only input[i].Role can
+// tell a role-less edit apart from an explicit switch back to delivery. Removing a link still removes its title; a
+// nonempty title replaces the saved title.
+func PreserveLinkTitles(current, next []TaskLink, input []LinkInput) {
 	for i := range next {
-		if next[i].Title != "" {
-			continue
-		}
+		roleSent := i < len(input) && input[i].Role != ""
 		for _, old := range current {
 			if old.Kind == next[i].Kind && old.Number == next[i].Number {
-				next[i].Title = old.Title
-				// A role-less edit (older clients, report imports) must not reset a role an explicit edit set.
-				if next[i].Role == "" {
+				if next[i].Title == "" {
+					next[i].Title = old.Title
+				}
+				// A role-less edit (older clients, report imports) must not reset a role an explicit edit set,
+				// while an explicit role (including delivery) always replaces the stored one.
+				if !roleSent {
 					next[i].Role = old.Role
 				}
 				break
@@ -464,7 +492,7 @@ func Bind(current []TaskRepository, input []TaskInput, catalog Catalog) ([]TaskR
 			if err != nil {
 				return nil, err
 			}
-			PreserveLinkTitles(previous, row.Links)
+			PreserveLinkTitles(previous, row.Links, in.Links)
 		}
 		if row.Links == nil {
 			row.Links = []TaskLink{}

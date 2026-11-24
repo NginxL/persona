@@ -112,7 +112,7 @@ class DevelopingDiagnosticsShotsTest {
                 rule.waitForIdle()
                 rule.onNodeWithText(text.share).performScrollTo()
                 val layouts = mutableListOf<TextLayoutResult>()
-                rule.onNodeWithText(language.getString(R.string.settings_developing_device), useUnmergedTree = true)
+                val _ = rule.onNodeWithText(language.getString(R.string.settings_developing_device), useUnmergedTree = true)
                     .fetchSemanticsNode().config[SemanticsActions.GetTextLayoutResult].action?.invoke(layouts)
                 assertFalse("Device and App Version must not ellipsize", layouts.single().isLineEllipsized(0))
                 save(rule.onNodeWithTag("shot").captureToImage().asAndroidBitmap(), "developing-export-${name(tag, s, d, wide, big)}.png")

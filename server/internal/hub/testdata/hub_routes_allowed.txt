@@ -12,6 +12,7 @@ DELETE /api/v1/admin/machines/{id}
 DELETE /api/v1/admin/peers/{hub_id}
 DELETE /api/v1/auth/tokens/{id}
 DELETE /api/v1/looks/uploads/{id} # the hub keeps the looks: personas/ is its own directory (look_uploads.go)
+DELETE /api/v1/machines/{mid}/files/entry
 DELETE /api/v1/managers/{id}
 DELETE /api/v1/sessions/{mid}/{sid}
 GET /api/v1/admin/devices
@@ -83,6 +84,9 @@ GET /api/v1/machines/{mid}/screen/video/connect
 GET /api/v1/machines/{mid}/services
 GET /api/v1/machines/{mid}/services/logs
 GET /api/v1/machines/{mid}/stat
+GET /api/v1/machines/{mid}/storage # machine storage relay (machine_storage.go)
+GET /api/v1/machines/{mid}/storage/hotspots # machine storage relay (machine_storage.go)
+GET /api/v1/machines/{mid}/toolchain # on-demand read-only node relay (machine_toolchain.go)
 GET /api/v1/managers
 GET /api/v1/mutes
 GET /api/v1/ops/{id}
@@ -100,12 +104,14 @@ GET /api/v1/sessions/{mid}/{sid}/screen
 GET /api/v1/skills
 GET /api/v1/ws
 GET {bus.Path}
+GET {devicewire.DevelopmentPackagesPath}/{commit}/{version}/{file}
 GET {devicewire.RelayPath}
 GET {link.Path}
 GET {link.StreamPath}
 GET {peerPath}
 GET /i/{code}
 GET /i/{code}/docker
+PATCH /api/v1/machines/{mid}/files/entry
 PATCH /api/v1/managers/{id}
 POST /api/v1/admin/devices/pair
 POST /api/v1/admin/doctor
@@ -146,11 +152,13 @@ POST /api/v1/machines/{mid}/doctor/fix
 POST /api/v1/machines/{mid}/files
 POST /api/v1/machines/{mid}/files/chmod
 POST /api/v1/machines/{mid}/files/copy
+POST /api/v1/machines/{mid}/files/create
 POST /api/v1/machines/{mid}/files/mkdir
 POST /api/v1/machines/{mid}/files/move
 POST /api/v1/machines/{mid}/files/rename
 POST /api/v1/machines/{mid}/files/restore
 POST /api/v1/machines/{mid}/files/trash
+POST /api/v1/machines/{mid}/files/upload
 POST /api/v1/machines/{mid}/files/write
 POST /api/v1/machines/{mid}/files/zip
 POST /api/v1/machines/{mid}/git/commit
@@ -173,6 +181,7 @@ POST /api/v1/machines/{mid}/preview/start
 POST /api/v1/machines/{mid}/processes/{pid}/kill
 POST /api/v1/machines/{mid}/services/action
 POST /api/v1/machines/{mid}/spaces/{wid}/rename
+POST /api/v1/machines/{mid}/storage/cleanup # machine storage relay (machine_storage.go)
 POST /api/v1/machines/{mid}/tabs/close
 POST /api/v1/machines/{mid}/tabs/rename
 POST /api/v1/machines/{mid}/worktree/add
@@ -194,6 +203,7 @@ POST /api/v1/sessions
 POST /api/v1/sessions/{mid}/{sid}/agent-messages
 POST /api/v1/sessions/{mid}/{sid}/attach
 POST /api/v1/sessions/{mid}/{sid}/close
+POST /api/v1/sessions/{mid}/{sid}/continue-in-new-chat # starts a new chat from the computer's handoff, like POST /api/v1/sessions and .../fork (context_handoff.go, #12751)
 POST /api/v1/sessions/{mid}/{sid}/fork
 POST /api/v1/sessions/{mid}/{sid}/interrupt
 POST /api/v1/sessions/{mid}/{sid}/keys
@@ -219,6 +229,7 @@ PUT /api/v1/machines/{id}/name
 PUT /api/v1/machines/{mid}/agy-settings
 PUT /api/v1/machines/{mid}/claude-settings
 PUT /api/v1/machines/{mid}/codex-settings
+PUT /api/v1/machines/{mid}/files/content
 PUT /api/v1/machines/{mid}/grok-settings
 PUT /api/v1/machines/{mid}/omp-settings
 PUT /api/v1/mutes

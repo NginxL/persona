@@ -118,7 +118,7 @@ describe("the brief on the task's page (#3822)", () => {
         { todo_id: "todo_3", title: "Retry the sign-in fix", started: "2026-11-05T12:00:00Z", continues: "todo_2", current: true },
       ],
     };
-    const html = renderToStaticMarkup(<TaskBriefHistory todo={worked} />);
+    const html = renderToStaticMarkup(<TaskBriefHistory todo={worked} onOpenTodo={() => {}} />);
     expect(html).toContain("范围变更");
     expect(html).toContain("No screenshots needed");
     expect(html).toContain("原因：No screen changed");
@@ -133,6 +133,10 @@ describe("the brief on the task's page (#3822)", () => {
     expect(html).toContain("当前任务");
     expect(html).toContain("还在进行");
     expect(html.match(/<li data-lineage-current/g)).toHaveLength(1);
+    expect(html).toContain('data-open-todo="todo_1"');
+    expect(html).toContain('data-open-todo="todo_2"');
+    expect(html).toContain("接手自");
+    expect(html).toContain("由新卡接手");
   });
 });
 

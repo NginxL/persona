@@ -12,6 +12,7 @@ import (
 var legacyConnectors = map[string]bool{"lark": true, "mail": true}
 
 func (h *Manager) listedConnectors(ctx context.Context, all bool) []connector.Info {
+	h.requestLarkCLIRecovery(ctx)
 	out := []connector.Info{}
 	for _, info := range h.connectors.Infos(ctx) {
 		if info.ID == "github" && info.Options != nil {

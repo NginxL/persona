@@ -35,6 +35,7 @@ import persona.core.domain.inbox.InboxItem
 import persona.feature.assistant.AssistantSidebarContent
 import persona.feature.inbox.*
 import java.io.File
+import persona.core.inbox.*
 
 @RunWith(AndroidJUnit4::class)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)

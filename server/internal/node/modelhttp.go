@@ -27,6 +27,13 @@ const (
 // own client decides about it as it would without the node.
 var modelHTTPClient = &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 
+// An API connection's request sent through this computer; the handler zeroes the params it is handed.
+func init() {
+	nodeRPC(proto.MethodModelHTTP, func(_ *Node, ctx context.Context, params json.RawMessage) (any, error) {
+		return modelHTTP(ctx, params)
+	})
+}
+
 // modelHTTP answers model.http: one request (a reply's POST, or a model list's GET) to a model provider for an API connection that sends through this computer
 // (docs/assistant/model-config.md "Sending through a computer"). The key is in the headers for this call only: it is
 // never logged, kept or put in an error (an error names the URL at most, which holds no credential: the manager's

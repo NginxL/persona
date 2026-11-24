@@ -144,7 +144,8 @@ let runs = 0;
  * times the pixels. `columns` is how many topic cards a full row holds.
  */
 async function run(theme, lang = "zh-Hans", width = 1440, { overview = false, large = false, zoom = 1, columns = 1, shot = width === 1440 } = {}) {
-  const s = JSON.parse(await readFile(new URL(`../src/i18n/locales/${lang}/knowledge-kbdetail.json`, import.meta.url), "utf8"));
+  // the knowledge page's strings and the recording module's (src/modules/recording, #13407)
+  const s = Object.assign(...await Promise.all(["knowledge-kbdetail", "recording"].map(async (ns) => JSON.parse(await readFile(new URL(`../src/i18n/locales/${lang}/${ns}.json`, import.meta.url), "utf8")))));
   const cssWidth = width / zoom;
   const context = await browser.newContext({ viewport: { width: cssWidth, height: 1800 }, colorScheme: theme, timezoneId: "Asia/Shanghai", deviceScaleFactor: zoom, reducedMotion: "reduce" });
   await context.addInitScript(({ theme, lang, large }) => {

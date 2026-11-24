@@ -6,7 +6,7 @@ import (
 	"net/http"
 
 	"github.com/nwverse/persona/server/internal/assistantwire"
-	"github.com/nwverse/persona/server/internal/feishubot"
+	"github.com/nwverse/persona/server/internal/botcard"
 	"github.com/nwverse/persona/server/internal/proto"
 )
 
@@ -80,7 +80,7 @@ type Handler interface {
 	// FeishuMessage is feishu.message: the owner's message to the Feishu bot.
 	FeishuMessage(ctx context.Context, p FeishuMessage) error
 	// FeishuAction is feishu.card_action: the owner pressed one of the bot's cards.
-	FeishuAction(ctx context.Context, p FeishuAction) (*feishubot.CardResponse, error)
+	FeishuAction(ctx context.Context, p FeishuAction) (*botcard.CardResponse, error)
 	// FeishuView is feishu.view: what the bot's settings page shows of its chat.
 	FeishuView(ctx context.Context) FeishuView
 	// FeishuOwner is feishu.owner: the bot was paired or unpaired.

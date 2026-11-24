@@ -127,6 +127,14 @@ describe("command-only parity with the skill-aware view", () => {
 });
 
 describe("the card", () => {
+  it("places the details inside when the enclosing dialog clips both sides on desktop", () => {
+    host.setAttribute("role", "dialog");
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(new DOMRect(408, 400, 320, 200));
+    vi.spyOn(host, "getBoundingClientRect").mockReturnValue(new DOMRect(390, 80, 490, 600));
+    render([CONTINUE]);
+    expect(card()!.style.left).toBe("");
+  });
+
   it("shows the focused command, its description and what a text command types, to the right of the panel", () => {
     render([CONTINUE, COMPACT]);
     expect(card()!.textContent).toBe(`继续让它接着做${t("chat-slashpalette.types", { text: "继续" })}`);

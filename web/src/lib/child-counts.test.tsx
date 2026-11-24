@@ -42,22 +42,23 @@ const working = row("child-a", { state: "working", is_subagent: true, parent_ses
 // a waiting runtime child: only the manager names its parent
 const waiting = row("child-b", { state: "needs_you", status: "blocked", folded_under: "lead" });
 const orphan = row("orphan", { state: "working", is_subagent: true, parent_session_id: "archived" });
+const crossChild = row("remote-child", { machine_id: "box", state: "working", is_subagent: true, parent_machine_id: "m", parent_session_id: "lead", folded_under: "lead", folded_under_machine_id: "m" });
 const plain = row("plain", { state: "unread" });
-const raw = [parent, working, waiting, orphan, plain];
+const raw = [parent, working, waiting, orphan, crossChild, plain];
 const card = { id: "ix-1", machine_id: "m", session_id: "child-b", folded_under: "lead", kind: "question", questions: [{ question: "Which test runner?" }], created_at: at } as Interaction;
 const interactions = [card];
-const machines = [{ id: "m", online: true } as Machine];
+const machines = [{ id: "m", online: true } as Machine, { id: "box", online: true } as Machine];
 const mutes = { spaces: [], sessions: [] };
 const keys = (rows: readonly Session[]) => rows.map((s) => s.session_id);
 
-// What every place below agrees on: the parent needs you, the orphan works, the plain session finished unseen.
-const NEEDS = 1, WORKING = 1, UNREAD = 1;
+// What every place below agrees on: the parent needs you, orphan and cross-machine subagents stay out of the main list, and the plain session finished unseen.
+const NEEDS = 1, WORKING = 0, UNREAD = 1;
 
-describe("child sessions counted once, under their parent (#5120)", () => {
+describe("child sessions counted once, under their parent (#5120, #14323)", () => {
   const shown = foldRows(raw);
 
-  it("lists the parent in its folded state, the orphan, and the plain session", () => {
-    expect(keys(shown)).toEqual(["lead", "orphan", "plain"]);
+  it("lists the parent in its folded state and the plain session, hiding folded, cross-machine, and orphan subagents", () => {
+    expect(keys(shown)).toEqual(["lead", "plain"]);
     expect(shown[0].state).toBe("needs_you");
     expect(foldRows(raw)[0]).toBe(shown[0]); // the same copy each time: rows keep their memo
     expect(foldRows(shown)).toBe(shown);
@@ -66,7 +67,7 @@ describe("child sessions counted once, under their parent (#5120)", () => {
   it("the sidebar's state sections and quick filters", () => {
     const groups = Object.fromEntries(buildAgentGroups(shown, machines, "state", mutes).map((g) => [g.key, keys(g.sessions)]));
     expect(groups["state:needs"]).toEqual(["lead"]);
-    expect(groups["state:working"]).toEqual(["orphan"]);
+    expect(groups["state:working"]).toBeUndefined();
     expect(groups["state:unread"]).toEqual(["plain"]);
     const filters = filterCounts(splitAgentSessions(shown, machines).live, mutes);
     expect([filters.needs, filters.working, filters.unread]).toEqual([NEEDS, WORKING, UNREAD]);
@@ -80,7 +81,7 @@ describe("child sessions counted once, under their parent (#5120)", () => {
       return null;
     }
     renderToStaticMarkup(<Probe />);
-    expect(out).toMatchObject({ list: ["lead", "orphan", "plain"], full: ["lead", "orphan", "plain"], counts: { needs: NEEDS, working: WORKING, unread: UNREAD, badge: NEEDS } });
+    expect(out).toMatchObject({ list: ["lead", "plain"], full: ["lead", "plain"], counts: { needs: NEEDS, working: WORKING, unread: UNREAD, badge: NEEDS } });
     expect(tabTitle("Agents", stateCounts(shown).badge)).toBe(`(${NEEDS}) Agents · Persona`);
   });
 
@@ -97,37 +98,39 @@ describe("child sessions counted once, under their parent (#5120)", () => {
     expect(out).toEqual(["plain"]);
   });
 
-  it("the paged list on a folding hub: its rows are the parents, the Earlier fold counts the parent as needing you", () => {
-    // roots=1 leaves the folded children out; the parent comes with its own state and its rollup
+  it("the paged list on a folding hub: its rows are the parents, and foldRows filters any orphan is_subagent fallback", () => {
+    // roots=1&cross_machine_hierarchy=1 leaves folded and orphan subagents out; foldRows also acts as client safety net
     const page = [parent, orphan, plain];
     expect(page.filter(runtimeNeedsYou).length).toBe(NEEDS);
-    expect(keys(foldRows(page))).toEqual(["lead", "orphan", "plain"]);
+    expect(keys(foldRows(page))).toEqual(["lead", "plain"]);
     expect(stateCounts(foldRows(page))).toMatchObject({ needs: NEEDS, working: WORKING, unread: UNREAD });
   });
 
   it("Home: the card is the parent's, which is not listed a second time, and the hint stays off", () => {
     const home = homeOverview(shown, interactions);
     expect(home.groups.needs).toEqual([]); // the parent waits in the cards group, by its child's card
-    expect(home.groups.working.map((g) => g.lead.session_id)).toEqual(["orphan"]);
+    expect(home.groups.working).toEqual([]);
     expect(home.groups.unread.map((g) => g.lead.session_id)).toEqual(["plain"]);
     expect(new Set(interactions.map(homeKey)).size).toBe(interactions.length);
   });
 
   it("the main chat's dock and its Needs you / In progress entries", () => {
-    expect(dockAgents(raw, [], "main", "main").map((a) => [a.session.session_id, a.state])).toEqual([["lead", "needs_you"], ["orphan", "working"]]);
+    expect(dockAgents(raw, [], "main", "main").map((a) => [a.session.session_id, a.state])).toEqual([["lead", "needs_you"]]);
     const entries = assistantEntries({ conversation: "main", main: "main", todos: [], sessions: raw, interactions, plans: {}, feed: [] });
     expect(entries.needsYou.map((item) => item.key)).toEqual(["agent:m/lead"]);
     expect(entries.needsYou[0].kind === "agent" && entries.needsYou[0].asks.map((ix) => ix.id)).toEqual(["ix-1"]);
-    expect(entries.running.map((item) => item.key)).toEqual(["agent:m/orphan"]);
+    expect(entries.running).toEqual([]);
   });
 
-  it("the switcher's count, the pending list and the Inbox: one waiting agent, the parent", () => {
+  it("the switcher's count, the pending list and the Inbox: one waiting agent, the parent (including cross-machine cards)", () => {
     const list = { managers: [{ id: "a", name: "A" }], default: "a" } as unknown as Parameters<typeof managerWaiting>[0];
-    expect(managerWaiting(list, shown, interactions)).toEqual({ a: NEEDS });
-    const pending = sidebarPending(shown, interactions, {});
-    expect(pending.map((p) => [p.session?.session_id, p.cards.length, p.to])).toEqual([["lead", 1, { name: "session", mid: "m", sid: "lead", view: "chat", work: true }]]);
+    const crossCard = { id: "ix-cross", machine_id: "box", session_id: "remote-child", folded_under: "lead", folded_under_machine_id: "m", kind: "permission", tool_name: "Bash", created_at: at } as Interaction;
+    expect(managerWaiting(list, shown, [card, crossCard])).toEqual({ a: NEEDS });
+    const pending = sidebarPending(shown, [card, crossCard], {});
+    expect(pending.map((p) => [p.session?.session_id, p.cards.length, p.to])).toEqual([["lead", 2, { name: "session", mid: "m", sid: "lead", view: "chat", work: true }]]);
     expect(inboxWaiting(interactions, { m: raw }, mutes, { source: "", kind: "", query: "" }).map((ix) => ix.id)).toEqual(["ix-1"]);
     expect(requestRoute(card)).toEqual({ name: "session", mid: "m", sid: "lead" });
+    expect(requestRoute(crossCard)).toEqual({ name: "session", mid: "m", sid: "lead" });
   });
 
   it("the parent's row says how many subagents run", () => {
@@ -151,6 +154,6 @@ describe("child sessions counted once, under their parent (#5120)", () => {
     const answered = { "ix-1": { ix: card, resolution: { kind: "answer" }, at: Date.parse(at) + 1000 } } as unknown as Parameters<typeof answeredSessions>[2];
     const after = foldRows(answeredSessions(raw, [], answered));
     expect(after.find((s) => s.session_id === "lead")?.state).toBe("working");
-    expect(stateCounts(after)).toMatchObject({ needs: 0, working: WORKING + 1 });
+    expect(stateCounts(after)).toMatchObject({ needs: 0, working: 1 });
   });
 });

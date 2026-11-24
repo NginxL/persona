@@ -248,6 +248,36 @@ describe("Agent context usage", () => {
       captured.session = was;
     }
   });
+
+  it("shows ContextMeter in Assistant chats whenever context or token usage is available (#12541)", async () => {
+    async function renderAssistant() {
+      const stream = await renderToReadableStream(<ChatView mid="hub" sid="c1" assistant />);
+      await stream.allReady;
+      return new Response(stream).text();
+    }
+    const wasSession = captured.session;
+    const wasItems = captured.items;
+    try {
+      captured.session = { ...wasSession, assistant: true, context_tokens: 50_000, context_window: 200_000 };
+      captured.items = [];
+      const withContext = await renderAssistant();
+      expect(withContext).toContain("data-composer-usage");
+      expect(withContext).toContain('aria-valuenow="25"');
+      expect(withContext).not.toContain("data-composer-source");
+
+      captured.session = { ...wasSession, assistant: true, context_tokens: undefined, context_window: undefined };
+      captured.items = [{ id: "a1", seq: 1, role: "assistant", kind: "text", usage: [{ in: 2000, out: 1000 }] }];
+      const withUsage = await renderAssistant();
+      expect(withUsage).toContain("data-composer-usage");
+      expect(withUsage).toContain("3.0k tok");
+
+      captured.items = [];
+      expect(await renderAssistant()).not.toContain("data-composer-usage");
+    } finally {
+      captured.session = wasSession;
+      captured.items = wasItems;
+    }
+  });
 });
 
 describe("links in the chat", () => {

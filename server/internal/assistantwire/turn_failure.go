@@ -71,3 +71,19 @@ func ToolSearchRefused(text string) bool {
 	}
 	return containsAny(t, toolSearchWords)
 }
+
+// ImageLimitErrorWords name model API failures caused by accumulated pictures in a conversation exceeding the API's
+// request size, count or multi-image dimension limits (#13045): a gateway's 32 MB limit ("Request too large"), an image
+// Claude Code stripped ("could not be processed and was removed"), or Anthropic's "many-image requests" dimension limit.
+// Lower case: matched against lower-cased text of a failed turn.
+var ImageLimitErrorWords = []string{
+	"request too large",
+	"request_too_large",
+	"could not be processed and was removed",
+	"many-image requests",
+}
+
+// ImageLimitErrorText reports whether a failed turn's error text describes an image-limit failure (#13045).
+func ImageLimitErrorText(text string) bool {
+	return containsAny(strings.ToLower(text), ImageLimitErrorWords)
+}

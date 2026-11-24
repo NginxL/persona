@@ -140,7 +140,7 @@ class TodoListFilterTest {
         val today = all.filter { it.matches(TodoListFilter.Today, now, zone, monday) }
         val r = triageTodos(today, lookup, nowMs, zone = zone, known = superseded)
         assertEquals(0, r.listed(TriageSection.Waiting))
-        assertEquals(listOf("failed"), r.rows(TriageSection.JustDone).flatMap { g -> g.members.map { it.id } })
+        assertEquals(listOf("failed"), r.rows(TriageSection.Done).flatMap { g -> g.members.map { it.id } })
         assertEquals(1, hiddenWaiting(all, today, lookup, nowMs, zone = zone, superseded = superseded))
 
         val searched = triageTodos(listOf(failed, waiting), lookup, nowMs, zone = zone, known = superseded)

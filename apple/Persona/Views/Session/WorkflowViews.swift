@@ -696,7 +696,7 @@ struct WorkflowAgentRow: View {
                     .truncationMode(.middle)
             }
             Spacer(minLength: Theme.Space.xs)
-            if hovering || MacHover.showAll, open != nil {
+            if hovering, open != nil {
                 Text("Open [Workflow Agent]")
                     .font(Theme.Font.labelStrong)
                     .foregroundStyle(Theme.accent)
@@ -713,11 +713,6 @@ struct WorkflowAgentRow: View {
         if let open {
             Button { Haptics.tap(); open() } label: { content }
                 .buttonStyle(.plain)
-                #if os(macOS)
-                .macHoverShade(in: .rect(cornerRadius: Theme.Radius.badge, style: .continuous))
-                .onHover { hovering = $0 }
-                .help(agent.lastText ?? agent.title)
-                #endif
                 .accessibilityLabel(String(localized: "Open \(agent.title)'s conversation [Workflow Agent]"))
                 .accessibilityValue(Self.word(agent.runState))
                 .accessibilityIdentifier("workflow.agent")

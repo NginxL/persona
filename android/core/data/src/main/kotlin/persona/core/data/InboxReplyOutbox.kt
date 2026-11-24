@@ -2,9 +2,9 @@ package persona.core.data
 
 import persona.core.contracts.SessionKey
 import persona.core.contracts.api.LarkMention
-import persona.feature.inbox.InboxHandOffRequest
-import persona.feature.inbox.ReplyRequest
-import persona.feature.inbox.ReplyTarget
+import persona.core.inbox.InboxHandOffRequest
+import persona.core.inbox.ReplyRequest
+import persona.core.inbox.ReplyTarget
 import kotlinx.coroutines.Deferred
 import kotlinx.serialization.Serializable
 import kotlin.coroutines.AbstractCoroutineContextElement

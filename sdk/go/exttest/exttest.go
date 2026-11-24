@@ -83,6 +83,11 @@ func Check(t testing.TB, manifest []byte, run Run, config ...json.RawMessage) wi
 	h := newHub(run)
 	h.manifest = &m // what it declares is granted here
 	go h.serve(ctx)
+	defer func() {
+		for _, p := range h.takeProblems() {
+			t.Errorf("%s", p)
+		}
+	}()
 
 	if err := h.call(ctx, wire.MethodPing, struct{}{}, nil); code(err) != wire.ErrorCodeNotInitialized {
 		t.Fatalf("ping before initialize: want %s, got %v", wire.ErrorCodeNotInitialized, err)
@@ -229,6 +234,13 @@ func Check(t testing.TB, manifest []byte, run Run, config ...json.RawMessage) wi
 		case <-time.After(5 * time.Second):
 			t.Fatal("still running 5 seconds after the hub closed its stdin")
 		}
+		select {
+		case <-h.closed:
+		case <-time.After(time.Second):
+		}
+	}
+	for _, p := range h.takeProblems() {
+		t.Errorf("%s", p)
 	}
 	return res
 }

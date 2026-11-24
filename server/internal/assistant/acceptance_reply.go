@@ -9,8 +9,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/nwverse/persona/server/internal/botcard"
 	"github.com/nwverse/persona/server/internal/db"
 	"github.com/nwverse/persona/server/internal/i18n"
+	"github.com/nwverse/persona/server/internal/larkhost"
 	"github.com/nwverse/persona/server/internal/lazyre"
 )
 
@@ -19,6 +21,59 @@ import (
 // both full-width and ASCII question marks are neither particles nor stops, so questions still go to the agent, and
 // negations ("not passed", "can't pass", "no good") never match because the regex anchors on the approval word.
 var passWords = lazyre.New(`(?i)^\s*(验收)?(通过|没问题|可以|好的?|ok|okay|lgtm|pass(ed)?|approved?|👍)(?:[了啦呀咯喽呗哒啊]{1,2})?\s*[。.!！]?\s*$`)
+
+// conclusionQuestion handles free text on a conclusion before acceptance can take it as an answer. A displayed
+// option or bare confirmation continues through the existing reply path. Other text is a conversation with the
+// supervisor, so the card, its deadline and the task's decisions are untouched.
+func (s *Service) conclusionQuestion(ctx context.Context, ev *botcard.MessageEvent, content *botcard.Content, features FeishuFeatures) bool {
+	msg := ev.Message
+	id, earlier := s.acceptFor(msg.ParentID, msg.RootID)
+	if id == "" || earlier {
+		return false
+	}
+	ask, _ := s.askCopy(id)
+	text := strings.TrimSpace(content.Text)
+	if !ask.Conclusion || text == "" {
+		return false
+	}
+	if !strings.ContainsAny(text, "?？") { // i18n-ignore: question marks in the owner's reply, never shown
+		if passWords.MatchString(text) && (!decideAsk(&ask) || ask.Recommend != "") {
+			return false
+		}
+		if decideAsk(&ask) {
+			if option := exactDecisionOption(text, ask.Options); option != "" {
+				content.Text = option
+				return false
+			}
+		}
+	}
+	todo, ok := s.todoNow(id)
+	if !ok {
+		return false
+	}
+	cfg := s.settings(ctx)
+	target := botTarget{Kind: targetMain, TodoID: id}
+	supervisor := cfg.Main
+	if todo.Supervision != nil && todo.Supervision.Supervisor != "" {
+		supervisor = todo.Supervision.Supervisor
+	}
+	if supervisor == cfg.Main {
+		supervisor = s.ownSupervisor(cfg)
+	}
+	if supervisor != "" && supervisor != cfg.Main {
+		if c, present := s.session(ctx, cfg.MachineID, supervisor); present && c.Assistant {
+			target.Kind, target.SessionID = targetPersona, supervisor
+		}
+	}
+	l := s.botLang(ctx)
+	if err := botAllowed(l, features, target); err != nil {
+		s.chat().Note(ctx, larkhost.Target{}, msg.MessageID, err.Error())
+	} else if err := s.botSend(ctx, ev, *content, target); err != nil {
+		s.logf("bots: conclusion question for task %s: %v", id, err)
+		s.chat().Note(ctx, larkhost.Target{}, msg.MessageID, i18n.T(l, "assistant-feishu.not_sent", i18n.Args{"error": clip(oneLine(err.Error()), 200)}))
+	}
+	return true
+}
 
 // acceptReply answers a reply to a "Please verify" card or a conclusion's (true: it was one): "Pass" marks it verified (a
 // decision: takes the option recommended), anything else is the user's change (a decision: their choice), written into the
@@ -33,27 +88,27 @@ func (s *Service) acceptReply(ctx context.Context, messageID, text string, media
 	text = strings.TrimSpace(text)
 	if text == "" {
 		if media {
-			s.botNote(ctx, messageID, i18n.T(l, "assistant-reports.accept_media_dropped"))
+			s.chat().Note(ctx, larkhost.Target{}, messageID, i18n.T(l, "assistant-reports.accept_media_dropped"))
 		}
 		return true
 	}
 	if earlier { // a card of a round before the one asking now: answered, it neither accepts nor changes this round
-		s.botNote(ctx, messageID, i18n.T(l, "assistant-feishu_cards.already_handled"))
+		s.chat().Note(ctx, larkhost.Target{}, messageID, i18n.T(l, "assistant-feishu_cards.already_handled"))
 		return true
 	}
 	t, ok := s.todoNow(id)
 	ask, _ := s.askCopy(id)
 	card := slices.IndexFunc(ids, func(mid string) bool { return mid != "" && slices.Contains(ask.Messages, mid) })
 	if card < 0 {
-		s.botNote(ctx, messageID, i18n.T(l, "assistant-feishu_cards.already_handled"))
+		s.chat().Note(ctx, larkhost.Target{}, messageID, i18n.T(l, "assistant-feishu_cards.already_handled"))
 		return true
 	}
 	if decideAsk(&ask) && !ask.AcceptedAt.IsZero() { // taken, or its review moved on: over
-		s.botNote(ctx, messageID, i18n.T(l, "assistant-feishu_cards.already_handled"))
+		s.chat().Note(ctx, larkhost.Target{}, messageID, i18n.T(l, "assistant-feishu_cards.already_handled"))
 		return true
 	}
 	if decideAsk(&ask) && (!ask.RecheckAt.IsZero() || ok && ownerDecisionReturned(t.Supervision)) {
-		s.botNote(ctx, messageID, i18n.T(l, "assistant-feishu_cards.already_handled"))
+		s.chat().Note(ctx, larkhost.Target{}, messageID, i18n.T(l, "assistant-feishu_cards.already_handled"))
 		return true
 	}
 	// "OK" to a decision with nothing recommended takes nothing: it is their answer, and goes on as one.
@@ -61,23 +116,23 @@ func (s *Service) acceptReply(ctx context.Context, messageID, text string, media
 		// Approval on a pre-reopen card is answered but neither accepts nor reopens; a gone todo keeps old behavior.
 		if ok {
 			if a, _ := s.acceptAskLocked(id); a != nil && acceptAskStale(a, t) { // acceptFor read the asks
-				s.botNote(ctx, messageID, i18n.T(l, "assistant-feishu_cards.already_handled"))
+				s.chat().Note(ctx, larkhost.Target{}, messageID, i18n.T(l, "assistant-feishu_cards.already_handled"))
 				return true
 			}
 		}
 		if result, err := s.acceptTry(ctx, id, ids[card]); errors.Is(err, errAcceptStore) {
-			s.botNote(ctx, messageID, i18n.T(l, "http-status.unavailable"))
+			s.chat().Note(ctx, larkhost.Target{}, messageID, i18n.T(l, "http-status.unavailable"))
 		} else if note := inDoubtNote(l, err); note != "" { // it may be with the agent already: look before saying it again
-			s.botNote(ctx, messageID, note)
+			s.chat().Note(ctx, larkhost.Target{}, messageID, note)
 		} else if err != nil { // the recommendation did not reach the agent: nothing recorded, "OK" can be said again
-			s.botNote(ctx, messageID, i18n.T(l, "assistant-reports.accept_not_taken", i18n.Args{"error": clip(oneLine(i18n.Localize(err, l)), 120)}))
+			s.chat().Note(ctx, larkhost.Target{}, messageID, i18n.T(l, "assistant-reports.accept_not_taken", i18n.Args{"error": clip(oneLine(i18n.Localize(err, l)), 120)}))
 		} else if result.undelivered != nil {
 			why := clip(oneLine(i18n.Localize(result.undelivered, l)), 120)
-			s.botNote(ctx, messageID, i18n.T(l, "assistant-reports.accept_decided_not_sent", i18n.Args{"error": why}))
+			s.chat().Note(ctx, larkhost.Target{}, messageID, i18n.T(l, "assistant-reports.accept_decided_not_sent", i18n.Args{"error": why}))
 		} else if result.taken {
-			s.botNote(ctx, messageID, acceptedNote(l, &ask))
+			s.chat().Note(ctx, larkhost.Target{}, messageID, acceptedNote(l, &ask))
 		} else { // not this round that waits: answered as its button answers (feishu_card_actions.go), not swallowed
-			s.botNote(ctx, messageID, i18n.T(l, "assistant-feishu_cards.already_handled"))
+			s.chat().Note(ctx, larkhost.Target{}, messageID, i18n.T(l, "assistant-feishu_cards.already_handled"))
 		}
 		return true
 	}
@@ -86,13 +141,13 @@ func (s *Service) acceptReply(ctx context.Context, messageID, text string, media
 		result, err := s.answerDecisionText(ctx, id, ask.AskedAt.UTC().Format(timeKeyLayout), text)
 		switch {
 		case errors.Is(err, errAcceptStore):
-			s.botNote(ctx, messageID, i18n.T(l, "http-status.unavailable"))
+			s.chat().Note(ctx, larkhost.Target{}, messageID, i18n.T(l, "http-status.unavailable"))
 		case err != nil:
-			s.botNote(ctx, messageID, i18n.T(l, "assistant-reports.accept_not_taken", i18n.Args{"error": clip(oneLine(i18n.Localize(err, l)), 120)}))
+			s.chat().Note(ctx, larkhost.Target{}, messageID, i18n.T(l, "assistant-reports.accept_not_taken", i18n.Args{"error": clip(oneLine(i18n.Localize(err, l)), 120)}))
 		case !result.taken:
-			s.botNote(ctx, messageID, i18n.T(l, "assistant-feishu_cards.already_handled"))
+			s.chat().Note(ctx, larkhost.Target{}, messageID, i18n.T(l, "assistant-feishu_cards.already_handled"))
 		default:
-			s.botNote(ctx, messageID, i18n.T(l, "assistant-reports.outside_answered"))
+			s.chat().Note(ctx, larkhost.Target{}, messageID, i18n.T(l, "assistant-reports.outside_answered"))
 		}
 		return true
 	}
@@ -100,12 +155,12 @@ func (s *Service) acceptReply(ctx context.Context, messageID, text string, media
 	t, ok = s.todoNow(id)
 	if !ok {
 		s.reviewDismissals.actions.release(id)
-		s.botNote(ctx, messageID, i18n.T(l, "assistant-reports.accept_gone"))
+		s.chat().Note(ctx, larkhost.Target{}, messageID, i18n.T(l, "assistant-reports.accept_gone"))
 		return true
 	}
 	if a, _ := s.acceptAskLocked(id); a == nil || !a.AskedAt.Equal(ask.AskedAt) || acceptAskStale(a, t) {
 		s.reviewDismissals.actions.release(id)
-		s.botNote(ctx, messageID, i18n.T(l, "assistant-feishu_cards.already_handled"))
+		s.chat().Note(ctx, larkhost.Target{}, messageID, i18n.T(l, "assistant-feishu_cards.already_handled"))
 		return true
 	}
 	// Feedback starts its work round before delivery, which may wait for an offline Agent to resume.
@@ -116,7 +171,7 @@ func (s *Service) acceptReply(ctx context.Context, messageID, text string, media
 	s.reviewDismissals.actions.release(id)
 	if reopenErr != nil {
 		s.logf("task %s: acceptance reopen: %v", id, reopenErr)
-		s.botNote(ctx, messageID, withMediaDropped(l, i18n.T(l, "assistant-reports.accept_not_sent",
+		s.chat().Note(ctx, larkhost.Target{}, messageID, withMediaDropped(l, i18n.T(l, "assistant-reports.accept_not_sent",
 			i18n.Args{"error": clip(oneLine(reopenErr.Error()), 120)}), media))
 		return true
 	}
@@ -145,21 +200,21 @@ func (s *Service) acceptReply(ctx context.Context, messageID, text string, media
 		s.logf("task %s: acceptance to agent: %v", id, err)
 		why := clip(oneLine(err.Error()), 120)
 		if !decideAsk(&ask) {
-			s.botNote(ctx, messageID, withMediaDropped(l, i18n.T(l, "assistant-reports.accept_not_sent", i18n.Args{"error": why}), media))
+			s.chat().Note(ctx, larkhost.Target{}, messageID, withMediaDropped(l, i18n.T(l, "assistant-reports.accept_not_sent", i18n.Args{"error": why}), media))
 			return true
 		}
 		// A decision answered in words is made even when its agent cannot take it now: recorded above, its ask is answered,
 		// and its supervisor is told to pass it on. Never resent by the hub, so the agent cannot get it twice.
 		s.answeredInWords(ctx, id, ask.AskedAt)
 		s.decisionNotDelivered(ctx, id, ask.AskedAt, text, err)
-		s.botNote(ctx, messageID, withMediaDropped(l, i18n.T(l, "assistant-reports.accept_decided_not_sent", i18n.Args{"error": why}), media))
+		s.chat().Note(ctx, larkhost.Target{}, messageID, withMediaDropped(l, i18n.T(l, "assistant-reports.accept_decided_not_sent", i18n.Args{"error": why}), media))
 		return true
 	}
 	if decideAsk(&ask) {
 		s.userDecided(ctx, id) // decided: its agent's next stop goes back to the supervisor
 	}
 	s.answeredInWords(ctx, id, ask.AskedAt)
-	s.botNote(ctx, messageID, withMediaDropped(l, i18n.T(l, "assistant-reports.accept_sent"), media))
+	s.chat().Note(ctx, larkhost.Target{}, messageID, withMediaDropped(l, i18n.T(l, "assistant-reports.accept_sent"), media))
 	return true
 }
 
@@ -173,13 +228,17 @@ func (s *Service) answeredInWords(ctx context.Context, id string, askedAt time.T
 		b.mu.Unlock()
 		return
 	}
-	if decideAsk(a) {
+	decision := decideAsk(a)
+	if decision {
 		a.AcceptedAt = time.Now().UTC()
 	} else {
 		delete(b.asks, id)
 	}
 	s.saveAcceptLocked(ctx)
 	b.mu.Unlock()
+	if decision {
+		s.todoPushOver(id) // answered: its next push may ring
+	}
 }
 
 // withMediaDropped is note with, when the reply carried pictures or files, the line saying they did not go to the agent.
@@ -204,7 +263,7 @@ func acceptSucceeded() acceptResult { return acceptResult{taken: true} }
 func (s *Service) decisionNotDelivered(ctx context.Context, id string, askedAt time.Time, choice string, cause error) acceptResult {
 	l := s.botLang(ctx)
 	s.userDecided(ctx, id)
-	s.signal(superviseSignal{Todo: id, Kind: sigIdle, Key: "undelivered|" + askedAt.UTC().Format(time.RFC3339Nano),
+	s.signal(superviseSignal{Todo: id, Kind: sigIdle, Key: "undelivered|" + askedAt.UTC().Format(time.RFC3339Nano), Handoff: true,
 		Detail: i18n.T(l, "assistant-reports.decision_not_delivered", i18n.Args{"decision": clip(oneLine(choice), 200),
 			"error": clip(oneLine(i18n.Localize(cause, l)), 120)})})
 	return acceptResult{taken: true, undelivered: cause}
@@ -277,6 +336,10 @@ func (s *Service) acceptTryAsDismissalLocked(ctx context.Context, id, card strin
 			b.mu.Unlock()
 			return acceptResult{}, err
 		}
+	}
+	if decideAsk(a) && terminalResumeLabel(a.Recommend) {
+		b.mu.Unlock()
+		return acceptResult{}, i18n.Err("assistant-reports.manual_terminal_resume")
 	}
 	previousDueAt, previousAcceptedAt := a.DueAt, a.AcceptedAt
 	if a.AcceptedAt.IsZero() {
@@ -360,6 +423,9 @@ func (s *Service) acceptTryAsDismissalLocked(ctx context.Context, id, card strin
 	case cp.Conclusion:
 		// Seen: the review already closed the task and told where it came from; "verified" is for deployed work.
 	}
+	if decideAsk(&cp) {
+		s.todoPushOver(id) // taken: its next push may ring
+	}
 	completeDismissal()
 	s.updateAskCards(ctx, id, cp)
 	return result, nil
@@ -369,8 +435,8 @@ func (s *Service) acceptTryAsDismissalLocked(ctx context.Context, id, card strin
 // verified, its todo's chat thread and where the request came from hear it, and its cards say so.
 func (s *Service) taskVerified(ctx context.Context, id string, a acceptAsk) {
 	s.setTaskStageKind(ctx, id, "verify", "", "", true)
-	s.threadPost(id, threadEvent{kind: threadTodoAccepted}) // and the todo's chat thread
-	s.sourceReportSoon(id, sourceReportWait)                // and where the request came from (todo_source.go)
+	s.chat().ThreadPost(id, larkhost.ThreadEvent{Kind: larkhost.ThreadTodoAccepted}) // and the todo's chat thread
+	s.sourceReportSoon(id, sourceReportWait)                                         // and where the request came from (todo_source.go)
 	s.updateAskCards(ctx, id, a)
 }
 
@@ -381,7 +447,7 @@ func (s *Service) updateAskCards(ctx context.Context, id string, a acceptAsk) {
 		return
 	}
 	for _, mid := range a.Messages {
-		if err := s.botUpdateCard(ctx, mid, s.acceptCard(ctx, t, a, false)); err != nil {
+		if err := s.chat().UpdateCard(ctx, mid, s.acceptCard(ctx, t, a, false)); err != nil {
 			s.logf("task %s: acceptance card: %v", id, err)
 		}
 	}

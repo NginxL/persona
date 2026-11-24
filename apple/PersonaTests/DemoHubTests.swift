@@ -85,6 +85,47 @@ import PersonaWire
         _ = try await api.mailAccounts()
     }
 
+    @Test func healthIntakeLoadsRecordsAndUndoesWithoutResurrectingARetry() async throws {
+        let before = try await api.healthIntake()
+        #expect(before.water.today == 750)
+        #expect(before.protein.today == 36)
+        let draft = HealthIntake.Draft(kind: .water)
+        let logged = try await api.recordHealthIntake(draft)
+        #expect(logged.today.water == 1000)
+        #expect(logged.entry?.amount == 250)
+        let repeated = try await api.recordHealthIntake(draft)
+        #expect(repeated.today.water == 1000)
+        #expect(repeated.entry?.id == draft.id)
+        let undone = try await api.undoHealthIntake(draft.id)
+        #expect(undone.today.water == 750)
+        #expect(try await api.undoHealthIntake(draft.id).today.water == 750)
+        let tombstone = try await api.recordHealthIntake(draft)
+        #expect(tombstone.entry?.deletedAt != nil)
+        #expect(tombstone.today.water == 750)
+        let final = try await api.healthIntake()
+        #expect(final.water.entries.count == before.water.entries.count)
+        #expect(final.days.last?.water == final.water.today)
+    }
+
+    @Test func intakeDetailsOpenBothKindsAndSettingsFromTheBundledPages() async throws {
+        for kind in [HealthIntake.Kind.water, .protein] {
+            let first = try await api.pluginUI(HealthIntakeUI.id, HealthIntakeUI.page, context: .here().forPage(),
+                                               state: HealthIntakeUI.state(kind))
+            let view = try #require(first.view)
+            #expect(view.title?.isEmpty == false)
+            #expect(!view.sections.isEmpty)
+            let settings = try await api.pluginUI(HealthIntakeUI.id, HealthIntakeUI.page, context: .here().forPage(),
+                                                  state: view.state, action: "settings")
+            let state = try JSON.decoder.decode(JSONValue.self, from: Data(#require(settings.view?.state).utf8))
+            #expect(state["kind"]?.string == kind.rawValue)
+            #expect(state["edit"]?.bool == true)
+            let action = try await api.pluginUI(HealthIntakeUI.id, HealthIntakeUI.page, context: .here().forPage(),
+                                                state: view.state, action: "log", values: ["amount": "10"])
+            #expect(action.view == view)
+            #expect(action.toast?.isEmpty == false)
+        }
+    }
+
     /// Times are moved to now: the demo never looks days old.
     @Test func timesAreCurrent() async throws {
         let sessions = try await api.sessions()
@@ -105,6 +146,24 @@ import PersonaWire
         await #expect(throws: APIError.self) {
             _ = try await api.start(.init(machineID: "macbook", cwd: "/Users/me/code/weather", launcher: "claude"))
         }
+    }
+
+    /// The demo accepts the new sparse permission write, but does not turn other or mixed assistant writes into false successes.
+    @Test func assistantPermissionWritesDoNotSwallowOtherSettings() async throws {
+        var permission = APIClient.AssistantConfigBody()
+        permission.defaultPermissionMode = "bypassPermissions"
+        let saved = try await api.setAssistant(permission)
+        #expect(saved.defaultPermissionMode == "bypassPermissions")
+
+        var other = APIClient.AssistantConfigBody()
+        other.startRequestedTasks = false
+        await #expect(throws: APIError.self) { _ = try await api.setAssistant(other) }
+
+        var mixed = APIClient.AssistantConfigBody()
+        mixed.defaultPermissionMode = "acceptEdits"
+        mixed.startRequestedTasks = false
+        await #expect(throws: APIError.self) { _ = try await api.setAssistant(mixed) }
+        #expect(try await api.assistant().defaultPermissionMode == "bypassPermissions", "a refused mixed write changes nothing")
     }
 
     /// A message to an agent is echoed, and the demo answers it.

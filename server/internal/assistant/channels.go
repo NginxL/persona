@@ -62,9 +62,11 @@ const channelSeenKeep = 300
 
 // channelsBook is the channels' state in memory.
 type channelsBook struct {
-	mu     sync.Mutex
-	loaded bool
-	prefs  map[string]*channelPrefs
+	mu sync.Mutex
+	// receiving is the last accepted message for each channel/thread, until its route and binding are settled.
+	receiving map[channelAdmissionKey]chan struct{}
+	loaded    bool
+	prefs     map[string]*channelPrefs
 	// st is what the runs wait on (channels_runs.go), loaded apart from prefs.
 	st       channelsState
 	stLoaded bool
@@ -94,9 +96,7 @@ type channelsBook struct {
 	// list is the hub's list of the channels, kept a moment (the runs look at it every second).
 	list   []channel.View
 	listAt time.Time
-	// kitDown: CardKit would not make a progress card (feishu_stream.go); until then they are sent as messages.
-	kitDown time.Time
-	now     func() time.Time // tests
+	now    func() time.Time // tests
 }
 
 func (c *channelsBook) clock() time.Time {
@@ -229,11 +229,15 @@ func (s *Service) saveChannelStateLocked() error {
 	return nil
 }
 
-// bindChannelThread notes that thread of channel id talks to a conversation (machine, session), now.
-func (s *Service) bindChannelThread(id, thread, machine, session string) {
+// bindChannelThread notes the conversation only while its accepted binding generation is current.
+// Omitting generation is for seeding an existing binding; receive paths always supply their accepted generation.
+func (s *Service) bindChannelThread(id, thread, machine, session string, generation ...uint64) bool {
 	c := &s.chans
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if len(generation) > 0 && c.generation[id] != generation[0] {
+		return false
+	}
 	s.loadChannelsLocked(context.Background())
 	p := s.channelPrefLocked(id)
 	if p.Threads == nil {
@@ -243,13 +247,17 @@ func (s *Service) bindChannelThread(id, thread, machine, session string) {
 	p.Threads[thread] = &channelThread{MachineID: machine, SessionID: session, At: now}
 	pruneChannelThreads(p.Threads, now)
 	s.saveChannelsLocked()
+	return true
 }
 
 // unbindChannelThread forgets thread's conversation: its next message starts a new one (/new in the thread).
-func (s *Service) unbindChannelThread(id, thread string) {
+func (s *Service) unbindChannelThread(id, thread string, generation ...uint64) {
 	c := &s.chans
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if len(generation) > 0 && c.generation[id] != generation[0] {
+		return
+	}
 	s.loadChannelsLocked(context.Background())
 	p := s.channelPrefLocked(id)
 	if _, ok := p.Threads[thread]; !ok {

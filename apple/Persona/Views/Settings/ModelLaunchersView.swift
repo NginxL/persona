@@ -160,9 +160,6 @@ struct ModelLaunchersView: View {
                 ProviderWizard(start: step, wizard: importWizard, launchers: listOwner == importOwner ? launchers ?? [] : [])
             }
         }
-        #if os(macOS) && DEBUG
-        .onAppear { if UserDefaults.standard.bool(forKey: "macLauncherEditor") { adding = .pick } } // `-macLauncherEditor YES`: Add Launcher
-        #endif
         #if DEBUG
         // `-openLauncherEditor YES` opens the form Other Connection Types leads to, `-openLauncherEditor preset` on From Extension;
         // `-openProviderWizard pick|connect|models|import` the provider sheet at that step; `-openProviderComputers
@@ -211,43 +208,20 @@ struct ModelLaunchersView: View {
             ForEach(harnesses) { g in
                 Section {
                     ForEach(g.items) { row($0) }
-                    #if os(macOS)
-                    if g.id == harnesses.last?.id { macAddButtons }
-                    #endif
                 } header: { header(String(localized: "Managed by Persona · \(g.title)"), g.items.count) } footer: {
                     if g.id == harnesses.last?.id { managedFooter }
                 }
             }
         } else if query.isEmpty || !managed.isEmpty { Section {
             if managed.isEmpty {
-                #if os(macOS)
-                Text("No providers yet. Use “Add Provider…” below to set up the connection type, gateway, key, and default model, then pick one for each use in “Model Configuration”.")
-                    .font(Theme.Font.label).foregroundStyle(.secondary)
-                #else
                 Text("No providers yet. Tap + at the top right to set up the connection type, gateway, key, and default model, then pick one for each use in “Model Configuration”.")
                     .font(Theme.Font.label).foregroundStyle(.secondary)
-                #endif
             }
             ForEach(managed) { row($0) }
-            #if os(macOS)
-            macAddButtons
-            #endif
         } header: { header(String(localized: "Managed by Persona"), managed.count) } footer: {
             if !managed.isEmpty { managedFooter }
         } }
     }
-
-    #if os(macOS)
-    /// In the group it adds to, as a Mac settings pane has its add button (#1223): in the window's toolbar the search field
-    /// took the trailing end and the + went to the window's middle, over the settings list.
-    private var macAddButtons: some View {
-        HStack {
-            Spacer(minLength: 0)
-            Button("Import from ~/.zshrc…") { adding = .importZshrc }.lineLimit(1).formButton()
-            Button("Add Provider…") { adding = .pick }.lineLimit(1).formButton()
-        }
-    }
-    #endif
 
     private var managedFooter: some View {
         Text("Keys are stored encrypted on the hub and only handed to the computer at launch. They're never written to a file.")
@@ -311,18 +285,6 @@ struct ModelLaunchersView: View {
         // Swipe left to hide a ~/.zshrc launcher or bring a hidden one back (2026-11-01 user request). No
         // confirmation: it only changes what Persona lists and is undone the same way. A Persona one is deleted, key
         // and all, so that one asks first.
-        #if os(macOS)
-        // A Mac form has no swipe: the same actions in the row's menu (#1221).
-        .contextMenu {
-            if l.managed {
-                Button("Delete…", role: .destructive) { pendingDelete = l }
-            } else if l.hidden == true {
-                Button("Unhide [Lark Chat View e0534b]") { Task { await setHidden(l, false) } }
-            } else {
-                Button("Hide") { Task { await setHidden(l, true) } }
-            }
-        }
-        #endif
         .swipeActions(edge: .trailing, allowsFullSwipe: true) {
             if l.managed {
                 Button { pendingDelete = l } label: { Label("Delete", systemImage: Theme.Icon.delete) }.tint(Theme.danger)
@@ -812,9 +774,6 @@ struct LauncherEditor: View {
                 if let s = ProviderScopeForm(view: e) { scope = s }
             }
         }
-        #if os(macOS)
-        .macSheet()
-        #endif
     }
 
     /// Manual: the name, the kind, the gateway and key, the models, the flags.

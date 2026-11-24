@@ -439,3 +439,131 @@ func TestWorkGuideRestoresCodexLinkAfterOlderNode(t *testing.T) {
 		t.Fatal("rollback retained the recovered Codex link", err)
 	}
 }
+
+func TestMachineOpsSkillIsOptInByDefault(t *testing.T) {
+	t.Setenv("PERSONA_PLUGIN_SKILLS_DIR", t.TempDir())
+	user, dir := t.TempDir(), t.TempDir()
+	if err := Sync(dir, user, Selection{}, quiet); err != nil {
+		t.Fatal(err)
+	}
+	if hasSkill(dir, MachineOpsSkillName) {
+		t.Fatal("persona-machine-ops was installed by default without opt-in")
+	}
+	if slices.ContainsFunc(List(user, Selection{}), func(s Skill) bool { return s.Name == MachineOpsSkillName }) {
+		t.Fatal("persona-machine-ops appeared in default List without opt-in")
+	}
+	if slices.Contains(ForAgents, MachineOpsSkillName) {
+		t.Fatal("persona-machine-ops must not be injected into default ForAgents plugin")
+	}
+	// Explicit opt-in via Selection{MachineOps: true} installs and rolls back cleanly.
+	if err := Sync(dir, user, Selection{MachineOps: true}, quiet); err != nil {
+		t.Fatal(err)
+	}
+	if !hasSkill(dir, MachineOpsSkillName) {
+		t.Fatal("persona-machine-ops missing when Selection{MachineOps: true}")
+	}
+	if err := Sync(dir, user, Selection{MachineOps: false}, quiet); err != nil {
+		t.Fatal(err)
+	}
+	if hasSkill(dir, MachineOpsSkillName) {
+		t.Fatal("persona-machine-ops stayed after opting out")
+	}
+}
+
+func TestMachineOpsSkillCatalogAndReferences(t *testing.T) {
+	t.Setenv("PERSONA_PLUGIN_SKILLS_DIR", t.TempDir())
+	dir := t.TempDir()
+	if _, err := InstallMachineOps(dir); err != nil {
+		t.Fatal(err)
+	}
+	entries, err := LocalCatalog([]Root{{Path: dir, Source: "user"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var found bool
+	for _, e := range entries {
+		if e.Name != MachineOpsSkillName {
+			continue
+		}
+		found = true
+		e.Path = "/example/skills/persona-machine-ops/SKILL.md"
+		b, err := json.Marshal(e)
+		if err != nil || len(b) > 512 {
+			t.Fatalf("catalog entry %d bytes (want <= 512): %v", len(b), err)
+		}
+	}
+	if !found {
+		t.Fatal("persona-machine-ops missing from LocalCatalog")
+	}
+	read := func(rel string) string {
+		t.Helper()
+		b, err := os.ReadFile(filepath.Join(dir, MachineOpsSkillName, rel))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(b)
+	}
+	entry := read("SKILL.md")
+	for _, tc := range []struct{ ref, tool string }{
+		{"references/storage.md", "machine_ops_storage_hotspots"},
+		{"references/toolchain.md", "machine_ops_toolchain"},
+		{"references/network.md", "machine_ops_network"},
+		{"references/ports-and-processes.md", "machine_ops_processes"},
+		{"references/services.md", "machine_ops_service_logs"},
+	} {
+		if !strings.Contains(entry, "]("+tc.ref+")") {
+			t.Errorf("SKILL.md does not link to %s", tc.ref)
+		}
+		if !strings.Contains(read(tc.ref), tc.tool) {
+			t.Errorf("%s does not document %s", tc.ref, tc.tool)
+		}
+	}
+}
+
+func TestMachineOpsScriptAndConflictProtection(t *testing.T) {
+	dir := t.TempDir()
+	st, err := InstallMachineOps(dir)
+	if err != nil || !st.Installed || !st.Managed || st.Conflict {
+		t.Fatalf("InstallMachineOps: %+v %v", st, err)
+	}
+	script := filepath.Join(dir, MachineOpsSkillName, "scripts", "ops.sh")
+	info, err := os.Stat(script)
+	if err != nil || info.Mode()&0o111 == 0 {
+		t.Fatalf("ops.sh is not executable: %v", err)
+	}
+	bin := filepath.Join(dir, "personad")
+	if err := os.WriteFile(bin, []byte("#!/bin/sh\necho \"$@\"\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command("sh", script, "ports", "--protocol", "tcp")
+	cmd.Env = []string{"PERSONA_BIN=" + bin, "HOME=" + dir, "PATH=/usr/bin:/bin"}
+	if out, err := cmd.CombinedOutput(); err != nil || strings.TrimSpace(string(out)) != "ops ports --protocol tcp" {
+		t.Fatalf("ops.sh delegation: %v %q", err, out)
+	}
+	cmd = exec.Command("sh", script, "storage")
+	cmd.Env = []string{"HOME=" + dir, "PATH=/usr/bin:/bin"}
+	out, err := cmd.CombinedOutput()
+	var exit *exec.ExitError
+	if !errors.As(err, &exit) || exit.ExitCode() != 3 || !strings.Contains(string(out), "no personad") {
+		t.Fatalf("ops.sh without personad: %v %q", err, out)
+	}
+	// Editing a file marks the skill conflicted; reinstall and uninstall both refuse to clobber user edits.
+	if err := os.WriteFile(filepath.Join(dir, MachineOpsSkillName, "SKILL.md"), []byte("user owned"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := InstallMachineOps(dir); !errors.Is(err, ErrSkillConflict) {
+		t.Fatalf("InstallMachineOps over edited skill: %v, want ErrSkillConflict", err)
+	}
+	if _, err := UninstallMachineOps(dir); !errors.Is(err, ErrSkillConflict) {
+		t.Fatalf("UninstallMachineOps over edited skill: %v, want ErrSkillConflict", err)
+	}
+	// Clean directory installs and uninstalls cleanly.
+	dir2 := t.TempDir()
+	if _, err := InstallMachineOps(dir2); err != nil {
+		t.Fatal(err)
+	}
+	st2, err := UninstallMachineOps(dir2)
+	if err != nil || st2.Installed || st2.Managed {
+		t.Fatalf("UninstallMachineOps: %+v %v", st2, err)
+	}
+}

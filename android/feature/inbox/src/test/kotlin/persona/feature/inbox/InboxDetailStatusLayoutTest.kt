@@ -42,6 +42,7 @@ import persona.core.navigation.AppTab
 import persona.core.navigation.ChatRoute
 import persona.core.navigation.Navigator
 import persona.core.navigation.RouteSource
+import persona.core.inbox.*
 
 /** The detail status keeps its complete sentence and usable actions when width or text size makes one row too small. */
 @RunWith(AndroidJUnit4::class)
@@ -101,7 +102,7 @@ class InboxDetailStatusLayoutTest {
     private fun textLayout(text: String): TextLayoutResult {
         val node = rule.onNodeWithText(text, useUnmergedTree = true).fetchSemanticsNode()
         val layouts = mutableListOf<TextLayoutResult>()
-        node.config[SemanticsActions.GetTextLayoutResult].action!!(layouts)
+        val _ = node.config[SemanticsActions.GetTextLayoutResult].action!!(layouts)
         return layouts.single()
     }
 

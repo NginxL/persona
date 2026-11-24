@@ -132,14 +132,15 @@ func TestTypedHandleParamsDecodeAsTheSharedStructDid(t *testing.T) {
 		},
 		{
 			name:   methodWorktreePrepare,
-			sample: `{"composer":true,"kind":"herdr","workspace_id":"w1","cwd":"/repo","branch":"b"}`,
-			// Branch inspection extends the shared request shape after the typed split.
+			sample: `{"composer":true,"kind":"herdr","workspace_id":"w1","cwd":"/repo","branch":"b","allow_untracked":true}`,
+			// Branch inspection and untracked-file reuse extend the shared request shape after the typed split.
 			legacy: &struct {
-				Composer    bool   `json:"composer"`
-				Kind        string `json:"kind"`
-				WorkspaceID string `json:"workspace_id"`
-				Cwd         string `json:"cwd"`
-				Branch      string `json:"branch"`
+				Composer       bool   `json:"composer"`
+				Kind           string `json:"kind"`
+				WorkspaceID    string `json:"workspace_id"`
+				Cwd            string `json:"cwd"`
+				Branch         string `json:"branch"`
+				AllowUntracked bool   `json:"allow_untracked"`
 			}{},
 			typed: &worktreePrepareParams{},
 			same: func(l, n any) bool {

@@ -9,11 +9,11 @@ tool call is one hub ↔ node round trip.
 | --- | --- |
 | Device bridge (`device_info`, `screenshot`, `ax_tree`, `tap`, `long_press`, `drag`, `swipe`, `keys`, `button`, `launch_app`, `terminate_app`, `list_apps`) | `persona-iphone-bridge` ([iphone-bridge.md](iphone-bridge.md)) |
 | Pairing, the node's session with the phone, the per-machine switch, the node's built-in `iphone` program | [iphone-pairing.md](iphone-pairing.md) |
-| **Core**: element numbers, results, limits, approval rules (#3449) | `server/internal/iphonectl` |
+| **Core**: element numbers, results, limits, approval rules (#3449) | `server/internal/modules/phone-extra/iphonectl` |
 | The assistant's tools, waiting for the owner's approval and its wording | the manager |
 
 Status: the core is logic with unit tests against a fake bridge and the bridge's documented wire shapes. The node's
-`iphone` program runs its looks and dos through it (`server/internal/node/iphone/iphone_core.go`), checked end to end against
+`iphone` program runs its looks and dos through it (`server/internal/modules/phone-extra/nodeiphone/iphone_core.go`), checked end to end against
 a simulator ([iphone-pairing.md](iphone-pairing.md), "The node program `iphone` (#3450)"). **Not verified on a real
 iPhone.**
 

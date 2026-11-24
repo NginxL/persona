@@ -1,0 +1,4 @@
+New external information arrived while a needs_user ask is still open (card untouched):
+   - New information (https://github.com/example/app/pull/42): PR https://github.com/example/app/pull/42 was approved (checks: success).
+   - Pending needs_user ask: Should we merge PR #42 or wait for another reviewer? (recommended: Merge now)
+   - Evaluate whether this resolves or supersedes the pending ask. If the owner still must decide, call supervision_finish(visibility="silent") so the original card stays untouched. If this resolves or supersedes it, call task_review with the new verdict and a clear natural-language reason to clear the stale card (never fabricate an owner selection with task_decided).

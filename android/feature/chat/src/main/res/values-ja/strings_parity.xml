@@ -2,6 +2,7 @@
 <resources>
     <string name="chat_plan_approve_stepwise">承認して各ステップを確認</string>
     <string name="chat_menu_fork">新しいチャットに分岐</string>
+    <string name="chat_menu_fork_wait_turn">このターンが終わってから分岐できます</string>
     <string name="chat_menu_forked">新しいチャットに分岐しました</string>
     <string name="chat_menu_fork_failed">分岐できませんでした：%1$s</string>
     <string name="chat_menu_rewind">ここまで戻す</string>
@@ -28,4 +29,11 @@
     <string name="chat_tool_open_subagent">サブエージェントを見る</string>
     <string name="chat_tool_no_answer">回答なし</string>
     <string name="chat_computer_pill_opens">ステップを表示</string>
+    <string name="chat_menu_star">スターを付ける</string>
+    <string name="chat_menu_unstar">スターを外す</string>
+    <string name="chat_starred_saved">スター済み</string>
+    <string name="chat_starred_saving">スター付きメッセージを保存中</string>
+    <string name="chat_starred_removed">スターを外しました</string>
+    <string name="chat_starred_undo">元に戻す</string>
+    <string name="chat_starred_failed">スターの更新に失敗しました</string>
 </resources>

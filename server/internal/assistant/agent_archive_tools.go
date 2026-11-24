@@ -98,7 +98,8 @@ func (s *Service) archiveAndCloseTool(ctx context.Context, machine, self string,
 		return "", err
 	}
 	if r.Allow == nil || !*r.Allow {
-		return "The user declined on the phone (or did not answer): nothing changed (not archived, not closed).", nil
+		return outboundNotDone(r.Outcome(), "The user declined on the phone: nothing changed (not archived, not closed).",
+			"nothing changed (not archived, not closed)"), nil
 	}
 	res, err := s.archiveAndCloseAgentSession(ctx, am.ID, c.SessionID)
 	if err != nil {

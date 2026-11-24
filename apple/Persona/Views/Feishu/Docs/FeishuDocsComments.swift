@@ -56,13 +56,9 @@ struct FeishuDocsCommentsView: View {
         }
         .navigationTitle("Comments")
         .navigationBarTitleDisplayMode(.inline)
-        #if os(macOS)
-        .macSheetDone { dismiss() }
-        #else
         .toolbar {
             SheetClose { dismiss() }
         }
-        #endif
         .refreshable { await model?.load() }
         .onChange(of: model?.writeError) { _, message in
             guard let message else { return }

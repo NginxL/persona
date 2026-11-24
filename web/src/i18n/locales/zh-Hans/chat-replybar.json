@@ -11,6 +11,7 @@
   "cache_line": "缓存拆分：读取 {read} · 写入 {write} · 命中率 {rate}",
   "cache_line_no_rate": "缓存拆分：读取 {read} · 写入 {write}",
   "time_line": "耗时 {duration}",
+  "ttft_line": "首字延迟 {ttft}",
   "model_line": "模型：{model}",
   "models_other": "{count} 个模型",
   "suggestion_line": "建议：{suggestion}",

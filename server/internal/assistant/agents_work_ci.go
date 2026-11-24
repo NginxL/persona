@@ -11,8 +11,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/nwverse/persona/server/internal/connector/github"
 	"github.com/nwverse/persona/server/internal/db"
+	"github.com/nwverse/persona/server/internal/githubwire"
 	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/lazyre"
 	"github.com/nwverse/persona/server/internal/proto"
@@ -135,7 +135,7 @@ func (s *Service) ciChecks(ctx context.Context, e db.SessionWork, c proto.Sessio
 		return ciResult{}, time.Time{}, false
 	}
 	checks, hasChecks := s.ext.(interface {
-		PRChecks(context.Context, string, int) (github.PRCheckSnapshot, time.Time, bool, error)
+		PRChecks(context.Context, string, int) (githubwire.PRCheckSnapshot, time.Time, bool, error)
 	})
 	retryable := false
 	fromConnector := func(repo string) (ciResult, time.Time, bool) {

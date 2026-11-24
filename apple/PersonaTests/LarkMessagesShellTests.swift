@@ -1,4 +1,3 @@
-#if os(iOS)
 import SwiftUI
 import Testing
 @testable import Persona
@@ -100,4 +99,3 @@ import Testing
         #expect(pager.position == 2)
     }
 }
-#endif

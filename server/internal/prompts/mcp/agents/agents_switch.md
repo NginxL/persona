@@ -1,4 +1,4 @@
-Move many Claude Code agents to another launcher on their computers in one call. Use it when the user asks to move agents to another launcher ("move everything on the default launcher to X", "switch these to X"), for example because they watch their subscription quota; never on your own. Name the agents in `agents`, or leave it out to take every Claude Code agent (running ones, and stopped ones Persona started), narrowed by `machine` and `from_launcher` (`claude` is the default launcher). First call it with `preview` true and tell the user what it will do with each agent, then call it again without `preview` once they agree; when the user already named exactly which agents and where, one call is enough. Each agent goes as its state allows: one its usage limit stopped is switched now and goes on with what it was doing; an idle one is switched now and nothing is sent (it waits on the new launcher for the next message); one that is working, waits for the user (a question, a permission, a plan), is starting or has background work is queued and switched when its turn ends (with the usage-limit continuation if that turn ended on a limit); a stopped one Persona started has the launcher it resumes on changed, so its next Resume, or the message that resumes it, comes up on the new launcher; one the checks refuse (another CLI, a runtime's session, an assistant conversation, a launcher that does not run there, a model the launcher's default cannot be read for: give model) is reported and left as it is, and so is one whose switch failed on its computer (it is back on its launcher; not tried again: tell the user why). The answer has one line per agent: switched and continued, switched, switched (takes effect when resumed), queued, or refused with why. A queued switch is dropped if the agent moves to another launcher meanwhile or after a day; if it stops meanwhile, its Resume is pointed at the new launcher instead; agents_list shows queued ones as switch_queued=. The switch is the same as the user's from the agent's chat: same conversation, same terminal.{{template "shared/mcp_language" .}}
+Move Claude Code agents to another launcher only when the user asks. Name `agents`, or select all running and Persona-started stopped agents, filtered by `machine` and `from_launcher` (default `claude`). Preview and explain first unless the user named agents and target. Usage-limited agents switch and continue; idle agents switch without sending; working/waiting/starting/background-work agents queue until their turn ends, retaining any due limit continuation. Stopped agents change the launcher used by Resume or a resuming message. Unsupported sessions, unavailable launchers, or unreadable default models (supply `model`) are refused unchanged. Failures roll back without retry; explain why. Results are per agent: switched/continued, switched, switch-on-resume, queued, or refused. Queues expire after a day or independent launcher change; stopped agents' Resume uses the target. `agents_list` marks queues `switch_queued=`. Conversation and terminal stay unchanged.{{template "shared/mcp_language" .}}
 
 ```json
 {
@@ -7,45 +7,45 @@ Move many Claude Code agents to another launcher on their computers in one call.
   "properties": {
     "launcher": {
       "type": "string",
-      "description": "the launcher to move them to, by its name on their computers"
+      "description": "target launcher name on each agent's computer"
     },
     "model": {
       "type": "string",
-      "description": "a model of that launcher; empty: the launcher's default"
+      "description": "target model; empty uses the launcher default"
     },
     "effort": {
       "type": "string",
-      "description": "the reasoning effort on the new launcher; empty: as each has it"
+      "description": "target effort; empty preserves each agent's setting"
     },
     "agents": {
       "type": "array",
-      "description": "the agents to move; empty: every Claude Code agent (running, or stopped and started by Persona) that machine and from_launcher keep",
+      "description": "agents to move; empty selects eligible agents after machine/from_launcher filters",
       "items": {
         "type": "object",
         "required": ["session_id"],
         "properties": {
           "machine": {
             "type": "string",
-            "description": "the machine's id or name, as agents_list shows it"
+            "description": "machine ID or name from agents_list"
           },
           "session_id": {
             "type": "string",
-            "description": "the agent's session id, or its first 8 characters"
+            "description": "session ID or its first 8 characters"
           }
         }
       }
     },
     "machine": {
       "type": "string",
-      "description": "without agents: only this computer's agents"
+      "description": "without agents, limit to this computer"
     },
     "from_launcher": {
       "type": "string",
-      "description": "without agents: only the agents running on this launcher (claude: the default)"
+      "description": "without agents, source launcher (default claude)"
     },
     "preview": {
       "type": "boolean",
-      "description": "true: only say what it would do with each agent; nothing is switched or queued"
+      "description": "read-only; switches and queues nothing"
     }
   }
 }

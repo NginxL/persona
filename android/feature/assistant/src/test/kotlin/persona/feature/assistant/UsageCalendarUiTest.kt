@@ -443,7 +443,7 @@ class UsageCalendarUiTest {
     private fun textLayoutTag(tag: String): TextLayoutResult = textLayout(rule.onNodeWithTag(tag, useUnmergedTree = true))
     private fun textLayout(node: SemanticsNodeInteraction): TextLayoutResult {
         val layouts = mutableListOf<TextLayoutResult>()
-        node.fetchSemanticsNode().config.getOrNull(SemanticsActions.GetTextLayoutResult)?.action?.invoke(layouts)
+        val _ = node.fetchSemanticsNode().config.getOrNull(SemanticsActions.GetTextLayoutResult)?.action?.invoke(layouts)
         return layouts.single()
     }
 

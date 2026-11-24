@@ -343,7 +343,7 @@ func run(ctx context.Context, build update.Build, o runOptions) error {
 	var svc *Service
 	var ext *extmgr.Manager
 	// ConfigFile: its usage section (the account-pool gateways and their keys) is the devices', read and written there.
-	devs := devices.New(devices.Options{Store: database, ConfigFile: o.ConfigFile, TailcatKey: o.TailcatKey, ManagerID: o.ID,
+	devs := devices.New(devices.Options{PackageHub: func() *bus.Client { return bh.Client() }, Store: database, ConfigFile: o.ConfigFile, TailcatKey: o.TailcatKey, ManagerID: o.ID,
 		Logf:         log.New(stderr, "devices: ", log.LstdFlags).Printf,
 		ProjectState: func(st devicewire.States) devicewire.States { return svc.logicalProjectStates(st) },
 		Answer: func(ctx context.Context, machine, method string, params json.RawMessage) (any, bool, error) {
@@ -363,6 +363,7 @@ func run(ctx context.Context, build update.Build, o runOptions) error {
 		Detached:               func(machine string) { svc.NodeDetached(machine) },
 		HiddenAgentDirsChanged: func(machine string) { svc.HiddenAgentDirsChanged(machine) },
 		Location:               func() *time.Location { return svc.location(context.Background()) },
+		UpdateHandoffGrace:     func() time.Duration { return nodeUpdateHandoffGraceOf(svc.hello(context.Background())) },
 		PromptLanguage:         func() string { return answerLanguage(svc.hello(context.Background()).Locale) },
 		// The extensions' part of a node's connection and its events (internal/extmgr).
 		Own:         func(ctx context.Context, machine string) map[string]json.RawMessage { return ext.Own(ctx, machine) },
@@ -428,13 +429,14 @@ func run(ctx context.Context, build update.Build, o runOptions) error {
 		Timezone: func() string { return svc.userTZ() }})
 	o.Errors.ext.Store(ext)
 	bh = NewBusHub(BusOptions{ID: o.ID, Hub: hub, Token: token, HTTPClient: httpClient, Version: version, Deploy: deploy,
-		ConfigFile: o.ConfigFile, Outbox: database,
+		ConfigFile: o.ConfigFile, Outbox: database, Features: func() []string { return svc.moduleFeatures() },
 		Logf: logf, Devices: devs, Extensions: ext, StopWhenRevoked: o.StopWhenRevoked, StopWhenRejected: o.TokenFirst})
 	// The knowledge base in its directory, kept as its manager.json's kb section says (over the hub's hello). The model
 	// providers' keys are sealed with its own secret.key.
 	assistantStore := repositorystore.New(database)
 	svc = New(Options{Hub: bh, Store: func() Store { return assistantStore }, Logf: logf, Devices: devs,
-		KB: &KBOptions{Dir: o.KBDir, KeyDir: o.HandlesDir}, SecretKey: o.SecretKey,
+		ModulesOff: ReadModuleSwitch(ctx, assistantStore, logf), // the built-in modules switched off (modules.go)
+		KB:         &KBOptions{Dir: o.KBDir, KeyDir: o.HandlesDir}, SecretKey: o.SecretKey,
 		Trust: devs, AgentDirs: devs, ID: o.ID, Build: version, RepositoryConfig: o.ConfigFile,
 		RemoteImageCache: filepath.Join(home, "cache", "remote-images")})
 	svc.SetExtensions(ext) // the connectors', Cua's and ego's tools, in this process (fleet_tools.go)
@@ -454,11 +456,21 @@ func run(ctx context.Context, build update.Build, o runOptions) error {
 		defer close(extDone)
 		_ = ext.Run(ctx) // after ctx: stops the extensions' programs (they are the manager's children)
 	}()
+	var developmentDone chan *managerupdate.DevelopmentImage
 	if o.ID != "assistant" {
+		developmentDone = make(chan *managerupdate.DevelopmentImage, 1)
 		go func() {
+			var image *managerupdate.DevelopmentImage
+			defer func() { developmentDone <- image }()
 			if err := bh.Wait(ctx); err == nil {
 				if err := managerupdate.MarkReady(home, build); err != nil {
 					logf("manager update readiness: %v", err)
+				}
+				image = followDevelopment(ctx, home, build, devs, func(ctx context.Context) (bool, string) {
+					return managerIdle(ctx, bh, svc, ext)
+				}, logf)
+				if image != nil {
+					stop()
 				}
 			}
 		}()
@@ -467,6 +479,11 @@ func run(ctx context.Context, build update.Build, o runOptions) error {
 	stop() // a refused token ends Run before ctx: the computers and the extensions stop with it
 	<-done
 	<-extDone
+	if developmentDone != nil {
+		if image := <-developmentDone; image != nil {
+			return image
+		}
+	}
 	if err != nil && !errors.Is(err, context.Canceled) {
 		return err
 	}

@@ -235,17 +235,7 @@ struct ManagerDetailView: View {
     @ViewBuilder private func actions(_ m: HubManager) -> some View {
         let blocked = ManagersText.deleteBlocked(m)
         Section {
-            #if os(macOS)
-            // docs/apple/mac-design.md: a detail page's buttons are regular-size and grouped, not a row each.
-            HStack(spacing: Theme.Space.s) {
-                actionButtons(m, blocked: blocked)
-                    .buttonStyle(.bordered)
-                    .controlSize(.regular)
-                Spacer(minLength: 0)
-            }
-            #else
             actionButtons(m, blocked: blocked)
-            #endif
         } footer: {
             if let blocked { Text(blocked) }
         }
@@ -277,14 +267,6 @@ struct ManagerDetailView: View {
             .accessibilityIdentifier("manager.newCode")
         }
         let removeTitle = installing ? String(localized: "Cancel Install") : String(localized: "Delete")
-        #if os(macOS)
-        Button(role: .destructive) { confirmDelete = true } label: {
-            Label(removeTitle, systemImage: Theme.Icon.delete).lineLimit(1)
-                .foregroundStyle(blocked == nil ? Theme.danger : Theme.Hue.gray) // red says what it does
-        }
-        .disabled(blocked != nil)
-        .accessibilityIdentifier("manager.delete")
-        #else
         if blocked != nil {
             // Not a button that looks live: the footer says why it cannot go.
             Label(removeTitle, systemImage: Theme.Icon.delete)
@@ -299,7 +281,6 @@ struct ManagerDetailView: View {
             }
             .accessibilityIdentifier("manager.delete")
         }
-        #endif
     }
 
     /// The status with its dot, drawn like the other facts rows in either style.

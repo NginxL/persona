@@ -2,10 +2,11 @@ package extmgr
 
 import (
 	"context"
-	"github.com/nwverse/persona/server/internal/connector"
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/nwverse/persona/server/internal/connector"
 
 	"github.com/nwverse/persona/server/internal/rpc"
 )

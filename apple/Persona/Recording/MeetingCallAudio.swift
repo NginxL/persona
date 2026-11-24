@@ -180,7 +180,8 @@ nonisolated final class MeetingTalkTap: @unchecked Sendable {
 }
 
 /// `VoiceAudio` on the recorder (#3862 phase 4). Starting it connects the call's uplink to the tap; the voice goes to the
-/// recorder's player through the same jitter buffer as a phone call's (`VoicePlayout`); stopping it lets go of both and
+/// recorder's player through the same jitter buffer as a phone call's (`VoicePlayout`, reading how much the player has
+/// left off its render position, `VoicePlayerClock`, #13963); stopping it lets go of both and
 /// leaves the recording as it was. A made-up recording (`-showMeetingSample`) has no player: the voice then "plays" for
 /// as long as its PCM lasts, as `VoiceSample.SilentAudio` does, so the call and the echo spans follow it.
 @MainActor final class MeetingCallAudio: VoiceAudio {
@@ -194,8 +195,14 @@ nonisolated final class MeetingTalkTap: @unchecked Sendable {
     private var format = VoiceAudioFormat.provisional
     private var playout = VoicePlayout<Piece>(rate: VoiceFrame.defaultOutputRate)
     private var holdTimer: Task<Void, Never>?
-    /// The loudness of each piece still queued, the first one playing.
+    private var holdDue: TimeInterval?
+    /// The loudness of each piece still queued, the first one playing; emptied by completions, an output latency after
+    /// the player rendered it (for the orb and `onPlaying`, never for whether the player ran dry: `clock`).
     private var queued: [Float] = []
+    /// Where what was scheduled on the recorder's player ends on its timeline, and which player that is (the recorder
+    /// keeps one for the whole meeting, but the clock starts again with any other).
+    private var clock = VoicePlayerClock()
+    private var clockPlayer: ObjectIdentifier?
     /// Bumped by `clear` and `stop`: completions of what was scheduled before are ignored.
     private var generation = 0
     /// Without a player: when what was given would be played out, and the wait that ends it (nil: quiet).
@@ -216,14 +223,16 @@ nonisolated final class MeetingTalkTap: @unchecked Sendable {
         self.format = format
         self.events = events
         playout = VoicePlayout(rate: format.outputRate)
+        clock.restart()
         tap.connect(uplink)
+        Self.log.notice("meeting call: the voice plays on the recorder's player (\(PhoneVoiceAudio.describe(AVAudioSession.sharedInstance()), privacy: .public), echo cancellation \(self.cancelsEcho, privacy: .public))")
     }
 
     func reconfigure(_ format: VoiceAudioFormat) throws {
         guard format != self.format else { return }
         dropQueued()
         self.format = format
-        playout = VoicePlayout(rate: format.outputRate)
+        playout = VoicePlayout(rate: format.outputRate, level: playout.level) // the same call's link (#12922)
     }
 
     func play(_ pcm: Data) { schedule(pcm, voice: true) }
@@ -231,10 +240,12 @@ nonisolated final class MeetingTalkTap: @unchecked Sendable {
     func cue(_ pcm: Data) { schedule(pcm, voice: false) }
 
     func clear() {
+        logCut()
         let was = !queued.isEmpty || silentEnd != nil
         dropQueued()
         if let player = capture.callPlayer {
             player.stop()
+            clock.restart()
             if capture.engineRunning { player.play() }
         }
         if was { stopped() }
@@ -245,6 +256,7 @@ nonisolated final class MeetingTalkTap: @unchecked Sendable {
         let was = !queued.isEmpty || silentEnd != nil
         dropQueued()
         capture.callPlayer?.stop()
+        clock.restart()
         if was { onPlaying(false) }
         events = nil
     }
@@ -270,24 +282,35 @@ nonisolated final class MeetingTalkTap: @unchecked Sendable {
         buffer.frameLength = AVAudioFrameCount(samples.count)
         samples.withUnsafeBufferPointer { channel.update(from: $0.baseAddress!, count: samples.count) }
         guard voice else { return enqueue(buffer, level: nil, on: player) }
-        let ready = playout.add(Piece(buffer: buffer, level: VoicePCM.rms(samples)), frames: samples.count, playing: !queued.isEmpty)
-        if playout.isHolding {
-            waitForLead()
-        } else {
-            holdTimer?.cancel()
-            holdTimer = nil
+        let stalled = playout.stalls
+        // The playout counts at the voice's rate, before it was resampled for the player: PCM16, two bytes a frame.
+        let frames = pcm.count / 2
+        let left = playerLeft(player)
+        let ready = playout.add(Piece(buffer: buffer, level: VoicePCM.rms(samples)), frames: frames, left: left,
+                                at: ProcessInfo.processInfo.systemUptime)
+        logEndedReply()
+        if playout.stalls > stalled {
+            let had = Int(((left ?? 0) * 1000).rounded()), lead = Int(playout.leadNow * 1000)
+            Self.log.notice("meeting call: the voice ran dry mid-reply, \(had, privacy: .public) ms left in the player as the next piece came (below 0: silent that long); gathering \(lead, privacy: .public) ms before playing")
         }
+        holdUntilDue()
         for piece in ready { enqueue(piece.buffer, level: piece.level, on: player) }
     }
 
-    /// Plays what is held once the first of it has waited `VoicePlayout.wait`, lead or not.
-    private func waitForLead() {
-        guard holdTimer == nil else { return }
+    /// Plays what is held when `VoicePlayout.due` comes, lead or not; nothing held, no wait.
+    private func holdUntilDue() {
+        let due = playout.due
+        guard due != holdDue else { return }
+        holdTimer?.cancel()
+        holdTimer = nil
+        holdDue = due
+        guard let due else { return }
         let generation = generation
         holdTimer = Task { [weak self] in
-            try? await Task.sleep(for: .seconds(VoicePlayout<Piece>.wait))
+            try? await Task.sleep(for: .seconds(max(0, due - ProcessInfo.processInfo.systemUptime)))
             guard !Task.isCancelled, let self else { return }
             holdTimer = nil
+            holdDue = nil
             guard generation == self.generation, let player = capture.callPlayer, capture.engineRunning else { return playout.clear() }
             for piece in playout.release() { enqueue(piece.buffer, level: piece.level, on: player) }
         }
@@ -300,10 +323,41 @@ nonisolated final class MeetingTalkTap: @unchecked Sendable {
             if queued.isEmpty { began(level) }
             queued.append(level)
         }
+        let playing = player.isPlaying
+        if !playing || clockPlayer != ObjectIdentifier(player) { clock.restart() }
+        clockPlayer = ObjectIdentifier(player)
+        clock.scheduled(Double(buffer.frameLength) / buffer.format.sampleRate, rendered: playing ? player.renderedSeconds : nil)
         player.scheduleBuffer(buffer, completionCallbackType: .dataPlayedBack) { @Sendable [weak self] _ in
             Task { @MainActor in self?.played(generation, voice: voice) }
         }
-        if !player.isPlaying { player.play() }
+        if !playing { player.play() }
+    }
+
+    /// What the recorder's player still has to play, off its render position (`VoicePlayerClock.left`); nil for another
+    /// player than the clock's, or one that is not playing (its timeline starts again when it does).
+    private func playerLeft(_ player: AVAudioPlayerNode) -> TimeInterval? {
+        guard player.isPlaying, clockPlayer == ObjectIdentifier(player) else {
+            clock.restart()
+            return nil
+        }
+        return clock.left(rendered: player.renderedSeconds)
+    }
+
+    /// The reply that just ended, as it arrived (`VoiceReply`), into the call's log.
+    private func logEndedReply() {
+        guard let reply = playout.takeEnded() else { return }
+        Self.log.notice("meeting call: \(reply.logLine(lead: self.playout.leadNow), privacy: .public)")
+    }
+
+    /// The voice still to play is about to be cut off (`clear`): how much of it, and where it played. A cut-off while the
+    /// loudspeaker plays may be the voice's own echo taken for the owner cutting in (#13963).
+    private func logCut() {
+        let measured = capture.engineRunning ? capture.callPlayer.flatMap { playerLeft($0) } : nil
+        let left = max(0, measured ?? 0)
+        guard left > 0 || playout.isHolding || (measured == nil && !queued.isEmpty) else { return }
+        let amount = measured == nil ? "an unknown amount" : "\(Int((left * 1000).rounded())) ms"
+        let route = PhoneVoiceAudio.describe(AVAudioSession.sharedInstance().currentRoute)
+        Self.log.notice("meeting call: cut off with \(amount, privacy: .public) still in the player\(self.playout.isHolding ? " and more held" : "", privacy: .public) (\(route, privacy: .public), echo cancellation \(self.cancelsEcho, privacy: .public))")
     }
 
     private func played(_ generation: Int, voice: Bool) {
@@ -349,7 +403,9 @@ nonisolated final class MeetingTalkTap: @unchecked Sendable {
         generation += 1
         holdTimer?.cancel()
         holdTimer = nil
+        holdDue = nil
         playout.clear()
+        logEndedReply()
         queued = []
         silentEnd?.cancel()
         silentEnd = nil

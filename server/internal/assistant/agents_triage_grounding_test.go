@@ -127,3 +127,20 @@ func TestTriageHistoryFailureIsRetryable(t *testing.T) {
 		t.Fatal("triage proceeded without decision history")
 	}
 }
+
+func TestReadOnlyTriageDoesNotStoreAnUnsupportedUserWait(t *testing.T) {
+	s, f := workService(t)
+	const reply = "The checks passed. The scheduled job will run next."
+	f.setItems(proto.Item{Kind: proto.KindText, Role: "assistant", Text: reply})
+	f.triage = `{"phase":"blocked","on":"user","line":"Approval needed","questions":[{"question":"Should I run the job?"}]}`
+	row := stopped("s1", reply)
+	row.ReadOnlyReason, row.Capabilities = "Read-only history", &proto.SessionCapabilities{Read: true}
+	f.setSessions("box", row)
+	triage(t, s, "s1")
+	if work := entryOf(t, s, "s1").Work; work.Phase != "" || work.On != "" {
+		t.Fatalf("read-only triage kept an unsupported wait: %+v", work)
+	}
+	if len(s.workCards()) != 0 || len(f.sentToAgents()) != 0 {
+		t.Fatal("read-only triage tried to act on the unsupported wait")
+	}
+}

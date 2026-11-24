@@ -23,7 +23,7 @@ import { currentLanguage, t } from "../../i18n";
 import { tRich } from "../../i18n/rich";
 import { BASE } from "../../lib/base";
 import { navigate } from "../../lib/router";
-import { settingsHref } from "../settings/nav";
+import { settingsHref } from "../settings/href";
 import { setLookIcon } from "../../lib/look-icon";
 
 // the upload dialog (picking, cropping, sending an image) loads on its first open, not with the persona page

@@ -51,6 +51,33 @@ describe("parseNotebook", () => {
     ]);
   });
 
+  it("merges consecutive stream chunks before stripping ANSI and capping lines", () => {
+    const chunk = (n: number, start: number) => Array.from({ length: n }, (_, i) => `line ${start + i}\n`).join("");
+    const [capped, splitAnsi] = parseNotebook(
+      nb([
+        {
+          cell_type: "code",
+          source: "",
+          outputs: [
+            { output_type: "stream", name: "stdout", text: chunk(1500, 1) },
+            { output_type: "stream", name: "stdout", text: chunk(1000, 1501) },
+          ],
+        },
+        {
+          cell_type: "code",
+          source: "",
+          outputs: [
+            { output_type: "stream", name: "stdout", text: "\u001b[32m" },
+            { output_type: "stream", name: "stdout", text: "ok\u001b[0" },
+            { output_type: "stream", name: "stdout", text: "m" },
+          ],
+        },
+      ]),
+    ).cells;
+    expect(capped.outputs).toEqual([{ kind: "stream", name: "stdout", text: capLines(chunk(2500, 1)) }]);
+    expect(splitAnsi.outputs).toEqual([{ kind: "stream", name: "stdout", text: "ok" }]);
+  });
+
   it("reads attachments and nbformat 3 worksheets", () => {
     const n = parseNotebook(nb([{ cell_type: "markdown", source: "![a](attachment:p.png)", attachments: { "p.png": { "image/png": "AAAA" } } }]));
     expect(n.cells[0].attachments).toEqual({ "p.png": "data:image/png;base64,AAAA" });

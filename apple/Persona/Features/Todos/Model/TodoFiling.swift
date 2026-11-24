@@ -42,7 +42,7 @@ nonisolated enum TodoFiling {
         case .other: (TodoListSection.todo, false)
         case .justDone: (TodoListSection.justFinished, false)
         case .shelved: (TodoListSection.todo, true)
-        case .done: (TodoListSection.done, false)
+        case .done, .cancelled: (TodoListSection.done, false)
         }
     }
 

@@ -3,6 +3,8 @@ package assistant
 import (
 	"context"
 	"sync"
+
+	"github.com/nwverse/persona/server/internal/identity"
 )
 
 // Machine trust comes from the manager's device configuration, never node.info or an MCP hint.
@@ -69,7 +71,8 @@ func (s *Service) assistantCaller(ctx context.Context, machine, session string) 
 		return false
 	}
 	cfg := s.settings(ctx)
-	allowed := s.sameMachine(machine, cfg.MachineID) || s.sameMachine(machine, s.hello(ctx).Models.InboxAgentMachine)
+	allowed := s.sameMachine(machine, cfg.MachineID) ||
+		s.sameMachine(machine, s.hello(ctx).Models.InboxAgentMachine)
 	b := &s.startingAssistants
 	id := machine
 	if s.devs != nil {
@@ -78,14 +81,19 @@ func (s *Service) assistantCaller(ctx context.Context, machine, session string) 
 	b.mu.Lock()
 	allowed = allowed || b.machines[id] > 0
 	b.mu.Unlock()
+	startedHere := false
 	if session != "" {
 		s.origins.mu.Lock()
 		if s.originsLocked(ctx) {
 			if o := s.origins.m[session]; o != nil && o.By == originByStart && s.sameMachine(machine, o.MachineID) {
 				allowed = true
+				startedHere = true
 			}
 		}
 		s.origins.mu.Unlock()
+		if !allowed && s.isBackgroundCallerOn(ctx, machine, session) {
+			allowed = true
+		}
 	}
 	if !allowed {
 		return false
@@ -101,7 +109,17 @@ func (s *Service) assistantCaller(ctx context.Context, machine, session string) 
 		}
 		if sess.Cwd != "" {
 			m, ok := s.fleetMachine(machine)
-			return ok && m.isAssistant(sess)
+			if ok && m.isAssistant(sess) {
+				return true
+			}
+			// A background supervisor or its forked round branch (no host pane) keeps its assistant tool
+			// authorization even if its listed cwd drifted (e.g. after a Bash cd or forked transcript).
+			if s.isBackgroundCallerOn(ctx, machine, session) {
+				return true
+			}
+			// A headless conversation started by this manager whose listed cwd is still its assistant dir
+			// stays authorized even before the node's home directory is populated on fleetMachine.
+			return startedHere && identity.IsAssistantDirOf(sess.Cwd, s.id)
 		}
 	}
 	return true

@@ -19,8 +19,8 @@ Discord (the user's own bot, extension, #917): the first step (D1) is the `disco
 
 | id | Name | How it runs | Knowledge base | Inbox | Assistant tools | Writes | Login |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| `github` | GitHub | In the hub (`connector/github`) | `Archive` (`updated_at` cursor) | Yes, rule-based tiers + noise reduction (`rules.go`) | `github_search/read/diff/checks` | `github_comment`, `github_review` (gated) | Reads `gh` login from a computer (`credential.gh_token`) |
-| `imessage` | Messages | Reads on the Mac's node, with an RPC-forwarding adapter in the hub (`connector/imessage`) | `Archive` (ROWID) | Yes; its rows also as `inbox_things` in its subscription catalog (#6317) | `imessage_chats/read/search` | None | None (grant personad Full Disk Access on the Mac) |
+| `github` | GitHub | In the hub (`modules/github`) | `Archive` (`updated_at` cursor) | Yes, rule-based tiers + noise reduction (`rules.go`) | `github_search/read/diff/checks` | `github_comment`, `github_review` (gated) | Reads `gh` login from a computer (`credential.gh_token`) |
+| `imessage` | Messages | Reads on the Mac's node, with an RPC-forwarding adapter in the hub (`modules/imessage`) | `Archive` (ROWID) | Yes; its rows also as `inbox_things` in its subscription catalog (#6317) | `imessage_chats/read/search` | None | None (grant personad Full Disk Access on the Mac) |
 | `telegram` | Telegram | Extension `telegram` in the `nwverse/persona-extensions` marketplace (#1704, #2057, code outside this repo), called by the hub over the process extension protocol (`connector/proc`) | `Archive` | Yes | Read-only tools; reads through the `tg` CLI (`Unlisted`) | `telegram_send/forward/react/mark_read` (`tg` CLI, `Unlisted`, gated) | Stepwise `Login` (phone number, code, two-step verification password), session encrypted in `connector_secrets` |
 | `x` | X | Extension `x` in the `nwverse/persona-extensions` marketplace (nwverse/persona-extensions#179, `docs/plans/plan-x.md`), called by the hub over the process extension protocol (`connector/proc`); two optional sources: the X API (the user's own developer app, pay-per-use) or the `grok` CLI on the hub machine (the user's subscription) | None: X's deletion rules keep posts in the extension's data directory with short retention (`docs/plans/plan-x.md` ("X's rules")) | Yes, `mention` (X API source only) | `x_digest/feed/following/post/search` (`x_search` runs a Grok search) | None (read-only) | Stepwise `Login` (one step: the four X API keys), keys encrypted in `connector_secrets`; the Grok source needs no sign-in here (`grok login` on the hub machine) |
 | `discord` | Discord | Extension `discord` in the `nwverse/persona-extensions` marketplace (nwverse/persona-extensions#181, `docs/plans/plan-discord.md`), called by the hub over the process extension protocol (`connector/proc`); reads Discord's REST API as the user's own bot, through the optional `proxy` secret when the hub machine can't reach Discord | `Archive` (the channels, threads and forum posts the bot can read: a first backfill, then what moved, every 5 minutes) | Not yet (D2) | `discord_channels/messages/search` | None (read-only) | Stepwise `Login` (one step: the bot token), token encrypted in `connector_secrets` |
@@ -34,7 +34,7 @@ does not admit every chat or watch any document; the connector's `doc` Inbox ite
 
 ### Interfaces: one manifest, dispatched by declaration
 
-`server/internal/connector/connector.go`: `Connector` has `ID()`, `Name()`, `Manifest()`. The manifest (`manifest.go`, since v2 · V1) declares what it can do in one place:
+`server/internal/connectorwire/connector.go`: `Connector` has `ID()`, `Name()`, `Manifest()`. The manifest (`connectorwire/manifest.go`, since v2 · V1) declares what it can do in one place. These interfaces and types are the connector SPI: they live in the contract package `connectorwire`, which `internal/connector` aliases, so a connector built as a module needs only the contract and the leaf libraries (#13936). The framework that runs connectors (the registry, the gate, `As` and `Check`) stays in `internal/connector`:
 
 | Manifest field | Meaning |
 | --- | --- |
@@ -46,6 +46,8 @@ does not admit every chat or watch any document; the connector's `doc` Inbox ite
 | `Poll` | How often to query `Archive` (0 is the hub default; mail is 6 minutes) |
 | `Kinds` | Inbox item kinds; each needs a description in `prompts/inbox/kinds/<id>.md` (`connector.CheckKinds`, each connector's `TestKindsAreDescribed`); an undeclared kind received is logged |
 | `Proxy` | Answers on behalf of another program (subprocess `proc.Conn`): implements every interface, but only declared ones are real |
+
+A connector contributed by an extension that declares `memory_sources` (a memory extension) has its read tools withheld from the assistant's conversations: not listed, and a call there is refused with a pointer to `decisions_query`, since the hub reads that extension's memory itself and grades it by scene (`server/internal/extmgr/memory_sources.go`, `docs/extensions/extensions.md` "Memory sources"). Its writes, and the read tools coding Agents get through `AgentTools`, are unchanged.
 
 The hub uses only `connector.As[interface](c)` to discover capabilities: it asserts the interface only when declared. `Registry.Add` checks the manifest with `connector.Check`: declared but unimplemented, implemented but undeclared (except `Proxy`),
 unknown capabilities, or kinds without an Inbox capability all fail registration. Capability interfaces:
@@ -164,7 +166,8 @@ Every write that went out through the gate is kept in the ledger `sent_as_user` 
 
 ### Inbox ingestion
 
-The connector provides `InboxThing` (one thing: `Thread` is its key, `Kind` its own kind, `Tier` / `Why` the tier chosen by its rules, and `Done` means it observed completion);
+The connector provides `InboxThing` (one thing: `Thread` is its key, `Kind` its own kind, `Tier` / `Why` the tier chosen by its rules, and `Done` means it observed completion).
+For a GitHub pull request, `thread_state` records the observed PR state (`open`, `closed` or `merged`) independently of Inbox filing.
 each round, the hub hands candidates to the manager (`inbox.collected` on the bus, `docs/assistant/inbox.md` ("Who owns what")). The manager (`applyConnector` in `assistant/inbox_connectors.go`)
 merges subsequent activity for the same `Thread` into an open item. Classification, AI twin, completion and retention then belong to the manager and are the same for every source; replies, `Settle` and tools derived from events
 are still dispatched to connectors by the hub (the manager asks through `app.call inbox.*`). Items use a generic block (`InboxConnector`), so the App can render them without knowing the source.
@@ -233,7 +236,7 @@ with who did it (#5281); never a credential or a typed value. The actions and th
 3. Writes must be `Actions`; the `Describe` card must say who will see the result.
 4. `Status` answers only from memory (queried on every tool listing); errors get a one-sentence `Error`, and self-service fixes get a `Guide`.
 5. No body text, phone numbers or tokens in logs/errors.
-6. For external services, embed `connector.Egress` (`connector/egress.go`) in config to get a `proxy` key (`http://[username:password@]host:port`, empty means direct).
+6. For external services, embed `netproxy.Egress` (`netproxy/egress.go`, also named `connector.Egress`) in config to get a `proxy` key (`http://[username:password@]host:port`, empty means direct).
    Build every HTTP client with `Egress.HTTPClient`: use the proxy when configured, direct otherwise; invalid config errors rather than silently connecting directly. This is how `github.proxy` works (#1106);
    proxy-address parsing lives in `netproxy`, also used by `google.proxy`. Not yet wired: Telegram (MTProto, not HTTP), subprocess / third-party connectors (proxy must be passed to the program), see #1106.
 
@@ -348,7 +351,7 @@ Size: **small**.
 Current state: three execution models, three conventions.
 
 - Subprocess: no version, relies on "same build". Most fields lack JSON tags, so wire keys are Go field names (`Cursor`, `Batches`), hard for third parties to reproduce.
-- node relay: five iMessage-specific methods, then hardcoded in `node/node.go` (now `serveLocalConnector` in `node/connectors.go`).
+- node relay: five iMessage-specific methods, then hardcoded in `node/node.go` (now `ServeLocal` in `modules/imessage/node.go`, reached through `node/imessageport`).
 - Third party: HTTP + MCP was designed in `../plans/plan-connectors.md` ("External process") but not implemented.
 
 Proposal:
@@ -373,7 +376,7 @@ Lark, mail and GitHub stay in the hub and only run conformance tests.
 
 **Agreed on hub-managed merge keys, sender kinds, tags and supersession; disagreed on declarative conditions for "automatically resolved".**
 
-Current state: all noise reduction lives in the GitHub connector (`connector/github/rules.go`): CI merges by "repository + branch" (`Thread` itself becomes `ci:<repo>@<branch>`),
+Current state: all noise reduction lives in the GitHub connector (`modules/github/rules.go`): CI merges by "repository + branch" (`Thread` itself becomes `ci:<repo>@<branch>`),
 bot recognition (`isBot`), muted repositories and ignored branches (GitHub's own `Options`), and closure after a successful run / branch deletion / PR merge (`followUpCI` + `Settle`).
 A PR's or issue's thing names its move by the newest comment or submitted review (#7471), not by the notification: a push, an edit of the body or title or a label bumps the notification but adds no message, so the hub records nothing new and nothing downstream (supervisor signals, the task Agent's note) runs again. `Last` is opaque: it includes the message time and the distinct comment/review IDs at that time, so two messages in one second are distinct. Deleting a comment or dismissing a review cannot move the cursor back or replay an older message. The cursor is kept per account in the connector's existing sealed store across restarts, with the inbox's eight-day retention. Submitted inline-only reviews advance it even when the preview omits their empty body; pending reviews do not. A thread with no comment or review yet, and CI items, keep the notification's time.
 Telegram and Messages each repeat "groups are FYI" and "bots stay out of the Inbox". Every new source repeats this, and only GitHub can be muted in the App.
@@ -406,7 +409,7 @@ Size: **medium**. Hub Inbox, GitHub, Telegram, Messages; the App's mute menu is 
 **Agreed; v2 records but does not merge. Hints store only HMAC hashes, are hidden from models, and are used only to recognize people (decided).**
 
 Current state: knowledge-base people (`Person` in `kb/store.go`) have only one `Source` + `SourceID`; the same person has separate entries in Lark, mail, Messages and Telegram.
-To keep numbers off disk, Messages already uses a phone/email hash as the person id (`PersonKey` in `connector/imessage/persona.go`).
+To keep numbers off disk, Messages already uses a phone/email hash as the person id (`PersonKey` in `modules/imessage/persona.go`).
 
 Proposal:
 
@@ -447,7 +450,7 @@ The App then has **one** generic login page (field entry, web authorization, cod
   Keep old `/api/v1/mail/oauth/*` for old Apps.
 - **GitHub**: device-code login uses the built-in GitHub CLI Client ID; users need not register an OAuth App (decided #1089, replacing user-entered IDs).
   This is `oauthClientID` in `internal/authflow/flow.go` of `cli/cli` (`178c6fc778ccc68e1d6a`, whose source comment explicitly permits committing it),
-  hardcoded as `ghCLIClientID` in `server/internal/connector/github/login.go`; device-code login needs no client secret. The first step gets the code directly, and the App shows it and automatically waits for authorization.
+  hardcoded as `ghCLIClientID` in `server/internal/modules/github/login.go`; device-code login needs no client secret. The first step gets the code directly, and the App shows it and automatically waits for authorization.
   Older hubs stored a user-entered client ID: stop reading it and discard it on the next save; tokens obtained with it remain valid. If GitHub refuses to issue a code, report the error directly, not another ID form.
   Keep "read gh login from a computer" as an alternative.
 

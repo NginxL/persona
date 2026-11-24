@@ -162,20 +162,21 @@ func (s *Service) recoverScheduledLimitRetry(ctx context.Context, w delayedWait)
 		return false
 	}
 	name := run.RefID
-	space := ""
+	space, text := "", "" // a task gone is named by its id, which says nothing
 	if sc, err := s.lockedSchedule(ctx); err == nil {
 		if i := sc.indexLocked(run.RefID); i >= 0 {
 			t := sc.tasks[i]
 			name = t.labelIn(s.lang(ctx))
-			space = t.Space
+			space, text = t.Space, name
 		}
 		sc.mu.Unlock()
 	}
-	if space == SpaceHealth {
-		name, _ = healthNotice(s.lang(ctx))
-	}
 	if !streak {
-		s.push(ctx, Notification{Subtitle: retry.MachineName, DeviceID: run.MachineID, SessionID: run.SessionID,
+		// the lock screen does not name a task whose name says something sensitive (usage.go, scene 4)
+		if s.exitPolicy(ctx, text, run.SessionID, space).Redact {
+			name, _ = s.redactedNotice(ctx, s.lang(ctx), space)
+		}
+		s.push(withCard(ctx, cardScheduleLimitRetry), Notification{Subtitle: retry.MachineName, DeviceID: run.MachineID, SessionID: run.SessionID,
 			Title: i18n.T(s.lang(ctx), "assistant-schedule.run_failed", i18n.Args{"name": name}), Body: body})
 	}
 	if err := s.finishUnknownScheduledRetry(context.Background(), w.ID, w.Claim); err != nil {

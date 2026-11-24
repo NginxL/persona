@@ -71,14 +71,6 @@ struct TranslationSettingsView: View {
                     Section("Lark Chats to Translate") {
                         ForEach(chats) { c in
                             Text(c.name).lineLimit(1)
-                                #if os(macOS)
-                                // A Mac form has no swipe to delete: the row's menu takes it off (#1221).
-                                .contextMenu {
-                                    Button("Stop Translating", role: .destructive) {
-                                        chatsRaw = TranslationPrefs.encode(chats.filter { $0.id != c.id })
-                                    }
-                                }
-                                #endif
                         }
                             .onDelete { idx in
                                 var list = chats
@@ -163,9 +155,6 @@ struct TranslationChatPicker: View {
             }
             .task { await load() }
         }
-        #if os(macOS)
-        .macSheet()
-        #endif
     }
 
     private func load() async {

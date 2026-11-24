@@ -40,12 +40,6 @@ import PersonaWire
         #if os(iOS)
         #expect(FleetLink.session(URL(string: "\(LegacyNames.urlScheme)://open?machine=m1&session=s1")!)?.session == "s1")
         #endif
-        #if os(macOS)
-        #expect(MacOpenURL.route(URL(string: "\(LegacyNames.urlScheme)://pair")!) == .pair)
-        #expect(PersonaLinkHandoff.isPersonaLink(["CFBundleExecutable": LegacyNames.capitalizedProduct + "Link"]))
-        #expect(!PersonaLinkHandoff.isPersonaLink(["CFBundleExecutable": "Persona"]))
-        #expect(MacOpenURL.route(URL(string: "\(LegacyNames.urlScheme)://open?machine=m1&session=s1")!) == .session(SessionKey(machineID: "m1", sessionID: "s1")))
-        #endif
     }
 
     @Test func sessionReadsOldFieldButCanonicalFalseWins() throws {

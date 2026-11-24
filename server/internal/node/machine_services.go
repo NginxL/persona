@@ -118,6 +118,13 @@ func (t *serviceTailBuffer) Truncated() bool {
 	return t.truncated
 }
 
+// The machine page's services and containers. Each handler decodes its own params, answering bad_request.
+func init() {
+	nodeRPC(proto.MethodMachineServices, (*Node).machineServices)
+	nodeRPC(proto.MethodMachineServiceLogs, (*Node).machineServiceLogs)
+	nodeRPC(proto.MethodMachineServiceAction, (*Node).machineServiceAction)
+}
+
 func (n *Node) machineServices(ctx context.Context, _ json.RawMessage) (any, error) {
 	r := n.servicesRunner()
 	report := proto.MachineServicesReport{

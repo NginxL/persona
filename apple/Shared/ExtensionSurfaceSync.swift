@@ -22,9 +22,7 @@ nonisolated enum ExtensionSurfaceSync {
         let credentials = export(configs, names: names, devices: devices, answerOnly: answerOnly, capabilities: capabilities)
         guard store.read().groups.mapValues(\.credential) != credentials else { return }
         try store.replaceCredentials(credentials)
-        #if os(iOS) || os(watchOS) || os(visionOS)
         WidgetCenter.shared.reloadTimelines(ofKind: ExtensionSystemWidget.kind)
-        #endif
     }
 
     /// Off the main thread: every step reads or rewrites the shared snapshot. A cancelled refresh (the app went to the
@@ -32,10 +30,8 @@ nonisolated enum ExtensionSurfaceSync {
     static func refresh() async { await refresh(store: .shared) }
 
     @concurrent static func refresh(store: ExtensionSurfaceStore) async {
-        #if os(iOS) || os(watchOS) || os(visionOS)
         // Failure to enumerate means unknown, not empty: do not clear the hub's previous full report.
         let configurations = try? await ExtensionWidgetReconciliation.configurations()
-        #endif
         for (group, state) in store.read().groups {
             if Task.isCancelled { return }
             let api = APIClient(config: ServerConfig(url: state.credential.url, token: state.credential.token, access: state.credential.access), group: group)
@@ -44,7 +40,6 @@ nonisolated enum ExtensionSurfaceSync {
                     .refreshCatalog(group: group, expected: state, store: store)
                 guard let catalog = store.read().groups[group], catalog.generation == state.generation else { continue }
                 let w = catalog.widgets
-                #if os(iOS) || os(watchOS) || os(visionOS)
                 guard features.contains("extension_widgets") else { continue }
                 if let configurations, let current = store.read().groups[group], current.generation == state.generation {
                     for (key, family) in configurations where key.group == group {
@@ -72,7 +67,6 @@ nonisolated enum ExtensionSurfaceSync {
                     let report = store.read().reports(configurations)[group] ?? []
                     try await api.reportExtensionWidgets(device: device, widgets: report)
                 }
-                #endif
             } catch {
                 if Task.isCancelled { return }
                 if let error = error as? APIError, [401, 403].contains(error.status) {
@@ -80,9 +74,7 @@ nonisolated enum ExtensionSurfaceSync {
                 }
             }
         }
-        #if os(iOS) || os(watchOS) || os(visionOS)
         WidgetCenter.shared.reloadTimelines(ofKind: ExtensionSystemWidget.kind)
-        #endif
     }
 }
 #endif

@@ -63,6 +63,10 @@ data class InboxInteraction(
     val title: String = "",
     /** The manager that reported the card (docs/assistant/managers.md); null: the default manager. */
     val manager: String? = null,
+    /** Request kind (`plan`, `question`, `permission`, `screen`, `elicitation`) for semantic icon rendering. */
+    val kind: String = "",
+    /** Concise line of what the card asks (plan heading, first question, command), falling back to [summary]. */
+    val askLine: String? = null,
 ) {
     val sessionKey: String get() = "$machineId/$sessionId"
 }

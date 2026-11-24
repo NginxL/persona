@@ -40,6 +40,8 @@ import persona.core.designsystem.*
 import persona.core.navigation.AppTab
 import persona.core.navigation.ModelPurposeRoute
 import persona.core.navigation.Navigator
+import persona.core.navigation.SettingsPage
+import persona.core.navigation.SettingsPageRoute
 import persona.feature.chat.LocalMainChatGuidance
 import java.io.File
 
@@ -106,6 +108,7 @@ class AssistantReadinessShotsTest {
 
     @Test fun connectModelOpensMainChatForTheShownManager() {
         assertEquals(ModelPurposeRoute("assistant", "work"), ReadinessActionId.ConnectModel.destination(null, manager = "work"))
+        assertEquals(SettingsPageRoute(SettingsPage.ModelConfig), ReadinessActionId.PickModel.destination(null, manager = "work"))
     }
 
     @Test fun anExistingMainChatOffersSetupOnlyWhileItsModelIsBlocked() {

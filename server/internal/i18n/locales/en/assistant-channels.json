@@ -3,6 +3,8 @@
   "assistant_chats_only": "Only the assistant's chats can be picked",
   "no_feature": "{name} has no “{feature}” feature",
   "not_connected": "{name} isn't connected yet",
+  "cannot_send": "{name} can't send a standalone test message right now (send a message there first, or this channel only replies to incoming messages).",
+  "reply_only_test_ok": "{name} is connected and ready. It only replies to incoming messages, so no test message was sent.",
   "test_message": "This is a test message from Persona: this channel can reach you.",
   "ended": "Ended"
 }

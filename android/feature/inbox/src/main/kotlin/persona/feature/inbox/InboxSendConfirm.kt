@@ -12,6 +12,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import persona.core.designsystem.*
+import persona.core.inbox.*
 
 /**
  * Sending in the user's name asks first, the way the old app did: where it goes and every word of it. Every AI draft

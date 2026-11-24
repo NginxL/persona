@@ -65,10 +65,11 @@ nonisolated enum DirectionTodoSections {
     }
 
     /// The tree's directions in its order (the secretary's last), each with its to-dos in the tree's order: those this
-    /// device does not hold, or `keep` leaves out (a search), are dropped, and a direction left with none.
+    /// device does not hold, cancelled to-dos (which have their own fold), or `keep` leaves out (a search) are dropped,
+    /// and a direction left with none.
     static func build(_ tree: DirectionTree, todos: [String: TodoItem], keep: (TodoItem) -> Bool = { _ in true }) -> [Section] {
         tree.withTasks.compactMap { d in
-            let rows = d.tasks.compactMap { todos[$0.id] }.filter(keep)
+            let rows = d.tasks.compactMap { todos[$0.id] }.filter { !$0.isCancelled }.filter(keep)
             return rows.isEmpty ? nil : Section(direction: d, todos: rows)
         }
     }

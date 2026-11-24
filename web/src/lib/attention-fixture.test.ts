@@ -6,11 +6,13 @@ import { agentKey } from "./pins";
 import { routePath } from "./router";
 import { isMuted } from "./session-actions";
 import { stateCounts } from "./sessions";
+import { supervisorHeldOnly } from "./supervisor-held";
 import type { Interaction, Session } from "./types";
 
 // The hub's "Needs you" summary for Persona Link (server/internal/assistant/fleet_attention.go) reads the same fixture:
 // on the same sessions its count is the sidebar's badge and its items are the agents the badge counts; an item notifies
-// when the web app's system notification would (not muted, not waiting only on the assistant's decision), but only
+// when the web app's system notification would (not muted, not waiting only on the assistant's decision or on cards a
+// task's supervisor holds), but only
 // once the agent has a card, as the phone is pushed (the web app rings a terminal dialog at once); its routes are the
 // router's.
 describe("Persona Link's Needs you summary (spec/fixtures/attention)", () => {
@@ -21,10 +23,12 @@ describe("Persona Link's Needs you summary (spec/fixtures/attention)", () => {
       const mutes: AgentMutes = c.input.mutes;
       const items: { machine_id: string; session_id: string; muted: boolean; notify: boolean; route: string }[] = c.expected.items;
       const listed = sessions.filter((s) => !s.assistant); // useAgentSessions: the sidebar's list
-      expect(stateCounts(listed).badge).toBe(c.expected.needs_you);
-      const counted = listed.filter((s) => stateCounts([s]).badge === 1).map(agentKey);
+      // an agent waiting only on cards its task's supervisor holds is not counted (lib/supervisor-held.ts)
+      expect(stateCounts(listed, interactions).badge).toBe(c.expected.needs_you);
+      const counted = listed.filter((s) => stateCounts([s], interactions).badge === 1).map(agentKey);
       expect(items.map(agentKey).sort()).toEqual(counted.sort());
-      const looking = lookingOnly(interactions);
+      // not yet the user's: the assistant still looking at a question, or the task's supervisor holding the cards
+      const looking = new Set([...lookingOnly(interactions), ...supervisorHeldOnly(interactions)]);
       const carded = new Set(interactions.map(agentKey));
       for (const item of items) {
         const s = sessions.find((x) => agentKey(x) === agentKey(item))!;

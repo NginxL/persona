@@ -151,4 +151,15 @@ describe("charts", () => {
     expect(readChart(chartDoc(`<c:barChart>${ser("x", ["a"], [1])}</c:barChart><c:lineChart>${ser("y", ["a"], [2])}</c:lineChart>`), scheme)).toBeNull();
     expect(chartSVG({ kind: "col", cats: ["<b>"], series: [{ name: "<i>", values: [1], color: "#000000" }] }, 200, 100)).not.toContain("<b>");
   });
+
+  it("fills omitted OOXML cache indices with null and renders horizontal bars with empty categories", () => {
+    const sparse = `<c:barChart><c:barDir val="col"/><c:ser><c:idx val="0"/><c:tx>${strs(["S1"])}</c:tx><c:cat><c:strRef><c:strCache><c:ptCount val="2"/><c:pt idx="0"><c:v>Q1</c:v></c:pt><c:pt idx="2"><c:v>Q3</c:v></c:pt></c:strCache></c:strRef></c:cat><c:val><c:numRef><c:numCache><c:ptCount val="1"/><c:pt idx="-1"><c:v>99</c:v></c:pt><c:pt idx="2"><c:v>244</c:v></c:pt></c:numCache></c:numRef></c:val></c:ser></c:barChart>`;
+    const c = readChart(chartDoc(sparse), scheme)!;
+    expect(c.cats).toEqual(["Q1", "", "Q3"]);
+    expect(c.series[0].values).toEqual([null, null, 244]);
+    expect(1 in c.series[0].values).toBe(true);
+    const emptyBar = chartSVG({ kind: "bar", cats: [], series: [{ name: "S1", values: [], color: "#1f6feb" }] }, 300, 200);
+    expect(emptyBar).not.toContain("NaN");
+    expect(emptyBar).not.toContain("Infinity");
+  });
 });

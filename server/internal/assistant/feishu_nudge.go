@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/nwverse/persona/server/internal/assistantwire"
-	"github.com/nwverse/persona/server/internal/feishubot"
+	"github.com/nwverse/persona/server/internal/botcard"
 	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/proto"
 )
@@ -271,7 +271,7 @@ func (s *Service) nudgeCard(ctx context.Context, id, owner string, kind nudgeKin
 	s.logf("bots: nudge under card %s: %v", id, err)
 	// Refused (the card or its chat is gone): nothing to nudge under. Otherwise it may not have gone out, and the next
 	// sweep tries again under the same key, so one that did go out lands once, up to nudgeMaxTries and nudgeRetryWindow.
-	giveUp := chatRefused(err) || feishubot.MessageGone(err) || p.Tries >= nudgeMaxTries
+	giveUp := chatRefused(err) || botcard.MessageGone(err) || p.Tries >= nudgeMaxTries
 	b.mu.Lock()
 	if cur, still := b.cards[id]; still && cur.MessageID == c.MessageID {
 		p := cur.progress(kind)
@@ -305,7 +305,7 @@ func (s *Service) botNudge(ctx context.Context, c botCard, ix proto.Interaction,
 		to.ChatID, to.InThread = c.ChatID, true
 		text = feishuMention(owner) + " " + text
 	}
-	p := to.params(map[string]any{"reply_to": c.MessageID, "text": text, "uuid": nudgeKey(ix.ID, kind)})
+	p := targetParams(to, map[string]any{"reply_to": c.MessageID, "text": text, "uuid": nudgeKey(ix.ID, kind)})
 	return s.appCall(ctx, AppFeishu, FeishuText, p, nil)
 }
 

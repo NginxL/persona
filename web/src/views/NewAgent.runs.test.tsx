@@ -26,7 +26,11 @@ let host: HTMLDivElement;
 let closes: number;
 let started: number;
 const flush = () => act(async () => { for (let i = 0; i < 12; i++) await Promise.resolve(); });
-const tick = (ms = 0) => act(async () => { await vi.advanceTimersByTimeAsync(ms); });
+const tick = (ms = 0) => act(async () => {
+  await vi.advanceTimersByTimeAsync(0);
+  await vi.dynamicImportSettled();
+  await vi.advanceTimersByTimeAsync(ms);
+});
 const button = (text: string) => [...document.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent?.trim() === text);
 const textarea = () => document.querySelector<HTMLTextAreaElement>("textarea")!;
 const adds = () => calls.filter((c) => c.url.endsWith("/worktree/add"));

@@ -120,3 +120,47 @@ func TestNodeSessionStaleProvenanceCannotUndoUserStop(t *testing.T) {
 		})
 	}
 }
+
+// ran_at, the node's last sighting of an Agent running, survives the hub (#11528): a node that starts again reads it to
+// tell an Agent its restart cut off (node interrupted.go). Without it every such stop was unknown. A put that carries
+// none, or an older one, keeps the last sighting; one with a stale stop cause keeps the newer cause and still moves it.
+func TestNodeSessionRanAtSurvivesTheHub(t *testing.T) {
+	d, ctx := open(t), context.Background()
+	steps := []struct {
+		name string
+		put  NodeSession
+		want int64
+	}{
+		{"first sighting", NodeSession{Launcher: "claude", Cwd: "workspace", RanAt: 1000}, 1000},
+		{"later sighting", NodeSession{Launcher: "claude", Cwd: "workspace", RanAt: 1300}, 1300},
+		{"a put without one keeps it", NodeSession{Launcher: "claude", Cwd: "workspace", Model: "m"}, 1300},
+		{"an older one does not move it back", NodeSession{Launcher: "claude", Cwd: "workspace", RanAt: 1100}, 1300},
+		{"a user stop keeps it", NodeSession{Launcher: "claude", Cwd: "workspace", StopCause: proto.StopUser, StopCauseAt: 50, RanAt: 1300}, 1300},
+		{"a stale cause still moves it", NodeSession{Launcher: "claude", Cwd: "workspace", StopCause: proto.StopIdle, StopCauseAt: 10, RanAt: 1600}, 1600},
+	}
+	for _, step := range steps {
+		if err := d.PutNodeSession(ctx, "ran-machine", "ran-session", step.put); err != nil {
+			t.Fatal(err)
+		}
+		sessions, err := d.NodeSessions(ctx, "ran-machine")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := sessions["ran-session"]; got.RanAt != step.want {
+			t.Fatalf("%s: ran_at = %d, want %d (%+v)", step.name, got.RanAt, step.want, got)
+		}
+	}
+	sessions, _ := d.NodeSessions(ctx, "ran-machine")
+	if got := sessions["ran-session"]; got.StopCause != proto.StopUser {
+		t.Fatalf("a stale cause with a newer ran_at undid the user's stop: %+v", got)
+	}
+
+	raw, err := json.Marshal(NodeSession{Launcher: "claude", RanAt: 42})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var back NodeSession
+	if err := json.Unmarshal(raw, &back); err != nil || back.RanAt != 42 {
+		t.Fatalf("ran_at does not cross state.put / state.load: %s -> %+v (%v)", raw, back, err)
+	}
+}

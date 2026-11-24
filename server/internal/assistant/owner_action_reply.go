@@ -5,9 +5,10 @@ import (
 	"errors"
 
 	"github.com/nwverse/persona/server/internal/assistantwire"
+	"github.com/nwverse/persona/server/internal/botcard"
 	"github.com/nwverse/persona/server/internal/channel"
-	"github.com/nwverse/persona/server/internal/feishubot"
 	"github.com/nwverse/persona/server/internal/i18n"
+	"github.com/nwverse/persona/server/internal/larkhost"
 	"github.com/nwverse/persona/server/internal/proto"
 )
 
@@ -54,7 +55,7 @@ func (s *Service) resolveAppOwnerReply(ctx context.Context, machine, session, cl
 // replying to a server-owned proposal card in the authenticated owner's DM.
 // Once a parent names such a card, every verification or delivery failure is
 // final for this message: the words never fall through to a model turn.
-func (s *Service) botApproveOwnerAction(ctx context.Context, ev feishubot.MessageEvent, text, action string) bool {
+func (s *Service) botApproveOwnerAction(ctx context.Context, ev botcard.MessageEvent, text, action string) bool {
 	msg := ev.Message
 	if msg.ChatType != "p2p" || msg.ParentID == "" || action == "" || !ownerApprovalPhrase(s.settings(ctx), text) {
 		return false
@@ -81,12 +82,12 @@ func (s *Service) botApproveOwnerAction(ctx context.Context, ev feishubot.Messag
 
 	fail := func(err error) {
 		s.logf("bots: exact owner approval %s: %v", id, err)
-		s.botNote(ctx, msg.MessageID, i18n.T(s.botLang(ctx), "assistant-channels_plugin.answer_not_sent",
+		s.chat().Note(ctx, larkhost.Target{}, msg.MessageID, i18n.T(s.botLang(ctx), "assistant-channels_plugin.answer_not_sent",
 			i18n.Args{"error": clip(oneLine(err.Error()), 200)}))
 	}
 	ix, pending := s.pendingIx(id)
 	if !pending {
-		s.botNote(ctx, msg.MessageID, i18n.T(s.botLang(ctx), "assistant-channels_plugin.answered_elsewhere"))
+		s.chat().Note(ctx, larkhost.Target{}, msg.MessageID, i18n.T(s.botLang(ctx), "assistant-channels_plugin.answered_elsewhere"))
 		return true
 	}
 	// ChatID is empty only for the owner's DM. The pending interaction, rather
@@ -131,7 +132,7 @@ func (s *Service) botApproveOwnerAction(ctx context.Context, ev feishubot.Messag
 	})
 	if err != nil {
 		if errors.Is(err, errNotPending) {
-			s.botNote(ctx, msg.MessageID, i18n.T(s.botLang(ctx), "assistant-channels_plugin.answered_elsewhere"))
+			s.chat().Note(ctx, larkhost.Target{}, msg.MessageID, i18n.T(s.botLang(ctx), "assistant-channels_plugin.answered_elsewhere"))
 		} else {
 			fail(err)
 		}

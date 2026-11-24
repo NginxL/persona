@@ -35,6 +35,7 @@ import persona.core.contracts.api.InboxEntry
 import persona.core.designsystem.AppStyle
 import persona.core.designsystem.PersonaTheme
 import java.io.File
+import persona.core.inbox.*
 
 /**
  * A Feishu topic group's card (#576 G134, iOS `LarkTopicCard`): poster, time, the topic folded past 320 dp behind Expand,

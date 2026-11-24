@@ -29,17 +29,24 @@ func remedyingTask(t *testing.T, s *Service, f *fakeHub, failure error) (Todo, *
 
 func remedyingTaskAs(t *testing.T, s *Service, f *fakeHub, failure error, supervisor, planID string) (Todo, *TaskPlan) {
 	t.Helper()
+	return remedyingTaskFrom(t, s, f, failure, supervisor, supervisor, planID)
+}
+
+// remedyingTaskFrom starts a task from origin's plan under an explicitly assigned supervisor. Keeping those two facts
+// separate models a main-created task later put under a manual leader without rewriting its persisted plan (#5732).
+func remedyingTaskFrom(t *testing.T, s *Service, f *fakeHub, failure error, origin, supervisor, planID string) (Todo, *TaskPlan) {
+	t.Helper()
 	ctx := context.Background()
 	f.mu.Lock()
 	f.failStart = failure
 	f.mu.Unlock()
-	todo, err := s.createTodo(ctx, "修登录", "修登录", supervisor, planID)
+	todo, err := s.createTodo(ctx, "修登录", "修登录", origin, planID)
 	if err != nil {
 		t.Fatal(err)
 	}
 	s.superviseTodo(ctx, todo.ID, supervisor, []string{"PR 合并"}, 0)
 	task := PlanTask{Title: "修登录", Prompt: "修登录", Machine: "box", Cwd: "/code/app", Permission: "bypassPermissions", TodoID: todo.ID}
-	p := &TaskPlan{ID: planID, Conversation: supervisor, State: planStarted, Tasks: []PlanTask{task}, CreatedAt: time.Now(), UpdatedAt: time.Now()}
+	p := &TaskPlan{ID: planID, Conversation: origin, State: planStarted, Tasks: []PlanTask{task}, CreatedAt: time.Now(), UpdatedAt: time.Now()}
 	if err := s.savePlan(ctx, p); err != nil {
 		t.Fatal(err)
 	}
@@ -175,7 +182,8 @@ func TestRemedyToolsAnswerAndRetryInTheSameTab(t *testing.T) {
 }
 
 // The supervision turn that heard of the failure ends with no retry going: the start fails for good, with its
-// receipt. A turn that never told the user gets the hub's notice and push; one that did, none.
+// receipt. A turn that never told the user gets the hub's notice in the conversation; one that did, none. Neither is
+// pushed to the owner: the supervisor gave up on its own task, and only its needs_user brings that to the owner.
 func TestRemedyEndsWithTheTurnThatSawIt(t *testing.T) {
 	for _, told := range []bool{false, true} {
 		s, f := newQuietService(t)
@@ -204,7 +212,7 @@ func TestRemedyEndsWithTheTurnThatSawIt(t *testing.T) {
 		if notice := slices.Contains(kinds, feedNotice); notice == told {
 			t.Errorf("told=%v: the hub's notice %v", told, kinds)
 		}
-		if pushed := len(f.pushed()) > pushes; pushed == told {
+		if len(f.pushed()) > pushes {
 			t.Errorf("told=%v: pushed %v", told, f.pushed())
 		}
 	}
@@ -361,5 +369,28 @@ func TestRemedyIsNotEndedByAnotherConversationsTurn(t *testing.T) {
 	s.remedyTurnEnded(ctx, "conv1")
 	if got := todoNow(s, todo.ID); got.DoneAt == nil || got.StartError == "" {
 		t.Fatalf("not ended by the turn that saw it: %+v", got)
+	}
+}
+
+// A supervised task whose agent stopped on a dialog the computer did not know, and whose start cannot be remedied (no
+// tab kept), fails for good: the supervisor's message still shows the agent's screen as its rows, every choice of the
+// dialog on its own line, not only the one clipped line of the reason; with no retries offered for a tab that is gone.
+func TestAStalledStartThatFailsForGoodShowsItsScreen(t *testing.T) {
+	s, f := newQuietService(t)
+	shown := " Make auto mode your default permission mode?\n ❯ 1. Yes, make auto mode my default\n   2. Something new\n Enter to confirm · Esc to cancel"
+	data, _ := json.Marshal(map[string]any{"screen": shown})
+	failure := &rpc.Error{Code: proto.CodeAgentStartStalled, Data: data,
+		Message: "an unrecognized dialog blocks the start: \"Make auto mode your default permission mode?\"\n" + shown}
+	todo, _ := remedyingTask(t, s, f, failure)
+	waitFor(t, "the failure", func() bool { return todoNow(s, todo.ID).DoneAt != nil })
+	waitFor(t, "the supervision message", func() bool { return len(f.notices()) == 1 })
+	n := f.notices()[0]
+	for _, want := range []string{"启动标签最后几行", "   |  ❯ 1. Yes, make auto mode my default\n   |    2. Something new\n", "signal=failed"} {
+		if !strings.Contains(n, want) {
+			t.Errorf("message lacks %q:\n%s", want, n)
+		}
+	}
+	if strings.Contains(n, "还能重试") {
+		t.Errorf("retries offered for a start that failed for good:\n%s", n)
 	}
 }

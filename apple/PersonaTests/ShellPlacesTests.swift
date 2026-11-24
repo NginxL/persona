@@ -55,6 +55,20 @@ import Testing
         #expect(places.current == nil && !places.keeps(.machines))
     }
 
+    /// A To-dos place picked in the drawer (#10465): To-dos opens on it at its root, the to-do it kept being the place
+    /// before's; To-dos left and chosen again with no other place keeps its stack as every place does.
+    @Test func aToDosPlacePickedStartsToDosAtItsRoot() {
+        var places = ShellPlaces()
+        _ = places.enter(.todos, from: NavigationPath())
+        _ = places.enter(.inbox, from: path([.todos], detail: "kyoto"))
+        #expect(places.keeps(.todos))
+        #expect(places.enter(.todos, from: path([.inbox]), fresh: true) == nil)
+        #expect(places.current == .todos && !places.keeps(.todos))
+        #expect(places.enter(.todos, from: path([.todos], detail: "x"), fresh: true) == nil, "in front: its root")
+        _ = places.enter(.inbox, from: path([.todos], detail: "y"))
+        #expect(places.enter(.todos, from: path([.inbox])) == path([.todos], detail: "y"))
+    }
+
     @Test func healthAndNewChatAreNotPlaces() {
         #expect(!ShellPlaces.isPlace(.health) && !ShellPlaces.isPlace(.newConversation))
         #expect(ShellPlaces.isPlace(.inbox) && ShellPlaces.isPlace(.knowledge) && ShellPlaces.isPlace(.recordings))

@@ -2,6 +2,7 @@ package hub
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -15,14 +16,19 @@ import (
 	"github.com/nwverse/persona/server/internal/rpc"
 )
 
-// machineFileRoutes registers human-only read-only machine file browser endpoints (Phase 6A).
-// These routes require full credentials (no extension scope) and expose zero MCP tools.
+// machineFileRoutes registers human-only machine file browser endpoints (Phase 6A read-only + Phase 6B write/upload).
+// These routes require full credentials (no extension scope) and expose zero AI MCP tools.
 func (h *Hub) machineFileRoutes(api *http.ServeMux) {
 	api.HandleFunc("GET /api/v1/machines/{mid}/files/roots", h.withMachine(h.machineFileRoots))
 	api.HandleFunc("GET /api/v1/machines/{mid}/files/list", h.withMachine(h.machineFileList))
 	api.HandleFunc("GET /api/v1/machines/{mid}/files/preview", h.withMachine(h.machineFilePreview))
 	api.HandleFunc("GET /api/v1/machines/{mid}/files/tail", h.withMachine(h.machineFileTail))
 	api.HandleFunc("GET /api/v1/machines/{mid}/files/download", h.withMachine(h.machineFileDownload))
+	api.HandleFunc("PUT /api/v1/machines/{mid}/files/content", h.withMachine(h.machineFileWrite))
+	api.HandleFunc("POST /api/v1/machines/{mid}/files/create", h.withMachine(h.machineFileCreate))
+	api.HandleFunc("PATCH /api/v1/machines/{mid}/files/entry", h.withMachine(h.machineFileRename))
+	api.HandleFunc("DELETE /api/v1/machines/{mid}/files/entry", h.withMachine(h.machineFileDelete))
+	api.HandleFunc("POST /api/v1/machines/{mid}/files/upload", h.withMachine(h.machineFileUpload))
 }
 
 func (h *Hub) machineFileCallErr(w http.ResponseWriter, r *http.Request, err error) {
@@ -31,15 +37,34 @@ func (h *Hub) machineFileCallErr(w http.ResponseWriter, r *http.Request, err err
 	}
 	var re *rpc.Error
 	if errors.As(err, &re) {
+		var extra map[string]any
+		if len(re.Data) > 0 {
+			_ = json.Unmarshal(re.Data, &extra)
+		}
 		switch re.Code {
 		case proto.CodeMachineFileBoundary:
-			writeCode(w, http.StatusForbidden, proto.CodeMachineFileBoundary, re.Message, nil)
+			writeCode(w, http.StatusForbidden, proto.CodeMachineFileBoundary, re.Message, extra)
 			return
 		case proto.CodeMachineFileBinary:
-			writeCode(w, http.StatusUnsupportedMediaType, proto.CodeMachineFileBinary, re.Message, nil)
+			writeCode(w, http.StatusUnsupportedMediaType, proto.CodeMachineFileBinary, re.Message, extra)
 			return
 		case proto.CodeFileChanged:
-			writeCode(w, http.StatusConflict, proto.CodeFileChanged, re.Message, nil)
+			writeCode(w, http.StatusConflict, proto.CodeFileChanged, re.Message, extra)
+			return
+		case proto.CodeExists:
+			writeCode(w, http.StatusConflict, proto.CodeExists, re.Message, extra)
+			return
+		case proto.CodeMachineFileNotEmpty:
+			writeCode(w, http.StatusConflict, proto.CodeMachineFileNotEmpty, re.Message, extra)
+			return
+		case proto.CodeMachineFileSensitiveConfirm:
+			writeCode(w, http.StatusPreconditionFailed, proto.CodeMachineFileSensitiveConfirm, re.Message, extra)
+			return
+		case proto.CodeNotFound:
+			writeCode(w, http.StatusNotFound, proto.CodeNotFound, re.Message, extra)
+			return
+		case proto.CodeTooLarge:
+			writeCode(w, http.StatusRequestEntityTooLarge, proto.CodeTooLarge, re.Message, extra)
 			return
 		}
 	}
@@ -250,4 +275,286 @@ func (f *machineFileStreamReader) Seek(offset int64, whence int) (int64, error) 
 		f.pos, f.buf = target, nil
 	}
 	return f.pos, nil
+}
+
+const maxMachineFileJSONWriteBody = proto.MachineFileEditMaxBytes*2 + (64 << 10)
+
+type machineFileWriteHTTPBody struct {
+	Path             string    `json:"path"`
+	Root             string    `json:"root,omitempty"`
+	Text             *string   `json:"text"`
+	ExpectedMtime    time.Time `json:"expected_mtime"`
+	ExpectedSHA256   string    `json:"expected_sha256"`
+	ExpectedRevision string    `json:"expected_revision,omitempty"`
+	ConfirmSensitive bool      `json:"confirm_sensitive,omitempty"`
+}
+
+func (h *Hub) machineFileWrite(w http.ResponseWriter, r *http.Request, m *Machine) {
+	var body machineFileWriteHTTPBody
+	if err := decodeJSONBody(w, r, &body, maxMachineFileJSONWriteBody); err != nil {
+		writeBodyErr(w, err, err)
+		return
+	}
+	if strings.TrimSpace(body.Path) == "" {
+		writeErr(w, http.StatusBadRequest, errors.New("path is required"))
+		return
+	}
+	if body.Text == nil {
+		writeErr(w, http.StatusBadRequest, errors.New("text is required"))
+		return
+	}
+	if len(*body.Text) > proto.MachineFileEditMaxBytes {
+		writeCode(w, http.StatusRequestEntityTooLarge, proto.CodeTooLarge,
+			fmt.Sprintf("text exceeds maximum editable size (%d bytes)", proto.MachineFileEditMaxBytes),
+			map[string]any{"limit": proto.MachineFileEditMaxBytes})
+		return
+	}
+	if body.ExpectedMtime.IsZero() || strings.TrimSpace(body.ExpectedSHA256) == "" {
+		writeErr(w, http.StatusBadRequest, errors.New("expected_mtime and expected_sha256 are required"))
+		return
+	}
+	req := proto.MachineFileWriteRequest{
+		Path:             body.Path,
+		Root:             body.Root,
+		Text:             *body.Text,
+		ExpectedMtime:    body.ExpectedMtime,
+		ExpectedSHA256:   body.ExpectedSHA256,
+		ExpectedRevision: body.ExpectedRevision,
+		ConfirmSensitive: body.ConfirmSensitive,
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	defer cancel()
+	var out proto.MachineFileWriteResponse
+	if err := m.call(ctx, proto.MethodMachineFilesWrite, req, &out); err != nil {
+		h.machineFileCallErr(w, r, err)
+		return
+	}
+	writeJSON(w, out)
+}
+
+func (h *Hub) machineFileCreate(w http.ResponseWriter, r *http.Request, m *Machine) {
+	var req proto.MachineFileCreateRequest
+	if err := decodeJSONBody(w, r, &req, maxMachineFileJSONWriteBody); err != nil {
+		writeBodyErr(w, err, err)
+		return
+	}
+	if strings.TrimSpace(req.Dir) == "" {
+		writeErr(w, http.StatusBadRequest, errors.New("dir is required"))
+		return
+	}
+	if strings.TrimSpace(req.Name) == "" {
+		writeErr(w, http.StatusBadRequest, errors.New("name is required"))
+		return
+	}
+	if req.Kind != "file" && req.Kind != "dir" {
+		writeErr(w, http.StatusBadRequest, errors.New("kind must be 'file' or 'dir'"))
+		return
+	}
+	if len(req.Text) > proto.MachineFileEditMaxBytes {
+		writeCode(w, http.StatusRequestEntityTooLarge, proto.CodeTooLarge,
+			fmt.Sprintf("text exceeds maximum editable size (%d bytes)", proto.MachineFileEditMaxBytes),
+			map[string]any{"limit": proto.MachineFileEditMaxBytes})
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	defer cancel()
+	var out proto.MachineFileCreateResponse
+	if err := m.call(ctx, proto.MethodMachineFilesCreate, req, &out); err != nil {
+		h.machineFileCallErr(w, r, err)
+		return
+	}
+	writeJSON(w, out)
+}
+
+func (h *Hub) machineFileRename(w http.ResponseWriter, r *http.Request, m *Machine) {
+	var req proto.MachineFileRenameRequest
+	if err := decodeJSONBody(w, r, &req, 64<<10); err != nil {
+		writeBodyErr(w, err, err)
+		return
+	}
+	if strings.TrimSpace(req.Path) == "" || strings.TrimSpace(req.DestPath) == "" {
+		writeErr(w, http.StatusBadRequest, errors.New("path and dest_path are required"))
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	defer cancel()
+	var out proto.MachineFileRenameResponse
+	if err := m.call(ctx, proto.MethodMachineFilesRename, req, &out); err != nil {
+		h.machineFileCallErr(w, r, err)
+		return
+	}
+	writeJSON(w, out)
+}
+
+func (h *Hub) machineFileDelete(w http.ResponseWriter, r *http.Request, m *Machine) {
+	var req proto.MachineFileDeleteRequest
+	if r.Body != nil && r.ContentLength != 0 {
+		if err := decodeJSONBody(w, r, &req, 64<<10); err != nil && !errors.Is(err, io.EOF) {
+			writeBodyErr(w, err, err)
+			return
+		}
+	}
+	q := r.URL.Query()
+	if strings.TrimSpace(req.Path) == "" {
+		req.Path = q.Get("path")
+	}
+	if strings.TrimSpace(req.Root) == "" {
+		req.Root = q.Get("root")
+	}
+	if !req.ConfirmSensitive && queryBool(q.Get("confirm_sensitive")) {
+		req.ConfirmSensitive = true
+	}
+	if strings.TrimSpace(req.Path) == "" {
+		writeErr(w, http.StatusBadRequest, errors.New("path is required"))
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	defer cancel()
+	var out proto.MachineFileDeleteResponse
+	if err := m.call(ctx, proto.MethodMachineFilesDelete, req, &out); err != nil {
+		h.machineFileCallErr(w, r, err)
+		return
+	}
+	writeJSON(w, out)
+}
+
+func queryBool(v string) bool {
+	v = strings.TrimSpace(strings.ToLower(v))
+	return v == "1" || v == "true" || v == "yes"
+}
+
+// machineFileUpload streams a raw HTTP request body chunk-by-chunk into the target directory on the Node
+// without buffering the whole file in Hub or Node memory, cleaning up partial temp files on abort/disconnect/error.
+func (h *Hub) machineFileUpload(w http.ResponseWriter, r *http.Request, m *Machine) {
+	q := r.URL.Query()
+	dir := strings.TrimSpace(q.Get("dir"))
+	name := strings.TrimSpace(q.Get("name"))
+	if dir == "" || name == "" {
+		writeErr(w, http.StatusBadRequest, errors.New("dir and name are required"))
+		return
+	}
+	size := r.ContentLength
+	if size > proto.MachineFileUploadMaxBytes {
+		writeCode(w, http.StatusRequestEntityTooLarge, proto.CodeTooLarge,
+			fmt.Sprintf("file exceeds maximum upload size (%d bytes)", proto.MachineFileUploadMaxBytes),
+			map[string]any{"limit": proto.MachineFileUploadMaxBytes})
+		return
+	}
+
+	ctx := r.Context()
+	step := func(method string, params, out any) error {
+		c, cancel := context.WithTimeout(ctx, time.Minute)
+		defer cancel()
+		return m.call(c, method, params, out)
+	}
+
+	beginReq := proto.MachineFileUploadBeginRequest{
+		Dir:              dir,
+		Name:             name,
+		Root:             q.Get("root"),
+		Size:             size,
+		Overwrite:        queryBool(q.Get("overwrite")),
+		ConfirmSensitive: queryBool(q.Get("confirm_sensitive")),
+	}
+	var begin proto.MachineFileUploadBeginResponse
+	if err := step(proto.MethodMachineFilesUploadBegin, beginReq, &begin); err != nil {
+		h.machineFileCallErr(w, r, err)
+		return
+	}
+
+	done := false
+	defer func() {
+		if !done && begin.UploadID != "" {
+			c, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			_ = m.call(c, proto.MethodMachineFilesUploadAbort, proto.MachineFileUploadAbortRequest{UploadID: begin.UploadID}, nil)
+		}
+	}()
+
+	maxBytes := int64(proto.MachineFileUploadMaxBytes)
+	if begin.MaxBytes > 0 && begin.MaxBytes < maxBytes {
+		maxBytes = begin.MaxBytes
+	}
+	if size > maxBytes {
+		writeCode(w, http.StatusRequestEntityTooLarge, proto.CodeTooLarge,
+			fmt.Sprintf("file exceeds maximum upload size (%d bytes)", maxBytes),
+			map[string]any{"limit": maxBytes})
+		return
+	}
+
+	chunkBytes := proto.MachineFileUploadChunkBytes
+	if begin.ChunkBytes > 0 && begin.ChunkBytes < chunkBytes {
+		chunkBytes = begin.ChunkBytes
+	}
+
+	// Allow reading 1 byte past maxBytes so chunked or under-reported bodies exceeding the cap
+	// are always detected as oversized (413) instead of silently truncated at maxBytes.
+	body := http.MaxBytesReader(w, r.Body, maxBytes+1)
+	buf := make([]byte, chunkBytes)
+	var off int64
+	for {
+		n, err := io.ReadFull(body, buf)
+		if n > 0 {
+			if off+int64(n) > maxBytes {
+				writeCode(w, http.StatusRequestEntityTooLarge, proto.CodeTooLarge,
+					fmt.Sprintf("upload exceeds maximum size (%d bytes)", maxBytes),
+					map[string]any{"limit": maxBytes})
+				return
+			}
+			if size >= 0 && off+int64(n) > size {
+				writeErr(w, http.StatusBadRequest, fmt.Errorf("upload exceeded declared size (%d bytes)", size))
+				return
+			}
+			chunkReq := proto.MachineFileUploadChunkRequest{
+				UploadID: begin.UploadID,
+				Offset:   off,
+				Data:     buf[:n],
+			}
+			if cerr := step(proto.MethodMachineFilesUploadChunk, chunkReq, nil); cerr != nil {
+				h.machineFileCallErr(w, r, cerr)
+				return
+			}
+			off += int64(n)
+		}
+		if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
+			break
+		}
+		if err != nil {
+			if bodyTooLarge(err) {
+				writeCode(w, http.StatusRequestEntityTooLarge, proto.CodeTooLarge,
+					fmt.Sprintf("upload exceeds maximum size (%d bytes)", maxBytes),
+					map[string]any{"limit": maxBytes})
+				return
+			}
+			writeErr(w, http.StatusBadRequest, err)
+			return
+		}
+	}
+	if size < 0 {
+		// Probe 1 trailing byte so chunked bodies ending right on a chunk/cap boundary cannot sneak past maxBytes.
+		var probe [1]byte
+		pn, perr := body.Read(probe[:])
+		if pn > 0 || bodyTooLarge(perr) {
+			writeCode(w, http.StatusRequestEntityTooLarge, proto.CodeTooLarge,
+				fmt.Sprintf("upload exceeds maximum size (%d bytes)", maxBytes),
+				map[string]any{"limit": maxBytes})
+			return
+		}
+		if perr != nil && !errors.Is(perr, io.EOF) {
+			writeErr(w, http.StatusBadRequest, perr)
+			return
+		}
+	} else if off != size {
+		writeErr(w, http.StatusBadRequest, fmt.Errorf("upload cut short: %d of %d bytes", off, size))
+		return
+	}
+
+	var out proto.MachineFileUploadEndResponse
+	if err := step(proto.MethodMachineFilesUploadEnd, proto.MachineFileUploadEndRequest{UploadID: begin.UploadID}, &out); err != nil {
+		h.machineFileCallErr(w, r, err)
+		return
+	}
+	done = true
+	h.logf("[%s] machine file uploaded: %s (%d bytes)", m.cfg.ID, out.Entry.Path, out.Size)
+	writeJSON(w, out)
 }

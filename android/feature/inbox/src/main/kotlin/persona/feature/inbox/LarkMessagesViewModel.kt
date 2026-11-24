@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
+import persona.core.inbox.*
 
 /** Owns only the visible Messages page's requests; the pairing-scoped repository owns their state and serialization. */
 class LarkMessagesViewModel(private val repository: LarkMessagesRepository) : ViewModel() {

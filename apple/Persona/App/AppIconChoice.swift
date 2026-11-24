@@ -1,7 +1,5 @@
 import SwiftUI
-#if os(iOS) || os(visionOS)
 import UIKit
-#endif
 
 // Both supported personas use the default app icon. Paper's fixed light and dark sets remain available.
 
@@ -44,9 +42,7 @@ nonisolated enum AppIconChoice: String, CaseIterable, Identifiable, Sendable {
     func setAlternateIconName(_ name: String?) async throws
 }
 
-#if os(iOS) || os(visionOS)
 extension UIApplication: AppIconSetting {}
-#endif
 
 /// The home screen icon kept on the Avatar's (`follow`): what is on now, and the last failure to switch.
 @MainActor @Observable final class AppIconModel {
@@ -106,7 +102,6 @@ extension UIApplication: AppIconSetting {}
     }
 }
 
-#if os(iOS) || os(visionOS)
 extension AppIconChoice {
     /// The system's look, the home screen's: read off the screen, as the window carries the app's own Light & Dark.
     @MainActor static var systemLook: ColorScheme {
@@ -118,10 +113,9 @@ extension AppIconChoice {
         #endif
     }
 }
-#endif
 
 extension AppIconModel {
-    /// The app's own: UIApplication on iPhone and iPad, nothing on the Mac.
+    /// The app's own: UIApplication's.
     static func live() -> AppIconModel {
         #if DEBUG
         // Unit hosts must not read or change LaunchServices icons; an in-flight system switch can block its queue.
@@ -135,10 +129,6 @@ extension AppIconModel {
             return AppIconModel(system: nil)
         }
         #endif
-        #if os(iOS) || os(visionOS)
         return AppIconModel(system: UIApplication.shared)
-        #else
-        return AppIconModel(system: nil)
-        #endif
     }
 }

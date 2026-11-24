@@ -61,7 +61,7 @@ class ExtensionUiContractTest {
         val strict = Json { ignoreUnknownKeys = false }
         // Items: every key the schema writes is one the app reads.
         raw.jsonObject.getValue("sections").jsonArray.flatMap { it.jsonObject.getValue("items").jsonArray }.forEach {
-            strict.decodeFromJsonElement(persona.core.contracts.api.ExtensionViewItem.serializer(), it)
+            val _ = strict.decodeFromJsonElement(persona.core.contracts.api.ExtensionViewItem.serializer(), it)
         }
         assertTrue(view.sections.flatMap { it.items }.map { it.type }.containsAll(listOf("markdown", "table", "empty", "loading", "row")))
     }
@@ -73,7 +73,7 @@ class ExtensionUiContractTest {
         listOf("View.v8-today.json", "View.v8-section-header.json").forEach { name ->
             val raw = JsonCodec.parseToJsonElement(java.io.File(System.getProperty("persona.repo.root"), "schema/extension/examples/$name").readText())
             raw.jsonObject.getValue("sections").jsonArray.forEach {
-                strict.decodeFromJsonElement(persona.core.contracts.api.ExtensionViewSection.serializer(), it)
+                val _ = strict.decodeFromJsonElement(persona.core.contracts.api.ExtensionViewSection.serializer(), it)
             }
         }
         val header = JsonCodec.decodeFromJsonElement(persona.core.contracts.api.ExtensionView.serializer(),

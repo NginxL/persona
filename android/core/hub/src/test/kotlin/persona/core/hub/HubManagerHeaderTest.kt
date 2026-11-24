@@ -162,6 +162,11 @@ class HubManagerHeaderTest {
         assertFalse(isAssistantPath("https://example.com/api/v1/assistant?space=health".toHttpUrl()))
         assertFalse(isAssistantPath("https://example.com/api/v1/assistant/conversations/c1/feed".toHttpUrl()))
         assertTrue(isAssistantPath("https://example.com/api/v1/assistant/conversations".toHttpUrl()))
+        // The tracks, their kinds and extension trust are the default manager's (#13500).
+        assertFalse(isAssistantPath("https://example.com/api/v1/assistant/tracks".toHttpUrl()))
+        assertFalse(isAssistantPath("https://example.com/api/v1/assistant/tracks/qa-plain/space-md".toHttpUrl()))
+        assertFalse(isAssistantPath("https://example.com/api/v1/assistant/track-kinds".toHttpUrl()))
+        assertFalse(isAssistantPath("https://example.com/api/v1/assistant/extension-trust/notes".toHttpUrl()))
     }
 
     /**

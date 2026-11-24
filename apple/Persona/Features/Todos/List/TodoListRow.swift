@@ -1,13 +1,15 @@
 #if os(iOS)
 import SwiftUI
 
-/// One to-do on the V1 list (#10465; docs/design/proposals/todos-redesign.md 3.4, "Row anatomy"; DESIGN_SYSTEM 3.4
-/// "The work-item row" with the tick in the source mark's slot): the tick; the title with its due day or age; line 2,
-/// the mark and the hub's line in words; the door to what it asks; line 3, what the grouping does not already say.
-/// It reads its own cell only (`TodosListModel.Row`), so a run's new line draws this row alone (P5), and takes the list's
-/// model, not closures, so a list update that leaves it alone does not draw it again (P6). The tick is a button of its
-/// own (a 24-pt glyph hit as a finger's square, spoken as the title with Done or Not done, HIG-006 and HIG-007); the rest
-/// of the row opens the to-do and is spoken as one element, with the swipe's actions and Delete… as its own.
+/// One to-do on the V1 list (#10465; docs/design/proposals/todos-redesign.md 3.4, "Row anatomy"; DESIGN_SYSTEM 3.4 "The
+/// work-item row" with the tick in the source mark's slot), compact as Reminders' rows: one 12-pt padding above and
+/// below; the tick; the semibold title ("!" before it on a high-priority one) with its time in words ("Due Fri", "16m
+/// ago"); line 2, the mark and the hub's line in words; line 3, what the grouping does not already say. No door and no
+/// chevron: the row is its own way to its asks. It reads its own cell only (`TodosListModel.Row`), so a run's new line
+/// draws this row alone (P5), and takes the list's model, not closures, so a list update that leaves it alone does not
+/// draw it again (P6). The tick is a button of its own (a 22-pt ring hit as a finger's square without growing the row,
+/// spoken as the title with Done or Not done, HIG-006 and HIG-007); the rest of the row opens the to-do and is spoken
+/// as one element, with the swipe's actions and Delete… as its own.
 struct TodoListRow: View {
     var row: TodosListModel.Row
     /// What the tick, Mark Done and the row's actions do (`TodosListModel.tapTick`).
@@ -22,7 +24,6 @@ struct TodoListRow: View {
             VStack(alignment: .leading, spacing: Theme.Space.xs) {
                 titleLine(c)
                 if let said = c.said { lineTwo(said, mark: c.mark, unsaved: c.unsaved, markDone: c.markDone) }
-                if let door = c.door { doorLine(door, asks: c.asks) }
                 if let caption = c.caption {
                     Text(caption)
                         .font(Theme.Font.caption)
@@ -30,13 +31,16 @@ struct TodoListRow: View {
                         .lineLimit(1)
                 }
             }
-            .padding(.vertical, Theme.Space.s)
+            // The separator under it starts at the titles' column, as Mail's and the Inbox's.
+            .alignmentGuide(.listRowSeparatorLeading) { $0[.leading] }
             .accessibilityElement(children: .ignore)
             .accessibilityLabel(c.spoken)
             .accessibilityAddTraits(.isButton)
             .accessibilityActions { spokenActions(c) }
             .accessibilityIdentifier("todos.row." + row.todoID)
         }
+        // The row's one padding, inside a cell with no insets above or below of its own (`TodoListCell.insets`).
+        .padding(.vertical, Theme.Space.m)
         // A re-filing put it in another group or fold (proposal 3.9): a new view there, drawn hidden from its first
         // frame, which fades it in where it now is as it appears, so nothing slides across the list. With Reduce Motion
         // the model hides nothing.
@@ -75,7 +79,7 @@ struct TodoListRow: View {
         HStack(alignment: .firstTextBaseline, spacing: Theme.Space.s) {
             // A tick of a moment ago is struck through in the secondary color until the hub has it closed; a closed to-do
             // keeps its title as it was (the frames draw it so), its tick saying it is closed.
-            Text(c.title)
+            Text(Self.title(c))
                 .font(Theme.Font.bodyStrong)
                 .strikethrough(c.struck)
                 .foregroundStyle(c.struck ? Color.secondary : Color.primary)
@@ -126,30 +130,14 @@ struct TodoListRow: View {
         .font(Theme.Font.secondary)
     }
 
-    /// The door to what it asks, drawn as the style's button (proposal 3.4: "[ Review Plan › ]"). Until the row answers
-    /// in place (#10465's answers step) a tap on it is the row's, which opens the to-do where its asks are answered;
-    /// the row's label says it.
-    private func doorLine(_ door: TodoDoor, asks: Int) -> some View {
-        HStack(spacing: Theme.Space.sm) {
-            Button {} label: {
-                HStack(spacing: Theme.Space.xxs) {
-                    Text(door == .reviewPlan ? String(localized: "Review Plan [To-dos Door]") : String(localized: "Review [To-dos Door]"))
-                    ThemedIcon(Theme.Icon.disclosure).font(Theme.Font.captionStrong)
-                }
-                .lineLimit(1)
-            }
-            .font(Theme.Font.secondaryStrong)
-            .themedButton()
-            .tint(Theme.accent)
-            .fixedSize()
-            .allowsHitTesting(false)
-            if asks > 1 {
-                Text("\(asks) asks [To-dos Door]")
-                    .font(Theme.Font.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-            }
-        }
+    /// The title, after "!" in the caution tone on a high-priority to-do, the mark kept with the first word where the
+    /// title wraps (Reminders' mark; the row's spoken label says "High priority").
+    static func title(_ c: TodoRowContent) -> AttributedString {
+        let title = AttributedString(c.title)
+        guard c.highPriority else { return title }
+        var mark = AttributedString("!\u{00A0}")
+        mark.foregroundColor = Theme.cautionText
+        return mark + title
     }
 
     /// The lead in its tone, then the rest in the secondary color: one paragraph, so it wraps as one line of text.
@@ -181,15 +169,16 @@ struct TodoListRow: View {
     }
 }
 
-/// The tick's 24-pt glyph on the title's first line (its button hits a finger's square, `TodoListRow`); a fold's line
-/// keeps its room, unseen, so its words sit in the titles' column.
+/// The tick's 22-pt ring on the title's first line (its button hits a finger's square, `TodoListRow`), in the secondary
+/// color, which keeps the 3:1 a mark needs on every card and canvas (the tertiary was 1.8:1 on white); filled in the
+/// accent once done. A fold's line keeps its room, unseen, so its words sit in the titles' column.
 struct TodoTickGlyph: View {
     var closed: Bool
 
     var body: some View {
         ThemedIcon(closed ? Theme.Icon.successFilled : Theme.Icon.unchecked)
             .font(Theme.Font.title)
-            .foregroundStyle(closed ? AnyShapeStyle(Theme.accent) : AnyShapeStyle(.tertiary))
+            .foregroundStyle(closed ? AnyShapeStyle(Theme.accent) : AnyShapeStyle(.secondary))
             .accessibilityHidden(true)
     }
 }

@@ -1,6 +1,7 @@
 package devices
 
 import (
+	"bytes"
 	"context"
 	"debug/buildinfo"
 	"encoding/json"
@@ -17,6 +18,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/nwverse/persona/server/internal/devicewire"
 	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/identity"
 	"github.com/nwverse/persona/server/internal/lazyre"
@@ -66,9 +68,10 @@ type nodePackage struct {
 	base, dir string
 	// flat: listed in <base>/latest.json, so also served at <base>/<file.Name>, where hub self-update fetches it. A
 	// source without per-version directories has it only there: a GitHub repository's releases/latest/download.
-	flat  bool
-	file  update.File
-	build int64
+	development *devicewire.DevelopmentTarget
+	flat        bool
+	file        update.File
+	build       int64
 	// The release's node protocol range and capabilities (a fetched one), kept with it in the cache so a cached
 	// fallback is judged again before it is used.
 	nodeProtocol, nodeProtocolMin int
@@ -77,12 +80,21 @@ type nodePackage struct {
 	stale bool
 }
 
-type packageKey struct{ goos, arch, program, hub, base string }
+type packageKey struct {
+	goos, arch, program, hub, base string
+	development                    devicewire.DevelopmentTarget
+	hold                           bool
+}
 
 type packageResult struct {
 	pkg nodePackage
 	err error
 	at  time.Time
+	// local is localStamp(k) as the lookup began: a lookup remembered under another one is not fresh, so a build
+	// put in place afterwards (deploy.sh, a person, a hub update) is taken at once, not packageFoundTTL later.
+	local string
+	// localRecent means that stamp included a file too new for size/mtime alone to identify a rapid replacement.
+	localRecent bool
 }
 
 // nodePackages remembers lookups, makes one lookup per platform and kind at a time (the others wait for it) and one
@@ -92,6 +104,7 @@ type nodePackages struct {
 	results  map[packageKey]packageResult
 	looking  map[packageKey]chan struct{} // closed when that lookup is done
 	fetching map[string]*sync.Mutex       // by the cache file a download goes to
+	scans    map[string]versionScan       // carriesVersion's answers, by path
 	// httpClient replaces netproxy's client (tests); nil: netproxy.HTTPClient.
 	httpClient func(proxy *url.URL, timeout time.Duration) *http.Client
 	now        func() time.Time
@@ -121,20 +134,27 @@ func (d *Devices) packageKey(goos, arch, program string) packageKey {
 	if program != nodeproto.ProgramPersonaNode {
 		program = nodeproto.ProgramPersonad // personad, or an older node that does not say
 	}
-	return packageKey{goos: goos, arch: arch, program: program, hub: cfg.HubVersion, base: cfg.NodePackagesURL}
+	key := packageKey{goos: goos, arch: arch, program: program, hub: cfg.HubVersion, base: cfg.NodePackagesURL, hold: cfg.DevelopmentHold}
+	if cfg.DevelopmentTarget != nil {
+		key.development = *cfg.DevelopmentTarget
+		key.hold = key.hold || !key.development.Valid() || key.development.Version != cfg.HubVersion
+	}
+	return key
 }
 
 // cachedPackage is the lookup remembered for k, if it is still fresh.
 func (d *Devices) cachedPackage(k packageKey) (packageResult, bool) {
-	r, fresh, ok := d.rememberedPackage(k)
+	r, fresh, ok := d.rememberedPackage(k, false)
 	return r, ok && fresh
 }
 
 // rememberedPackage is the lookup remembered for k however old (ok), and whether it is still fresh. A result that
 // stands in for the site (stale) or says the site is away is looked up again after a minute; what the site said,
-// found or not, after ten.
-func (d *Devices) rememberedPackage(k packageKey) (r packageResult, fresh, ok bool) {
+// found or not, after ten. allowRecent is only for a caller that already waited on this lookup generation; later,
+// independent cache decisions keep it false.
+func (d *Devices) rememberedPackage(k packageKey, allowRecent bool) (r packageResult, fresh, ok bool) {
 	p := &d.packages
+	local, localRecent := p.localStamp(k)
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	r, ok = p.results[k]
@@ -145,17 +165,17 @@ func (d *Devices) rememberedPackage(k packageKey) (r packageResult, fresh, ok bo
 	if r.pkg.stale || (r.err != nil && siteAway(r.err)) {
 		ttl = packageMissTTL
 	}
-	return r, p.clock().Sub(r.at) <= ttl, true
+	return r, p.clock().Sub(r.at) <= ttl && (allowRecent || !localRecent && !r.localRecent) && r.local == local, true
 }
 
-func (d *Devices) remember(k packageKey, pkg nodePackage, err error) {
+func (d *Devices) remember(k packageKey, pkg nodePackage, err error, local string, localRecent bool) {
 	p := &d.packages
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if p.results == nil {
 		p.results = map[packageKey]packageResult{}
 	}
-	p.results[k] = packageResult{pkg: pkg, err: err, at: p.clock()}
+	p.results[k] = packageResult{pkg: pkg, err: err, at: p.clock(), local: local, localRecent: localRecent}
 }
 
 // standIn marks pkg as standing in for what the site would say (stale): remembered for a minute only.
@@ -196,7 +216,8 @@ func (d *Devices) lookupShared(ctx context.Context, k packageKey) (nodePackage, 
 		case <-ctx.Done():
 			return nodePackage{}, i18n.Err("devices-deploy.package_unreachable", i18n.Args{"os": k.goos, "arch": k.arch, "err": ctx.Err().Error()})
 		}
-		if r, ok := d.cachedPackage(k); ok {
+		if r, fresh, ok := d.rememberedPackage(k, true); ok && fresh {
+			// This caller already waited on that generation. Later independent decisions still revalidate recent files.
 			return r.pkg, r.err
 		}
 		return d.lookupShared(ctx, k) // forgotten already (a test's clock): look it up again
@@ -207,8 +228,9 @@ func (d *Devices) lookupShared(ctx context.Context, k packageKey) (nodePackage, 
 	}
 	p.looking[k] = ch
 	p.mu.Unlock()
+	local, localRecent := p.localStamp(k)
 	pkg, err := d.lookupPackage(ctx, k)
-	d.remember(k, pkg, err)
+	d.remember(k, pkg, err, local, localRecent)
 	p.mu.Lock()
 	delete(p.looking, k)
 	close(ch)
@@ -242,7 +264,7 @@ func (d *Devices) nodeTarget(info proto.NodeInfo) string {
 		return hub
 	}
 	k := d.packageKey(info.OS, info.Arch, info.Program)
-	r, fresh, ok := d.rememberedPackage(k)
+	r, fresh, ok := d.rememberedPackage(k, false)
 	if !fresh {
 		d.lookupSoon(k) // what was remembered stands until the lookup lands, so a node does not flip out of date meanwhile
 	}
@@ -289,7 +311,7 @@ func (d *Devices) packageBlocked(info proto.NodeInfo) error {
 	if info.OS == "" || info.Arch == "" {
 		return nil
 	}
-	if r, _, ok := d.rememberedPackage(d.packageKey(info.OS, info.Arch, info.Program)); ok {
+	if r, _, ok := d.rememberedPackage(d.packageKey(info.OS, info.Arch, info.Program), false); ok {
 		return r.err // the last lookup's, also while a newer one runs (nodeTarget starts it)
 	}
 	return nil
@@ -297,6 +319,12 @@ func (d *Devices) packageBlocked(info proto.NodeInfo) error {
 
 // lookupPackage finds k's build (see the order above; the connector's: lookupConnector).
 func (d *Devices) lookupPackage(ctx context.Context, k packageKey) (nodePackage, error) {
+	if k.hold {
+		return nodePackage{}, i18n.Err("devices-deploy.development_hold")
+	}
+	if k.development.Commit != "" {
+		return d.lookupDevelopment(ctx, k)
+	}
 	if k.program == programConnector {
 		return d.lookupConnector(ctx, k)
 	}
@@ -307,25 +335,37 @@ func (d *Devices) lookupPackage(ctx context.Context, k packageKey) (nodePackage,
 	name := nodeBinaryName(k.program, plat)
 	// Resident preflight requires the running program's identity, even if it is installed under another name.
 	for _, dir := range localNodeDirs() {
-		path := filepath.Join(dir, name)
-		if !fileExists(path) {
-			continue
-		}
-		version := k.hub
-		b, err := os.ReadFile(path + ".version")
-		if k.program == nodeproto.ProgramPersonaNode {
-			// A dedicated node left by an earlier release is only usable with a matching sidecar.
-			if err != nil || version == "" || strings.TrimSpace(string(b)) != version {
+		for _, local := range localNodeNames(k.program, plat) {
+			path := filepath.Join(dir, local)
+			if !fileExists(path) {
 				continue
 			}
-		} else if stamped := strings.TrimSpace(string(b)); err == nil && stamped != "" {
-			version = stamped // a packaged personad can be of another build (docs/operations/docker.md "Node builds")
+			version, inferred := k.hub, false
+			b, err := os.ReadFile(path + ".version")
+			if k.program == nodeproto.ProgramPersonaNode {
+				// A dedicated node left by an earlier release is only usable with a matching sidecar.
+				if err != nil || version == "" || strings.TrimSpace(string(b)) != version {
+					continue
+				}
+			} else if stamped := strings.TrimSpace(string(b)); err == nil && stamped != "" {
+				version = stamped // a packaged personad can be of another build (docs/operations/docker.md "Node builds")
+			} else {
+				inferred = true
+			}
+			if err := checkPackagePlatform(path, k.goos, k.arch, k.program); err != nil {
+				d.logf("node package for %s: ignore local %s: %v", plat, local, err)
+				continue
+			}
+			// A build without a version file is taken for the hub's own; one that cannot be it (an older build a hub
+			// update or a deploy left in place) would only fail the node's self-check (#12958).
+			if inferred {
+				if carries, err := d.packages.carriesVersion(path, version); err != nil || !carries {
+					d.logf("node package for %s: ignore local %s: it is not build %s (%v)", plat, local, version, err)
+					continue
+				}
+			}
+			return nodePackage{Version: version, Program: k.program, goos: k.goos, arch: k.arch, path: path}, nil
 		}
-		if err := checkPackagePlatform(path, k.goos, k.arch, k.program); err != nil {
-			d.logf("node package for %s: ignore local %s: %v", plat, name, err)
-			continue
-		}
-		return nodePackage{Version: version, Program: k.program, goos: k.goos, arch: k.arch, path: path}, nil
 	}
 	if k.base == "" || k.hub == "dev" || !safeVersion.MatchString(k.hub) {
 		// Nowhere to fetch from (a hub built without an update URL and no node_packages.url, or "off"; a dev build).
@@ -414,6 +454,118 @@ func nodeBinaryName(program, plat string) string {
 	return program + "-" + plat
 }
 
+// localNodeNames are the names a build of program for plat may have in a local node dir, the current one first. A
+// Windows build left by a hub or a person from before Windows builds kept their .exe has none; it is still taken when
+// it is the version it would be sent as (carriesVersion).
+func localNodeNames(program, plat string) []string {
+	name := nodeBinaryName(program, plat)
+	if legacy, ok := strings.CutSuffix(name, ".exe"); ok {
+		return []string{name, legacy}
+	}
+	return []string{name}
+}
+
+// localBuildRecent is the window in which equal-sized replacements may still share an mtime on a coarse filesystem
+// clock. Do not reuse a result captured in this window without reading the executable again once. Only small clock skew
+// counts as recent; a far-future timestamp must not disable reuse for the file's whole lifetime (#13298, #13326 review).
+const localBuildRecent = 2 * time.Second
+
+func localBuildMtimeRecent(now, mod time.Time) bool {
+	age := now.Sub(mod)
+	return age >= -localBuildRecent && age < localBuildRecent
+}
+
+// localStamp is what the local builds k may be taken from look like now: each candidate and its version file, with
+// size and modification time ("" when there are none). recent says at least one file is inside localBuildRecent.
+func (p *nodePackages) localStamp(k packageKey) (stamp string, recent bool) {
+	if k.goos == "" || k.arch == "" {
+		return "", false
+	}
+	var b strings.Builder
+	now := p.clock()
+	for _, dir := range localNodeDirs() {
+		for _, name := range localNodeNames(k.program, k.goos+"-"+k.arch) {
+			for _, f := range []string{name, name + ".version"} {
+				if st, err := os.Stat(filepath.Join(dir, f)); err == nil {
+					fmt.Fprintf(&b, "%s|%d|%d\n", filepath.Join(dir, f), st.Size(), st.ModTime().UnixNano())
+					recent = recent || localBuildMtimeRecent(now, st.ModTime())
+				}
+			}
+		}
+	}
+	return b.String(), recent
+}
+
+// versionScan is carriesVersion's answer for a file as it was then.
+type versionScan struct {
+	size    int64
+	mod     time.Time
+	version string
+	carries bool
+	recent  bool // the file was inside localBuildRecent when scanned: confirm it once after that window too
+}
+
+// carriesVersion: the build at path can be version. A node installs a build only when its node-update-check prints
+// the version it is sent as (internal/nodeupdate), and that is the version the build was linked with, so its bytes are
+// in the file. A file without them is another build: one a hub update or a deploy left in place, or one a later step
+// of a deploy has not replaced yet. Finding them proves nothing (a short version can occur in any build), so this
+// never turns down a build that would pass. Answers are remembered while the file stays the same.
+func (p *nodePackages) carriesVersion(path, version string) (bool, error) {
+	if version == "" {
+		return true, nil
+	}
+	st, err := os.Stat(path)
+	if err != nil {
+		return false, err
+	}
+	p.mu.Lock()
+	scan, ok := p.scans[path]
+	p.mu.Unlock()
+	recent := localBuildMtimeRecent(p.clock(), st.ModTime())
+	if ok && !recent && !scan.recent && scan.size == st.Size() && scan.mod.Equal(st.ModTime()) && scan.version == version {
+		return scan.carries, nil
+	}
+	carries, err := fileContains(path, []byte(version))
+	if err != nil {
+		return false, err
+	}
+	p.mu.Lock()
+	if p.scans == nil {
+		p.scans = map[string]versionScan{}
+	}
+	p.scans[path] = versionScan{size: st.Size(), mod: st.ModTime(), version: version, carries: carries, recent: recent}
+	p.mu.Unlock()
+	return carries, nil
+}
+
+// fileContains reads the file at path in chunks, looking for needle (not empty).
+func fileContains(path string, needle []byte) (bool, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return false, err
+	}
+	defer f.Close()
+	buf := make([]byte, len(needle)-1+1<<20)
+	kept := 0
+	for {
+		n, err := f.Read(buf[kept:])
+		if n > 0 {
+			window := buf[:kept+n]
+			if bytes.Contains(window, needle) {
+				return true, nil
+			}
+			kept = min(len(needle)-1, len(window))
+			copy(buf, window[len(window)-kept:])
+		}
+		if errors.Is(err, io.EOF) {
+			return false, nil
+		}
+		if err != nil {
+			return false, err
+		}
+	}
+}
+
 // fileProgram is the kind of program a release download is, by its name.
 func fileProgram(f update.File) string {
 	switch {
@@ -459,6 +611,10 @@ func (d *Devices) fetchManifest(ctx context.Context, u string) (*update.Manifest
 	if err != nil {
 		return nil, err
 	}
+	return readPackageManifest(ctx, client, u)
+}
+
+func readPackageManifest(ctx context.Context, client *http.Client, u string) (*update.Manifest, error) {
 	ctx, cancel := context.WithTimeout(ctx, packageLookup)
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
@@ -571,6 +727,10 @@ func cachedFallback(k packageKey) (nodePackage, bool) {
 
 // fetchPackage is p as a file on this machine: its own, the cache's, or downloaded into the cache and checked.
 func (d *Devices) fetchPackage(ctx context.Context, p nodePackage) (string, error) {
+	if p.development != nil {
+		path, _, err := d.fetchDevelopment(ctx, p)
+		return path, err
+	}
 	if p.path != "" {
 		if root := identity.NodePackageCacheDir(); strings.HasPrefix(p.path, root+string(filepath.Separator)) {
 			now := d.packages.clock() // a cached build used now (a stand-in): pruneCache keeps its dir a while

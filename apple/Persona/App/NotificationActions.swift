@@ -63,7 +63,7 @@ nonisolated enum NotificationActions {
             ],
             intentIdentifiers: [], options: [])
         // Pairing receipts (#4199): Not you? Revoke, It's Mine / Not Mine (PairReceiptActions).
-        var all = Set([permission, plan, question, screen, elicitation, done, decide] + PairReceiptActions.categories)
+        var all = Set([permission, plan, question, screen, elicitation, done, decide, WaterReminderActions.notificationCategory] + PairReceiptActions.categories)
         #if os(iOS)
         // A calendar meeting's reminder (#8731 G2): Start (MeetingReminders).
         all.insert(MeetingReminders.notificationCategory)
@@ -82,6 +82,12 @@ nonisolated enum NotificationActions {
         case rejectPlan: Resolution(approve: false, feedback: text?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "")
         default: nil
         }
+    }
+
+    /// Whether a button may settle the card `id`: not one its task's supervisor holds (`Interaction.supervisorHeld`), as
+    /// far as the app knows its pending cards; a card it has not loaded is left to the hub, as before.
+    static func answerable(_ id: String, among cards: some Sequence<Interaction>) -> Bool {
+        !cards.contains { $0.id == id && !$0.answerableHere }
     }
 
     /// What Take Recommendation on a decision's push answers: the to-do, the round it was asked in (sent back exactly as

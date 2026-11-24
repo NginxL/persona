@@ -279,9 +279,7 @@ func (n *Node) start(ctx context.Context, cwd, launcher, prompt, resume, workspa
 		if resume != "" { // a Codex thread is resumed above: this id is not one
 			return nil, refusal(codexResumeRefused, "找不到这个 Codex 会话的记录，没法接着它：请在电脑上恢复（codex resume）。", nil)
 		}
-		// An inherited effort needs no override, which would leave the shared app-server; the record keeps it all the same.
-		runs := n.codexOwnEffort(ctx, argv, codexPaneEnv(launch), cwd, execution)
-		s, err := n.startCodex(ctx, launch, cwd, launcher, codexExecutionArgs(argv, runs), execution, prompt, ws, tabName, mode)
+		s, err := n.startCodex(ctx, launch, cwd, launcher, argv, execution, prompt, ws, tabName, mode)
 		if err == nil && strings.TrimSpace(prompt) != "" {
 			n.codexGoalAfterStart(s.SessionID, s.PaneID, execution.Goal) // its first message is in (codex_start_goal.go)
 		}
@@ -311,8 +309,16 @@ func (n *Node) start(ctx context.Context, cwd, launcher, prompt, resume, workspa
 	}
 	// Persona's hooks: a plugin, or in --settings for a claude that loads none (hooksplugin.go).
 	settings, hooks := n.claudeStartSettings(ctx, launcher, "claude", cwd)
+	if execution.Source.Role == "" {
+		execution.Source.Role = "task_agent"
+	}
+	execution.Source = sourceSession(execution.Source, id)
+	settings, err = n.sourceClaudeSettings(ctx, launcher, cwd, settings, "", execution.Source)
+	if err != nil {
+		return nil, err
+	}
 	// No tier alias on the command line for a gateway provider (#10365): its model for that tier, else its default.
-	spec := claudeLaunch{Launcher: launcher, Settings: settings, Hooks: hooks, Display: n.liveRepliesPlugin(hooks), Model: n.claudeModelArg(launcher, execution.Model),
+	spec := claudeLaunch{Source: execution.Source, Launcher: launcher, Settings: settings, Hooks: hooks, Display: n.liveRepliesPlugin(hooks), Model: n.claudeModelArg(launcher, execution.Model),
 		Plugins: n.claudeLoadsPlugins(ctx), TaskInstructionFile: instructionFile}
 	if backend := backendLaunchFrom(ctx); backend != nil && mode != "plan" {
 		for _, repo := range backend.executor.journal.Repositories {
@@ -359,7 +365,7 @@ func (n *Node) start(ctx context.Context, cwd, launcher, prompt, resume, workspa
 		cmd = cdThen(cwd, cmd, shells...)
 	}
 	n.notePaneStart(launcher) // not in the agent sandbox unless a managed launcher (agentsandbox.go)
-	st := sessionState{Pane: pane, Launcher: launcher, Cwd: cwd, StartedAt: time.Now().UTC(), Model: execution.Model, ModelFingerprint: execution.Fingerprint,
+	st := sessionState{ModelSource: execution.Source, Pane: pane, Launcher: launcher, Cwd: cwd, StartedAt: time.Now().UTC(), Model: execution.Model, ModelFingerprint: execution.Fingerprint,
 		PlanThen: planThen, TaskInstructions: execution.TaskInstructions, TaskInstructionFile: instructionFile, TaskInstructionChannel: instructionChannel}
 	if prev, ok := n.state.get(id); ok && resume != "" {
 		if !prev.StartedAt.IsZero() { // a branch (fork.go) has none: it starts now
@@ -478,7 +484,7 @@ func (n *Node) resumeKnown(ctx context.Context, id string) bool {
 }
 
 // resumeOutsideHealth: this computer knows where conversation id started, and every directory it knows it by is
-// outside the health space and the Agent folders kept out of Persona. The hub asks it (session.start's
+// outside every space (identity.InSpace) and the Agent folders kept out of Persona. The hub asks it (session.start's
 // resume_outside_health) for a resume an extension's token names that its computer does not list (#10941): a quiet chat
 // leaves the list after a week, or sooner on a busy computer, and a stopped Agent takes no message, so a resume is the
 // only way back to one the extension started.
@@ -527,7 +533,7 @@ func (n *Node) resumeOutsideHealth(ctx context.Context, id string) bool {
 		}
 	}
 	for _, d := range dirs {
-		if d != "" && (identity.InHealthSpace(d) || n.cwdBlocked(d)) {
+		if d != "" && (identity.InSpace(d) || n.cwdBlocked(d)) {
 			return false
 		}
 	}
@@ -557,7 +563,7 @@ func (n *Node) retypeStart(ctx context.Context, pane string, typed *typedStart) 
 // error: in its data (screen) for a coded one, else after its text.
 func (n *Node) startTabFailed(ctx context.Context, launch host.Launcher, created *host.Created, ws, id string, err error) error {
 	pane := created.Pane.String()
-	shown, _ := n.readPane(ctx, pane, "recent-unwrapped", 30)
+	shown, _ := n.readPane(ctx, pane, "recent-unwrapped", 2*screen.DialogLines)
 	tail := lastLines(shown, 12)
 	keep := func(e error) error {
 		if adoptedPane(ctx) != nil { // the user's own pane ("Run Agent Here"): theirs to keep, never closed later
@@ -571,7 +577,10 @@ func (n *Node) startTabFailed(ctx context.Context, launch host.Launcher, created
 	case rpcCode(err) == proto.CodeShellWaiting:
 		return keep(err)
 	case errors.As(err, &stalled):
-		return keep(refusal(proto.CodeAgentStartStalled, fmt.Sprintf("%v\n%s", err, tail), map[string]any{"screen": tail}))
+		// The whole screen, as a dialog is read (screen.DialogLines): whoever remedies the start reads what stopped it
+		// (an unrecognized dialog's question and every choice), not only its last rows.
+		whole := stalledScreen(shown)
+		return keep(refusal(proto.CodeAgentStartStalled, fmt.Sprintf("%v\n%s", err, whole), map[string]any{"screen": whole}))
 	case errors.As(err, &rejected):
 		n.closeNewTab(ctx, launch, created, ws)
 		return refusal(proto.CodeStartLineRejected, fmt.Sprintf("%v, twice; the tab is closed\n%s", err, tail),
@@ -582,6 +591,19 @@ func (n *Node) startTabFailed(ctx context.Context, launch host.Launcher, created
 		return err
 	}
 	return fmt.Errorf("%w\n%s", err, tail)
+}
+
+// stalledScreen is the last screen.DialogLines rows of a stalled start's pane, the blank rows under what it drew left
+// out (a tall pane's fresh screen is mostly blank rows below a dialog drawn from its top).
+func stalledScreen(shown string) string {
+	lines := strings.Split(strings.TrimRight(shown, "\n"), "\n")
+	for len(lines) > 0 && strings.TrimSpace(lines[len(lines)-1]) == "" {
+		lines = lines[:len(lines)-1]
+	}
+	if len(lines) > screen.DialogLines {
+		lines = lines[len(lines)-screen.DialogLines:]
+	}
+	return strings.Join(lines, "\n")
 }
 
 // checkStart validates a start's arguments and returns the directory (~ expanded, home when empty) and launcher.

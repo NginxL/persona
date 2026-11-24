@@ -1,8 +1,8 @@
 package persona.core.data
 
 import persona.core.contracts.HubScope
-import persona.feature.inbox.ReplyRequest
-import persona.feature.inbox.ReplyTarget
+import persona.core.inbox.ReplyRequest
+import persona.core.inbox.ReplyTarget
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.*
 import org.junit.Test

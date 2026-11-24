@@ -35,9 +35,12 @@ jobs:
       desktop: ${{ steps.paths.outputs.desktop }}
       scripts: ${{ steps.paths.outputs.scripts }}
     steps:
+      # Every branch's history but file contents only at the tip (blob:none): path selection reads commits and trees,
+      # so old contents, screenshot branches' included, are never downloaded.
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          filter: blob:none
           persist-credentials: false
       - id: base
         name: Resolve comparison base
@@ -64,9 +67,12 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
+      # The commit privacy range, the migration freeze and the ratchets read the base, but only a few of its files: Git
+      # fetches each missing one on demand, without the token checkout has dropped by then (the repository is public).
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          filter: blob:none
           persist-credentials: false
       - name: Repository guards
         env:
@@ -84,6 +90,8 @@ jobs:
     needs: changes
     if: needs.changes.outputs.android == 'true'
     uses: ./.github/workflows/android-test.yml
+    with:
+      commit: ${{ github.sha }}
   apple:
     name: iOS and Watch
     needs: changes

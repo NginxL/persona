@@ -1,14 +1,14 @@
 package assistant
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
-	"fmt"
+	"maps"
 	"slices"
 	"sync"
 	"time"
 
-	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/prompts"
 	"github.com/nwverse/persona/server/internal/proto"
 )
@@ -29,13 +29,10 @@ import (
 // round: no round is asked for, the message is rendered as before (not Fresh), and a message that asks for no round needs every tool,
 // so the node replaces a round's process, once it is idle, by a plain resume with every tool (node/assistant_round.go).
 //
-// The node says how each round went (superviseRoundAnswered). A round it could not start from the first turn because
-// that turn is no longer on the conversation's chain (a compaction, before #7315 or since: no_anchor), and a round that
-// restarted the process with a transcript over backgroundTranscriptLimit, get the background supervisor replaced the
-// next time a signal is for it while it is idle (backgroundOutgrown, ensureBackground): a new one starts, what was
-// queued for the old one moves to it, and the old one is put away like a former main chat, titled "… · until M/D" and
-// archived (putAwayBackground). What the answers said is kept in this manager's memory only: after a restart a
-// replacement whose rounds still have no anchor can be replaced once more (at most once per backgroundRetry).
+// The node says how each round went (superviseRoundAnswered). A legacy round it could not start from the first turn
+// because that turn is no longer on the conversation's chain (no_anchor), and a restarted round whose transcript is
+// over backgroundTranscriptLimit, make the legacy conversation unable to continue. At the next idle digest its unread
+// work moves to main (backgroundOutgrown, ensureBackground), without archiving it or starting a replacement (#5732).
 
 // superviseRoundParam marks an assistant.send to the background supervisor that is a round (node/assistant_round.go).
 const superviseRoundParam = "supervise_round"
@@ -94,7 +91,7 @@ var roundToolsWithheld = map[string]string{
 	"task_start_screen": "failed and started go to the main conversation, and only it remedies a start (remedyTool)",
 	"task_start_keys":   "failed and started go to the main conversation, and only it remedies a start (remedyTool)",
 	"task_retry":        "failed and started go to the main conversation, and only it retries a start (toolTaskRetry)",
-	"agent_supervise":   "only the main conversation adopts an agent opened outside supervision (toolAgentSupervise)",
+	"agent_supervise":   "only the main conversation and a direction's lead adopt an agent opened outside supervision (toolAgentSupervise)",
 	"todo_create":       "a direction's own work: the background supervisor is not a direction and records no to-dos",
 	"todo_complete":     "a direction's own work: the background supervisor is not a direction and records no to-dos",
 	"leader_progress":   "a direction's own work: only a leader conversation reports progress (toolLeaderProgress)",
@@ -111,17 +108,14 @@ func roundTools(list []proto.Tool) []proto.Tool {
 	return out
 }
 
-// backgroundTranscriptLimit is how large the background supervisor's transcript grows before it is replaced. The file
-// only grows (a compaction appends to it too), and every round now restarts the process, so Claude Code reads and
-// parses all of it at each round's start, as the node does to find the anchor and the app's history after a node
-// restart, though the round uses only the first turn. Measured with Claude Code 2.1.322 and a local mock of the model
-// API on synthetic lines of about 4 KiB (node/assistant_round_live_test.go): a round asks the model 0.24 s after its
-// process starts with a small file, 0.47 s at 32 MiB and about 0.8 s at 128 MiB, and the node's anchor scan takes
-// 0.09 s and 0.35 s. Real transcripts that large were not measured and may parse slower (docs/lessons/agents.md: the
-// app's reader took about 20 s for 317 MB on a cold open, which would be about 2 s for 32 MiB). A round writes about 0.1
-// to 0.4 MB (estimated: the snapshot, its message, its tool calls), so at the audited 60 to 75 rounds a day 32 MiB is a
-// replacement every few days; without a limit the file would reach a gigabyte within months. Only a round that
-// restarted the process counts (superviseRoundAnswered).
+// backgroundTranscriptLimit is how large a legacy background supervisor's transcript can be before its unread work
+// moves to main rather than starting another clean round. The file only grows (a compaction appends to it too), and
+// every round restarts the process, so Claude Code reads and parses all of it at each round's start, as the node does
+// to find the anchor and the app's history after a node restart, though the round uses only the first turn. Measured
+// with Claude Code 2.1.322 and a local mock of the model API on synthetic lines of about 4 KiB
+// (node/assistant_round_live_test.go): a round asks the model 0.24 s after its process starts with a small file, 0.47 s
+// at 32 MiB and about 0.8 s at 128 MiB, and the node's anchor scan takes 0.09 s and 0.35 s. Real transcripts that large
+// were not measured and may parse slower. Only a round that restarted the process counts (superviseRoundAnswered).
 const backgroundTranscriptLimit int64 = 32 << 20
 
 // backgroundKeepsContext is assistant.background_supervisor_keeps_context in effect with settings cfg: the background
@@ -140,18 +134,305 @@ type superviseRoundReply struct {
 	TranscriptBytes int64  `json:"transcript_bytes"`
 }
 
+// backgroundRoundForksKey persists manager-attested background supervision round forks across restarts (#12650).
+const backgroundRoundForksKey = "assistant.background_round_forks"
+
+// backgroundRoundFork records a manager-attested forked session id created by a background supervisor round (#12650).
+type backgroundRoundFork struct {
+	Base    string    `json:"base"`
+	Machine string    `json:"machine,omitempty"`
+	At      time.Time `json:"at"`
+}
+
+// maxBackgroundRoundForks caps the persisted round fork table so long-running hubs stay bounded.
+const maxBackgroundRoundForks = 512
+
 // superviseRounds is what the rounds' answers say about background supervisors, in memory: the ones to replace and why,
 // the ones that are a replacement and have not started a round from their first turn yet, when a replacement was last
-// tried, and whether an old node was logged.
+// tried, whether an old node was logged, any manager-attested forked round session ids, and the circuit breaker state.
 type superviseRounds struct {
 	mu          sync.Mutex
 	outgrown    map[string]string // background supervisor → why it is replaced at the next chance (no_anchor, oversized)
 	replacement map[string]bool   // a background supervisor started to replace another, until a round of it starts fresh
 	replacedAt  time.Time
 	oldNode     bool
+	forks       map[string]backgroundRoundFork // manager-attested forked round session id → its base background supervisor
+	breaker     superviseBreaker               // circuit breaker / backoff for auth-denied or repeated no-op all_stopped rounds
+	forksLoaded bool
 }
 
-// superviseRoundAnswered notes how round res of background supervisor to went (deliverRelay).
+// backgroundForksLocked loads manager-attested round forks from the store once; r.mu is held.
+func (s *Service) backgroundForksLocked(ctx context.Context) bool {
+	r := &s.background.rounds
+	if r.forksLoaded {
+		return true
+	}
+	st := s.store()
+	if st == nil {
+		r.forksLoaded = true
+		return true
+	}
+	var m map[string]backgroundRoundFork
+	if _, err := st.Setting(ctx, backgroundRoundForksKey, &m); err != nil {
+		s.logf("supervise: load background round forks: %v", err)
+		return false
+	}
+	if len(m) > 0 {
+		if r.forks == nil {
+			r.forks = m
+		} else {
+			for k, v := range m {
+				if _, exists := r.forks[k]; !exists {
+					r.forks[k] = v
+				}
+			}
+		}
+	}
+	r.forksLoaded = true
+	return true
+}
+
+func (s *Service) saveBackgroundForks(ctx context.Context, forks map[string]backgroundRoundFork) {
+	st := s.store()
+	if st == nil {
+		return
+	}
+	if forks == nil {
+		forks = map[string]backgroundRoundFork{}
+	}
+	sctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+	if err := st.PutSetting(sctx, backgroundRoundForksKey, forks); err != nil {
+		s.logf("supervise: save background round forks: %v", err)
+	}
+}
+
+// registerBackgroundRoundFork records a manager-attested forkID returned for baseID (the background supervisor) on
+// machine, so it inherits assistant authorization and supervision tools and stays hidden from the Agents list.
+func (s *Service) registerBackgroundRoundFork(ctx context.Context, machine, forkID, baseID string) {
+	if forkID == "" || baseID == "" || forkID == baseID {
+		return
+	}
+	cfg := s.settings(ctx)
+	if forkID == cfg.Main || baseID == cfg.Main {
+		return
+	}
+	if s.devs != nil && machine != "" {
+		machine = s.devs.Canonical(machine)
+	}
+	r := &s.background.rounds
+	r.mu.Lock()
+	s.backgroundForksLocked(ctx)
+	if r.forks == nil {
+		r.forks = map[string]backgroundRoundFork{}
+	}
+	if len(r.forks) >= maxBackgroundRoundForks {
+		oldestID := ""
+		var oldestAt time.Time
+		for id, f := range r.forks {
+			if oldestID == "" || f.At.Before(oldestAt) {
+				oldestID, oldestAt = id, f.At
+			}
+		}
+		if oldestID != "" {
+			delete(r.forks, oldestID)
+		}
+	}
+	r.forks[forkID] = backgroundRoundFork{Base: baseID, Machine: machine, At: time.Now().UTC()}
+	snapshot := maps.Clone(r.forks)
+	r.mu.Unlock()
+	s.saveBackgroundForks(ctx, snapshot)
+}
+
+// cachedBackgroundSettings returns the saved BackgroundSupervisor, BackgroundSupervisorMachineID, MachineID, and Main
+// from the in-memory settings cache (or store when uncached) without calling s.hub.Hello, avoiding re-entrant hub
+// lock deadlocks during in-flight DeviceCall callbacks and avoiding hot-path allocations.
+func (s *Service) cachedBackgroundSettings(ctx context.Context) (base, bgMachine, cfgMachine, mainID string) {
+	b := &s.prefs
+	b.mu.Lock()
+	loaded := b.cached != nil
+	if loaded {
+		base = b.cached.BackgroundSupervisor
+		bgMachine = b.cached.BackgroundSupervisorMachineID
+		cfgMachine = b.cached.MachineID
+		mainID = b.cached.Main
+	}
+	b.mu.Unlock()
+	if loaded {
+		return base, bgMachine, cfgMachine, mainID
+	}
+	if s.store() == nil {
+		return "", "", "", ""
+	}
+	v, ok := s.settingsLastGood(ctx)
+	if !ok {
+		return "", "", "", ""
+	}
+	return v.BackgroundSupervisor, v.BackgroundSupervisorMachineID, v.MachineID, v.Main
+}
+
+// backgroundForkBase reports whether id (optionally scoped to machine) is a manager-attested forked round branch of
+// the current background supervisor, returning the base background supervisor id. Unverified ParentSessionID /
+// RootSessionID linkage from node session lists is never accepted as an authorization credential.
+func (s *Service) backgroundForkBase(ctx context.Context, machine, id string) (string, bool) {
+	if id == "" {
+		return "", false
+	}
+	base, _, _, mainID := s.cachedBackgroundSettings(ctx)
+	if base == "" || id == mainID || id == base {
+		return "", false
+	}
+	r := &s.background.rounds
+	r.mu.Lock()
+	s.backgroundForksLocked(ctx)
+	entry, found := r.forks[id]
+	r.mu.Unlock()
+	if found && entry.Base == base {
+		if machine == "" || entry.Machine == "" || s.sameMachine(machine, entry.Machine) {
+			return base, true
+		}
+	}
+	return "", false
+}
+
+// isBackgroundSession reports whether id is the current background supervisor or a manager-attested forked round branch of it.
+func (s *Service) isBackgroundSession(ctx context.Context, id string) bool {
+	if s.isBackground(ctx, id) {
+		return true
+	}
+	_, ok := s.backgroundForkBase(ctx, "", id)
+	return ok
+}
+
+// isBackgroundCallerOn reports whether session on machine is the current background supervisor or a manager-attested
+// forked round branch of it running on the machine authorized for the background supervisor.
+func (s *Service) isBackgroundCallerOn(ctx context.Context, machine, session string) bool {
+	if machine == "" || session == "" || s.isWorkMachine(machine) {
+		return false
+	}
+	cfg := s.settings(ctx)
+	base := cfg.BackgroundSupervisor
+	if base == "" || session == cfg.Main {
+		return false
+	}
+	if sess, known := s.nodeSession(machine, session); known && sess.PaneID != "" {
+		return false
+	}
+	if session != base {
+		if _, ok := s.backgroundForkBase(ctx, machine, session); !ok {
+			return false
+		}
+	}
+	bgMachine := cmp.Or(cfg.BackgroundSupervisorMachineID, cfg.MachineID)
+	if s.sameMachine(machine, bgMachine) {
+		return true
+	}
+	s.origins.mu.Lock()
+	defer s.origins.mu.Unlock()
+	if !s.originsLocked(ctx) {
+		return false
+	}
+	o := s.origins.m[base]
+	return o != nil && o.By == originByStart && s.sameMachine(machine, o.MachineID)
+}
+
+// supervisionHoldKey maps a forked background supervisor round session id back to its base background supervisor id
+// for supervision push-hold and supervision_finish checks.
+func (s *Service) supervisionHoldKey(ctx context.Context, self string) string {
+	if base, ok := s.backgroundForkBase(ctx, "", self); ok {
+		return base
+	}
+	return self
+}
+
+// backgroundMatch holds a precomputed snapshot for matching the current background supervisor and its manager-attested
+// forked round branches on one machine inside hot session-list loops with zero per-row settings/lock/session allocations.
+type backgroundMatch struct {
+	base  string
+	main  string
+	forks map[string]struct{}
+}
+
+func (s *Service) backgroundMatcher(ctx context.Context, machine string) backgroundMatch {
+	if machine == "" {
+		return backgroundMatch{}
+	}
+	base, bgMachine, cfgMachine, mainID := s.cachedBackgroundSettings(ctx)
+	if base == "" || s.isWorkMachine(machine) {
+		return backgroundMatch{}
+	}
+	if cfgMachine == "" && bgMachine == "" {
+		cfg := s.settings(ctx)
+		bgMachine = cfg.BackgroundSupervisorMachineID
+		cfgMachine = cfg.MachineID
+		if mainID == "" {
+			mainID = cfg.Main
+		}
+	}
+	authorized := s.sameMachine(machine, cmp.Or(bgMachine, cfgMachine))
+	if !authorized {
+		s.origins.mu.Lock()
+		if s.originsLocked(ctx) {
+			if o := s.origins.m[base]; o != nil && o.By == originByStart && s.sameMachine(machine, o.MachineID) {
+				authorized = true
+			}
+		}
+		s.origins.mu.Unlock()
+	}
+	if !authorized {
+		return backgroundMatch{}
+	}
+	m := backgroundMatch{base: base, main: mainID}
+	r := &s.background.rounds
+	r.mu.Lock()
+	s.backgroundForksLocked(ctx)
+	for id, entry := range r.forks {
+		if entry.Base == base && (entry.Machine == "" || s.sameMachine(machine, entry.Machine)) {
+			if m.forks == nil {
+				m.forks = map[string]struct{}{}
+			}
+			m.forks[id] = struct{}{}
+		}
+	}
+	r.mu.Unlock()
+	return m
+}
+
+func (m backgroundMatch) isFork(sess *proto.Session) bool {
+	if m.base == "" || len(m.forks) == 0 || sess.PaneID != "" || sess.SessionID == "" || sess.SessionID == m.base || sess.SessionID == m.main {
+		return false
+	}
+	_, ok := m.forks[sess.SessionID]
+	return ok
+}
+
+func (m backgroundMatch) matches(sess *proto.Session) bool {
+	if m.base == "" || sess.PaneID != "" || sess.SessionID == "" || sess.SessionID == m.main {
+		return false
+	}
+	return sess.SessionID == m.base || m.isFork(sess)
+}
+
+// hiddenBackgroundRoundForks returns the session ids in list that are forked background supervisor round branches
+// and must stay out of the ordinary Agents/session list.
+func (s *Service) hiddenBackgroundRoundForks(ctx context.Context, machine string, list []proto.Session) map[[2]string]bool {
+	m := s.backgroundMatcher(ctx, machine)
+	if m.base == "" {
+		return nil
+	}
+	var out map[[2]string]bool
+	for i := range list {
+		if m.isFork(&list[i]) {
+			if out == nil {
+				out = map[[2]string]bool{}
+			}
+			out[[2]string{machine, list[i].SessionID}] = true
+		}
+	}
+	return out
+}
+
+// superviseRoundAnswered notes how round res of legacy background supervisor to went (deliverRelay).
 func (s *Service) superviseRoundAnswered(to string, res superviseRoundReply) {
 	r := &s.background.rounds
 	r.mu.Lock()
@@ -165,24 +446,16 @@ func (s *Service) superviseRoundAnswered(to string, res superviseRoundReply) {
 	}
 	if res.Context == "fresh" {
 		s.logf("supervise: background round %s: fresh", short(to))
-		delete(r.replacement, to) // it works: a later no_anchor of it (a compaction) replaces it
 	} else {
 		s.logf("supervise: background round %s: kept (%s)", short(to), res.Why)
 	}
 	why := ""
 	switch {
 	case res.Context == "kept" && res.Why == "no_anchor":
-		if r.replacement[to] {
-			// A replacement whose first turn is no anchor either: Claude Code's transcript is not what the node reads.
-			// Replacing it again would make a new conversation every backgroundRetry; it keeps the whole context instead.
-			s.logf("supervise: the new background supervisor %s has no first turn to start rounds from either; it keeps the whole context", short(to))
-			return
-		}
 		why = "no_anchor"
 	case res.TranscriptBytes > backgroundTranscriptLimit && (res.Context == "fresh" || res.Why == "start_failed"):
-		// Only where rounds restart the process (backgroundTranscriptLimit): a conversation that keeps its context for
-		// good (an older Claude Code, another runtime: unsupported) is neither restarted per round nor spared idle
-		// compaction, and replacing it would only throw that context away.
+		// Only where rounds restart the process: a conversation that keeps its context for good is neither restarted
+		// per round nor spared idle compaction, so its size alone is no reason to move the work.
 		why = "oversized"
 	}
 	if why == "" {
@@ -194,14 +467,9 @@ func (s *Service) superviseRoundAnswered(to string, res superviseRoundReply) {
 	r.outgrown[to] = why
 }
 
-// backgroundOutgrown is why background supervisor id, which is there, is to be replaced now ("" when it is not): a
-// round's answer said it cannot start from its first turn or its transcript is too large, rounds start fresh (the
-// switch is off), no replacement was tried within backgroundRetry, and it is idle (nothing of it is lost: no turn
-// running, nothing going in). It is then reserved for the replacement (relays.replacing), in one step with the look
-// that nothing goes in: from then on no queued message starts going into it, and none goes in straight, until what
-// waits for it moved to its replacement (backgroundLost) or the replacement did not start (releaseBackground). A
-// message that went in meanwhile would run in an archived conversation that is no longer the background supervisor,
-// its task_review refused. background.mu is held.
+// backgroundOutgrown reports why legacy background supervisor id can no longer start another clean round. It reserves
+// the conversation in one step with the idle check, so no message goes into it while its unread work moves to main
+// (backgroundLost). A busy or draining conversation stays eligible for a later digest. background.mu is held.
 func (s *Service) backgroundOutgrown(ctx context.Context, cfg Settings, id string) string {
 	if backgroundKeepsContext(cfg) {
 		return ""
@@ -209,14 +477,12 @@ func (s *Service) backgroundOutgrown(ctx context.Context, cfg Settings, id strin
 	r := &s.background.rounds
 	r.mu.Lock()
 	why := r.outgrown[id]
-	recent := !r.replacedAt.IsZero() && time.Since(r.replacedAt) < backgroundRetry
 	r.mu.Unlock()
-	if why == "" || recent {
+	if why == "" {
 		return ""
 	}
 	rl := &s.relays
 	rl.mu.Lock()
-	// The queue must be readable: what waits there moves to the replacement.
 	reserved := s.relayLocked(ctx) && !rl.draining[id]
 	if reserved {
 		rl.replacing[id] = true
@@ -225,7 +491,6 @@ func (s *Service) backgroundOutgrown(ctx context.Context, cfg Settings, id strin
 	if !reserved {
 		return ""
 	}
-	// Looked at once reserved: a message that went in just before shows it working.
 	if c, ok := s.session(ctx, cfg.MachineID, id); !ok || c.Status == proto.StatusWorking || c.Starting {
 		s.releaseBackground(ctx, cfg.MachineID, id)
 		return ""
@@ -233,9 +498,8 @@ func (s *Service) backgroundOutgrown(ctx context.Context, cfg Settings, id strin
 	return why
 }
 
-// releaseBackground lets background supervisor id, reserved for a replacement that is not happening
-// (backgroundOutgrown), take messages again, and has what waits for it go in now that may: a drain passed it by
-// meanwhile.
+// releaseBackground lets a legacy background supervisor whose move to main was deferred take messages again, and has
+// what waits for it go in now that may: a drain passed it by meanwhile.
 func (s *Service) releaseBackground(ctx context.Context, machine, id string) {
 	rl := &s.relays
 	rl.mu.Lock()
@@ -243,56 +507,6 @@ func (s *Service) releaseBackground(ctx context.Context, machine, id string) {
 	rl.mu.Unlock()
 	if c, ok := s.session(ctx, machine, id); ok {
 		s.drainRelays(machine, []proto.Session{c})
-	}
-}
-
-// replaceBackground starts a background supervisor in place of old, which outgrew its first turn (why), and puts old
-// away. The new one's id, or old's when it could not start (old goes on as it is: its rounds keep the context, and the
-// next try is after backgroundRetry). background.mu is held, and old is reserved (backgroundOutgrown): the caller
-// moves what waits for it (backgroundLost), which ends the reservation.
-func (s *Service) replaceBackground(ctx context.Context, cfg Settings, old, why string) string {
-	r := &s.background.rounds
-	r.mu.Lock()
-	r.replacedAt = time.Now()
-	r.mu.Unlock()
-	s.logf("supervise: replacing the background supervisor %s (%s)", short(old), why)
-	id, err := s.startBackground(ctx)
-	if err != nil {
-		s.logf("supervise: the background supervisor's replacement did not start: %v; %s goes on as it is", err, short(old))
-		s.releaseBackground(ctx, cfg.MachineID, old)
-		return old
-	}
-	r.mu.Lock()
-	delete(r.outgrown, old)
-	if why == "no_anchor" {
-		if r.replacement == nil {
-			r.replacement = map[string]bool{}
-		}
-		r.replacement[id] = true
-	}
-	r.mu.Unlock()
-	// The owner's model pick for the background supervisor goes on with the conversation that does its work: a pick is
-	// never dropped behind the owner's back (model_pick.go). The old one keeps its own in the archive.
-	if pick, ok := s.modelPickOf(ctx, cfg.BackgroundSupervisorMachineID, old); ok {
-		pick.At = time.Now().UTC()
-		if err := s.setModelPick(ctx, id, &pick); err != nil {
-			s.logf("supervise: carry the background supervisor's model pick to %s: %v", short(id), err)
-		}
-	}
-	s.putAwayBackground(ctx, cfg.BackgroundSupervisorMachineID, old, time.Now())
-	return id
-}
-
-// putAwayBackground puts away background supervisor old, replaced (the settings name another already): renamed
-// "Background supervisor · until M/D" in the owner's language by the user's hand (autonaming leaves it) and archived,
-// as a former main chat is (putAwayMain). Its rounds stay readable there; sending to it brings it back as an ordinary
-// conversation.
-func (s *Service) putAwayBackground(ctx context.Context, machine, old string, now time.Time) {
-	local := now.In(s.location(ctx))
-	s.titleSet(machine, old, i18n.T(s.lang(ctx), "assistant-conversations.background_supervisor_former",
-		i18n.Args{"month": fmt.Sprint(int(local.Month())), "day": fmt.Sprint(local.Day())}), titleByUser)
-	if _, err := s.setArchived(ctx, machine, old, true, titleByUser); err != nil {
-		s.logf("supervise: archive the former background supervisor %s: %v", short(old), err)
 	}
 }
 

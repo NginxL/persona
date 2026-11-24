@@ -1,0 +1,8 @@
+{
+  "$schema": "../../../../schema/module.schema.json",
+  "id": "screen-share",
+  "api": 1,
+  "origin": "builtin",
+  "title": "Screen sharing",
+  "feature": "module.screen-share"
+}

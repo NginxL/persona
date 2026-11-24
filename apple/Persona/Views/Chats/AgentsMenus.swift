@@ -256,10 +256,7 @@ struct AgentRowMenu: View, Equatable {
         #endif
         // The session as it is when an item is tapped (all of it: Hand to Persona sends its last line).
         let now = { model.latest(key) }
-        #if os(macOS)
-        MacOpenInWindowButton(key: key)
-        Divider()
-        #elseif os(visionOS)
+        #if os(visionOS)
         VisionOpenInWindowButton(key: key)
         Divider()
         #endif
@@ -273,13 +270,11 @@ struct AgentRowMenu: View, Equatable {
             Button { model.markSeen(key) } label: { Label("Mark as Seen", systemImage: Theme.Icon.view) }
         }
         #if os(iOS)
-        if UIDevice.current.userInterfaceIdiom == .phone {
-            if takeoverAvailable {
-                Button { if let s = now() { actions.takeover(s) } } label: { Label("Take over", systemImage: Theme.Icon.terminal) }
-            }
-            if continueAvailable {
-                Button { if let s = now() { actions.continueInNewSession(s) } } label: { Label("Continue in a new session", systemImage: Theme.Icon.compose) }
-            }
+        if takeoverAvailable {
+            Button { if let s = now() { actions.takeover(s) } } label: { Label("Take over", systemImage: Theme.Icon.terminal) }
+        }
+        if continueAvailable {
+            Button { if let s = now() { actions.continueInNewSession(s) } } label: { Label("Continue in a new session", systemImage: Theme.Icon.compose) }
         }
         #endif
         if renamable {

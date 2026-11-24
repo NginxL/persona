@@ -24,6 +24,7 @@ import persona.core.contracts.api.MailReference
 import persona.core.contracts.api.MailTransport
 import persona.core.contracts.api.SendMailRequest
 import persona.core.designsystem.PersonaTheme
+import persona.core.inbox.*
 
 /** Leaving the compose page while a send is in flight must neither close it nor cancel the send (#5706). */
 @RunWith(AndroidJUnit4::class)

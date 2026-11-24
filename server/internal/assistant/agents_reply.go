@@ -201,7 +201,7 @@ func mayAsk(sess *proto.Session, triage bool) bool {
 // not one whose news goes elsewhere (an inbox draft, a Feishu thread, a quiet task's conversation), not too old.
 func (s *Service) replyWaits(machine string, sess proto.Session, now time.Time) bool {
 	if sess.HiddenByDirectory() || !sess.AwaitsReply || sess.State != proto.StateIdle || now.Sub(sess.UpdatedAt) > replyOldest ||
-		spaceOf(sess) == SpaceHealth { // its questions are not for the lock screen (doneAlert)
+		spaceOf(sess) != "" { // a space's questions are not for the lock screen (doneAlert); no ctx here, so any space
 		return false
 	}
 	return !s.mutedAs(machine, sess.SessionID, sess.SpaceName) && !s.isInboxAgent(sess.SessionID) &&
@@ -226,9 +226,11 @@ func (s *Service) remindReply(machine string, sess proto.Session) error {
 	s.logf("reply reminder %s/%s: %s", machine, short(sess.SessionID), body)
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	_, err := s.hub.NotifyRequest(ctx, NotifyRequest{Notification: Notification{ID: "ntf_" + randomHex(8),
+	n := Notification{ID: "ntf_" + randomHex(8),
 		Kind: assistantwire.NotifyReply, DeviceID: machine, SessionID: sess.SessionID, Subtitle: s.pushPlace(machine, sess),
-		Title: head, Body: body, RelatedKey: replyRelatedKey(sess)}})
+		Title: head, Body: body, RelatedKey: replyRelatedKey(sess)}
+	s.noteCard(ctx, cardAgentReply, n)
+	_, err := s.hub.NotifyRequest(ctx, NotifyRequest{Notification: n})
 	return err
 }
 

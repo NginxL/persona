@@ -41,11 +41,18 @@ function render(commands: ComposerCommand[]) {
   act(() => root.render(<Composer draftKey="skill-chunk-test" placeholder="" mention={source} machineId="computer" commands={commands} onSend={async () => true} />));
 }
 
-it("keeps the command fallback through skill-chunk loading and failure, including a skills-only palette", async () => {
+it("keeps bare / clean and preserves the command fallback through keyword skill-chunk loading and failure", async () => {
   render(COMMANDS);
   const box = host.querySelector("textarea")!;
   await act(async () => {
     Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(box, "/");
+    box.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+  await vi.waitFor(() => expect(host.querySelectorAll("[role=option]")).toHaveLength(2));
+  expect(host.textContent).not.toContain(t("chat-composerpanel.skills_loading"));
+
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(box, "/a");
     box.dispatchEvent(new Event("input", { bubbles: true }));
   });
   await vi.waitFor(() => expect(host.querySelectorAll("[role=option]")).toHaveLength(2));

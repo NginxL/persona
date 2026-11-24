@@ -49,8 +49,9 @@ import persona.core.domain.inbox.InboxItem
 import persona.core.navigation.AppTab
 import persona.core.navigation.Navigator
 import java.io.File
+import persona.core.inbox.*
 
-/** Inbox headers in every style, light and dark, at ordinary and 200% text. */
+/** Inbox headers at a narrow width, in every style, light and dark, at ordinary and 200% input text. */
 @RunWith(AndroidJUnit4::class)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 @Config(sdk = [35], qualifiers = "en-w400dp-h1000dp-xhdpi")
@@ -94,17 +95,23 @@ class InboxSectionHeaderShotsTest {
         var style by mutableStateOf(AppStyle.Glass)
         var dark by mutableStateOf(false)
         var fontScale by mutableStateOf(1f)
+        var width by mutableStateOf(400.dp)
         rule.setContent {
             CompositionLocalProvider(LocalDensity provides Density(LocalDensity.current.density, fontScale)) {
                 PersonaTheme(style = style, darkTheme = dark, reduceMotion = true) {
-                    Box(Modifier.testTag("shot").width(400.dp).height(1000.dp).background(PersonaTheme.palette.background)) {
+                    Box(Modifier.testTag("shot").width(width).height(1000.dp).background(PersonaTheme.palette.background)) {
                         OnAll { InboxScreen(inbox, navigator) }
                     }
                 }
             }
         }
         for (appearance in AppStyle.entries) for (night in listOf(false, true)) for (scale in listOf(1f, 2f)) {
-            rule.runOnIdle { style = appearance; dark = night; fontScale = scale }
+            rule.runOnIdle {
+                style = appearance
+                dark = night
+                fontScale = scale
+                width = if (scale == 1f) 400.dp else 280.dp
+            }
             rule.waitForIdle()
             rule.onAllNodes(hasText("Needs you") and SemanticsMatcher.keyIsDefined(SemanticsProperties.Heading)).assertCountEquals(1)
             if (scale == 1f) rule.onNodeWithText("Mark all as read").assertExists()
@@ -135,7 +142,7 @@ class InboxSectionHeaderShotsTest {
                 LocalInboxZone provides java.time.ZoneId.of("UTC"),
             ) {
                 PersonaTheme(style = appearance, darkTheme = night, reduceMotion = true) {
-                    Box(Modifier.testTag("shot").width(400.dp).height(1000.dp).background(PersonaTheme.palette.background)) {
+                    Box(Modifier.testTag("shot").width(280.dp).height(1000.dp).background(PersonaTheme.palette.background)) {
                         OnAll { InboxScreen(inbox, navigator) }
                     }
                 }

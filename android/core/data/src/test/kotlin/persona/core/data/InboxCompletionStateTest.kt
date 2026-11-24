@@ -5,8 +5,8 @@ import kotlinx.serialization.json.*
 import org.junit.Assert.*
 import org.junit.Test
 import persona.core.domain.inbox.InboxItem
-import persona.feature.inbox.InboxRecord
-import persona.feature.inbox.InboxSnapshot
+import persona.core.inbox.InboxRecord
+import persona.core.inbox.InboxSnapshot
 
 class InboxCompletionStateTest {
     private fun record(version: String = "v1", done: Boolean = false) = InboxRecord(

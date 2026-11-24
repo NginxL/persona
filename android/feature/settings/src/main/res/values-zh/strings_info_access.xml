@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- What an extension may read of personal information (#13500), as the web's settings-extensioninfoaccess.json. -->
+<resources>
+    <string name="settings_info_access_title">可以读的私人信息</string>
+    <string name="settings_info_access_owner">这是我自己的扩展</string>
+    <string name="settings_info_access_owner_hint">打开后它能读所有内容，包括健康和钱。只给像应用本身一样可信的扩展打开，比如你自己的记忆扩展。</string>
+    <string name="settings_info_access_owner_footer">它能读你的所有信息，包括私事。</string>
+    <string name="settings_info_access_footer">关着的那一类私人信息它看不到；其他内容照常可以读。</string>
+    <string name="settings_info_access_save_failed">没能修改它能读的内容：%1$s</string>
+</resources>

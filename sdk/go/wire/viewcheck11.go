@@ -118,15 +118,15 @@ func checkShape(s *SceneShape) error {
 			return errors.New("round is at most half the smaller size")
 		}
 	case SceneShapeCylinder:
-		if len(s.Points) > 0 || len(s.Size) > 0 || s.Yaw != nil || s.Round != nil {
-			return errors.New("a cylinder has no points, size, yaw or round")
+		if len(s.Points) > 0 || len(s.Size) > 0 || s.Yaw != nil || s.Round != nil || s.Wall {
+			return errors.New("a cylinder has no points, size, yaw, round or wall")
 		}
 		if !finitePoint(s.Center) {
 			return errors.New("center is finite")
 		}
 	case SceneShapePrism:
-		if len(s.Center) > 0 || len(s.Size) > 0 || s.Yaw != nil || s.Round != nil || s.Radius != 0 {
-			return errors.New("a prism has no center, size, yaw, round or radius")
+		if len(s.Center) > 0 || len(s.Size) > 0 || s.Yaw != nil || s.Round != nil || s.Radius != 0 || s.Wall {
+			return errors.New("a prism has no center, size, yaw, round, radius or wall")
 		}
 		return checkPolygon(s.Points)
 	}

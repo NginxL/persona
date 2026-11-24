@@ -2,9 +2,10 @@
   "version": 1,
   "counts": {
     "agents_needs_you": {
-      "rule": "The Agents that wait for the user: one per waiting session, folded to its parent; Persona conversations, quiet tasks' agents, muted agents and directory-hidden sessions left out; a card on no session counts 1. The needs-you fixture's badge rule (expected.badge_rows).",
+      "rule": "The Agents that wait for the user: one per waiting session, folded to its parent; Persona conversations, quiet tasks' agents, muted agents, directory-hidden sessions and sessions whose only pending cards are held (delegating; a card its task's supervisor holds, a routed terminal question included, is in no row either) left out; a card on no session counts 1. The needs-you fixture's badge rule (expected.badge_rows).",
       "pinned_by": "spec/fixtures/needs-you",
-      "waits_on": []
+      "waits_on": [],
+      "refined_by": ["D11"]
     },
     "inbox_unread": {
       "rule": "Unread open action items, one per item: what every client's Inbox tab counts today.",
@@ -32,7 +33,7 @@
       "lanes": ["ios", "android"],
       "surfaces": {
         "agents_tab": {"value": "badge", "keys": "badge_rows"},
-        "agents_section": {"value": "rows", "keys": "rows"}
+        "agents_section": {"value": "header", "keys": "rows"}
       }
     }
   },
@@ -50,8 +51,8 @@
       ],
       "tests": [{"file": "apple/PersonaTests/AgentsNeedsYouFixtureTests.swift", "symbol": "AgentsNeedsYouFixtureTests"}],
       "status": "differs",
-      "decisions": ["D1"],
-      "why": "On a hub with bounded lists, a session that waits with no card counts only if its row is loaded, and a card in a muted space counts while its row is not loaded."
+      "decisions": ["D1", "D11"],
+      "why": "On a hub with bounded lists, a session that waits with no card counts only if its row is loaded, and a card in a muted space counts while its row is not loaded; a session whose only card is held counts (the needs-you fixture's iOS mark, D11)."
     },
     {
       "client": "ios",
@@ -63,8 +64,8 @@
       "code": [{"file": "apple/Persona/Views/Chats/AgentsNeedsYouRows.swift", "symbol": "AgentsNeedsYou.rows"}],
       "tests": [{"file": "apple/PersonaTests/AgentsNeedsYouFixtureTests.swift", "symbol": "AgentsNeedsYouFixtureTests"}],
       "status": "differs",
-      "decisions": ["D6"],
-      "why": "It keeps muted agents and quiet tasks' agents as rows, which the count leaves out."
+      "decisions": ["D6", "D11"],
+      "why": "Its header and filter count every row, muted agents and quiet tasks' agents included, which the count leaves out (D6), and a session whose only card is held (D11): the needs-you fixture's iOS marks."
     },
     {
       "client": "ios",
@@ -76,7 +77,7 @@
       "code": [{"file": "apple/Persona/App/HomeWidgetWriter.swift", "symbol": "AppModel.homeSnapshot"}],
       "tests": [{"file": "apple/PersonaTests/HomeWidgetTests.swift", "symbol": "needsYouIsTheAgentsBadge"}],
       "status": "differs",
-      "decisions": ["D1", "D2"],
+      "decisions": ["D1", "D2", "D11"],
       "why": "It draws the Agents badge's rows, with the badge's difference on hubs with bounded lists; its scope outside the app is D2's."
     },
     {
@@ -89,7 +90,7 @@
       "code": [{"file": "apple/Shared/WatchPet.swift", "symbol": "WatchPet.status"}],
       "tests": [{"file": "apple/PersonaTests/WatchPetTests.swift", "symbol": "WatchPetTests"}],
       "status": "differs",
-      "decisions": ["D1", "D2"],
+      "decisions": ["D1", "D2", "D11"],
       "why": "It counts the sessions with a card plus those in needs_you, muted agents and Persona conversations included, for every assistant."
     },
     {
@@ -102,7 +103,7 @@
       "code": [{"file": "apple/Persona/Intents/IntentSupport.swift", "symbol": "IntentPicker.waiting"}],
       "tests": [{"file": "apple/PersonaTests/IntentsTests.swift", "symbol": "IntentPicker.waiting"}],
       "status": "differs",
-      "decisions": ["D1", "D2"],
+      "decisions": ["D1", "D2", "D11"],
       "why": "It counts cards, one each, Persona conversations' included, on every paired hub."
     },
     {
@@ -118,8 +119,8 @@
         {"file": "android/core/domain/src/test/kotlin/persona/core/domain/sort/AgentsNeedsYouFixtureTest.kt", "symbol": "AgentsNeedsYouFixtureTest"}
       ],
       "status": "differs",
-      "decisions": ["D1"],
-      "why": "It reads no hidden_by_directory, so a directory-hidden session's cards count on every hub; on hubs with bounded lists it counts over the 50 rows it holds until the Agents page is shown."
+      "decisions": ["D1", "D11"],
+      "why": "It reads no hidden_by_directory, so a directory-hidden session's cards count on every hub; on hubs with bounded lists it counts over the 50 rows it holds until the Agents page is shown; a session whose only card is held counts (the needs-you fixture's Android mark, D11)."
     },
     {
       "client": "android",
@@ -131,8 +132,8 @@
       "code": [{"file": "android/feature/agents/src/main/kotlin/persona/feature/agents/AgentsListInfo.kt", "symbol": "agentNeedsYouRows"}],
       "tests": [{"file": "android/feature/agents/src/test/kotlin/persona/feature/agents/AgentsListInfoTest.kt", "symbol": "agentNeedsYouRows"}],
       "status": "differs",
-      "decisions": ["D6", "D1"],
-      "why": "It keeps muted agents and quiet tasks' agents as rows, which the count leaves out, and, reading no hidden_by_directory, a directory-hidden session that waits (the needs-you fixture's Android mark, D1)."
+      "decisions": ["D6", "D1", "D11"],
+      "why": "Its header and filter count every row, muted agents and quiet tasks' agents included, which the count leaves out (D6), a session whose only card is held (D11) and, reading no hidden_by_directory, a directory-hidden session that waits (D1): the needs-you fixture's Android marks."
     },
     {
       "client": "web",
@@ -148,7 +149,7 @@
       ],
       "tests": [{"file": "web/src/lib/attention-fixture.test.ts", "symbol": "stateCounts"}],
       "status": "differs",
-      "decisions": ["D1", "D2"],
+      "decisions": ["D1", "D2", "D11"],
       "why": "Without bounded lists it counts muted agents and no card on no session; with them (the default) it draws the hub's state count, quiet and muted agents in."
     },
     {
@@ -161,7 +162,7 @@
       "code": [{"file": "web/src/lib/current-assistant.ts", "symbol": "useScopedCounts"}],
       "tests": [],
       "status": "differs",
-      "decisions": ["D1"],
+      "decisions": ["D1", "D11"],
       "why": "The unscoped rule, over the current assistant's sessions."
     },
     {
@@ -174,7 +175,7 @@
       "code": [{"file": "desktop/src/badge.ts", "symbol": "setBadge"}],
       "tests": [],
       "status": "differs",
-      "decisions": ["D1", "D2"],
+      "decisions": ["D1", "D2", "D11"],
       "why": "It shows the web's unscoped number (web agents_unscoped)."
     },
     {
@@ -187,7 +188,7 @@
       "code": [{"file": "web/src/lib/desktop-island.ts", "symbol": "islandState"}],
       "tests": [{"file": "web/src/lib/desktop-island.test.ts", "symbol": "islandState"}],
       "status": "differs",
-      "decisions": ["D1", "D2"],
+      "decisions": ["D1", "D2", "D11"],
       "why": "It counts the sessions in needs_you, quiet and muted agents included, and no card on no session."
     },
     {
@@ -204,7 +205,7 @@
       ],
       "tests": [{"file": "server/internal/assistant/fleet_attention_test.go", "symbol": "TestLiveActivityKeepsItsOwnCount"}],
       "status": "differs",
-      "decisions": ["D4", "D1", "D2"],
+      "decisions": ["D4", "D1", "D2", "D11"],
       "why": "A Persona conversation counts by a standing card, an elicitation does not stand, a card on no session does not count, and only the default manager's agents are in it."
     },
     {
@@ -217,7 +218,7 @@
       "code": [{"file": "server/internal/assistant/fleet_attention.go", "symbol": "linkAttention"}],
       "tests": [{"file": "server/internal/assistant/fleet_attention_test.go", "symbol": "TestLinkAttentionFollowsTheSharedFixtures"}],
       "status": "differs",
-      "decisions": ["D3", "D1"],
+      "decisions": ["D3", "D1", "D11"],
       "why": "It counts muted agents and no card on no session, by the web badge's rule (spec/fixtures/attention)."
     },
     {
@@ -230,7 +231,7 @@
       "code": [{"file": "native/app-core/crates/persona-core/src/sort/mod.rs", "symbol": "counts"}],
       "tests": [{"file": "native/app-core/crates/persona-core/tests/sort_projection.rs", "symbol": "agents_list_projection_replays_every_fixture"}],
       "status": "differs",
-      "decisions": ["D6"],
+      "decisions": ["D6", "D11"],
       "why": "It counts muted agents and reads no quiet field."
     },
     {
@@ -247,7 +248,7 @@
       ],
       "tests": [{"file": "apple/PersonaTests/AssistantBadgesTests.swift", "symbol": "AssistantBadgesTests"}],
       "status": "differs",
-      "decisions": ["D1"],
+      "decisions": ["D1", "D11"],
       "why": "It counts each card on the session it names, so a waiting child counts apart from its parent."
     },
     {
@@ -261,7 +262,7 @@
       "code": [{"file": "android/app/src/main/java/persona/android/ui/ShellCounts.kt", "symbol": "ShellCounts.waiting"}],
       "tests": [{"file": "android/app/src/test/java/persona/android/ui/ShellCountsTest.kt", "symbol": "ShellCountsTest"}],
       "status": "differs",
-      "decisions": ["D1"],
+      "decisions": ["D1", "D11"],
       "why": "Outside the 50 rows it holds on a hub with bounded lists, it counts a session's cards one each; it keeps directory-hidden sessions."
     },
     {
@@ -274,8 +275,9 @@
       "scope": "each_assistant",
       "code": [{"file": "web/src/lib/manager-attention.ts", "symbol": "waitingAgents"}],
       "tests": [{"file": "web/src/lib/current-assistant.test.tsx", "symbol": "waitingAgents"}],
-      "status": "matches",
-      "why": "Sessions once from the complete list, children folded, a card on no session 1, quiet, muted and directory-hidden ones out: the count's rule (the plan's step 10)."
+      "status": "differs",
+      "decisions": ["D11"],
+      "why": "Sessions once from the complete list, children folded, a card on no session 1, quiet, muted and directory-hidden ones out, as the count's rule has it (the plan's step 10); but a session whose only cards are held still counts (D11)."
     },
     {
       "client": "server",
@@ -457,7 +459,7 @@
       "code": [{"file": "apple/Persona/App/AppIconBadge.swift", "symbol": "AppIconBadge.count"}],
       "tests": [{"file": "apple/PersonaTests/AppIconBadgeTests.swift", "symbol": "AppIconBadgeTests"}],
       "status": "differs",
-      "decisions": ["D9", "D1", "D12"],
+      "decisions": ["D9", "D1", "D12", "D11"],
       "why": "The tabs' badges added up, the Agents badge's difference on hubs with bounded lists included (ios.agents_tab, D1), set by the app only, so it goes stale while the app is not running."
     },
     {
@@ -470,7 +472,7 @@
       "code": [{"file": "apple/Vision/App/VisionShell.swift", "symbol": "VisionShell"}],
       "tests": [],
       "status": "differs",
-      "decisions": ["D9", "D1"],
+      "decisions": ["D9", "D1", "D11"],
       "why": "The Persona and Agents tabs' badges added up, the Agents badge's difference on hubs with bounded lists included (ios.agents_tab, D1)."
     }
   ]

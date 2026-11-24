@@ -34,6 +34,7 @@ import org.robolectric.annotation.GraphicsMode
 import persona.core.contracts.Session
 import persona.core.contracts.Todo
 import persona.core.contracts.TodoAgent
+import persona.core.contracts.TodoPRStatus
 import persona.core.designsystem.AppStyle
 import persona.core.designsystem.PersonaTheme
 import persona.core.domain.tasks.TodoListFilter
@@ -83,7 +84,7 @@ class TodoListFilterShotsTest {
         Todo("t4", title = "收件箱分拣加批量操作", agents = agent("s4"), priority = "high", dueDate = "2026-11-13", updatedAt = ago(4), createdAt = ago(900)),
         Todo("t5", title = "修复 #412 推送丢失", agents = agent("s5"), updatedAt = ago(50), createdAt = ago(900)),
         Todo("t6", title = "网页加载提速", dueDate = "2026-11-11", doneAt = ago(90), doneBy = "user", updatedAt = ago(90), createdAt = ago(2000)),
-        Todo("t7", title = "设置页加搜索", prUrl = "https://example.com/pr/31", origin = "conv", dueDate = "2026-11-07", updatedAt = ago(3000), createdAt = ago(9000)),
+        Todo("t7", title = "设置页加搜索", prUrl = "https://example.com/pr/31", prStatus = TodoPRStatus(url = "https://example.com/pr/31", state = "open", checkedAt = ago(0)), origin = "conv", dueDate = "2026-11-07", updatedAt = ago(3000), createdAt = ago(9000)),
         Todo("t8", title = "写发布说明", priority = "low", dueDate = "2026-11-14", updatedAt = ago(200), createdAt = ago(3000)),
         Todo("t9", title = "续域名", dueDate = "2026-12-03", updatedAt = ago(400), createdAt = ago(3000)),
         Todo("t10", title = "轮换 API Key", priority = "low", updatedAt = ago(300), createdAt = ago(3000)),
@@ -125,7 +126,7 @@ class TodoListFilterShotsTest {
                 open(style = style, dark = dark)
                 // no summary line; the counts are the sections'
                 assertFalse("summary line", has("个未完成"))
-                assertTrue(has("需要你") && has("工作中"))
+                assertTrue(has("等你处理") && has("工作中"))
                 rule.onNodeWithTag("todos-filter").assertExists()
                 save("after", style, dark)
             }

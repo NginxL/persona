@@ -163,6 +163,25 @@ describe("suggestions", () => {
     expect(splitSuggestions("no block")).toEqual([{ kind: "text", text: "no block" }]);
   });
 
+  it("ignores outer code fences, supports 4-backtick suggestion fences, and strips CRLF", () => {
+    const quoted = "Example:\n```md\n```suggestion\nnoop\n```\n```\nDone.";
+    expect(splitSuggestions(quoted)).toEqual([{ kind: "text", text: quoted }]);
+
+    const tildeQuoted = "~~~\n```suggestion\nnoop\n```\n~~~";
+    expect(splitSuggestions(tildeQuoted)).toEqual([{ kind: "text", text: tildeQuoted }]);
+
+    const nested = "Wrap in fence:\n````suggestion\n```ts\nconst x = 1;\n```\n````\nAfter";
+    expect(splitSuggestions(nested)).toEqual([
+      { kind: "text", text: "Wrap in fence:\n" },
+      { kind: "suggestion", lines: ["```ts", "const x = 1;", "```"] },
+      { kind: "text", text: "\nAfter" },
+    ]);
+
+    expect(splitSuggestions("```suggestion\r\na\r\nb\r\n```\r\n")).toEqual([
+      { kind: "suggestion", lines: ["a", "b"] },
+    ]);
+  });
+
   it("writes the block of the lines picked", () => {
     expect(suggestionBlock(["a", "b"])).toBe("```suggestion\na\nb\n```\n");
   });

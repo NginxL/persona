@@ -166,7 +166,7 @@ private fun LazyListScope.hostInformation(detail: ExtensionDetail) {
                 val home = detail.homepage?.takeIf { value -> runCatching { URI(value).let { it.scheme == "https" && !it.host.isNullOrBlank() && it.userInfo == null } }.getOrDefault(false) }
                 home?.let { url ->
                     val handler = LocalUriHandler.current
-                    JRow(stringResource(R.string.settings_ext_about_homepage), leadingIcon = PhIcons.ArrowSquareOut, onClick = { runCatching { handler.openUri(url) } })
+                    JRow(stringResource(R.string.settings_ext_about_homepage), leadingIcon = PhIcons.ArrowSquareOut, onClick = { val _ = runCatching { handler.openUri(url) } })
                 }
             }
         }

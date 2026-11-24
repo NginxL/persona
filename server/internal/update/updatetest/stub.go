@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -29,6 +30,14 @@ var goCache = func() string {
 func Program(t testing.TB, name, goos, goarch string) string {
 	t.Helper()
 	return ProgramSource(t, name, goos, goarch, "package main\n\nfunc main() {}\n")
+}
+
+// VersionedProgram is Program linked with version, as a release links main.version: the build carries its version's
+// bytes, which the manager looks for before it takes a local build for the hub's own (internal/devices).
+func VersionedProgram(t testing.TB, name, goos, goarch, version string) string {
+	t.Helper()
+	return ProgramSource(t, name, goos, goarch, "package main\n\nimport \"os\"\n\nvar version = "+strconv.Quote(version)+
+		"\n\nfunc main() { os.Stdout.WriteString(version + \"\\n\") }\n")
 }
 
 // ProgramSource is Program with main.go's source given.

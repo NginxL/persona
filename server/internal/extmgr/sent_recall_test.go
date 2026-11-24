@@ -145,6 +145,7 @@ func codeOf(err error) string {
 // the checks and before the connector, and only then is the row marked, at the time of the recall. Asked again, it
 // is already taken back, and neither the user nor the connector is bothered.
 func TestRecallSentTakesTheMessageBack(t *testing.T) {
+	needsLarkModule(t)
 	e := newRecallEnv(t)
 	id := e.send(time.Hour)
 	row, err := e.recall(id)
@@ -176,6 +177,7 @@ func TestRecallSentTakesTheMessageBack(t *testing.T) {
 // Whatever cannot be taken back is refused with its own code, before the user is asked and before the connector is
 // told, and the row is left as it was.
 func TestRecallSentRefuses(t *testing.T) {
+	needsLarkModule(t)
 	for _, tc := range []struct {
 		name  string
 		setup func(e *recallEnv) int64
@@ -246,6 +248,7 @@ func TestRecallSentRefuses(t *testing.T) {
 // A message can be taken back until sent_recall_hours after it was sent (24 hours when it is 0, never too late below
 // 0, and not a number of hours that wraps the clock around), and until the connector's own limit when that is shorter: the stricter of the two, to the second.
 func TestRecallSentWindow(t *testing.T) {
+	needsLarkModule(t)
 	const h = time.Hour
 	for _, tc := range []struct {
 		name  string
@@ -290,6 +293,7 @@ func TestRecallSentWindow(t *testing.T) {
 // A recall needs the caller to say how the user agreed: without that, nothing happens. What the caller's confirm says
 // is the answer: its error stops the recall and comes back as it is, with nothing told to the connector or marked.
 func TestRecallSentNeedsTheUsersWord(t *testing.T) {
+	needsLarkModule(t)
 	e := newRecallEnv(t)
 	id := e.send(0)
 
@@ -335,6 +339,7 @@ func (m markFailing) MarkSentAsUserRecalled(ctx context.Context, id int64, at ti
 // (and each can be asked again), the message being gone marks it, whether or not the request is still there to hear
 // it, and a mark that fails after that says so without pretending the message is still there.
 func TestRecallSentOutcomes(t *testing.T) {
+	needsLarkModule(t)
 	retry := func(e *recallEnv, id int64) {
 		t.Helper()
 		e.c.recall = nil
@@ -433,6 +438,7 @@ func TestRecallSentOutcomes(t *testing.T) {
 // ends as an outcome nobody can tell (the connector's words are its own, a plain error that says nothing about a
 // deadline), nothing is marked, and asking again goes through.
 func TestRecallSentEndsWhenTheConnectorNeverAnswers(t *testing.T) {
+	needsLarkModule(t)
 	was := sentRecallTimeout
 	sentRecallTimeout = 100 * time.Millisecond
 	t.Cleanup(func() { sentRecallTimeout = was })
@@ -463,6 +469,7 @@ func TestRecallSentEndsWhenTheConnectorNeverAnswers(t *testing.T) {
 // Two recalls of one row at once both reach the connector, which allows repeats, but the row is marked once: one of
 // them is the recall, the other finds it taken back already.
 func TestRecallSentTwiceAtOnce(t *testing.T) {
+	needsLarkModule(t)
 	e := newRecallEnv(t)
 	var inside atomic.Int32
 	release := make(chan struct{})
@@ -507,10 +514,12 @@ func TestRecallSentTwiceAtOnce(t *testing.T) {
 // under the id of a connector that can recall other things (GitHub's, registered here: it is the kind of message that
 // is refused, not a connector that is missing): no connector but one that says it can offers a recall.
 func TestRecallSentNeverMailsNorRecordedSends(t *testing.T) {
+	needsGitHubModule(t)
+	needsLarkModule(t)
 	h := newTestManager(t)
 	st := newSentLedgerStore()
 	h.store = st
-	h.mail = &sendingMail{id: "1A2B.3C4D@hub.example.com"}
+	h.mail = &sendingMail{replyMail: *newReplyMail(t), id: "1A2B.3C4D@hub.example.com"}
 	h.connectors = h.newConnectors([]connector.Rule{{Connector: "mail", Action: "mail_send", Decision: connector.Allow}})
 	h.registerConnectors()
 	if _, ok := connector.RecallerOf(h.connectors.Get("github")); !ok {

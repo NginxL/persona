@@ -47,6 +47,9 @@ const (
 	ToolErrorDeclined    = "declined"     // the user (or connector_gate) did not allow the write
 	ToolErrorUnavailable = "unavailable"  // the node, the hub or the connector cannot be reached or is not signed in
 	ToolErrorRateLimited = "rate_limited" // the connector waits out a rate limit (RetryAfter seconds)
+	// ToolErrorUnanswered: the write's card ended without the user's own answer (it expired, was withdrawn or cleared,
+	// someone else answered it): nothing was written, and the user did not decline it.
+	ToolErrorUnanswered = "unanswered"
 )
 
 func TextResult(text string, isErr bool) ToolResult {

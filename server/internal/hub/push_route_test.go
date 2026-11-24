@@ -13,6 +13,8 @@ import (
 	"github.com/nwverse/persona/server/internal/i18n"
 )
 
+const refusedRelayURL = "https://relay.example/relay"
+
 // A phone whose relay registration failed says why when it registers, and the hub, which has no apns.json, answers
 // that its pushes go nowhere and why (#5998): it used to send empty relay fields and nobody knew.
 func TestDeviceRegistrationSaysWhichWay(t *testing.T) {
@@ -40,9 +42,32 @@ func TestDeviceRegistrationSaysWhichWay(t *testing.T) {
 	if got["route"] != "none" || got["reason"] != "no_relay" {
 		t.Fatalf("an app that names no relay: %v", got)
 	}
+	got = register(`{"device_id":"phone","name":"iPhone","kind":"iphone","apns_token":"aa","topic":"app.example",
+		"relay_url":"` + refusedRelayURL + `","relay_error":"403 topic not served"}`)
+	detail, _ := got["detail"].(string)
+	if got["route"] != "none" || got["reason"] != "relay_failed" ||
+		!strings.Contains(detail, refusedRelayURL) || !strings.Contains(detail, "403 topic not served") {
+		t.Fatalf("relay refused with its URL: %v", got)
+	}
+	if d, _ := h.push.device("phone"); d.RelayURL != refusedRelayURL {
+		t.Fatalf("kept relay URL %q, want %q", d.RelayURL, refusedRelayURL)
+	}
+	code, out := call(t, mux, "GET", "/api/v1/devices/push", h.cfg.Token, "")
+	devices, _ := out["devices"].([]any)
+	if code != 200 || len(devices) != 1 {
+		t.Fatalf("push routes: %d %v", code, out)
+	}
+	device, _ := devices[0].(map[string]any)
+	if _, ok := device["relay_url"]; ok {
+		t.Fatalf("an additive public field beside push: %v", device)
+	}
+	listed, _ := device["push"].(map[string]any)
+	if listed["route"] != "none" || listed["reason"] != "relay_failed" || listed["detail"] != detail {
+		t.Fatalf("listed relay refusal: %v", listed)
+	}
 	// A grant wins over whatever error came with it, and the error is not kept.
 	got = register(`{"device_id":"phone","name":"iPhone","kind":"iphone","apns_token":"aa","topic":"app.example",
-		"push_key":"pk","relay_url":"https://relay.example/relay","relay_grant":"g","relay_error":"stale"}`)
+		"push_key":"pk","relay_url":"` + refusedRelayURL + `","relay_grant":"g","relay_error":"stale"}`)
 	if got["route"] != "relay" || got["reason"] != nil {
 		t.Fatalf("relayed: %v", got)
 	}
@@ -220,6 +245,51 @@ func TestDoctorListsPushRoutes(t *testing.T) {
 	resp.Body.Close()
 	if len(body.Devices) != 1 || body.Devices[0].Push.Reason != pushRelayFailed {
 		t.Fatalf("devices %+v", body.Devices)
+	}
+
+	h.push.register(Device{DeviceID: "b", Name: "Work iPhone", Kind: "iphone", APNSToken: "bb",
+		RelayURL: refusedRelayURL, RelayError: "403 app.example not served"})
+	// A redirect and a network failure still name the relay in their route detail, but get no refusal advice.
+	h.push.register(Device{DeviceID: "moved", Name: "Moved iPhone", Kind: "iphone", APNSToken: "cc",
+		RelayURL: refusedRelayURL, RelayError: "301 https://relay.example/new"})
+	h.push.register(Device{DeviceID: "offline", Name: "Offline iPhone", Kind: "iphone", APNSToken: "dd",
+		RelayURL: refusedRelayURL, RelayError: "dial tcp: timeout"})
+	for _, tc := range []struct {
+		lang              i18n.Lang
+		failure, guidance string
+	}{
+		{i18n.En, "Work iPhone (iphone): Can’t get background pushes: registering with the push relay failed",
+			"Check the relay's health and the topics it serves"},
+		{i18n.ZhHans, "Work iPhone（iphone）：收不到后台推送：向推送中继登记失败",
+			"请检查该中继的健康状况及其提供服务的 topic"},
+		{i18n.Ja, "Work iPhone（iphone）：バックグラウンドのプッシュ通知を受け取れません：プッシュリレーへの登録に失敗しました",
+			"リレーの稼働状況と対応しているトピックを確認してください"},
+	} {
+		t.Run(string(tc.lang), func(t *testing.T) {
+			d := &doctorReport{l: tc.lang}
+			d.pushRoutes(context.Background(), get)
+			text := reportText(d)
+			for _, want := range []string{tc.failure, refusedRelayURL, "403 app.example not served", tc.guidance} {
+				if !strings.Contains(text, want) {
+					t.Errorf("doctor missing %q:\n%s", want, text)
+				}
+			}
+			if got := strings.Count(text, tc.guidance); got != 1 {
+				t.Errorf("refusal advice appeared %d times, want once (not for a redirect or network error):\n%s", got, text)
+			}
+		})
+	}
+	for _, tc := range []struct {
+		route pushRoute
+		want  string
+	}{
+		{pushRoute{Route: pushNone, Reason: pushNoRelay}, "Can’t get background pushes: the hub has no apns.json and the device reported no relay (the build has no relay configured, or the app is too old)"},
+		{pushRoute{Route: pushDirect}, "Straight to APNs"},
+		{pushRoute{Route: pushRelay}, "Through the push relay"},
+	} {
+		if got := pushRouteLine(i18n.En, tc.route); got != tc.want {
+			t.Errorf("existing route wording %q, want %q", got, tc.want)
+		}
 	}
 }
 

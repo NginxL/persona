@@ -226,23 +226,12 @@ struct FileViewer: View {
         .environment(\.viewImages, nil)
         .environment(\.openURL, OpenURLAction { url in
             guard ["http", "https"].contains(url.scheme?.lowercased() ?? "") else {
-                #if os(macOS)
-                return LinkPolicy.system(url)
-                #else
                 return .systemAction
-                #endif
             }
             openLink(url)
             return .handled
         })
-        #if os(macOS)
-        .macLinkPanel($link, key: key)
-        // Outside the panel: its GeometryReader takes any size, so a minimum inside it never reached the sheet and the
-        // sheet opened at its toolbar's 470 × 80 (#1502). The stack's bars are the sheet window's, still on top of this.
-        .macLargeSheet(bars: true)
-        #else
         .sheet(item: $link) { target in LinkSheet(target: target, key: key) }
-        #endif
     }
 
     private func openLink(_ url: URL) {
@@ -383,7 +372,6 @@ struct FileViewer: View {
         } primaryAction: {
             save(FileSaveKind.defaultTarget(name))
         }
-        .arrowlessMenu()
         .disabled(saver.busy)
         .accessibilityLabel("Download")
         .accessibilityHint("Touch and hold for more ways to save")
@@ -470,7 +458,6 @@ struct FileViewer: View {
                 ShareLink(item: local) { Label("Share", systemImage: Theme.Icon.share) }
             }
         } label: { ThemedIcon(Theme.Icon.moreMenu) }
-        .arrowlessMenu()
         .accessibilityLabel("More")
         .accessibilityIdentifier("file-menu")
     }
@@ -890,7 +877,6 @@ final class FileViewerModel {
     }
 }
 
-#if os(iOS) || os(visionOS)
 struct PDFKitView: UIViewRepresentable {
     var document: PDFDocument
     func makeUIView(context: Context) -> PDFView {
@@ -901,18 +887,6 @@ struct PDFKitView: UIViewRepresentable {
     }
     func updateUIView(_ v: PDFView, context: Context) {}
 }
-#else
-struct PDFKitView: NSViewRepresentable {
-    var document: PDFDocument
-    func makeNSView(context: Context) -> PDFView {
-        let v = PDFView()
-        v.autoScales = true
-        v.document = document
-        return v
-    }
-    func updateNSView(_ v: PDFView, context: Context) {}
-}
-#endif
 
 /// Images in a markdown file on a computer: relative paths load from that machine, web URLs as usual.
 struct MachineImageProvider: ImageProvider {

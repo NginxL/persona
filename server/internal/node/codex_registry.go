@@ -8,26 +8,44 @@ import (
 	"github.com/nwverse/persona/server/internal/identity"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"sort"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/nwverse/persona/server/internal/host"
+	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/proto"
 	"github.com/nwverse/persona/server/internal/transcript"
 )
 
+type codexRemoteDiag string
+
+const (
+	codexDiagNone            codexRemoteDiag = ""
+	codexDiagSocketGone      codexRemoteDiag = "socket_gone"
+	codexDiagEndpointInvalid codexRemoteDiag = "endpoint_invalid"
+	codexDiagUnreachable     codexRemoteDiag = "unreachable"
+	codexDiagHomeMismatch    codexRemoteDiag = "home_mismatch"
+	codexDiagHandshakeFailed codexRemoteDiag = "handshake_failed"
+)
+
 type codexRegistry struct {
-	mu           sync.Mutex
-	config       proto.CodexConfig
-	claudeIDs    map[string]bool
-	liveRollouts map[string]string // rollout id → what holds it open (codexHolder)
-	byPane       map[string]string
-	threads      map[string]codexSource
-	remotes      map[string]*codexRemote
-	retries      map[string]codexRetry // server id -> attempts that did not connect (codex_backoff.go)
-	report       func(proto.CodexConfig)
+	mu            sync.Mutex
+	config        proto.CodexConfig
+	claudeIDs     map[string]bool
+	liveRollouts  map[string]string          // rollout id → what holds it open (codexHolder)
+	liveEndpoints map[string]string          // rollout id → resolved shared endpoint when held by a --listen app-server
+	liveCanQuit   map[string]bool            // rollout id → standalone CLI in a safe-quit terminal
+	stdioHomes    map[string]bool            // canonical home → a stdio app-server currently runs there
+	remoteDiags   map[string]codexRemoteDiag // resolved endpoint → last connection failure kind
+	byPane        map[string]string
+	threads       map[string]codexSource
+	remotes       map[string]*codexRemote
+	retries       map[string]codexRetry // server id -> attempts that did not connect (codex_backoff.go)
+	report        func(proto.CodexConfig)
 	// handed: the hub handed this connection the inventory it keeps for the computer (node.configure's codex, every
 	// connection: devices.connected). Until then the registry is a new Node's, without the threads the user joined, the
 	// homes and the app-servers the hub kept, and the hub would store it over what it kept: reports wait for it
@@ -43,7 +61,50 @@ type codexRegistry struct {
 type codexSource struct{ home, thread, path string }
 
 func newCodexRegistry() *codexRegistry {
-	return &codexRegistry{threads: map[string]codexSource{}, remotes: map[string]*codexRemote{}, scan: scanCodexProcesses, checked: scanCodexProcessesChecked, kick: make(chan struct{}, 1)}
+	return &codexRegistry{
+		threads:     map[string]codexSource{},
+		remotes:     map[string]*codexRemote{},
+		remoteDiags: map[string]codexRemoteDiag{},
+		scan:        scanCodexProcesses,
+		checked:     scanCodexProcessesChecked,
+		kick:        make(chan struct{}, 1),
+	}
+}
+
+func (r *codexRegistry) setRemoteDiag(endpoint string, diag codexRemoteDiag) {
+	if r == nil || endpoint == "" {
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.remoteDiags == nil {
+		r.remoteDiags = map[string]codexRemoteDiag{}
+	}
+	if diag == codexDiagNone {
+		delete(r.remoteDiags, endpoint)
+		return
+	}
+	r.remoteDiags[endpoint] = diag
+}
+
+// codexControlEndpoint is the default Unix control socket endpoint for home.
+func codexControlEndpoint(home string) string {
+	if home == "" {
+		return ""
+	}
+	return "unix://" + filepath.Join(home, "app-server-control", "app-server-control.sock")
+}
+
+// codexResolvedEndpoint normalizes a process's --listen endpoint for home; returns "" for standalone CLIs,
+// stdio app-servers, or disabled listeners.
+func codexResolvedEndpoint(home, endpoint string) string {
+	if endpoint == "" || endpoint == "stdio://" || endpoint == "off" {
+		return ""
+	}
+	if endpoint == "unix://" {
+		return codexControlEndpoint(home)
+	}
+	return endpoint
 }
 
 // canonicalCodexHome is home absolute, with its links resolved as far as it exists: a home that does not exist yet
@@ -271,6 +332,15 @@ func (n *Node) discoverCodex() {
 	found := scan()
 	changed := false
 	liveRollouts := map[string]string{}
+	liveEndpoints := map[string]string{}
+	liveCanQuit := map[string]bool{}
+	stdioHomes := map[string]bool{}
+	for _, p := range found {
+		home := canonicalCodexHome(firstNonEmpty(p.home, n.codexHome()), n.home)
+		if home != "" && p.endpoint == "stdio://" {
+			stdioHomes[home] = true
+		}
+	}
 	for pid, paths := range openCodexRollouts(found) {
 		for _, p := range found {
 			if p.pid != pid {
@@ -281,6 +351,8 @@ func (n *Node) discoverCodex() {
 				holder = codexHolderAppServer
 			}
 			home := canonicalCodexHome(firstNonEmpty(p.home, n.codexHome()), n.home)
+			sharedEndpoint := codexResolvedEndpoint(home, p.endpoint)
+			canQuit := p.endpoint == "" && runtime.GOOS != "windows" && p.hasTakeoverTerminal()
 			for _, path := range paths {
 				if !pathWithin(path, home) { // Windows paths do not tell case apart (codex_desktop.go)
 					continue
@@ -288,12 +360,23 @@ func (n *Node) discoverCodex() {
 				if thread := rolloutThreadID(home, path); thread != "" {
 					id := n.registerCodex(home, thread, path)
 					liveRollouts[id] = holder
+					if sharedEndpoint != "" {
+						liveEndpoints[id] = sharedEndpoint
+					}
+					if prev, exists := liveCanQuit[id]; !exists {
+						liveCanQuit[id] = canQuit
+					} else {
+						liveCanQuit[id] = prev && canQuit
+					}
 				}
 			}
 		}
 	}
 	r.mu.Lock()
 	r.liveRollouts = liveRollouts
+	r.liveEndpoints = liveEndpoints
+	r.liveCanQuit = liveCanQuit
+	r.stdioHomes = stdioHomes
 	r.mu.Unlock()
 	byPane := map[string]string{}
 	for _, p := range found {
@@ -301,19 +384,24 @@ func (n *Node) discoverCodex() {
 		if home == "" {
 			continue
 		}
-		if p.pane != "" {
-			byPane[n.herdrPaneIn(p.pane, p.herdrSession)] = home
+		switch {
+		case p.pane != "":
+			if n.hosts != nil {
+				byPane[n.herdrPaneIn(p.pane, p.herdrSession)] = home
+			} else {
+				byPane[p.pane] = home
+			}
+		case p.herdrCore != "":
+			byPane[host.PaneRef{Kind: host.HerdrCore, ID: p.herdrCore}.String()] = home
+		case p.ternPane != "":
+			byPane[host.PaneRef{Kind: host.Tern, ID: p.ternPane}.String()] = home
 		}
 		r.mu.Lock()
 		if !slices.Contains(r.config.Homes, home) {
 			r.config.Homes = append(r.config.Homes, home)
 			changed = true
 		}
-		if p.endpoint != "" && p.endpoint != "stdio://" && p.endpoint != "off" {
-			endpoint := p.endpoint
-			if endpoint == "unix://" {
-				endpoint += filepath.Join(home, "app-server-control", "app-server-control.sock")
-			}
+		if endpoint := codexResolvedEndpoint(home, p.endpoint); endpoint != "" {
 			sum := sha256.Sum256([]byte(home + "\x00" + endpoint))
 			id := "discovered-" + hex.EncodeToString(sum[:12])
 			if !slices.ContainsFunc(r.config.Servers, func(s proto.CodexServer) bool { return s.Home == home && s.Endpoint == endpoint }) {
@@ -421,6 +509,10 @@ const (
 // that keeps stdio app-servers for months holds the threads they once loaded: they showed "Unread" all along.
 const codexHeldIdle = 24 * time.Hour
 
+// codexHeldWorkingStale: a held rollout with an open turn that has seen no new write or activity this long stops
+// reporting StatusWorking so runaway timers do not climb for hours when an external CLI waits on a prompt or stalls.
+const codexHeldWorkingStale = 20 * time.Minute
+
 // heldRecently: the rollout at path was written within codexHeldIdle (its last line's time or its mtime, the later).
 func heldRecently(m quickMeta, path string, pass *codexListPass) bool {
 	st, err := pass.stat(path)
@@ -432,6 +524,65 @@ func heldRecently(m quickMeta, path string, pass *codexListPass) bool {
 		at = m.activity
 	}
 	return time.Since(at) < codexHeldIdle
+}
+
+// heldTurnStalled reports whether a held rollout's open turn has gone without new writes or activity for at least
+// codexHeldWorkingStale.
+func heldTurnStalled(m quickMeta, path string, pass *codexListPass) bool {
+	var at time.Time
+	if st, err := pass.stat(path); err == nil {
+		at = st.ModTime()
+	}
+	if m.turnActivityAt.After(at) {
+		at = m.turnActivityAt
+	}
+	if m.contentAt.After(at) {
+		at = m.contentAt
+	}
+	return !at.IsZero() && time.Since(at) >= codexHeldWorkingStale
+}
+
+// codexSharedReadOnlyReason explains why a rollout held by a shared --listen app-server could not be joined live.
+func (n *Node) codexSharedReadOnlyReason(home, endpoint string) string {
+	if endpoint == codexControlEndpoint(home) && codexDaemonSocketGone(home) != nil {
+		return i18n.T(i18n.Default, "codex-history.shared_socket_gone")
+	}
+	diag := codexDiagNone
+	var matched *codexRemote
+	if n.codices != nil {
+		n.codices.mu.Lock()
+		diag = n.codices.remoteDiags[endpoint]
+		for _, c := range n.codices.remotes {
+			if c.spec.Endpoint == endpoint {
+				matched = c
+				break
+			}
+		}
+		n.codices.mu.Unlock()
+	}
+	ready := false
+	if matched != nil {
+		matched.mu.Lock()
+		ready = matched.ready
+		matched.mu.Unlock()
+	}
+	switch diag {
+	case codexDiagSocketGone:
+		return i18n.T(i18n.Default, "codex-history.shared_socket_gone")
+	case codexDiagHomeMismatch:
+		return i18n.T(i18n.Default, "codex-history.shared_home_mismatch")
+	case codexDiagEndpointInvalid:
+		return i18n.T(i18n.Default, "codex-history.shared_endpoint_invalid")
+	case codexDiagUnreachable, codexDiagHandshakeFailed:
+		return i18n.T(i18n.Default, "codex-history.shared_unreachable")
+	}
+	if ready {
+		return i18n.T(i18n.Default, "codex-history.shared_not_loaded")
+	}
+	if _, _, err := validateCodexEndpoint(endpoint); err != nil {
+		return i18n.T(i18n.Default, "codex-history.shared_endpoint_invalid")
+	}
+	return i18n.T(i18n.Default, "codex-history.shared_unreachable")
 }
 
 // codexListPass holds what one session-list rebuild (sessionList, codexSessions) looks up once instead of once per row.
@@ -588,6 +739,10 @@ func (n *Node) codexSessionsIn(seen map[string]bool, pass *codexListPass) []prot
 	for k, v := range n.codices.liveRollouts {
 		liveRollouts[k] = v
 	}
+	liveEndpoints := make(map[string]string, len(n.codices.liveEndpoints))
+	for k, v := range n.codices.liveEndpoints {
+		liveEndpoints[k] = v
+	}
 	n.codices.mu.Unlock()
 	var out []proto.Session
 	projects := map[string]string{}
@@ -612,6 +767,7 @@ func (n *Node) codexSessionsIn(seen map[string]bool, pass *codexListPass) []prot
 			continue
 		}
 		elsewhere := false
+		desktopViewOnly := false
 		if n.programRun(id, src, pass) {
 			continue
 		}
@@ -659,13 +815,25 @@ func (n *Node) codexSessionsIn(seen map[string]bool, pass *codexListPass) []prot
 		if holder := liveRollouts[id]; holder != "" && heldRecently(m, src.path, pass) {
 			// A stdio app-server (the Codex desktop App's own) has no way in, but the rollout it holds open says
 			// whether a turn runs; unknown put a desktop task at work under the app's quiet spaces.
+			// Bound open-turn Working by inactivity so a stalled or prompt-blocked external CLI does not climb forever.
 			s.Status = proto.StatusUnknown
+			stalled := false
 			if m.turnOpen {
-				s.Status = proto.StatusWorking
+				if heldTurnStalled(m, src.path, pass) {
+					stalled = true
+				} else {
+					s.Status = proto.StatusWorking
+				}
 			} else if m.turnClosed {
 				s.Status = proto.StatusDone // as a loaded idle thread on an app-server (codex_remote.go)
 			}
-			s.ReadOnlyReason = holder + " 正在运行，但未提供共享入口；只能同步本地历史"
+			if ep := liveEndpoints[id]; ep != "" {
+				s.ReadOnlyReason = n.codexSharedReadOnlyReason(src.home, ep)
+			} else if stalled {
+				s.ReadOnlyReason = i18n.T(i18n.Default, "codex-history.stalled_turn", i18n.Args{"holder": holder})
+			} else {
+				s.ReadOnlyReason = holder + " 正在运行，但未提供共享入口；只能同步本地历史"
+			}
 		} else if m.turnOpen && !m.turnClosed && !m.turnActivityAt.IsZero() && time.Since(m.turnActivityAt) < codexFreshWorking && time.Since(m.turnActivityAt) >= -5*time.Minute {
 			// liveRollouts refreshes every 30s; when a rollout is actively writing an open turn between scans or on
 			// hosts where lsof misses it, keep StatusWorking instead of misreporting it as stopped (#12389).
@@ -708,28 +876,22 @@ func (n *Node) codexSessionsIn(seen map[string]bool, pass *codexListPass) []prot
 			n.codexRewindRow(id, &s)
 		} else if err != errCodexNoOwner {
 			s.ReadOnlyReason = err.Error()
-		} else if src.path == "" && codexDesktopChatIn(src, pass) {
-			// The App's chat whose rollout is gone: sent to through the App, as one with a rollout.
-			elsewhere = true
+		} else if codexDesktopChatIn(src, pass) {
+			// Retain App identity and grouping when an update removes its bus, including database-only chats.
 			s.AgentName, s.AgentSurface = "Codex App", transcript.SurfaceDesktop
-			s.Capabilities.Send = true
-			s.ReadOnlyReason = ""
+			s.Capabilities.Send = pass.desktopAvailable(src.home)
+			elsewhere, desktopViewOnly = s.Capabilities.Send, !s.Capabilities.Send
+			s.ReadOnlyReason = i18n.T(i18n.Default, codexDesktopUnavailableKey)
 			n.placeCodexDesktopIn(&s, src, src.thread, false, pass)
-			n.codexDesktopEffortRow(&s, src, m) // codex_desktop_effort.go
+			if s.Capabilities.Send {
+				s.ReadOnlyReason = ""
+				n.codexDesktopEffortRow(&s, src, m) // codex_desktop_effort.go
+			}
 		} else if o := codexThreadOrigin(src); o.desktop { // a subagent whose rollout is gone too: its database row (#8191)
-			switch {
-			case o.parent != "":
+			if o.parent != "" {
 				s.AgentName, s.ParentThreadID, s.AgentSurface = "Codex App", o.parent, transcript.SurfaceDesktop
 				s.ReadOnlyReason = "仅查看：这个子 Agent 由父 Agent 驱动"
 				n.placeCodexDesktopIn(&s, src, o.parent, true, pass)
-			case codexDesktopChatIn(src, pass):
-				// The Codex App on this machine runs it (codex_desktop.go): sendable while the App has the thread loaded.
-				elsewhere = true
-				s.AgentName, s.AgentSurface = "Codex App", transcript.SurfaceDesktop
-				s.Capabilities.Send = true
-				s.ReadOnlyReason = ""
-				n.placeCodexDesktopIn(&s, src, src.thread, false, pass)
-				n.codexDesktopEffortRow(&s, src, m)
 			}
 		} else if o.cli {
 			s.AgentName, s.AgentSurface = "Codex CLI", transcript.SurfaceCLI
@@ -746,7 +908,7 @@ func (n *Node) codexSessionsIn(seen map[string]bool, pass *codexListPass) []prot
 				adopted = append(adopted, adoption{len(out), s.ParentThreadID, root})
 			}
 		}
-		if s.SourceKind == "codex_history" && !s.Capabilities.Send && !s.IsSubagent && s.Status == proto.StatusOffline && n.codexResumableIn(context.Background(), id, pass) {
+		if !desktopViewOnly && s.SourceKind == "codex_history" && !s.Capabilities.Send && !s.IsSubagent && s.Status == proto.StatusOffline && n.codexResumableIn(context.Background(), id, pass) {
 			// Nothing has it open: a stopped agent, read-only like any (stopped.go, #4754); its terminal page's Resume
 			// brings it back in a new tab (session.start, codex_resume.go).
 			s.Capabilities.Terminal = true
@@ -754,7 +916,7 @@ func (n *Node) codexSessionsIn(seen map[string]bool, pass *codexListPass) []prot
 			s.Capabilities.StopCause = n.stopCause(id)
 		}
 		if s.SourceKind == "codex_history" && !s.Capabilities.Send && !s.IsSubagent && !n.codexBlocked(id) {
-			s.Capabilities.Takeover = n.codexTakeoverRow(id, src, m, liveRollouts[id] != "" || s.Status == proto.StatusWorking)
+			s.Capabilities.Takeover = n.codexTakeoverRowIn(id, src, m, liveRollouts[id] != "" || s.Status == proto.StatusWorking, pass)
 		}
 		if n.codexBlocked(id) {
 			markCodexConflict(&s)

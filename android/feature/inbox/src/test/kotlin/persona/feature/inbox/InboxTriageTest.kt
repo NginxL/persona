@@ -8,6 +8,7 @@ import kotlinx.serialization.json.jsonObject
 import persona.core.contracts.JsonCodec
 import org.junit.Assert.*
 import org.junit.Test
+import persona.core.inbox.*
 
 // New items waiting for triage (#1773): the banner's words and its "Set up", the same as on the web and iOS.
 @RunWith(AndroidJUnit4::class)

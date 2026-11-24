@@ -13,9 +13,12 @@ import (
 	"github.com/nwverse/persona/server/internal/proto"
 )
 
-func failedBatchSignal(todo Todo, at time.Time) superviseSignal {
-	return superviseSignal{Todo: todo.ID, Kind: sigFailed, Key: "workspace was not created", Machine: "box", Launcher: "work",
+func failedBatchSignal(s *Service, todo Todo, at time.Time) superviseSignal {
+	g := superviseSignal{Todo: todo.ID, Kind: sigFailed, Key: "workspace was not created", Machine: "box", Launcher: "work",
 		Detail: "workspace was not created", At: at, Generation: at}
+	// Direct deliverDigest callers must establish the same durable outbox entry that signal creates in production (#5732).
+	s.updateSupervisePending(func(pending map[string]superviseSignal) { pending[g.id()] = g })
+	return g
 }
 
 func newFailedBatchService(t *testing.T, st Store) (*Service, *fakeHub, map[string]Todo) {
@@ -43,6 +46,26 @@ func newFailedBatchService(t *testing.T, st Store) (*Service, *fakeHub, map[stri
 	return s, f, todos
 }
 
+// newManualLeaderFailureService keeps the failed-start feature on the explicit manual-Agent topology that #5732
+// retains: main created the plan, and the owner put its task under a leader before the start.
+func newManualLeaderFailureService(t *testing.T) (*Service, *fakeHub, Todo) {
+	t.Helper()
+	return newManualLeaderFailureServiceOn(t, nil)
+}
+
+func newManualLeaderFailureServiceOn(t *testing.T, st Store) (*Service, *fakeHub, Todo) {
+	t.Helper()
+	s, f := newQuietServiceOn(t, st)
+	f.judge = `{"verdict":"done","reason":"PR 已合并"}`
+	f.known["lead1"] = true
+	f.setSessions("server", proto.Session{SessionID: "conv1", MachineID: "server", Assistant: true, Status: proto.StatusIdle},
+		proto.Session{SessionID: "lead1", MachineID: "server", Assistant: true, Status: proto.StatusIdle})
+	setSettings(t, s, func(v *Settings) { v.Leaders = []string{"lead1"} })
+	todo, _ := remedyingTaskFrom(t, s, f, nil, "conv1", "lead1", "plan_manual_leader")
+	waitFor(t, "the manual leader task's initial start", func() bool { return len(todoNow(s, todo.ID).Agents) == 1 })
+	return s, f, todoNow(s, todo.ID)
+}
+
 func queuedFailedStart(s *Service, id string) bool {
 	for _, msg := range queuedRelays(s, id) {
 		if msg.Tool == superviseTool && strings.Contains(msg.Text, "signal=failed") {
@@ -53,7 +76,7 @@ func queuedFailedStart(s *Service, id string) bool {
 }
 
 func TestLeaderFailedStartGoesOnlyToThatLeader(t *testing.T) {
-	s, f, todo := newLeaderService(t)
+	s, f, todo := newManualLeaderFailureService(t)
 	ctx := context.Background()
 	if err := s.failTodo(ctx, todo.ID, "workspace was not created"); err != nil {
 		t.Fatal(err)
@@ -98,11 +121,11 @@ func TestFailedStartBatchesShareOneRoundAndRecoverAfterRestart(t *testing.T) {
 	now := time.Now().UTC()
 	s, f, todos := newFailedBatchService(t, st)
 	ctx := context.Background()
-	first := failedBatchSignal(todos["todo_a"], now)
+	first := failedBatchSignal(s, todos["todo_a"], now)
 	if !s.deliverDigest(ctx, s.settings(ctx), "lead1", []superviseSignal{first}, "", now, time.Time{}) {
 		t.Fatal("the first failure was not delivered")
 	}
-	second := failedBatchSignal(todos["todo_b"], now.Add(10*time.Minute))
+	second := failedBatchSignal(s, todos["todo_b"], now.Add(10*time.Minute))
 	if s.deliverDigest(ctx, s.settings(ctx), "lead1", []superviseSignal{second}, "", now.Add(10*time.Minute), now) {
 		t.Fatal("a same-group second failure delivered during the cooldown")
 	}
@@ -149,7 +172,7 @@ func TestFailedStartBatchesKeepDifferentKeysAndRetriesImmediate(t *testing.T) {
 	now := time.Now().UTC()
 	s, f, todos := newFailedBatchService(t, st)
 	ctx := context.Background()
-	if !s.deliverDigest(ctx, s.settings(ctx), "lead1", []superviseSignal{failedBatchSignal(todos["todo_a"], now)}, "", now, time.Time{}) {
+	if !s.deliverDigest(ctx, s.settings(ctx), "lead1", []superviseSignal{failedBatchSignal(s, todos["todo_a"], now)}, "", now, time.Time{}) {
 		t.Fatal("first delivery failed")
 	}
 	for _, tc := range []struct {
@@ -166,8 +189,10 @@ func TestFailedStartBatchesKeepDifferentKeysAndRetriesImmediate(t *testing.T) {
 		{"new retry attempt", "todo_a", "lead1", func(g *superviseSignal) { g.Key = "retry 1: workspace was not created" }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			g := failedBatchSignal(todos[tc.todo], now.Add(time.Minute))
+			g := failedBatchSignal(s, todos[tc.todo], now.Add(time.Minute))
 			tc.mutate(&g)
+			// The mutated retry key is a new durable stretch, not the base key registered by failedBatchSignal.
+			s.updateSupervisePending(func(pending map[string]superviseSignal) { pending[g.id()] = g })
 			before := len(supervisionTo(f, tc.to, sigFailed))
 			if !s.deliverDigest(ctx, s.settings(ctx), tc.to, []superviseSignal{g}, "", now.Add(time.Minute), now) {
 				t.Fatal("an independent or immediate failure was deferred")
@@ -182,7 +207,7 @@ func TestFailedStartBatchesKeepDifferentKeysAndRetriesImmediate(t *testing.T) {
 func TestFailedStartBatchesSameGatherListsAllTasks(t *testing.T) {
 	s, f, todos := newFailedBatchService(t, &memStore{})
 	now := time.Now().UTC()
-	list := []superviseSignal{failedBatchSignal(todos["todo_a"], now), failedBatchSignal(todos["todo_b"], now)}
+	list := []superviseSignal{failedBatchSignal(s, todos["todo_a"], now), failedBatchSignal(s, todos["todo_b"], now)}
 	if !s.deliverDigest(context.Background(), s.settings(context.Background()), "lead1", list, "", now, time.Time{}) {
 		t.Fatal("same-gather delivery failed")
 	}
@@ -193,7 +218,7 @@ func TestFailedStartBatchesSameGatherListsAllTasks(t *testing.T) {
 }
 
 func TestLeaderCanUseOnlyItsOwnStartRemedies(t *testing.T) {
-	s, f, todo := newLeaderService(t)
+	s, f, todo := newManualLeaderFailureService(t)
 	ctx := context.Background()
 	_, plan, index, err := s.remedyOf(ctx, todo.ID)
 	if err != nil {
@@ -231,7 +256,7 @@ func TestLeaderCanUseOnlyItsOwnStartRemedies(t *testing.T) {
 }
 
 func TestLeaderCanRetryItsFailedStart(t *testing.T) {
-	s, f, todo := newLeaderService(t)
+	s, f, todo := newManualLeaderFailureService(t)
 	ctx := context.Background()
 	if err := s.failTodo(ctx, todo.ID, "workspace was not created"); err != nil {
 		t.Fatal(err)
@@ -265,7 +290,7 @@ func TestMainTaskStartRemediesRejectAnotherLeader(t *testing.T) {
 func TestFailedStartSettingsWordingKeepsWordBoundaries(t *testing.T) {
 	s, _ := newQuietService(t)
 	want := map[string]string{
-		"assistant.leaders":                   "needs_user still comes to the main conversation",
+		"assistant.leaders":                   "Only needs_user escalations go to the main conversation",
 		"assistant.main_supervises_own_tasks": "failed starts with no current leader and of what",
 	}
 	for _, setting := range s.ownSettings() {
@@ -293,7 +318,7 @@ func TestFailedStartBatchStoreFailureFailsOpen(t *testing.T) {
 	now := time.Now().UTC()
 	ctx := context.Background()
 	for _, id := range []string{"todo_a", "todo_b"} {
-		g := failedBatchSignal(todos[id], now)
+		g := failedBatchSignal(s, todos[id], now)
 		if !s.deliverDigest(ctx, s.settings(ctx), "lead1", []superviseSignal{g}, "", now, time.Time{}) {
 			t.Fatalf("%s was not delivered with the batch store unavailable", id)
 		}
@@ -318,14 +343,14 @@ func TestFailedStartBatchesBoundaryListsAllDeferredTasks(t *testing.T) {
 	s.superviseTimes.gather = time.Hour
 	ctx := context.Background()
 	now := time.Now().UTC()
-	if !s.deliverDigest(ctx, s.settings(ctx), "lead1", []superviseSignal{failedBatchSignal(todos["todo_a"], now)}, "", now, time.Time{}) {
+	if !s.deliverDigest(ctx, s.settings(ctx), "lead1", []superviseSignal{failedBatchSignal(s, todos["todo_a"], now)}, "", now, time.Time{}) {
 		t.Fatal("A did not deliver immediately")
 	}
 	for _, step := range []struct {
 		id string
 		at time.Time
 	}{{"todo_b", now.Add(5 * time.Minute)}, {"todo_c", now.Add(12 * time.Minute)}} {
-		if s.deliverDigest(ctx, s.settings(ctx), "lead1", []superviseSignal{failedBatchSignal(todos[step.id], step.at)}, "", step.at, now) {
+		if s.deliverDigest(ctx, s.settings(ctx), "lead1", []superviseSignal{failedBatchSignal(s, todos[step.id], step.at)}, "", step.at, now) {
 			t.Fatalf("%s delivered during A's cooldown", step.id)
 		}
 	}
@@ -338,7 +363,7 @@ func TestFailedStartBatchesBoundaryListsAllDeferredTasks(t *testing.T) {
 			t.Fatalf("deferred = %+v, want B and C", batch.Deferred)
 		}
 	}
-	boundary := []superviseSignal{failedBatchSignal(todos["todo_b"], now.Add(5*time.Minute)), failedBatchSignal(todos["todo_c"], now.Add(12*time.Minute))}
+	boundary := []superviseSignal{failedBatchSignal(s, todos["todo_b"], now.Add(5*time.Minute)), failedBatchSignal(s, todos["todo_c"], now.Add(12*time.Minute))}
 	for i := range boundary {
 		boundary[i].NotBefore = now.Add(superviseDedupWindow)
 	}
@@ -418,11 +443,11 @@ func TestFailedStartBatchesFirstMessageCASAcrossManagers(t *testing.T) {
 	wg.Add(2)
 	go func() {
 		defer wg.Done()
-		results <- result{first.deliverDigest(ctx, first.settings(ctx), "lead1", []superviseSignal{failedBatchSignal(firstTodos["todo_a"], now)}, "", now, time.Time{})}
+		results <- result{first.deliverDigest(ctx, first.settings(ctx), "lead1", []superviseSignal{failedBatchSignal(first, firstTodos["todo_a"], now)}, "", now, time.Time{})}
 	}()
 	go func() {
 		defer wg.Done()
-		results <- result{second.deliverDigest(ctx, second.settings(ctx), "lead1", []superviseSignal{failedBatchSignal(secondTodos["todo_b"], now)}, "", now, time.Time{})}
+		results <- result{second.deliverDigest(ctx, second.settings(ctx), "lead1", []superviseSignal{failedBatchSignal(second, secondTodos["todo_b"], now)}, "", now, time.Time{})}
 	}()
 	wg.Wait()
 	close(results)
@@ -478,10 +503,10 @@ func TestFailedStartBatchesRelaySaveFailureKeepsDeferred(t *testing.T) {
 	s.superviseTimes.gather = time.Hour
 	ctx := context.Background()
 	now := time.Now().UTC()
-	if !s.deliverDigest(ctx, s.settings(ctx), "lead1", []superviseSignal{failedBatchSignal(todos["todo_a"], now)}, "", now, time.Time{}) {
+	if !s.deliverDigest(ctx, s.settings(ctx), "lead1", []superviseSignal{failedBatchSignal(s, todos["todo_a"], now)}, "", now, time.Time{}) {
 		t.Fatal("first delivery failed")
 	}
-	deferred := failedBatchSignal(todos["todo_b"], now.Add(time.Minute))
+	deferred := failedBatchSignal(s, todos["todo_b"], now.Add(time.Minute))
 	if s.deliverDigest(ctx, s.settings(ctx), "lead1", []superviseSignal{deferred}, "", now.Add(time.Minute), now) {
 		t.Fatal("B did not defer")
 	}
@@ -529,7 +554,7 @@ func TestFailedStartBatchesGenerationCleanupAndRestore(t *testing.T) {
 	s.superviseTimes.gather = time.Hour
 	ctx := context.Background()
 	now := time.Now().UTC()
-	older := failedBatchSignal(todos["todo_a"], now)
+	older := failedBatchSignal(s, todos["todo_a"], now)
 	older.Recipient = "lead1"
 	newer := older
 	newer.Key = "retry 1: workspace was not created"
@@ -590,10 +615,10 @@ func TestFailedStartBatchesLeaderRemovalReleasesAndCleansDeferred(t *testing.T) 
 	s.superviseTimes.gather = time.Hour
 	ctx := context.Background()
 	now := time.Now().UTC()
-	if !s.deliverDigest(ctx, s.settings(ctx), "lead1", []superviseSignal{failedBatchSignal(todos["todo_a"], now)}, "", now, time.Time{}) {
+	if !s.deliverDigest(ctx, s.settings(ctx), "lead1", []superviseSignal{failedBatchSignal(s, todos["todo_a"], now)}, "", now, time.Time{}) {
 		t.Fatal("first delivery failed")
 	}
-	deferred := failedBatchSignal(todos["todo_b"], now.Add(time.Minute))
+	deferred := failedBatchSignal(s, todos["todo_b"], now.Add(time.Minute))
 	if s.deliverDigest(ctx, s.settings(ctx), "lead1", []superviseSignal{deferred}, "", now.Add(time.Minute), now) {
 		t.Fatal("B did not defer")
 	}
@@ -627,11 +652,11 @@ func TestFailedStartBatchesMixedImmediateKeepsLastDelivery(t *testing.T) {
 	s.superviseTimes.gather = time.Hour
 	ctx := context.Background()
 	now := time.Now().UTC()
-	if !s.deliverDigest(ctx, s.settings(ctx), "lead1", []superviseSignal{failedBatchSignal(todos["todo_a"], now)}, "", now, time.Time{}) {
+	if !s.deliverDigest(ctx, s.settings(ctx), "lead1", []superviseSignal{failedBatchSignal(s, todos["todo_a"], now)}, "", now, time.Time{}) {
 		t.Fatal("first delivery failed")
 	}
-	deferred := failedBatchSignal(todos["todo_b"], now.Add(time.Minute))
-	immediate := failedBatchSignal(todos["todo_c"], now.Add(time.Minute))
+	deferred := failedBatchSignal(s, todos["todo_b"], now.Add(time.Minute))
+	immediate := failedBatchSignal(s, todos["todo_c"], now.Add(time.Minute))
 	immediate.Machine = "other"
 	prev := now
 	at := now.Add(time.Minute)
@@ -658,7 +683,7 @@ func TestFailedStartBatchRecoveryAtServiceStartup(t *testing.T) {
 	s, f, todos := newFailedBatchService(t, st)
 	ctx, cancel := context.WithCancel(context.Background())
 	now := time.Now().UTC()
-	deferred := failedBatchSignal(todos["todo_b"], now.Add(-superviseDedupWindow))
+	deferred := failedBatchSignal(s, todos["todo_b"], now.Add(-superviseDedupWindow))
 	deferred.Recipient = "lead1"
 	deferred.NotBefore = now.Add(-time.Second)
 	key, eligible := s.failedStartBatchKey(ctx, "lead1", deferred)
@@ -696,7 +721,7 @@ func TestFailedStartBatchRecoveryAtServiceStartup(t *testing.T) {
 
 func TestRemediableFailedStartBatchesWithoutDelayingRetry(t *testing.T) {
 	st := planUpdateStore{&planMemStore{memStore: &memStore{}, plans: map[string]db.TaskPlanRow{}}}
-	s, f, first := newLeaderServiceOn(t, st)
+	s, f, first := newManualLeaderFailureServiceOn(t, st)
 	ctx := context.Background()
 	reason := clip(oneLine(s.startFailureText(ctx, "box", keptRefusal(proto.CodeShellWaiting))), proto.CodedStartErrorMax)
 	if err := s.failTodo(ctx, first.ID, reason); err != nil {
@@ -704,7 +729,7 @@ func TestRemediableFailedStartBatchesWithoutDelayingRetry(t *testing.T) {
 	}
 	s.taskStartFailed(ctx, todoNow(s, first.ID), "box", nil, reason)
 	waitFor(t, "the first final failure", func() bool { return len(supervisionTo(f, "lead1", sigFailed)) == 1 })
-	second, _ := remedyingTaskAs(t, s, f, keptRefusal(proto.CodeShellWaiting), "lead1", "plan_leader_remediable")
+	second, _ := remedyingTaskFrom(t, s, f, keptRefusal(proto.CodeShellWaiting), "conv1", "lead1", "plan_leader_remediable")
 	var deferred superviseSignal
 	waitFor(t, "the remediable notification to join the same deferred batch", func() bool {
 		doc := readFailedBatchDoc(t, st)
@@ -753,8 +778,8 @@ func TestRemediableFailedStartBatchesWithoutDelayingRetry(t *testing.T) {
 
 func TestFinalRetryTransitionIsNotRemedying(t *testing.T) {
 	st := planUpdateStore{&planMemStore{memStore: &memStore{}, plans: map[string]db.TaskPlanRow{}}}
-	s, f, _ := newLeaderServiceOn(t, st)
-	todo, _ := remedyingTaskAs(t, s, f, keptRefusal(proto.CodeShellWaiting), "lead1", "plan_leader_final_retry")
+	s, f, _ := newManualLeaderFailureServiceOn(t, st)
+	todo, _ := remedyingTaskFrom(t, s, f, keptRefusal(proto.CodeShellWaiting), "conv1", "lead1", "plan_leader_final_retry")
 	waitFor(t, "the initial remediable notification", func() bool { return len(supervisionTo(f, "lead1", sigFailed)) == 1 })
 	s.superviseTimes.gather = time.Hour
 	f.mu.Lock()

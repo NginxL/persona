@@ -75,11 +75,11 @@ internal data class CalendarArguments(
  */
 internal fun parseTime(raw: String?, zone: ZoneId = ZoneId.systemDefault()): Instant? {
     val text = raw?.trim()?.takeIf { it.isNotEmpty() } ?: return null
-    runCatching { return OffsetDateTime.parse(text).toInstant() }
-    runCatching { return Instant.parse(text) }
-    runCatching { return LocalDate.parse(text).atStartOfDay(zone).toInstant() }
+    val _ = runCatching { return OffsetDateTime.parse(text).toInstant() }
+    val _ = runCatching { return Instant.parse(text) }
+    val _ = runCatching { return LocalDate.parse(text).atStartOfDay(zone).toInstant() }
     for (pattern in listOf("yyyy-MM-dd HH:mm", "yyyy-MM-dd'T'HH:mm", "yyyy-MM-dd'T'HH:mm:ss")) {
-        runCatching { return LocalDateTime.parse(text, DateTimeFormatter.ofPattern(pattern, Locale.ROOT)).atZone(zone).toInstant() }
+        val _ = runCatching { return LocalDateTime.parse(text, DateTimeFormatter.ofPattern(pattern, Locale.ROOT)).atZone(zone).toInstant() }
     }
     invalid("cannot read the time \"$raw\"; use ISO 8601 such as 2026-10-24T14:00:00+08:00")
 }

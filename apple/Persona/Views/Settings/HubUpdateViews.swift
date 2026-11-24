@@ -197,15 +197,6 @@ struct HubSettingsPage: View {
                 if s.working {
                     progressRows(s)
                 } else {
-                    #if os(macOS)
-                    // A standard button at the group's trailing end, not a bar the width of the form (#1221).
-                    HStack {
-                        Spacer(minLength: 0)
-                        Button { Task { await model.update(now: false) } } label: { Text("Update Hub").lineLimit(1) }
-                            .formButton(prominent: true)
-                            .accessibilityIdentifier("hub.update")
-                    }
-                    #else
                     Button {
                         Task { await model.update(now: false) }
                     } label: {
@@ -214,7 +205,6 @@ struct HubSettingsPage: View {
                     .themedButton(prominent: true)
                     .listRowBackground(Color.clear)
                     .accessibilityIdentifier("hub.update")
-                    #endif
                 }
             } else if s.working {
                 progressRows(s)

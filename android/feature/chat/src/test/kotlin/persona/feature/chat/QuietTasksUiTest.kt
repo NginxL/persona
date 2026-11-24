@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.material3.LocalRippleConfiguration
+import androidx.compose.material3.Text
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -15,9 +16,12 @@ import androidx.compose.runtime.snapshots.Snapshot
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.height
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import java.io.File
 import java.time.Instant
@@ -124,6 +128,67 @@ class QuietTasksUiTest {
         store.load("main")
         val host = AssistantTaskHost(store, "main", listOf(cut, limited), { it }, {}, { throw it }, {})
         return api to host
+    }
+
+    @Test fun unrecoverableWireKindUsesTheLocalizedInvalidConversationOutcome() {
+        showInvalidConversationOutcome(cut.copy(turnErrorKind = "unrecoverable"), shots = "default")
+    }
+
+    @Config(fontScale = 2f)
+    @Test fun unrecoverableWireKindUsesTheLocalizedInvalidConversationOutcomeAtLargestText() {
+        showInvalidConversationOutcome(cut.copy(turnErrorKind = "unrecoverable"), shots = "large")
+    }
+
+    @Test fun compactionSealedWireCodeUsesTheLocalizedInvalidConversationOutcome() {
+        showInvalidConversationOutcome(cut.copy(turnErrorCode = "compaction_sealed"))
+    }
+
+    private fun showInvalidConversationOutcome(session: Session, shots: String? = null) {
+        val raw = "opaque account transition 7A99"
+        val sealed = session.copy(turnError = raw)
+        val api = Api(listOf(interrupted), emptyList())
+        val store = TasksStore(api, Connection(), scope)
+        store.reloadTodos()
+        store.load("main")
+        val host = AssistantTaskHost(store, "main", listOf(sealed), { it }, {}, { throw it }, {})
+        val tray = AssistantTrayState().also { it.expanded = AssistantTray.NeedsYou }
+        val explanation = "Conversation invalid: its compacted context belongs to another account. Start a new conversation to continue."
+        rule.setContent {
+            PersonaTheme(style = style, darkTheme = dark, reduceMotion = true) {
+                Text(explanation, Modifier.testTag("invalid-two-line-control").width(200.dp),
+                    style = PersonaTheme.type.caption, maxLines = 2)
+                Column(Modifier.testTag("invalid-shot").background(PersonaTheme.palette.background)) {
+                    AssistantTrays(host, tray, emptyList(), emptyList(), emptyList(), { 900.dp }, busy = false, enabled = true,
+                        onApprove = {}, onReview = {}, onSend = {}, onSchedule = {})
+                }
+            }
+        }
+        val inOutcome = hasAnyAncestor(hasTestTag("assistant-tray-interrupted"))
+        rule.onNode(hasText("Invalid conversation") and inOutcome).assertIsDisplayed()
+        val texts = rule.onAllNodes(inOutcome).fetchSemanticsNodes().flatMap { node ->
+            node.config.getOrNull(SemanticsProperties.Text).orEmpty().map { it.text }
+        }
+        assertEquals(explanation, texts.single { it != interrupted.title && it != "Invalid conversation" })
+        rule.onNode(hasText(explanation) and inOutcome).assertIsDisplayed()
+        rule.onNodeWithText(raw).assertDoesNotExist()
+        rule.onNodeWithTag("assistant-tray-continue").assertDoesNotExist()
+        val subtitle = rule.onNode(hasText(explanation) and hasAnyAncestor(hasTestTag("assistant-tray-interrupted")))
+        val subtitleHeight = subtitle.getUnclippedBoundsInRoot().height
+        val twoLines = rule.onNodeWithTag("invalid-two-line-control").getUnclippedBoundsInRoot().height
+        assertTrue("The invalid-conversation explanation must not be clipped to two lines: $subtitleHeight vs $twoLines",
+            subtitleHeight > twoLines)
+        rule.runOnIdle { assertTrue(api.retried.isEmpty()) }
+        if (shots != null) {
+            val output = File("build/invalid-conversation-shots").also { it.mkdirs() }
+            for (s in listOf(AppStyle.Glass, AppStyle.Brief, AppStyle.Board)) for (d in listOf(false, true)) {
+                style = s; dark = d
+                Snapshot.sendApplyNotifications()
+                rule.waitForIdle()
+                val bitmap = rule.onNodeWithTag("invalid-shot").captureToImage().asAndroidBitmap()
+                File(output, "invalid-${s.name.lowercase()}-${if (d) "dark" else "light"}-$shots.png").outputStream()
+                    .use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
+            }
+        }
     }
 
     @Test fun theRowsActOnTheirOwnAndFinishedKeepsWhatWasOpened() {

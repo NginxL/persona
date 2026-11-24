@@ -106,7 +106,7 @@ func (n *Node) offLimits(path string) error {
 // certs/dev.pem below it is the project's own.
 func dataSecret(rel string) bool {
 	parts := strings.Split(rel, "/")
-	if len(parts) > 0 && parts[0] == "task-workspaces" {
+	if len(parts) > 0 && (parts[0] == "task-workspaces" || parts[0] == "repos") {
 		return true
 	}
 	if len(parts) > 2 && parts[0] == "managers" {

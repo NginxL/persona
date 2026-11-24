@@ -44,6 +44,11 @@ function Probe() {
   return null;
 }
 
+function ReadOnlyProbe() {
+  shown = useTranscript("m", "A", { readOnly: true });
+  return null;
+}
+
 const item = (id: string, seq: number): Item => ({ id, seq, role: "user", kind: "text", text: id });
 const subscribes = () => sent.filter((m) => m.type === "subscribe");
 const hello = () => act(() => handlers.reconnected?.());
@@ -93,6 +98,30 @@ describe("useTranscript subscribe", () => {
     expect(subscribes()).toHaveLength(1);
     expect(subscribes()[0].since_seq).toBeUndefined();
   });
+});
+
+it("keeps read-only history paging off the subscription channel", async () => {
+  act(() => root.unmount());
+  calls.length = 0;
+  sent.length = 0;
+  root = createRoot(host);
+  act(() => root.render(<ReadOnlyProbe />));
+  await settleFirstRead({ items: [item("a10", 10)], to_seq: 10, has_more: true });
+  let read!: Promise<symbol | undefined>;
+  act(() => { read = shown.loadEarlier(); });
+  const older = calls.find((c) => c.url.includes("before_seq=10"));
+  expect(older, "the read-only view reuses ordinary earlier pages").toBeDefined();
+  await act(async () => {
+    older!.resolve({ items: [item("a5", 5)], has_more: false });
+    expect(await read).toBeDefined();
+  });
+  expect(shown.items.map((i) => i.id)).toEqual(["a5", "a10"]);
+  expect(shown.hasMore).toBe(false);
+  hello();
+  expect(subscribes()).toEqual([]);
+  act(() => root.unmount());
+  expect(sent.some((m) => m.type === "unsubscribe" && m.session_id === "A")).toBe(false);
+  root = createRoot(host);
 });
 
 it("clears the session's cached live retry on unmount", async () => {

@@ -270,6 +270,9 @@ type Item struct {
 	// Visualization is set on KindVisualization items: a Codex visualize marker's reference to an HTML fragment on
 	// the node. The bytes are not carried here; the session visualization route serves them after path checks.
 	Visualization *Visualization `json:"visualization,omitempty"`
+	// TTFTMS is the observed time-to-first-token in milliseconds from turn send/request start to the first
+	// assistant token/chunk during live streaming execution. Nil when not observed (such as historical replays).
+	TTFTMS *int64 `json:"ttft_ms,omitempty"`
 }
 
 type StoredItem struct {
@@ -410,6 +413,8 @@ type MessageSource struct {
 	// Push is a scheduled input's delivery mode, persisted with the input so a queued user message cannot change it.
 	// "asked" suppresses that run's normal completion; absent keeps the existing every-answer behavior.
 	Push string `json:"push,omitempty"`
+	// ScheduleRunID correlates a reference-only prompt with the run that sent it.
+	ScheduleRunID string `json:"schedule_run_id,omitempty"`
 }
 
 const (
@@ -417,7 +422,9 @@ const (
 	SourceConversation  = "conversation"
 	SourcePatrol        = "patrol"
 	SourceFollowup      = "followup"
+	SourceAutoContinue  = "auto-continue" // a hub-generated continuation after a transient error or usage-limit reset
 	SourceSupervision   = "supervision"
+	SourceNotice        = "notice"         // a notice relayed by Persona
 	SourceScheduledTask = "scheduled_task" // a scheduler outside Persona, e.g. a Codex heartbeat
 	// SourceMeeting is a batch of a recorded meeting the session attends (docs/assistant/meeting-minutes.md "Feeding
 	// the attending session"): other people's words, never the user's; Title is the meeting's name.

@@ -16,12 +16,12 @@ const KEY = "persona.sidebar-icons";
  * Each built-in page's color under Colored, one per page so no two look alike, each picked for what the page is (an
  * amber Overview, an orange Inbox, blue To-dos …). Red is left out: on these pages it would read as an error. Every
  * named color reads at 3:1 on the sidebar and its hover fill, light and dark (ui/theme-contrast.test.ts). History
- * belongs to Agents and is not one of the pages (SidebarParts.tsx useNavPages).
+ * belongs to Agents and is not one of the pages (SidebarParts.tsx useNavPages). A feature module's page names its own
+ * (core/module-host.ts ModuleNavItem.color; the health module's is pink).
  */
 export const BUILTIN_PAGE_COLORS: Record<Exclude<(typeof NAV_PAGES)[number], "terminal" | "starred">, UIColor> = {
   home: "amber",
   inbox: "orange",
-  health: "pink",
   messages: "green",
   "workspace-board": "yellow",
   todos: "blue",

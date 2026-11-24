@@ -1,0 +1,382 @@
+# Which part of the code is Persona Core and which belongs to a feature module (#13843, part of #13430;
+# docs/architecture/core-and-modules.md "Classification").
+#
+# Checked by scripts/test/test_module_classification.py, which fails when a unit below matches no line (a new package,
+# directory or Gradle project nobody classified) and when a line matches nothing (stale: the unit moved or was removed).
+#
+# Units, one per kind:
+#   go      every Go package directory (a directory with a tracked .go file, testdata left out) under server/ and sdk/go/
+#   apple   every directory apple/<name>, apple/Persona/<name> and apple/Packages/<name>
+#   gradle  every project android/settings.gradle.kts includes
+#   web     every directory under web/src, one and two levels deep
+#
+# Lines:
+#   module <id>                    declares a module id (#13430 section 2, plus the modules already built)
+#   <kind> <unit> <core|id>        classifies one unit; the most specific line wins
+#   <kind> <unit>/... <id>         the directory and everything below it (go, apple, web); never core, so a new
+#                                  directory cannot become core without a line of its own
+#   <kind> <prefix>/* *            each directory under a module root belongs to the module its name says
+#   gradle :module:* *             the same for Gradle projects
+# A line may also name an existing directory deeper than the units (apple/Persona/Views/Mail): it records a module's
+# future home inside a core directory and is stale once that directory is gone.
+#
+# Moving a directory into a module root: delete its line here; the module-root line classifies the new place.
+# Adding a unit: add one line, sorted with its neighbours. A unit that is obviously a module's future home gets the module id even while it still
+# lives in a core path; that is what this file is for.
+
+module voice
+module volc
+module recording
+module lark
+module mail
+module health
+module knowledge-ui
+module office
+module screen-share
+module phone-extra
+module computer-use
+module engines-extra
+module github
+module imessage
+module appearance-styles
+module glasses
+module code-viewer
+module alarms
+module briefing
+
+# Module roots: each directory below them is the module of that name.
+go server/internal/modules/*/... *
+go server/internal/modules/all core
+go server/internal/modules/all/node core
+web web/src/modules/* *
+gradle :module:* *
+
+# --- Go (server/, sdk/go/) ----------------------------------------------------------------------------------------
+go sdk/go core
+go sdk/go/ext core
+go sdk/go/exttest core
+go sdk/go/wire core
+go server/cmd/password-wasm core
+go server/cmd/persona-hub core
+go server/cmd/persona-link core
+go server/cmd/persona-manager core
+go server/cmd/persona-node core
+go server/cmd/persona-projects core
+go server/cmd/personad core
+go server/internal/acceptloop core
+go server/internal/agents core
+go server/internal/agentsend core
+go server/internal/ai core
+go server/internal/aiwire core
+go server/internal/apierr core
+go server/internal/apns core
+go server/internal/approval core
+go server/internal/archguard core
+go server/internal/assistant core
+go server/internal/assistant/archiverecovery core
+go server/internal/assistant/chatsearch core
+go server/internal/assistant/kernel core
+go server/internal/assistant/repository core
+go server/internal/assistant/repositorystore core
+go server/internal/assistant/saved core
+go server/internal/assistant/todo/projection core
+go server/internal/assistant/todo/timeline core
+go server/internal/assistantskills core
+go server/internal/assistantwire core
+go server/internal/botcard core
+go server/internal/botport core
+go server/internal/buildtags core
+go server/internal/buildtags/printtags core
+go server/internal/builtinext core
+go server/internal/bus core
+go server/internal/cachewarm core
+go server/internal/channel core
+go server/internal/channel/conformance core
+go server/internal/chatexport core
+go server/internal/cliport core
+go server/internal/cliwire core
+go server/internal/claudeplugin core
+go server/internal/clitext core
+go server/internal/closeout core
+go server/internal/compat core
+go server/internal/compatprobe core
+go server/internal/configuration core
+go server/internal/connector core
+go server/internal/connector/conformance core
+go server/internal/connector/proc core
+go server/internal/connector/serve core
+go server/internal/connectorwire core
+go server/internal/conversationlog core
+go server/internal/db core
+go server/internal/db/dbtest core
+go server/internal/deeplink core
+go server/internal/depguard core
+go server/internal/devices core
+go server/internal/devicewire core
+go server/internal/dialogwire core
+go server/internal/errreport core
+go server/internal/extension core
+go server/internal/extension/conformance core
+go server/internal/extension/denohost core
+go server/internal/extension/egress core
+go server/internal/extension/host core
+go server/internal/extension/hubrelay core
+go server/internal/extension/sandbox core
+go server/internal/extension/serve core
+go server/internal/extension/sourcevalidate core
+go server/internal/extension/uistream core
+go server/internal/extmgr core
+go server/internal/extmgr/githubport core
+go server/internal/extmgr/imessageport core
+go server/internal/extmgr/mailport core
+go server/internal/extmgr/storage core
+go server/internal/extwire core
+go server/internal/githubwire core
+go server/internal/imessagewire core
+go server/internal/herdr core
+go server/internal/herdrcore core
+go server/internal/host core
+go server/internal/hub core
+go server/internal/hubcli core
+go server/internal/hubclient core
+go server/internal/hubedge core
+go server/internal/i18n core
+go server/internal/identity core
+go server/internal/imageorient core
+go server/internal/jsonsubset core
+go server/internal/kb core
+go server/internal/kbwire core
+go server/internal/larkhost core
+go server/internal/lazyre core
+go server/internal/lcuconfirm core
+go server/internal/link core
+go server/internal/linktray core
+go server/internal/machineops core
+go server/internal/mailwire core
+go server/internal/manager core
+go server/internal/managercli core
+go server/internal/managerconf core
+go server/internal/managerupdate core
+go server/internal/mcpserver core
+go server/internal/mcptoolgolden core
+go server/internal/mcpwait core
+go server/internal/mdns core
+go server/internal/memtrim core
+go server/internal/modapi core
+go server/internal/modelhttp core
+go server/internal/modelretry core
+go server/internal/netaddr core
+go server/internal/netproxy core
+go server/internal/netshape core
+go server/internal/node core
+go server/internal/node/clipshare core
+go server/internal/node/imessageport core
+go server/internal/node/iphoneport core
+go server/internal/node/machdiag core
+go server/internal/node/nodekit core
+go server/internal/node/screenport core
+go server/internal/node/transcripttail core
+go server/internal/nodeclient core
+go server/internal/nodecmd core
+go server/internal/nodecmd/commandport core
+go server/internal/nodeproto core
+go server/internal/nodesign core
+go server/internal/nodeupdate core
+go server/internal/operations/backup core
+go server/internal/osproc core
+go server/internal/osproc/osproctest core
+go server/internal/outboxcli core
+go server/internal/passwordpake core
+go server/internal/pgdocker core
+go server/internal/pinneddial core
+go server/internal/preview core
+go server/internal/procinfo core
+go server/internal/procs core
+go server/internal/promptcontent core
+go server/internal/prompts core
+go server/internal/proto core
+go server/internal/proxyproto core
+go server/internal/pushcrypto core
+go server/internal/quota core
+go server/internal/recordinghost core
+go server/internal/relay core
+go server/internal/relayproto core
+go server/internal/remoteimage core
+go server/internal/repositorywire core
+go server/internal/resourcequeue core
+go server/internal/rpc core
+go server/internal/runtimepkg core
+go server/internal/runtimepkg/gen core
+go server/internal/scriptcli core
+go server/internal/secretkey core
+go server/internal/sessionhistory core
+go server/internal/sessionlist core
+go server/internal/sessionorigin core
+go server/internal/sessionsearch core
+go server/internal/shareproof core
+go server/internal/shareproxy core
+go server/internal/shellcmd core
+go server/internal/slowlinksoak core
+go server/internal/streams core
+go server/internal/subscriptions core
+go server/internal/subscriptionsui core
+go server/internal/supervise core
+go server/internal/sysmon core
+go server/internal/taskworkspace core
+go server/internal/teamdocs core
+go server/internal/terminalmaintenance core
+go server/internal/testhome core
+go server/internal/textfmt core
+go server/internal/tmux core
+go server/internal/tokenuse core
+go server/internal/toolcli core
+go server/internal/toolschema core
+go server/internal/transcribejob core
+go server/internal/transcript core
+go server/internal/tunnel core
+go server/internal/tzguard core
+go server/internal/update core
+go server/internal/update/updatetest core
+go server/internal/usagesource core
+go server/internal/webasset core
+go server/internal/webasset/precompress core
+go server/internal/webpush core
+go server/internal/webpush/webpushtest core
+go server/internal/workspaceboard core
+go server/internal/workspacenaming core
+go server/plugins core
+go server/scripts/fleetsoak core
+go server/scripts/pushrec core
+
+# Module code still in core paths.
+go server/internal/transcribelive voice
+go server/internal/lark lark
+go server/internal/screen core
+go server/internal/protectedapps computer-use
+go server/internal/orcart/... engines-extra
+go server/internal/terncli engines-extra
+go server/internal/rexcli engines-extra
+go server/internal/assistant/kbhistory knowledge-ui
+go server/internal/assistant/kbsent knowledge-ui
+
+# --- Apple ------------------------------------------------------------------------------------------------------
+apple apple/AboutVersionAccessibilityHost core
+apple apple/AboutVersionAccessibilityUITests core
+apple apple/IslandPeer core
+apple apple/LiveActivity core
+apple apple/Modules core
+apple apple/Modules/Health health
+apple apple/Modules/ScreenShare screen-share
+apple apple/PersonaCallIntents voice
+apple apple/PersonaLink screen-share
+apple apple/PersonaNotify core
+apple apple/PersonaShare core
+apple apple/PersonaTests core
+apple apple/PersonaUITests core
+apple apple/PersonaVisionWidgets core
+apple apple/PersonaWatch core
+apple apple/PersonaWatchWidgets core
+apple apple/PersonaWidgets core
+apple apple/Shared core
+apple apple/simslim core
+apple apple/verify core
+apple apple/Vision core
+
+apple apple/Persona/App core
+apple apple/Persona/Calls voice
+apple apple/Persona/CarPlay voice
+apple apple/Persona/Code code-viewer
+apple apple/Persona/Debug core
+apple apple/Persona/DesignSystem core
+apple apple/Persona/DevMode core
+apple apple/Persona/Features core
+apple apple/Persona/Glasses glasses
+apple apple/Persona/Intents core
+apple apple/Persona/Persona core
+apple apple/Persona/PhoneTools core
+apple apple/Persona/Recording recording
+apple apple/Persona/Resources core
+apple apple/Persona/Views core
+apple apple/Persona/Voice voice
+apple apple/Persona/Views/Feishu lark
+apple apple/Persona/Views/Knowledge knowledge-ui
+apple apple/Persona/Views/Mail mail
+apple apple/Persona/Views/Voice voice
+
+apple apple/Packages/BeautifulUI appearance-styles
+apple apple/Packages/PersonaCore core
+apple apple/Packages/PersonaInputKit core
+apple apple/Packages/PersonaKit core
+apple apple/Packages/PersonaModuleAPI core
+apple apple/Packages/PersonaScreenCore screen-share
+apple apple/Packages/PersonaScreenKit screen-share
+apple apple/Packages/PersonaSSH core
+apple apple/Packages/PersonaWire core
+
+# --- Android (android/settings.gradle.kts) ----------------------------------------------------------------------
+gradle :app core
+gradle :core:chatlist core
+gradle :core:contracts core
+gradle :core:data core
+gradle :core:demo core
+gradle :core:designsystem core
+gradle :core:domain core
+gradle :core:hub core
+gradle :core:inbox core
+gradle :core:moduleapi core
+gradle :core:navigation core
+gradle :core:rustcore core
+gradle :core:rustcore-android core
+gradle :core:terminal core
+gradle :feature:agents core
+gradle :feature:assistant core
+gradle :feature:chat core
+gradle :feature:files core
+gradle :feature:inbox core
+gradle :feature:machines core
+gradle :feature:settings core
+gradle :feature:terminal core
+gradle :platform:capsule core
+gradle :platform:notify core
+gradle :platform:phonetools core
+gradle :platform:shortcuts core
+
+# --- Web (web/src) ----------------------------------------------------------------------------------------------
+web web/src/admin core
+web web/src/admin/pages core
+web web/src/core core
+web web/src/features core
+web web/src/features/todos core
+web web/src/i18n core
+web web/src/i18n/locales core
+web web/src/lib core
+web web/src/lib/configuration core
+web web/src/lib/html-runtime core
+web web/src/modules core
+web web/src/screen screen-share
+web web/src/screen/tiers screen-share
+web web/src/sharing core
+web web/src/showcase core
+web web/src/showcase/images core
+web web/src/showcase/v6 core
+web web/src/ui core
+web web/src/ui/brands core
+web web/src/ui/model-panel core
+web web/src/ui/stream core
+web web/src/views core
+web web/src/views/agents core
+web web/src/views/assistant core
+web web/src/views/chat core
+web web/src/views/extensions core
+web web/src/views/inbox core
+web web/src/views/knowledge knowledge-ui
+web web/src/views/link core
+web web/src/views/machines core
+web web/src/views/messages core
+web web/src/views/palette core
+web web/src/views/session core
+web web/src/views/settings core
+web web/src/views/spaces core
+web web/src/views/subscriptions core
+web web/src/views/terminal core
+web web/src/views/workspace-board core

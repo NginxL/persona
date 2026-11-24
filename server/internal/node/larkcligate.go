@@ -464,7 +464,7 @@ func (n *Node) larkCLIBin(c *proto.LarkCLI) string {
 	}
 	if p, _ = exec.LookPath(bin); p == "" {
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-		out, _ := loginShell(ctx, "command -v "+shellQuote(bin)).Output()
+		out := larkShellOutput(ctx, "command -v "+shellQuote(bin))
 		cancel()
 		lines := strings.Split(strings.TrimSpace(string(out)), "\n")
 		if last := strings.TrimSpace(lines[len(lines)-1]); filepath.IsAbs(last) {
@@ -480,6 +480,17 @@ func (n *Node) larkCLIBin(c *proto.LarkCLI) string {
 		n.mu.Unlock()
 	}
 	return p
+}
+
+// larkShellOutput is what a login shell printed for script, for the gate's asks (where lark-cli is, the shell's PATH),
+// which run inside a tool call's hook. Output waits for stdout to close, not for the shell to exit, and a background
+// job the user's shell startup leaves running (an update check, a daemon started from ~/.zshrc) inherits stdout: without
+// WaitDelay that job would decide how long the call waits, past ctx's timeout. What the shell printed is kept either way.
+func larkShellOutput(ctx context.Context, script string) []byte {
+	cmd := loginShell(ctx, script)
+	cmd.WaitDelay = time.Second
+	out, _ := cmd.Output()
+	return out
 }
 
 // larkLoginPATHRetry: how long a failed ask of the login shell's PATH stands before another try.
@@ -501,7 +512,7 @@ func (n *Node) larkLoginPATH() []string {
 		return dirs
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	out, _ := loginShell(ctx, `printf '\n`+larkLoginPATHMark+`%s\n' "$PATH"`).Output()
+	out := larkShellOutput(ctx, `printf '\n`+larkLoginPATHMark+`%s\n' "$PATH"`)
 	cancel()
 	dirs = parseLoginPATH(out)
 	n.mu.Lock()

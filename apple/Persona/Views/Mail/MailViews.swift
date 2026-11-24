@@ -197,10 +197,6 @@ struct MailDetailView: View {
         .sheet(isPresented: $askClaude) {
             NewChatPrefilled(prompt: String(localized: "Use mail_read to read the email (account_id: \(summary.accountID), mailbox: \(summary.mailbox), uid: \(summary.uid), subject: \(summary.subject ?? "")), summarize the key points, and draft a suggested reply."))
         }
-        #if DEBUG && os(macOS)
-        // `-showMailAskClaude YES` (with an inbox mail open): the 「让 Claude 处理」 sheet.
-        .onAppear { if UserDefaults.standard.bool(forKey: "showMailAskClaude") { askClaude = true } }
-        #endif
         .task {
             guard let api = model.api else { return }
             do {
@@ -287,7 +283,6 @@ struct NewChatPrefilled: View {
     }
 }
 
-#if os(iOS) || os(visionOS)
 struct HTMLView: UIViewRepresentable {
     var html: String
     @Binding var height: CGFloat
@@ -344,7 +339,6 @@ struct HTMLView: UIViewRepresentable {
         }
     }
 }
-#endif
 
 struct ComposeDraft: Identifiable {
     let id = UUID()
@@ -394,12 +388,7 @@ struct ComposeView: View {
                 TextField(String(localized: "Cc"), text: $draft.cc).keyboardType(.emailAddress).textInputAutocapitalization(.never)
                 TextField(String(localized: "Subject"), text: $draft.subject)
                 Section {
-                    #if os(macOS)
-                    // A grouped Mac form shows a titled field as label + trailing value: the body took the right half.
-                    TextField(String(localized: "Message [Mail Views d661c3]"), text: $draft.body, prompt: Text("Message [Mail Views d661c3]"), axis: .vertical).labelsHidden().lineLimit(10...40)
-                    #else
                     TextField(String(localized: "Message [Mail Views d661c3]"), text: $draft.body, axis: .vertical).lineLimit(10...40)
-                    #endif
                 }
                 if let error { Text(error).foregroundStyle(Theme.danger).font(Theme.Font.caption) }
             }
@@ -474,14 +463,6 @@ struct MailAccountsView: View {
                                     .font(Theme.Font.label).foregroundStyle(a.status == "error" ? Theme.danger : .secondary)
                             }
                         }
-                        #if os(macOS)
-                        // A Mac form has no swipe to delete: the row's menu removes the account (#1221).
-                        .contextMenu {
-                            Button("Delete Account", role: .destructive) {
-                                Task { await delete([a.id]) }
-                            }
-                        }
-                        #endif
                     }
                     .onDelete { idx in
                         let ids = idx.map { accounts[$0].id }
@@ -712,12 +693,7 @@ struct AddMailAccountView: View {
                 Section {
                 } footer: {
                     // 2026-11-01: 「AI 一键添加」 (paste and recognize) is gone; Persona adds accounts itself (mail_account_add).
-                    #if os(macOS)
-                    // On macOS the add-account confirmation card appears in the Mac app, not on a phone (#4070).
-                    Label("You can also just tell Persona “Add a mail account for me”, give it the address and password, and confirm in the app.", systemImage: Theme.Icon.ai)
-                    #else
                     Label("You can also just tell Persona “Add a mail account for me”, give it the address and password, and confirm on your phone.", systemImage: Theme.Icon.ai)
-                    #endif
                 }
             }
             .themedPage()

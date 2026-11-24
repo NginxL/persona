@@ -15,9 +15,9 @@ import (
 	"time"
 
 	"github.com/nwverse/persona/server/internal/connector"
-	"github.com/nwverse/persona/server/internal/connector/github"
 	"github.com/nwverse/persona/server/internal/db"
 	"github.com/nwverse/persona/server/internal/extension"
+	"github.com/nwverse/persona/server/internal/githubwire"
 )
 
 // The route a recall comes in by (docs/protocol.md "Connector API"): POST /api/v1/connectors/sent/{id}/recall.
@@ -27,6 +27,7 @@ func recallPath(id int64) string { return fmt.Sprintf("/api/v1/connectors/sent/%
 // The user's own full device, having asked the user once, takes a message back: the connector is asked once with what
 // the row says, the row is marked, and the answer is the row as the ledger now has it.
 func TestRecallRouteTakesTheMessageBack(t *testing.T) {
+	needsLarkModule(t)
 	e := newRecallEnv(t)
 	id := e.send(time.Hour)
 	code, out := call(t, e.h.routes(), "POST", recallPath(id), deviceToken("dev_phone", roleFull), `{"confirm":true}`)
@@ -49,6 +50,7 @@ func TestRecallRouteTakesTheMessageBack(t *testing.T) {
 // on that machine can read it, and in the audit it is not told from a person). A refused request says why, changes
 // nothing, and the connector hears of none of them.
 func TestRecallRouteIsForTheUsersOwnDevicesOnly(t *testing.T) {
+	needsLarkModule(t)
 	e := newRecallEnv(t)
 	mux := e.h.routes()
 	pairing := "jp_script_" + randomHex(4)
@@ -125,6 +127,7 @@ func TestRecallRouteIsForTheUsersOwnDevicesOnly(t *testing.T) {
 // No way in skips the confirmation: whoever asks, a request that does not say the user agreed recalls nothing and the
 // connector is not asked. The user's own device is told what is missing; the rest are refused before it matters.
 func TestRecallRouteNoPathSkipsTheConfirmation(t *testing.T) {
+	needsLarkModule(t)
 	e := newRecallEnv(t)
 	e.h.routes()
 	id := e.send(0)
@@ -157,6 +160,7 @@ func TestRecallRouteNoPathSkipsTheConfirmation(t *testing.T) {
 // without it (none, empty, false, something else) or one that is not JSON recalls nothing, so a stray POST cannot
 // delete a message; the user is not asked a second time on a card.
 func TestRecallRouteNeedsTheUsersConfirmation(t *testing.T) {
+	needsLarkModule(t)
 	e := newRecallEnv(t)
 	mux := e.h.routes()
 	phone := deviceToken("dev_phone", roleFull)
@@ -194,6 +198,7 @@ func TestRecallRouteNeedsTheUsersConfirmation(t *testing.T) {
 // the row is left as it was: 404 not_found, 409 not_recallable / too_old / already_recalled, 503 connector_unavailable
 // and no_database, 502 recall_refused, 504 recall_unknown; a failure of the ledger itself is a plain 500.
 func TestRecallRouteAnswersByCode(t *testing.T) {
+	needsLarkModule(t)
 	fails := func(e *recallEnv, err error) int64 {
 		e.c.recall = func(context.Context, connector.SentMessage) error { return err }
 		return e.send(0)
@@ -266,6 +271,7 @@ func TestRecallRouteAnswersByCode(t *testing.T) {
 // that did it), so a screen that was behind can show it taken back without asking again; neither the connector nor
 // the row is touched.
 func TestRecallRouteGivesBackTheRowTakenBackBefore(t *testing.T) {
+	needsLarkModule(t)
 	e := newRecallEnv(t)
 	mux := e.h.routes()
 	phone := deviceToken("dev_phone", roleFull)
@@ -375,6 +381,7 @@ func bodyOf(t *testing.T, rec *httptest.ResponseRecorder) map[string]any {
 // Two requests to take one message back at once share one recall and its successful answer: both get 200 with the
 // same recalled row instead of asking the connector twice. The core leaves this to its caller.
 func TestRecallRouteTwiceAtOnceTakesBackOnce(t *testing.T) {
+	needsLarkModule(t)
 	e := newRecallEnv(t)
 	e.h.routes()
 	release := e.slowFirst(nil)
@@ -413,6 +420,7 @@ func TestRecallRouteTwiceAtOnceTakesBackOnce(t *testing.T) {
 // Three requests for one row at once, the first taking the message back: the connector is asked once, by the first;
 // all three get the same 200 and recalled row. A request after the flight still finds it already taken back.
 func TestRecallRouteThreeAtOnceFirstSucceeds(t *testing.T) {
+	needsLarkModule(t)
 	e := newRecallEnv(t)
 	e.h.routes()
 	release, maxInside := e.holdFirst(nil)
@@ -450,6 +458,7 @@ func TestRecallRouteThreeAtOnceFirstSucceeds(t *testing.T) {
 // (502 recall_refused), not a generic busy answer. They do not ask the connector themselves, so it is asked once,
 // never two at a time. The user's next tap is a new recall and goes through.
 func TestRecallRouteThreeAtOnceFirstFails(t *testing.T) {
+	needsLarkModule(t)
 	e := newRecallEnv(t)
 	e.h.routes()
 	release, maxInside := e.holdFirst(errors.New("GitHub DELETE: 403 not allowed"))
@@ -487,6 +496,7 @@ func TestRecallRouteThreeAtOnceFirstFails(t *testing.T) {
 // An unknown outcome is shared as unknown, never as success and never hidden behind a generic busy response. The row
 // stays unmarked, and a later explicit request can reconcile it with the connector.
 func TestRecallRouteConcurrentUnknownStaysUnknown(t *testing.T) {
+	needsLarkModule(t)
 	e := newRecallEnv(t)
 	e.h.routes()
 	release, maxInside := e.holdFirst(fmt.Errorf("%w: the answer was lost", connector.ErrRecallUnknown))
@@ -516,6 +526,7 @@ func TestRecallRouteConcurrentUnknownStaysUnknown(t *testing.T) {
 
 // A request that does not say the user agreed does not take a place behind a recall on its way: it is told at once.
 func TestRecallRouteUnconfirmedDoesNotWait(t *testing.T) {
+	needsLarkModule(t)
 	e := newRecallEnv(t)
 	e.h.routes()
 	release, _ := e.holdFirst(nil)
@@ -542,6 +553,7 @@ func TestRecallRouteUnconfirmedDoesNotWait(t *testing.T) {
 // A request that is waiting for another recall of its row stops when its own client goes away, without asking the
 // connector; the recall it waited for is not affected.
 func TestRecallRouteWaitingStopsWithTheRequest(t *testing.T) {
+	needsLarkModule(t)
 	e := newRecallEnv(t)
 	e.h.routes()
 	release := e.slowFirst(nil)
@@ -573,6 +585,7 @@ func TestRecallRouteWaitingStopsWithTheRequest(t *testing.T) {
 
 // What one recall waits for is the same row's: a recall on its way holds up no other message's.
 func TestRecallRouteHoldsUpOnlyItsOwnRow(t *testing.T) {
+	needsLarkModule(t)
 	e := newRecallEnv(t)
 	e.h.routes()
 	release := e.slowFirst(nil)
@@ -627,6 +640,7 @@ func (e *recallEnv) at(age time.Duration, action string) int64 {
 // acts on), besides recalled_at once it was. Nothing else of a row changes, so an older app that does not know the new
 // field reads the page as it did.
 func TestSentLedgerRowsSayWhetherTheyCanBeTakenBack(t *testing.T) {
+	needsLarkModule(t)
 	const h = time.Hour
 	e := newRecallEnv(t)
 	e.now = time.Date(2026, 11, 7, 12, 0, 0, 0, time.UTC)
@@ -668,6 +682,7 @@ func TestSentLedgerRowsSayWhetherTheyCanBeTakenBack(t *testing.T) {
 // the send, to the nanosecond: a message of exactly that age can be taken back, one a nanosecond older cannot. A
 // connector that is not available cannot take anything back now.
 func TestSentLedgerRowsFollowTheWindow(t *testing.T) {
+	needsLarkModule(t)
 	const h = time.Hour
 	for _, tc := range []struct {
 		name  string
@@ -716,6 +731,7 @@ func TestSentLedgerRowsFollowTheWindow(t *testing.T) {
 // What a recall did shows in the ledger at once: the row says when it was taken back and that it cannot be again, and
 // the others are as they were.
 func TestSentLedgerRowsFollowARecall(t *testing.T) {
+	needsLarkModule(t)
 	e := newRecallEnv(t)
 	taken, other := e.send(0), e.send(0)
 	before := e.readRows(t)
@@ -738,6 +754,7 @@ func TestSentLedgerRowsFollowARecall(t *testing.T) {
 // GitHub. The ledger offers the recall, the user's device asks for it, GitHub is asked once to delete exactly that
 // comment, and the ledger shows it taken back; asking again deletes nothing more.
 func TestRecallRouteTakesBackAGitHubComment(t *testing.T) {
+	needsLarkModule(t)
 	var mu sync.Mutex
 	var seen []string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -763,10 +780,10 @@ func TestRecallRouteTakesBackAGitHubComment(t *testing.T) {
 	st := newSentLedgerStore()
 	h.store = st
 	h.connectors = h.newConnectors([]connector.Rule{{Connector: "github", Action: "github_comment", Decision: connector.Allow}})
-	gh := github.New(github.Config{Auth: github.AuthConfig{FromMachine: "mac"}, APIRoot: srv.URL}, "Mac", func(context.Context, string) (string, error) {
+	gh := newTestGitHub(t, githubwire.Config{Auth: githubwire.AuthConfig{FromMachine: "mac"}, APIRoot: srv.URL}, "Mac", func(context.Context, string) (string, error) {
 		return "gho_example000000000000000000000000000001", nil
 	})
-	if err := h.addConnector(signedInGitHub{gh}); err != nil {
+	if err := h.addConnector(signedInGitHub{gh.(fullGitHub)}); err != nil {
 		t.Fatal(err)
 	}
 	args := json.RawMessage(`{"repo":"example-org/example-repo","number":12,"body":"Looks good."}`)
@@ -812,6 +829,7 @@ func TestRecallRouteTakesBackAGitHubComment(t *testing.T) {
 // The id in the path is a row's: a number from 1. Anything else is a bad request that reaches nothing, and a number
 // no row has is a 404.
 func TestRecallRouteIdIsARowNumber(t *testing.T) {
+	needsLarkModule(t)
 	e := newRecallEnv(t)
 	mux := e.h.routes()
 	phone := deviceToken("dev_phone", roleFull)
@@ -844,6 +862,7 @@ func (a auditedLedger) AddExtensionAudit(ctx context.Context, id, action, actor 
 // its text. Nothing is recorded for what did not take anything back (refused by the route or by the connector,
 // not asked for, already taken back), and a record that cannot be written does not undo the recall.
 func TestRecallRouteIsAudited(t *testing.T) {
+	needsLarkModule(t)
 	e := newRecallEnv(t)
 	aud := newAuditingStore()
 	e.h.store = auditedLedger{e.st, aud}
@@ -909,6 +928,7 @@ func TestRecallRouteIsAudited(t *testing.T) {
 // What a failure says never carries the message's text or summary: not the route's refusals, not the connector's
 // words, not the plain 500. (The row an already_recalled answer brings is the row, by design.)
 func TestRecallRouteFailureAnswersDoNotCarryTheText(t *testing.T) {
+	needsLarkModule(t)
 	const secret = "SECRETTEXT-9f3a"
 	for name, tc := range map[string]struct {
 		err    error

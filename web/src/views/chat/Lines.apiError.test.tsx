@@ -307,3 +307,63 @@ describe("an exhausted recovery chain's failure card", () => {
     expect(html).not.toContain(">重试</button>");
   });
 });
+
+describe("image-limit turn failures (#13045)", () => {
+  const samples = [
+    "Request too large (max 32MB). Accumulated images and attachments in the conversation pushed the request over the limit.",
+    "API Error: an image in the conversation could not be processed and was removed. Please try again.",
+    "API Error: 400 At least one of the image dimensions exceed max allowed size for many-image requests: 2000 pixels",
+  ];
+
+  it("shows one plain localized sentence in both Persona and Agent chats, keeps raw text under Details, and suppresses Retry", () => {
+    for (const raw of samples) {
+      for (const assistant of [true, false]) {
+        const host = document.createElement("div");
+        document.body.append(host);
+        const root = createRoot(host);
+        const onCompactAndResend = vi.fn();
+        act(() => root.render(
+          <ErrorBanner
+            line={line(raw)}
+            assistant={assistant}
+            onRetry={() => {}}
+            onCompactAndResend={onCompactAndResend}
+            onDismiss={() => {}}
+          />,
+        ));
+        expect(host.textContent).toContain("这个对话里的图片太多或太大，超出了模型限制。");
+        expect(host.textContent).not.toContain("要你处理，重试没有用");
+        expect(host.textContent).not.toContain(raw);
+        const buttons = [...host.querySelectorAll("button")];
+        expect(buttons.some((b) => b.textContent === "重试")).toBe(false);
+        expect(buttons.some((b) => b.textContent === "去修")).toBe(false);
+        const compactBtn = host.querySelector<HTMLButtonElement>('[data-testid="compact-and-resend"]');
+        expect(compactBtn?.textContent).toBe("压缩并重发");
+        act(() => compactBtn!.click());
+        expect(onCompactAndResend).toHaveBeenCalledTimes(1);
+        // Raw error text is kept under Details.
+        act(() => buttons.find((b) => b.textContent === "错误详情")!.click());
+        expect(host.querySelector("[data-error-details] pre")!.textContent).toBe(raw);
+        act(() => root.unmount());
+        host.remove();
+      }
+    }
+  });
+
+  it("omits Compact and send again when compaction is unsupported and on inline history records", () => {
+    const html = banner(samples[0], false);
+    expect(html).toContain("这个对话里的图片太多或太大，超出了模型限制。");
+    expect(html).not.toContain("压缩并重发");
+    expect(html).not.toContain(">重试</button>");
+    const record = inline(samples[0], true);
+    expect(record).toContain("这个对话里的图片太多或太大，超出了模型限制。");
+    expect(record).not.toContain("压缩并重发");
+  });
+
+  it("recognizes hub turnErrorCode=images_too_large even on generic API Error wording", () => {
+    const html = banner("API Error: 400 Bad Request", false, { turnErrorCode: "images_too_large", onCompactAndResend: () => {} });
+    expect(html).toContain("这个对话里的图片太多或太大，超出了模型限制。");
+    expect(html).toContain("压缩并重发");
+    expect(html).not.toContain(">重试</button>");
+  });
+});

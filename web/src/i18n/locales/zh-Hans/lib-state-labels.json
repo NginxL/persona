@@ -31,5 +31,12 @@
   "direction_working": "在做",
   "direction_needs_you": "等你",
   "direction_stuck": "卡住",
-  "direction_planned": "未开始"
+  "direction_planned": "未开始",
+  "bg_stalled_minutes_one": "后台命令 {count} 分钟没有动静",
+  "bg_stalled_minutes_other": "后台命令 {count} 分钟没有动静",
+  "bg_stalled_hours_one": "后台命令 {count} 小时没有动静",
+  "bg_stalled_hours_other": "后台命令 {count} 小时没有动静",
+  "bg_stalled_days_one": "后台命令 {count} 天没有动静",
+  "bg_stalled_days_other": "后台命令 {count} 天没有动静",
+  "bg_stalled_hint": "它的后台命令一直没有占用 CPU，也没有输出新内容，可能卡住了。仍按「工作中」计算：运行中的工具算在干活，是否停掉由你决定。"
 }

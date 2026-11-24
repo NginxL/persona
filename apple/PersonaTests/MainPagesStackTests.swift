@@ -43,7 +43,7 @@ import UIKit
             case .sidebar:
                 AssistantSidebar(current: nil, open: { _ in }, newConversation: {}, openProfile: {}, openRoutines: {},
                                  openKnowledge: {}, openSettings: {}, drawer: nil)
-            case .todos: TodosView()
+            case .todos: TodosView(openDetail: { _ in })
             case .machines: MachinesView()
             case .terminals: TerminalsView(only: nil)
             case .profile: AssistantProfileView()

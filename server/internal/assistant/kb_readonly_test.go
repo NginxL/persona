@@ -56,6 +56,9 @@ func TestKBReadOnlyAbsentArchiveAndWriteRefusals(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "absent")
 	s := readonlyService(t, dir)
 	for _, path := range []string{"/api/v1/kb/projects", "/api/v1/kb-search?q=example", "/api/v1/recordings"} {
+		if strings.HasPrefix(path, "/api/v1/recordings") && !s.recordingOn() {
+			continue // the recording module's route, absent without it
+		}
 		r := httptest.NewRecorder()
 		s.ServeHTTP(r, httptest.NewRequest("GET", path, nil))
 		if r.Code != 200 {
@@ -72,6 +75,9 @@ func TestKBReadOnlyAbsentArchiveAndWriteRefusals(t *testing.T) {
 		{"DELETE", "/api/v1/kb/projects/example"},
 		{"POST", "/api/v1/kb-trash/example-1/restore"},
 	} {
+		if strings.HasPrefix(req.path, "/api/v1/recordings") && !s.recordingOn() {
+			continue
+		}
 		r := httptest.NewRecorder()
 		s.ServeHTTP(r, httptest.NewRequest(req.method, req.path, strings.NewReader(`{}`)))
 		if r.Code != 403 || !strings.Contains(r.Body.String(), "kb_read_only") {

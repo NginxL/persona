@@ -10,6 +10,7 @@ import (
 	"log"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -1501,5 +1502,106 @@ func TestGateProxyReportsAWriteWhoseCommandClosedTheConnection(t *testing.T) {
 	got := hub.reportList(t, 1)
 	if r := got[0]; r.Path != "/conversations/c2/messages" || r.Text != "hi" || r.SessionID != "s1" || r.MessageRef != "" {
 		t.Fatalf("told %+v", got)
+	}
+}
+
+// The process always learns its own address at the gate proxy, even when the gate names no environment of its own or
+// lacks the base variable, and never gets it twice (#13540).
+func TestGateAddressAlwaysInEnv(t *testing.T) {
+	api := newFakeAPI(t)
+	n, cwd := gateNode(t, api.URL)
+	envOfName := func(env []string, name string) int {
+		n := 0
+		for _, kv := range env {
+			if k, _, _ := strings.Cut(kv, "="); k == name {
+				n++
+			}
+		}
+		return n
+	}
+	// No environment at all: the address is still there, once.
+	n.larkCfg.Gates[0].Env = nil
+	env, release := n.assistantLarkEnv(cwd, "")
+	release()
+	if base, ok := envOf(env, "EXAMPLE_BASE"); !ok || envOfName(env, "EXAMPLE_BASE") != 1 ||
+		!regexp.MustCompile(`^http://127\.0\.0\.1:\d+/[0-9a-f]{32}$`).MatchString(base) {
+		t.Fatalf("EXAMPLE_BASE %q in %v", base, env)
+	}
+	// The gate's other variables go in as before, and the address is not repeated.
+	n.larkCfg.Gates[0].Env = map[string]string{"EXAMPLE_BASE": "old", "EXAMPLE_ACCOUNT": "2"}
+	env, release = n.assistantLarkEnv(cwd, "")
+	release()
+	if base, _ := envOf(env, "EXAMPLE_BASE"); envOfName(env, "EXAMPLE_BASE") != 1 || base == "old" || func() bool { v, _ := envOf(env, "EXAMPLE_ACCOUNT"); return v != "2" }() {
+		t.Fatalf("environment %v", env)
+	}
+}
+
+// A gate whose API a sandboxed extension names as host.persona.internal is dialed on this machine's loopback (#13540).
+func TestGateProxyHostPersonaInternal(t *testing.T) {
+	api := newFakeAPI(t)
+	n, cwd := gateNode(t, api.URL)
+	u, err := url.Parse(api.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	n.larkCfg.Gates[0].Env["EXAMPLE_BASE"] = "http://host.persona.internal:" + u.Port()
+	env, release := n.assistantLarkEnv(cwd, "")
+	defer release()
+	base, _ := envOf(env, "EXAMPLE_BASE")
+	if code, body := send(t, "GET", base+"/api/v1/me", ""); code != http.StatusOK || body != `{"ok":true}` {
+		t.Fatalf("%d %s", code, body)
+	}
+	got := api.requests()
+	if len(got) != 1 || got[0].Host != "127.0.0.1:"+u.Port() {
+		t.Fatalf("dialed as %+v", got)
+	}
+}
+
+// A gate the node does not know yet, or one whose address is not in its environment, is asked for again at once (at
+// most every gateRefreshInterval), not after assistantLark's minute (#13540).
+func TestAssistantLarkForGateRefreshes(t *testing.T) {
+	hub := newScriptHub(t, func(context.Context, proto.Interaction) (any, error) {
+		return proto.Resolution{Allow: boolp(true)}, nil
+	}, notifyOK)
+	n := hub.n
+	stale := proto.CommandGate{Command: "ex", BaseEnv: "EX_BASE", Auth: &proto.GateAuth{}, Env: map[string]string{}}
+	fresh := stale
+	fresh.Env = map[string]string{"EX_BASE": "http://127.0.0.1:1"}
+	hub.mu.Lock()
+	hub.lark = proto.AssistantLark{Gates: []proto.CommandGate{fresh}}
+	hub.mu.Unlock()
+	n.mu.Lock()
+	n.larkCfg, n.larkCfgAt = proto.AssistantLark{Gates: []proto.CommandGate{stale}}, time.Now().Add(-5*time.Second)
+	n.mu.Unlock()
+	cfg := n.assistantLarkForGate(t.Context(), "ex")
+	if len(cfg.Gates) != 1 || cfg.Gates[0].Env["EX_BASE"] != "http://127.0.0.1:1" {
+		t.Fatalf("refreshed: %+v", cfg)
+	}
+}
+
+// An attempt just made throttles the next one even without an answer yet, so a hub outage is not dialled on every gate
+// request; once the interval has passed it is tried again (#13540).
+func TestAssistantLarkForGateThrottlesAnAttempt(t *testing.T) {
+	hub := newScriptHub(t, func(context.Context, proto.Interaction) (any, error) {
+		return proto.Resolution{Allow: boolp(true)}, nil
+	}, notifyOK)
+	n := hub.n
+	stale := proto.CommandGate{Command: "ex", BaseEnv: "EX_BASE", Auth: &proto.GateAuth{}, Env: map[string]string{}}
+	fresh := stale
+	fresh.Env = map[string]string{"EX_BASE": "http://127.0.0.1:1"}
+	hub.mu.Lock()
+	hub.lark = proto.AssistantLark{Gates: []proto.CommandGate{fresh}}
+	hub.mu.Unlock()
+	n.mu.Lock()
+	n.larkCfg, n.larkCfgAt, n.larkCfgTryAt = proto.AssistantLark{Gates: []proto.CommandGate{stale}}, time.Now().Add(-5*time.Second), time.Now()
+	n.mu.Unlock()
+	if cfg := n.assistantLarkForGate(t.Context(), "ex"); cfg.Gates[0].Env["EX_BASE"] != "" {
+		t.Fatalf("a recent attempt still called the hub: %+v", cfg)
+	}
+	n.mu.Lock()
+	n.larkCfgTryAt = time.Now().Add(-5 * time.Second)
+	n.mu.Unlock()
+	if cfg := n.assistantLarkForGate(t.Context(), "ex"); cfg.Gates[0].Env["EX_BASE"] != "http://127.0.0.1:1" {
+		t.Fatalf("a later request refreshed: %+v", cfg)
 	}
 }

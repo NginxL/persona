@@ -1,9 +1,7 @@
 import MarkdownUI
 import PersonaKit
 import SwiftUI
-#if canImport(UIKit)
 import UIKit
-#endif
 
 // The pictures in a reply, drawn to fit the text (#9474; docs/design/DESIGN_SYSTEM.md "Pictures in replies"; the web's
 // are the same rules, #9475). `ReplyImages` turns each run of pictures on their own lines into a `persona-images`

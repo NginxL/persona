@@ -4,8 +4,8 @@
 依頼メッセージの message_id：om_example
 
 1. ユーザーとして lark-cli でグループを読みます（読んでも既読にはなりません）。範囲の指定がなければ、ほかのメンバーやボットの発言も含めて直近 40 件を読みます（まず一覧だけで、ダウンロードはしません）：
-   mkdir -p ~/.persona/lark-read/om_example && cd ~/.persona/lark-read/om_example && lark-cli im +chat-messages-list --chat-id oc_example --page-size 40 --no-reactions
-   依頼に範囲があれば（直近 2 日、全部、特定の人だけなど）、それに合うオプションに置き換えます（--start / --end は ISO 8601、--order asc、--page-all --page-limit など）。ただし多くても 500 件までにし、超えたら 500 件で止めて、何件をいつから読んだかを回答に書いてください。--download-resources は付けないでください（大きさを見ずにすべての画像とファイルをダウンロードします）。読み終えたら元のディレクトリに戻ってください（cd -）。
+   mkdir -p ~/.persona/lark-read/om_example && cd ~/.persona/lark-read/om_example && lark-cli im +chat-messages-list --chat-id oc_example --order desc --page-size 40 --no-reactions
+   このコマンドは最新のページを取得します。選んだメッセージは古い順に読んでください。依頼に範囲があれば（直近 2 日、全部、特定の人だけなど）、その範囲を優先します。チャット一覧では --start / --end（ISO 8601）が使えます。トピックはメッセージの時刻で絞ります。必要に応じて has_more が true の間は --page-token で続きを取得しますが、両方の一覧と全ページを合わせて 500 件までです。最後のページは残り件数までに縮めます。範囲を読み終えたら、または上限で止めます。上限、ページの失敗、カーソルの欠落で読み取りが不完全なら、何件をいつから読んだかとともに回答に書いてください。--download-resources は付けないでください（大きさを見ずにすべての画像とファイルをダウンロードします）。読み終えたら元のディレクトリに戻ってください（cd -）。
 2. 画像と添付ファイルは一覧で [Image: img_…] や <file key="file_…" name="…"/> のように見えます（key のない [Image] は取得できないので飛ばし、回答にそう書きます）。必要なものだけを、ループを使わず 1 つずつ ~/.persona/lark-read/om_example にダウンロードします：cd ~/.persona/lark-read/om_example && lark-cli im +messages-resources-download --message-id <message_id> --file-key <key> --type image|file --output lark-im-resources/<key>（--output は必ず lark-im-resources/ の中のファイル名にします。ほかの場所は確認が必要になります）。サブシェル「( … )」は使わないでください。一覧にはファイルの大きさが出ないので、ダウンロード結果の data.size_bytes で確かめます（保存先は data.saved_path）。50 MB を超えたファイルはすぐ削除して読まず、それを足すと合計が 200 MB を超えるときも削除して、そこでダウンロードをやめます。取らなかったもの、削除したものは回答に書いてください。
 3. 画像は画像を見られるツールで直接見ます（多くても 20 枚、依頼に関係が深く新しいものから）。添付ファイルは種類に合わせて読みます（テキストやログはそのまま、表や PDF は中身を、圧縮ファイルはまず一覧を）。
 4. lark-cli がない、ログインしていない、権限が足りないときは、larkcli_messages ツールで文字だけでも読み、画像と添付ファイルを読めなかったことと理由を回答に書いてください。

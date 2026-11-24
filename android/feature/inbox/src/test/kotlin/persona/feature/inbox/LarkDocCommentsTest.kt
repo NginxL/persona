@@ -10,6 +10,7 @@ import org.junit.Assert.*
 import org.junit.Test
 import persona.core.hub.HubError
 import persona.core.hub.HubFailure
+import persona.core.inbox.*
 
 /** Comments in the Feishu document reader (#2964, iOS FeishuDocsCommentsTests): the JSON, where "Send" goes, retries and resolving. */
 class LarkDocCommentsTest {

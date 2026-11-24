@@ -12,6 +12,21 @@ export interface BusyItem {
   title: string;
 }
 
+export interface HubDevelopmentProgress {
+  phase: "building" | "backing_up" | "applying_backup";
+  step: string;
+  step_index: number;
+  step_total: number;
+  elapsed_seconds: number;
+  item_label?: string;
+  item_done?: number;
+  item_total?: number;
+  bytes_done?: number;
+  bytes_total?: number;
+  bytes_per_second?: number;
+  percent?: number;
+}
+
 export interface HubUpdateStatus {
   source?: "release" | "beta" | "web-dev";
   development?: {
@@ -24,6 +39,7 @@ export interface HubUpdateStatus {
     /** The snapshot folder in effect, the recommended one, and how many are kept. */
     backup_directory?: string;
     backup_default_directory?: string;
+    backup_directory_is_default?: boolean;
     backup_retain?: number;
     /** The hub pauses its own writers instead of running hub.json hooks. */
     builtin_quiesce?: boolean;
@@ -51,6 +67,7 @@ export interface HubUpdateStatus {
   };
   state: string;
   progress?: string;
+  development_progress?: HubDevelopmentProgress;
   busy: BusyItem[];
   error?: string;
   auto: boolean;
@@ -88,7 +105,6 @@ export interface Skill {
 }
 
 export const hubUpdate = () => api<HubUpdateStatus>("/hub/update");
-export const checkHubUpdate = () => api<HubUpdateStatus>("/hub/update/check", { method: "POST" });
 /** `now`: don't wait for the assistant and the agents to be idle. */
 export const startHubUpdate = (now: boolean) => api<HubUpdateStatus>("/hub/update", { method: "POST", json: now ? { now: true } : {} });
 export const setHubUpdateSettings = (s: {
@@ -100,7 +116,6 @@ export const setHubUpdateSettings = (s: {
   development_backup_directory?: string;
   development_backup_retain?: number;
 }) => api<HubUpdateStatus>("/hub/update/settings", { method: "PUT", json: s });
-export const hubUpdateHistory = () => api<{ history: HubUpdateRecord[] | null }>("/hub/update/history").then((r) => r.history ?? []);
 export interface HubUpdateBackup {
   id: string;
   version: string;
@@ -109,21 +124,10 @@ export interface HubUpdateBackup {
   updated_at: string;
   created_at: string;
 }
-export const hubUpdateBackups = () => api<{ backups: HubUpdateBackup[] }>("/hub/update/backups").then(r => r.backups);
-export const applyHubUpdateBackup = (id: string) => api<HubUpdateStatus>(`/hub/update/backups/${encodeURIComponent(id)}/apply`, { method: "POST" });
 export const skills = (manager?: string) => api<{ machine_id: string; machine?: string; skills: Skill[] | null }>("/skills", { headers: manager ? { [MANAGER_HEADER]: manager } : undefined });
 
-/** An update is under way (the progress row, no buttons). */
-export function updateWorking(s: HubUpdateStatus): boolean {
-  return ["building", "applying_backup", "backing_up", "downloading", "waiting_idle", "restarting", "confirming"].includes(s.state);
-}
-
-/** A state that ends an update: the history has a new line. */
-export function updateFinished(prev: string | undefined, next: string): boolean {
-  return prev !== next && ["updated", "rolled_back", "failed"].includes(next);
-}
-
-export function updateStateTitle(s: HubUpdateStatus): string {
+/** Titles shared by the sidebar notice and the Settings progress row. */
+export function workingUpdateTitle(s: HubUpdateStatus): string | undefined {
   switch (s.state) {
     case "applying_backup":
       return t("lib-hub-update.state_applying_backup");
@@ -131,8 +135,6 @@ export function updateStateTitle(s: HubUpdateStatus): string {
       return t("lib-hub-update.state_building");
     case "backing_up":
       return t("lib-hub-update.state_backing_up");
-    case "checking":
-      return t("lib-hub-update.state_checking");
     case "downloading":
       return t("lib-hub-update.state_downloading");
     case "waiting_idle":
@@ -141,16 +143,6 @@ export function updateStateTitle(s: HubUpdateStatus): string {
       return t("lib-hub-update.state_restarting");
     case "confirming":
       return t("lib-hub-update.state_confirming");
-    case "updated":
-      return t("lib-hub-update.result_updated");
-    case "rolled_back":
-      return t("lib-hub-update.result_rolled_back");
-    case "failed":
-      return t("lib-hub-update.result_failed");
-    case "available":
-      return t("lib-hub-update.state_available");
-    default:
-      return t("lib-hub-update.state_current");
   }
 }
 
@@ -182,7 +174,8 @@ export function hubNoticeKey(n: HubNotice): string | null {
 export function hubNoticeCandidates(s: HubUpdateStatus | null | undefined): HubNotice[] {
   if (!s) return [];
   const out: HubNotice[] = [];
-  if (updateWorking(s)) out.push({ kind: "updating", what: updateStateTitle(s) });
+  const workingTitle = workingUpdateTitle(s);
+  if (workingTitle) out.push({ kind: "updating", what: workingTitle });
   if (s.state === "rolled_back" && s.error && s.latest?.build != null) out.push({ kind: "rolled_back", why: s.error, build: s.latest.build });
   if (s.auto_notice) out.push({ kind: "auto_on" });
   const l = s.latest;

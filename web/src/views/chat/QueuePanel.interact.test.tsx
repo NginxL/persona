@@ -42,8 +42,7 @@ const settle = () => act(() => new Promise((r) => setTimeout(r, 0)));
 describe("QueuePanel row actions", () => {
   it("pulls a message back to edit or deletes it, re-queueing the others in order", async () => {
     vi.mocked(api).mockResolvedValue({ queue: ["第一条", "第二条", "第三条"] });
-    const withdrawn: string[] = [];
-    render(<QueuePanel session={session} draftKey="qp-edit" canEdit onWithdrawn={(t) => void withdrawn.push(t)} />);
+    render(<QueuePanel session={session} draftKey="qp-edit" canEdit />);
     click(within(1, "[data-queue-edit]"));
     await settle();
     click(within(2, "[data-queue-delete]"));
@@ -52,7 +51,6 @@ describe("QueuePanel row actions", () => {
       ["/sessions/m/s/queue", { keep: [0, 2] }],
       ["/sessions/m/s/queue", { keep: [0, 1] }],
     ]);
-    expect(withdrawn).toEqual(["第二条", "第三条"]);
   });
 
   it("sends every queued message at one press, with no dialog; its tooltip and description say what happens", async () => {
@@ -420,7 +418,7 @@ describe("QueuePanel status, always-visible Send now and photo thumbnails (#1087
         session={{ ...session, queued: [fivePhotos] }}
         draftKey="qp-10871-multi"
         canEdit
-        photoPreviewsOf={() => [dataUrl]}
+        pending={[{ id: "local", raw: fivePhotos, before: [], images: [{ mime: "image/png", data: "iVBORw0KGgo=" }] }]}
       />,
     );
     const thumbs = [...rows()[0].querySelectorAll<HTMLImageElement>("[data-queue-photo-thumb]")];

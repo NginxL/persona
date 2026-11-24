@@ -4,6 +4,7 @@ import SwiftUI
 struct SettingsAgentView: View {
     var body: some View {
         SettingsForm {
+            DefaultPermissionsSettingsSection()
             Section {
                 NavigationLink { HiddenAgentDirsView() } label: {
                     SettingsRow(title: String(localized: "agentDirs.title", defaultValue: "Agent Folders"), symbol: Theme.Icon.options, tint: Theme.ai)

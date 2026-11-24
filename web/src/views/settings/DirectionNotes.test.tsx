@@ -100,7 +100,20 @@ describe("DirectionNotes", () => {
     expect(calls[1]).toMatchObject({ path: "/assistant/directions/conv%20a/notes", init: { method: "PUT", json: { notes: "x" } } });
   });
 
+  it("opens the shared new-conversation permission setting from a direction", async () => {
+    const openPermissions = vi.fn();
+    const deps: DirectionNotesDeps = { list: async () => LEADERS, save: vi.fn() };
+    const props = { deps, onOpenPermissions: openPermissions } as unknown as { deps: DirectionNotesDeps };
+    await act(async () => root.render(<DirectionNotes {...props} />));
+    const link = host.querySelector<HTMLButtonElement>('[data-settings-row="direction-permissions"]');
+    expect(link).not.toBeNull();
+    expect(link!.textContent).toContain(t("settings-directionnotes.permissions"));
+    await act(async () => link!.click());
+    expect(openPermissions).toHaveBeenCalledOnce();
+  });
+
   it("is found by the settings search", () => {
     expect(searchSettings(t("settings-directionnotes.title")).groups.some((r) => r.anchor === "direction-notes")).toBe(true);
+    expect(searchSettings(t("settings-directionnotes.title")).groups.some((r) => r.anchor === "default-permissions")).toBe(true);
   });
 });

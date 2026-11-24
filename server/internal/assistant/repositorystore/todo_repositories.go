@@ -46,6 +46,37 @@ func (d *Store) TodoRepositories(ctx context.Context, id string) (repository.Tas
 	return decodeTodoRepositories(id, revision, raw)
 }
 
+// ListTodoRepositories loads saved repository associations for the named to-dos in one query.
+func (d *Store) ListTodoRepositories(ctx context.Context, ids []string) (map[string][]repository.TaskRepository, error) {
+	out := make(map[string][]repository.TaskRepository, len(ids))
+	if len(ids) == 0 {
+		return out, nil
+	}
+	err := d.Transaction(ctx, func(tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `SELECT todo_id, repositories FROM todo_repository_sets WHERE todo_id = ANY($1)`, ids)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var todoID string
+			var raw []byte
+			if err := rows.Scan(&todoID, &raw); err != nil {
+				return err
+			}
+			set, err := decodeTodoRepositories(todoID, 0, raw)
+			if err != nil {
+				return err
+			}
+			if len(set.Repositories) > 0 {
+				out[todoID] = set.Repositories
+			}
+		}
+		return rows.Err()
+	})
+	return out, err
+}
+
 // ReadTodoRepositoriesTx locks the Todo, including an empty association set. Preparation
 // consumers can read this value and persist their own selected snapshot in the same
 // transaction. It never seals business associations or changes legacy execution paths.
@@ -171,7 +202,7 @@ func (d *Store) SetTodoRepositoryLinks(ctx context.Context, id, repoID string, i
 				if err != nil {
 					return err
 				}
-				repository.PreserveLinkTitles(row.Links, links)
+				repository.PreserveLinkTitles(row.Links, links, in.Links)
 				cur.Repositories[index].Links = links
 				cur.Revision++
 				out = cur
@@ -183,31 +214,46 @@ func (d *Store) SetTodoRepositoryLinks(ctx context.Context, id, repoID string, i
 	return out, err
 }
 
-// SetTodoRepositoryLinkRoles persists a role rewrite the manager classified (e.g. a proven-foreign PR downgraded to
-// reference), serializing with interactive edits through the same revision and Todo lock.
-func (d *Store) SetTodoRepositoryLinkRoles(ctx context.Context, id string, rows []repository.TaskRepository) (repository.TaskSet, error) {
+// SetTodoRepositoryLinkRole rewrites the role of a single link (matched by canonical URL) inside one transaction, so
+// the automatic gate downgrade can never clobber a concurrent edit made to another link.
+func (d *Store) SetTodoRepositoryLinkRole(ctx context.Context, id, canonicalURL, role string) (repository.TaskSet, error) {
+	normalized, perr := repository.NormalizeLinkRole(role)
+	if perr != "" {
+		return repository.TaskSet{}, perr
+	}
+	// NormalizeLink stores the default delivery role as an empty string.
+	storedRole := ""
+	if normalized == repository.LinkRoleReference {
+		storedRole = normalized
+	}
+	return d.updateTodoRepositoryLink(ctx, id, canonicalURL, func(link *repository.TaskLink) {
+		link.Role = storedRole
+	})
+}
+
+// SetTodoPRLinkTitle updates only an existing PR link. A poll must never recreate a removed link.
+func (d *Store) SetTodoPRLinkTitle(ctx context.Context, id, canonicalURL, title string) error {
+	_, err := d.updateTodoRepositoryLink(ctx, id, canonicalURL, func(link *repository.TaskLink) {
+		if link.Kind == "pull_request" && title != "" {
+			link.Title = title
+		}
+	})
+	return err
+}
+
+func (d *Store) updateTodoRepositoryLink(ctx context.Context, id, canonicalURL string, update func(*repository.TaskLink)) (repository.TaskSet, error) {
 	var out repository.TaskSet
 	err := d.Transaction(ctx, func(tx pgx.Tx) error {
 		cur, err := ReadTodoRepositoriesTx(ctx, tx, id, nil)
 		if err != nil {
 			return err
 		}
-		roles := map[string]string{}
-		for _, row := range rows {
-			for _, l := range row.Links {
-				role, perr := repository.NormalizeLinkRole(l.Role)
-				if perr != "" {
-					return perr
-				}
-				roles[l.CanonicalURL] = role
-			}
-		}
 		changed := false
-		for ri := range cur.Repositories {
-			for li := range cur.Repositories[ri].Links {
-				if role, ok := roles[cur.Repositories[ri].Links[li].CanonicalURL]; ok && cur.Repositories[ri].Links[li].Role != role {
-					cur.Repositories[ri].Links[li].Role = role
-					changed = true
+		for _, row := range cur.Repositories {
+			for i, link := range row.Links {
+				if link.CanonicalURL == canonicalURL {
+					update(&row.Links[i])
+					changed = changed || row.Links[i] != link
 				}
 			}
 		}

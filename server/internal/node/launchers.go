@@ -176,9 +176,9 @@ func (n *Node) launchers(ctx context.Context, refresh ...bool) ([]proto.Launcher
 	}
 }
 
-func scanLaunchers(ctx context.Context) ([]byte, error) {
+func scanLaunchers(ctx context.Context, env ...string) ([]byte, error) {
 	began := time.Now()
-	out, err := launcherShellOutput(ctx, launcherScript)
+	out, err := launcherShellOutput(ctx, launcherScript, env...)
 	// A background child can hold stdout open after a complete scan. A partial frame can be just a banner.
 	if _, complete := launcherOutput(string(out)); !complete {
 		took := time.Since(began).Round(time.Millisecond)
@@ -190,8 +190,9 @@ func scanLaunchers(ctx context.Context) ([]byte, error) {
 	return out, nil
 }
 
-func launcherShellOutput(ctx context.Context, script string) ([]byte, error) {
+func launcherShellOutput(ctx context.Context, script string, env ...string) ([]byte, error) {
 	cmd := loginShell(ctx, script)
+	cmd.Env = append(cmd.Environ(), env...)
 	// A shell's children can hold stdout open after it dies. Bound the group and the pipe wait (#10952).
 	killGroupOnCancel(cmd)
 	return cmd.Output()

@@ -230,9 +230,6 @@ struct ElicitationForm: View {
             }
             .controlSize(.large)
             Button { act(.cancel) } label: { Text("Cancel").lineLimit(1) }
-                #if os(macOS)
-                .buttonStyle(.link)
-                #endif
                 .font(Theme.Font.caption)
                 .frame(maxWidth: .infinity)
                 .accessibilityIdentifier("elicitation.cancel")

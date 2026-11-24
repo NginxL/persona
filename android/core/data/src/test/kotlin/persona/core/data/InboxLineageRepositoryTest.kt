@@ -35,8 +35,8 @@ import persona.core.contracts.api.InteractionCenter
 import persona.core.contracts.api.MailReplyTarget
 import persona.core.contracts.api.RequestManager
 import persona.core.contracts.api.SessionsRepository
-import persona.feature.inbox.InboxItemKey
-import persona.feature.inbox.InboxRecord
+import persona.core.inbox.InboxItemKey
+import persona.core.inbox.InboxRecord
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class InboxLineageRepositoryTest {

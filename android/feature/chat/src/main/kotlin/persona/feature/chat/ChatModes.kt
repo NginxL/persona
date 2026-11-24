@@ -32,7 +32,7 @@ import persona.core.domain.sort.hasSource
 import persona.core.domain.sort.listedModes
 
 /** Claude Code's permission modes, effort levels and /model aliases as the app shows them (iOS SessionModes, node/modes.go). */
-internal object SessionModes {
+object SessionModes {
     /** [id] is what the hub and the agent use; the words are resources, or [raw] for an id the app does not know (shown as is). */
     data class Option(val id: String, @StringRes val titleRes: Int, @StringRes val detailRes: Int, val raw: String? = null) {
         fun title(resources: Resources): String = raw ?: resources.getString(titleRes)

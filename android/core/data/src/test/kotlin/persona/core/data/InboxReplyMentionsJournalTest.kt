@@ -10,8 +10,8 @@ import kotlinx.serialization.json.put
 import org.junit.Assert.assertEquals
 import org.junit.Test
 import persona.core.contracts.JsonCodec
-import persona.feature.inbox.ReplyRequest
-import persona.feature.inbox.ReplyTarget
+import persona.core.inbox.ReplyRequest
+import persona.core.inbox.ReplyTarget
 import java.nio.file.Files
 
 /** #576 G122: the on-disk reply journal is part of the mention contract, including legacy thread recovery. */

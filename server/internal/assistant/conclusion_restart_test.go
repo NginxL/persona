@@ -22,6 +22,7 @@ const conclusionCrashDatabase = "PERSONA_TEST_CONCLUSION_DATABASE_URL"
 // Feishu failure with an exit during that same first post. In either case a
 // fresh manager on the same PostgreSQL database should deliver the conclusion once, under its original key (#10393).
 func TestSupervisionConclusionSurvivesManagerRestart(t *testing.T) {
+	needsLarkLayer(t)
 	// The parent creates and owns the database; the child must reconnect to that exact database to exercise restart.
 	rawURL := os.Getenv(conclusionCrashDatabase)
 	if os.Getenv(conclusionCrashChild) == "" {

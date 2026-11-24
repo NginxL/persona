@@ -1,4 +1,3 @@
-#if os(iOS)
 import SwiftUI
 import Testing
 import UIKit
@@ -88,4 +87,3 @@ import UIKit
         }
     }
 }
-#endif

@@ -100,10 +100,6 @@ struct TerminalSettingsView: View {
     @AppStorage(TerminalPrefs.theme) private var themeID = TerminalTheme.defaultID
     @AppStorage(TerminalPrefs.inputMode) private var inputMode = "direct"
     @AppStorage(TerminalPrefs.size) private var size = "phone"
-    #if os(macOS)
-    @AppStorage(TerminalPrefs.optionAsMeta) private var optionAsMeta = false
-    @AppStorage(TerminalPrefs.mouseMode) private var mouseMode = MacTerminalMouse.Mode.program.rawValue
-    #endif
     @State private var newShortcut = ""
 
     private var shortcuts: Binding<[String]> {
@@ -155,34 +151,9 @@ struct TerminalSettingsView: View {
                     Text(inputMode == "field" ? String(localized: "Write in the field below the terminal and press Return to send it all at once. The key bar's ctrl / alt / ⇧ also apply to the next character you type in the field.")
                          : TerminalHelpText.directFooter)
                 }
-                #if os(macOS)
-                Section {
-                    Toggle("Use Option as Meta Key", isOn: $optionAsMeta)
-                } header: {
-                    Text("Keyboard")
-                } footer: {
-                    Text(optionAsMeta ? String(localized: "Option+letter sends Esc+letter, so Option+B / Option+F move by word in the shell; Option no longer types special characters like ™ or é. Input methods work as usual.")
-                         : String(localized: "Option types special characters as usual (Option+2 is ™). When this is on, Option+key sends Esc+key, like the setting of the same name in the Terminal app."))
-                }
-                Section {
-                    SegmentedChoice(String(localized: "Mouse While Driving"), [(MacTerminalMouse.Mode.program.rawValue, String(localized: "To Program")), (MacTerminalMouse.Mode.local.rawValue, String(localized: "Select Locally"))],
-                                    selection: $mouseMode)
-                } header: {
-                    Text("Mouse")
-                } footer: {
-                    Text(MacTerminalMouse.mode(mouseMode) == .program
-                         ? String(localized: "While driving, clicks, drags and right and middle clicks go to the program on the computer (only programs with mouse support, like vim or Claude Code, receive them). Hold Shift to select text and open the menu here; ⌘-click still opens links.")
-                         : String(localized: "While driving, select text and right-click for the menu here; a single click still clicks the program. Hold Shift to hand the mouse to the program."))
-                }
-                #endif
                 Section {
                     ForEach(Array(shortcuts.wrappedValue.enumerated()), id: \.offset) { i, s in
                         Text(s).font(Theme.Font.body.monospaced()).lineLimit(1)
-                        #if os(macOS)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .contentShape(.rect)
-                            .contextMenu { shortcutMenu(i) }
-                        #endif
                     }
                     .onDelete { shortcuts.wrappedValue.remove(atOffsets: $0) }
                     .onMove { shortcuts.wrappedValue.move(fromOffsets: $0, toOffset: $1) }
@@ -210,13 +181,6 @@ struct TerminalSettingsView: View {
                 } footer: {
                     Text(TerminalHelpText.keysFooter)
                 }
-                #if os(macOS)
-                Section("Actions [Terminal Extras ed31fb]") {
-                    ForEach(TerminalHelpText.gestures) { Label($0.text, systemImage: $0.symbol) }
-                }
-                .font(Theme.Font.secondary)
-                .foregroundStyle(.secondary)
-                #else
                 Section("Gestures") {
                     Label("Tap the terminal: the tap goes to the terminal (Claude's “Jump to bottom”, questions at the top)", systemImage: Theme.Icon.tap)
                     Label("Drag up or down: scroll the terminal (Claude scrolls back through the chat)", systemImage: "arrow.up.and.down")
@@ -230,7 +194,6 @@ struct TerminalSettingsView: View {
                 }
                 .font(Theme.Font.secondary)
                 .foregroundStyle(.secondary)
-                #endif
             }
             .themedPage()
             .navigationTitle("Terminal Settings")
@@ -242,19 +205,6 @@ struct TerminalSettingsView: View {
             }
         }
     }
-
-    #if os(macOS)
-    /// A Mac list has no edit mode (`EditButton` is empty there): a command moves or goes from its context menu.
-    @ViewBuilder private func shortcutMenu(_ i: Int) -> some View {
-        let list = shortcuts.wrappedValue
-        Button { shortcuts.wrappedValue = MacShortcutOrder.move(list, at: i, by: -1) } label: { Label("Move Up", systemImage: Theme.Icon.moveUp) }
-            .disabled(i == 0)
-        Button { shortcuts.wrappedValue = MacShortcutOrder.move(list, at: i, by: 1) } label: { Label("Move Down", systemImage: Theme.Icon.moveDown) }
-            .disabled(i == list.count - 1)
-        Divider()
-        Button(role: .destructive) { shortcuts.wrappedValue.remove(at: i) } label: { Label("Delete", systemImage: Theme.Icon.delete) }
-    }
-    #endif
 
     private func add() {
         let s = newShortcut.trimmingCharacters(in: .whitespaces)
@@ -386,17 +336,8 @@ struct SuggestionStrip: View {
     }
 }
 
-/// The terminal's size wording: the phone's size on iOS, the window's on the Mac (a Mac takes over at its panel's size).
+/// The terminal's size wording: the phone's size.
 enum TerminalSizeText {
-    #if os(macOS)
-    static let own = String(localized: "Window Size")
-    static let ownFooter = String(localized: "When the terminal opens, this window takes it over: the computer's pane takes the window's rows and columns, and Claude lays out to the window's width. When you leave the terminal or the connection drops, the pane returns to the computer's size.")
-    static let mirrorFooter = String(localized: "Leaves the computer's pane as it is and shows it at the computer's width; long lines wrap in the window (or scroll sideways).")
-    static let wrap = String(localized: "Wrap long lines to the window width")
-    static let takeOver = String(localized: "For example Ovis or another herdr client. Taking over disconnects it and resizes the terminal to this window; when you leave the terminal, the pane returns to the computer's size.")
-    static let icon = Theme.Icon.laptop
-    static let takeOverIcon = Theme.Icon.takeOverWindow
-    #else
     static let own = String(localized: "iPhone Size")
     static let ownFooter = String(localized: "When the terminal opens, the iPhone takes it over: the computer's pane takes the iPhone's rows and columns, and Claude lays out to the iPhone's width. When you leave the terminal, the app goes to the background, or the connection drops, the pane returns to the computer's size.")
     static let mirrorFooter = String(localized: "Leaves the computer's pane as it is and shows it at the computer's width; long lines wrap on the iPhone (or swipe sideways).")
@@ -404,10 +345,9 @@ enum TerminalSizeText {
     static let takeOver = String(localized: "For example Ovis or another herdr client. Taking over disconnects it and resizes the terminal to the iPhone; when you leave the terminal, the pane returns to the computer's size.")
     static let icon = Theme.Icon.phone
     static let takeOverIcon = Theme.Icon.handoff
-    #endif
 }
 
-/// The terminal's help wording: touches on iOS; on the Mac a click, the keyboard, the wheel and the trackpad.
+/// The terminal's help wording: touches.
 enum TerminalHelpText {
     struct Gesture: Identifiable {
         var text: String
@@ -415,23 +355,6 @@ enum TerminalHelpText {
         var id: String { text }
     }
 
-    #if os(macOS)
-    static let loadOlder = String(localized: "Scroll up to load earlier output")
-    static let noWrap = String(localized: "No Wrap · Scroll Sideways")
-    static let noWrapValue = String(localized: "Off, scroll sideways")
-    static let textFooter = String(localized: "⌘+ / ⌘− / ⌘0 or pinching on the trackpad also change the text size. Chinese and other wide characters use the system font, two cells each.")
-    static let directFooter = String(localized: "Click the terminal to type directly: every key goes to the terminal (input methods work too), and ⌘ shortcuts stay with the app. The key bar's keyboard button moves input to or away from the terminal; double-click it for Return. A click on the terminal is also a click inside it (such as Claude's “Jump to bottom”).")
-    static let shortcutsFooter = String(localized: "In the key bar's bolt: click to type, double-click to run with Return. Right-click a command to move it up, move it down, or delete it.")
-    static let keysFooter = String(localized: "ctrl is always there; the keyboard button and arrows are at the far right. When the keys don't fit, the key bar scrolls sideways.")
-    static let gestures: [Gesture] = [
-        Gesture(text: String(localized: "Click the terminal: start typing; the click also goes to the terminal (Claude's “Jump to bottom”, questions at the top)"), symbol: Theme.Icon.click),
-        Gesture(text: String(localized: "Scroll wheel or trackpad: scroll the terminal (Claude scrolls back through the chat)"), symbol: Theme.Icon.upDown),
-        Gesture(text: String(localized: "Drag to select, ⌘C to copy; the context menu has Copy, Paste, and Select All"), symbol: Theme.Icon.contextMenu),
-        Gesture(text: String(localized: "⌘V: paste the clipboard (asks first for multiple lines)"), symbol: Theme.Icon.paste),
-        Gesture(text: String(localized: "⌘+ / ⌘− / ⌘0, trackpad pinch: change text size"), symbol: Theme.Icon.enlarge),
-        Gesture(text: String(localized: "Three-finger swipe on the trackpad: switch agents in this space (when “Swipe between pages” is set to three fingers in System Settings › Trackpad)"), symbol: Theme.Icon.swipe),
-    ]
-    #else
     static let loadOlder = String(localized: "Swipe up to load earlier output")
     static let noWrap = String(localized: "No Wrap · Swipe Sideways")
     static let noWrapValue = String(localized: "Off, swipe sideways")
@@ -439,12 +362,4 @@ enum TerminalHelpText {
     static let directFooter = String(localized: "Tap the keyboard button at the right of the key bar to show the keyboard; every key goes straight to the terminal (like on a computer, with input methods and dictation). Double-tap the keyboard button for Return. Tapping the terminal taps inside it (such as Claude's “Jump to bottom”) and doesn't show the keyboard.")
     static let shortcutsFooter = String(localized: "In the key bar's bolt: tap to type, double-tap to run with Return. Tap Edit at the top left to delete or reorder.")
     static let keysFooter = String(localized: "ctrl is always there; the keyboard button and arrows are at the far right. When the keys don't fit, swipe the key bar sideways.")
-    #endif
-    #if os(macOS)
-
-    /// Everything above, for the wording check (MacTerminalWordingTests).
-    static var all: [String] {
-        [loadOlder, noWrap, noWrapValue, textFooter, directFooter, shortcutsFooter, keysFooter] + gestures.map(\.text)
-    }
-    #endif
 }

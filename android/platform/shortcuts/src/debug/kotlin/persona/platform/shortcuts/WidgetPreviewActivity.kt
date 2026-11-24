@@ -62,8 +62,8 @@ class WidgetPreviewActivity : Activity() {
     }
 
     override fun onDestroy() {
-        ids.forEach { runCatching { host.deleteAppWidgetId(it) } }
-        runCatching { host.stopListening() }
+        ids.forEach { val _ = runCatching { host.deleteAppWidgetId(it) } }
+        val _ = runCatching { host.stopListening() }
         super.onDestroy()
     }
 

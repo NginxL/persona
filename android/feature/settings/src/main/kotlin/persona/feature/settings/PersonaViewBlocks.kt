@@ -185,7 +185,7 @@ fun PersonaViewBlock(view: ExtensionView, modifier: Modifier = Modifier) {
     val state = remember(view) { ExtensionViewState(view = view) }
     val handle = remember(uri) {
         ExtensionViewHandle(press = { _, _ -> }, edit = { _, _ -> }, choose = {},
-            open = { url -> if (ExtensionViewText.isHttps(url)) runCatching { uri.openUri(url) } })
+            open = { url -> if (ExtensionViewText.isHttps(url)) { val _ = runCatching { uri.openUri(url) } } })
     }
     ExtensionViewColumn(state, handle, modifier)
 }

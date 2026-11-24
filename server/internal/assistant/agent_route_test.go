@@ -131,7 +131,7 @@ func TestHandStartedAgentUnderALeaderGetsItsSignals(t *testing.T) {
 
 	agentTurn(s, f, proto.StatusDone, "做完了，PR https://github.com/o/r/pull/7 已合并", 0)
 	waitFor(t, "the leader's message", func() bool { return len(f.noticesTo("lead1")) == 1 })
-	if n := f.noticesTo("lead1")[0]; !strings.Contains(n, "📋 督办") || !strings.Contains(n, "signal=review") {
+	if n := f.noticesTo("lead1")[0]; !strings.Contains(n, "📋 督办") || !strings.Contains(n, "你督办自己派出和转交给你的任务") || !strings.Contains(n, "signal=review") {
 		t.Fatalf("the leader's message:\n%s", n)
 	}
 	if got := f.noticesTo("conv1"); len(got) != 0 {
@@ -157,8 +157,7 @@ func TestHandStartedAgentUnderALeaderGetsItsSignals(t *testing.T) {
 	}
 }
 
-// task_plan's supervisor: the main conversation hands the plan to a leader, whose tasks they are; nobody else may, and
-// only to a current leader.
+// Main may explicitly select a direction lead; ordinary side conversations cannot assign another supervisor.
 func TestTaskPlanSupervisor(t *testing.T) {
 	s, f := newQuietService(t)
 	f.known["lead1"] = true
@@ -181,10 +180,10 @@ func TestTaskPlanSupervisor(t *testing.T) {
 	}
 	res, err := plan("conv1", "lead1")
 	if err != nil || !strings.Contains(res, "Leader conversation lead1 supervises them") {
-		t.Fatalf("handed to the leader: %s %v", res, err)
+		t.Fatalf("explicit leader did not supervise the plan: %s %v", res, err)
 	}
 	waitFor(t, "the task", func() bool { return len(onlyTodo(s).Agents) == 1 })
-	if v := onlyTodo(s).Supervision; v == nil || v.Supervisor != "lead1" || len(v.DoneWhen) != 1 {
+	if v := onlyTodo(s).Supervision; v == nil || v.Supervisor != "lead1" || v.SupervisorSource != "plan" || len(v.DoneWhen) != 1 {
 		t.Fatalf("supervision: %+v", v)
 	}
 }
@@ -312,11 +311,42 @@ func (m *planMemStore) TaskPlansByID(_ context.Context, ids []string) ([]db.Task
 	return out, nil
 }
 
+func (m *planMemStore) TaskPlansMadeSince(_ context.Context, since time.Time) ([]db.TaskPlanRow, error) {
+	m.pmu.Lock()
+	defer m.pmu.Unlock()
+	var out []db.TaskPlanRow
+	for _, p := range m.plans {
+		if p.CreatedAt.Before(since) || p.State != planStarted && p.State != planDismissed {
+			continue
+		}
+		out = append(out, p)
+	}
+	slices.SortFunc(out, func(a, b db.TaskPlanRow) int {
+		if c := a.CreatedAt.Compare(b.CreatedAt); c != 0 {
+			return c
+		}
+		return strings.Compare(a.ID, b.ID)
+	})
+	return out, nil
+}
+
 func (m *planMemStore) AppendFeed(_ context.Context, r db.FeedRow) error {
 	m.pmu.Lock()
 	defer m.pmu.Unlock()
 	m.feed = append(m.feed, r)
 	return nil
+}
+
+func (m *planMemStore) FeedItem(_ context.Context, id string) (*db.FeedRow, error) {
+	m.pmu.Lock()
+	defer m.pmu.Unlock()
+	for i := len(m.feed) - 1; i >= 0; i-- {
+		if m.feed[i].ID == id {
+			r := m.feed[i]
+			return &r, nil
+		}
+	}
+	return nil, nil
 }
 
 func (m *planMemStore) Feed(_ context.Context, conversation string, since time.Time, limit int) ([]db.FeedRow, error) {

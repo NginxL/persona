@@ -1,0 +1,134 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "name": "pass_midway",
+      "hub": {"state": "finishing", "pass_started": true, "final_done": 2400, "end": 6312.5},
+      "transcription": {"mode": "hub", "state": "finishing", "gaps": [], "final_done": 2400, "end": 6312.5},
+      "minutes_state": "pending",
+      "has_minutes": false,
+      "expected": {"line": "checking", "done_minutes": 40, "total_minutes": 105}
+    },
+    {
+      "name": "pass_just_started",
+      "hub": {"state": "finishing", "pass_started": true, "final_done": 0, "end": 6312.5},
+      "transcription": {"mode": "hub", "state": "finishing", "gaps": [], "final_done": 0, "end": 6312.5},
+      "minutes_state": "pending",
+      "has_minutes": false,
+      "expected": {"line": "checking", "done_minutes": 0, "total_minutes": 105}
+    },
+    {
+      "name": "pass_not_started_yet",
+      "hub": {"state": "finishing", "pass_started": false, "final_done": 0, "end": 6312.5},
+      "transcription": {"mode": "hub", "state": "finishing", "gaps": [[600, 642.5]]},
+      "minutes_state": "pending",
+      "has_minutes": false,
+      "expected": {"line": "checking"}
+    },
+    {
+      "name": "last_window_past_the_end",
+      "hub": {"state": "finishing", "pass_started": true, "final_done": 6320, "end": 6312.5},
+      "transcription": {"mode": "hub", "state": "finishing", "gaps": [], "final_done": 6312.5, "end": 6312.5},
+      "minutes_state": "pending",
+      "has_minutes": false,
+      "expected": {"line": "checking", "done_minutes": 105, "total_minutes": 105}
+    },
+    {
+      "name": "end_unknown",
+      "hub": {"state": "finishing", "pass_started": true, "final_done": 120, "end": 0},
+      "transcription": {"mode": "hub", "state": "finishing", "gaps": []},
+      "minutes_state": "pending",
+      "has_minutes": false,
+      "expected": {"line": "checking"}
+    },
+    {
+      "name": "done_rounds_down_total_rounds",
+      "hub": {"state": "finishing", "pass_started": true, "final_done": 2459.9, "end": 3570},
+      "transcription": {"mode": "hub", "state": "finishing", "gaps": [], "final_done": 2459.9, "end": 3570},
+      "minutes_state": "pending",
+      "has_minutes": false,
+      "expected": {"line": "checking", "done_minutes": 40, "total_minutes": 60}
+    },
+    {
+      "name": "short_meeting_counts_one_minute",
+      "hub": {"state": "finishing", "pass_started": true, "final_done": 0, "end": 20},
+      "transcription": {"mode": "hub", "state": "finishing", "gaps": [], "final_done": 0, "end": 20},
+      "minutes_state": "pending",
+      "has_minutes": false,
+      "expected": {"line": "checking", "done_minutes": 0, "total_minutes": 1}
+    },
+    {
+      "name": "final_writes_the_minutes",
+      "hub": {"state": "final", "pass_started": true, "final_done": 6312.5, "end": 6312.5},
+      "transcription": {"mode": "hub", "state": "final", "gaps": []},
+      "minutes_state": "pending",
+      "has_minutes": false,
+      "expected": {"line": "writing"}
+    },
+    {
+      "name": "failed_writes_the_minutes",
+      "hub": {"state": "failed", "pass_started": true, "final_done": 0, "end": 6312.5},
+      "transcription": {"mode": "hub", "state": "failed", "gaps": []},
+      "minutes_state": "pending",
+      "has_minutes": false,
+      "expected": {"line": "writing"}
+    },
+    {
+      "name": "live_before_the_complete_upload",
+      "hub": {"state": "live", "pass_started": false, "final_done": 0, "end": 0},
+      "transcription": {"mode": "hub", "state": "live", "gaps": []},
+      "minutes_state": "pending",
+      "has_minutes": false,
+      "expected": {"line": "writing"}
+    },
+    {
+      "name": "device_mode",
+      "transcription": {"mode": "device"},
+      "minutes_state": "pending",
+      "has_minutes": false,
+      "expected": {"line": "writing"}
+    },
+    {
+      "name": "no_transcription",
+      "transcription": null,
+      "minutes_state": "pending",
+      "has_minutes": false,
+      "expected": {"line": "writing"}
+    },
+    {
+      "name": "unknown_state",
+      "transcription": {"mode": "hub", "state": "polishing", "gaps": [], "final_done": 2400, "end": 6312.5},
+      "minutes_state": "pending",
+      "has_minutes": false,
+      "expected": {"line": "writing"}
+    },
+    {
+      "name": "numbers_that_are_not_numbers",
+      "transcription": {"mode": "hub", "state": "finishing", "gaps": [], "final_done": "2400", "end": 6312.5},
+      "minutes_state": "pending",
+      "has_minutes": false,
+      "expected": {"line": "checking"}
+    },
+    {
+      "name": "minutes_shown_while_newer_ones_wait",
+      "transcription": {"mode": "hub", "state": "finishing", "gaps": [], "final_done": 2400, "end": 6312.5},
+      "minutes_state": "pending",
+      "has_minutes": true,
+      "expected": {"line": "none"}
+    },
+    {
+      "name": "minutes_ready",
+      "transcription": {"mode": "hub", "state": "final", "gaps": []},
+      "minutes_state": "ready",
+      "has_minutes": true,
+      "expected": {"line": "none"}
+    },
+    {
+      "name": "minutes_failed",
+      "transcription": {"mode": "hub", "state": "final", "gaps": []},
+      "minutes_state": "failed",
+      "has_minutes": false,
+      "expected": {"line": "none"}
+    }
+  ]
+}

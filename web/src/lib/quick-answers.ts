@@ -5,6 +5,7 @@
 import { t } from "../i18n";
 import type { Resolution } from "./answered";
 import { isSecretHandoff, isSecretRun } from "./tool-detail";
+import { supervisorHeld } from "./supervisor-held";
 import type { Interaction } from "./types";
 
 /** A permission card only its own form can allow: it has fields to fill in (#4987), it is a password card (#1137),
@@ -30,6 +31,8 @@ export interface QuickChoice {
 
 /** A row's one-tap answers; null when the card needs its chat (a plan, several questions, ticks, typing, a form). */
 export function quickAnswers(ix: Interaction): QuickChoice[] | null {
+  // a card a task's supervisor holds is not the user's to answer (lib/supervisor-held.ts): no button for it anywhere
+  if (supervisorHeld(ix)) return null;
   switch (ix.kind) {
     case "permission": {
       if (needsFieldValues(ix)) return null;

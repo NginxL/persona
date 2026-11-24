@@ -8,5 +8,6 @@
   "remove": "移除",
   "workspace": "工作区",
   "repository": "仓库",
-  "skill": "技能"
+  "skill": "技能",
+  "file": "文件"
 }

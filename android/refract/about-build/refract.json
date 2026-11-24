@@ -1,0 +1,154 @@
+{
+  "schemaVersion": 1,
+  "android": {
+    "output": {
+      "directory": "android/feature/settings/src/test/kotlin/persona/feature/settings/generated",
+      "packageName": "persona.feature.settings.generated"
+    },
+    "imports": [
+      "androidx.compose.material3.Text",
+      "persona.core.designsystem.JRow",
+      "persona.core.designsystem.PersonaTheme"
+    ],
+    "components": {
+      "SettingsBuildRow": {
+        "parameters": [
+          { "label": "title", "type": "stringKey", "required": true }
+        ],
+        "content": "parameter",
+        "contentParameter": "trailing",
+        "modifiers": [],
+        "target": "JRow",
+        "argumentStyle": "named",
+        "arguments": [
+          { "source": "title", "target": "title" }
+        ],
+        "attributes": {}
+      },
+      "SettingsBuildValue": {
+        "parameters": [
+          { "label": "text", "type": "string", "required": true },
+          { "label": "style", "type": "font", "required": true },
+          { "label": "color", "type": "color", "required": true }
+        ],
+        "content": "none",
+        "modifiers": [],
+        "target": "Text",
+        "argumentStyle": "named",
+        "arguments": [
+          { "source": "text", "target": "text" },
+          { "source": "style", "target": "style" },
+          { "source": "color", "target": "color" }
+        ],
+        "attributes": {}
+      },
+      "SettingsBuildFallback": {
+        "parameters": [
+          { "label": "title", "type": "stringKey", "required": true },
+          { "label": "style", "type": "font", "required": true },
+          { "label": "color", "type": "color", "required": true }
+        ],
+        "content": "none",
+        "modifiers": [],
+        "target": "Text",
+        "argumentStyle": "named",
+        "arguments": [
+          { "source": "title", "target": "text" },
+          { "source": "style", "target": "style" },
+          { "source": "color", "target": "color" }
+        ],
+        "attributes": {}
+      }
+    },
+    "nativeComponents": {},
+    "modifiers": {},
+    "tokens": {
+      "spacing": {},
+      "radius": {},
+      "font": { "DesignTypography.micro": "PersonaTheme.type.micro" },
+      "color": { "DesignColors.secondary": "PersonaTheme.palette.ink3" }
+    },
+    "resources": {
+      "className": "persona.feature.settings.R",
+      "catalog": "android/feature/settings/src/main/res/values/strings_core.xml",
+      "strings": {
+        "settings.about.build": "settings_about_build",
+        "settings.not.provided": "settings_not_provided"
+      }
+    }
+  },
+  "harmonyOS": {
+    "output": { "directory": "android/refract/about-build/generated-harmony-unverified" },
+    "imports": [
+      { "module": "persona/designsystem/SettingsBuildRow", "symbols": ["SettingsBuildRow"] },
+      { "module": "persona/designsystem/Text", "symbols": ["Text"] },
+      { "module": "persona/designsystem/PersonaTheme", "symbols": ["PersonaTheme"] }
+    ],
+    "components": {
+      "SettingsBuildRow": {
+        "parameters": [
+          { "label": "title", "type": "stringKey", "required": true }
+        ],
+        "content": "builder",
+        "modifiers": [],
+        "target": "SettingsBuildRow",
+        "argumentStyle": "object",
+        "arguments": [
+          { "source": "title", "target": "title" }
+        ],
+        "attributes": {}
+      },
+      "SettingsBuildValue": {
+        "parameters": [
+          { "label": "text", "type": "string", "required": true },
+          { "label": "style", "type": "font", "required": true },
+          { "label": "color", "type": "color", "required": true }
+        ],
+        "content": "none",
+        "modifiers": [],
+        "target": "Text",
+        "argumentStyle": "object",
+        "arguments": [
+          { "source": "text", "target": "text" },
+          { "source": "style", "target": "style" },
+          { "source": "color", "target": "color" }
+        ],
+        "attributes": {}
+      },
+      "SettingsBuildFallback": {
+        "parameters": [
+          { "label": "title", "type": "stringKey", "required": true },
+          { "label": "style", "type": "font", "required": true },
+          { "label": "color", "type": "color", "required": true }
+        ],
+        "content": "none",
+        "modifiers": [],
+        "target": "Text",
+        "argumentStyle": "object",
+        "arguments": [
+          { "source": "title", "target": "text" },
+          { "source": "style", "target": "style" },
+          { "source": "color", "target": "color" }
+        ],
+        "attributes": {}
+      }
+    },
+    "nativeComponents": {},
+    "modifiers": {},
+    "tokens": {
+      "spacing": {},
+      "radius": {},
+      "font": { "DesignTypography.micro": "PersonaTheme.micro" },
+      "color": { "DesignColors.secondary": "PersonaTheme.ink3" }
+    },
+    "resources": {
+      "namespace": "app",
+      "stringTable": "string",
+      "catalog": "android/refract/about-build/harmony-resource-validation-only/string.json",
+      "strings": {
+        "settings.about.build": "settings_about_build",
+        "settings.not.provided": "settings_not_provided"
+      }
+    }
+  }
+}

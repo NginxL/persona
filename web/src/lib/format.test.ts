@@ -5,6 +5,22 @@ import type { Session } from "./types";
 
 const session = (o: Partial<Session>): Session => ({ machine_id: "m", session_id: "s", cwd: "/x", status: "idle", ...o }) as Session;
 
+describe("remote path names", () => {
+  it.each([
+    ["C:\\Work\\App", "App"],
+    ["c:/Work/App/", "App"],
+    ["C:\\Work\\App\\", "App"],
+    ["\\\\server\\share\\Project", "Project"],
+    ["//server/share/Project/", "Project"],
+    ["/work/App/", "App"],
+    ["/work/a\\b", "a\\b"],
+    ["/", "/"],
+    ["", ""],
+  ])("shows the last component of %s", (path, name) => {
+    expect(baseName(path)).toBe(name);
+  });
+});
+
 describe("sessionTitle", () => {
   const tab = { slot_id: "w1:t1", slot_name: "Export work", space_kind: "herdr" };
   it("prefers a named herdr tab when enabled", () => {

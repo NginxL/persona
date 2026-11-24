@@ -13,9 +13,18 @@ import (
 // the conversation's history (#12014) adds 738 B (199,188 B ceiling). Embedding persona-opencode-runtime
 // (opencode/package.json, index.js, companion.mjs, lib/*.js including #12504/#12545; shared runtime-sdk blob reused)
 // measured 248,704 B on 2026-11-21. Session-bound A2A tool bridges bring the generated total to about 251.3 kB.
+// Minifying the remaining non-compat Antigravity lib sources (acp.js, file-links.js, models.js; #12781, #13123)
+// brings the generated total from 254,085 B back to 251,311 B under the unchanged 252,000 B ceiling.
+// Antigravity's empty-response retry and interrupted-turn notices (#13957) use the remaining room and add 850 B.
+// Runtime fixes merged on 2026-11-24 add 872 B (253,709 B): the runtime-sdk's shell gates reading quoted $(…) and
+// $'…' words (#14040, 574 B), opencode's JSONC comma-brace strings and provider:org/model split (#14091, 189 B), pi's
+// top-level oldText/newText (#14092, 11 B) and paseo's WebSocket RSV-bit and Close-payload checks (#14095, 98 B).
+// OpenCode live ACP tool-call normalization (#14130) adds 383 B on main (254,092 B).
+// The dedicated-Assistant environment handoff (#14068) adds 114 B (254,206 B).
+// Claude Code plugin 0.3.0 permission / question / plan approval bridging (#14214) adds 6,363 B (260,569 B).
 // Raise the budget only for code a runtime needs, never to embed the packages raw again.
 func TestDistBudget(t *testing.T) {
-	const budget = 252_000
+	const budget = 260_569
 	_, out := generateIntegrations(t)
 	entries, err := os.ReadDir(out)
 	if err != nil {

@@ -32,9 +32,6 @@ struct InboxPolicySheet: View {
             }
             .task { await model.load() }
         }
-        #if os(macOS)
-        .macSheet()
-        #endif
     }
 
     @ViewBuilder private var choices: some View {
@@ -129,13 +126,9 @@ struct InboxRulesView: View {
             #if os(iOS) || os(visionOS)
             .navigationBarTitleDisplayMode(.inline)
             #endif
-            #if os(macOS)
-            .macSheetDone { dismiss() }
-            #else
             .toolbar {
                 SheetClose { dismiss() }
             }
-            #endif
             .task(id: model.readKey) {
                 await model.load()
                 #if DEBUG
@@ -147,17 +140,10 @@ struct InboxRulesView: View {
             }
             .sheet(item: $editing, onDismiss: { Task { await model.load() } }) { InboxPolicySheet(target: $0) }
         }
-        #if os(macOS)
-        .macSheet()
-        #endif
     }
 
     private static var hint: String {
-        #if os(macOS)
-        String(localized: "Right-click an item in the Inbox and pick a rule for its chat, sender, or repository.")
-        #else
         String(localized: "Touch and hold an item in the Inbox and pick a rule for its chat, sender, or repository.")
-        #endif
     }
 
     private func row(_ p: InboxPolicy) -> some View {

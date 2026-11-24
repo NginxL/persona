@@ -133,7 +133,7 @@ func sendTimingOf(ctx context.Context) *sendTiming {
 
 func (h *Hub) sendMessage(w http.ResponseWriter, r *http.Request, m *Machine) {
 	started := time.Now()
-	p, ok := optionalObject(w, r, 32<<20)
+	p, ok := optionalObject(w, r, proto.MessageBodyLimit)
 	if !ok {
 		return
 	}
@@ -144,6 +144,12 @@ func (h *Hub) sendMessage(w http.ResponseWriter, r *http.Request, m *Machine) {
 		return
 	}
 	sid := r.PathValue("sid")
+	// The pictures this message carries, never those before it in the conversation (#12973).
+	if images, _ := p["images"].([]any); len(images) > 0 {
+		if row, _ := m.session(sid); apierr.ImagesOverLimit(w, proto.HubImageLimits.For(row.Agent), len(images)) {
+			return
+		}
+	}
 	if terminalAgentSend(r.Context()) {
 		if _, ok := h.terminalAgentTarget(m, sid); !ok {
 			h.refuseTerminalAgent(w, r)
@@ -166,7 +172,7 @@ func (h *Hub) sendMessage(w http.ResponseWriter, r *http.Request, m *Machine) {
 
 	if caller := principalOf(r.Context()); caller.Role == roleScoped {
 		row, exists := m.session(sid)
-		if !exists || healthSession(&row) {
+		if !exists || spaceSession(&row) {
 			writeErr(w, http.StatusNotFound, errors.New("no such session"))
 			return
 		}
@@ -525,15 +531,28 @@ func (h *Hub) linkSentTodo(ctx context.Context, m *Machine, todoID, sid string, 
 func (h *Hub) deliverOnce(ctx context.Context, m *Machine, p map[string]any) (int, []byte, string) {
 	var out json.RawMessage
 	sendTimingOf(ctx).mark("dispatch_started", true)
+	sid, _ := p["session_id"].(string)
+	sentAt := time.Now()
+	if sid != "" {
+		// Arm before calling the node so fast streaming deltas emitted while session.send is still
+		// in flight are captured; definitive non-delivery or queued responses disarm below.
+		h.ttft.arm(m.cfg.ID, sid, sentAt)
+	}
 	err := m.call(ctx, "session.send", p, &out)
 	sendTimingOf(ctx).mark("node_returned", err == nil)
 	switch outcome := sendOutcome(err); {
 	case err == nil:
+		if sid != "" && sendReturnedQueued(out) {
+			h.ttft.disarm(m.cfg.ID, sid, sentAt)
+		}
 		if len(out) == 0 {
 			out = json.RawMessage("{}")
 		}
 		return http.StatusOK, append(out, '\n'), outcome
 	case rpcCodeOf(err) == devicewire.CodeHeld && holdOf(ctx) != nil:
+		if sid != "" {
+			h.ttft.disarm(m.cfg.ID, sid, sentAt)
+		}
 		// The machine's manager holds it until the computer is back (withHold, #10661): nothing was typed, it goes by
 		// itself, and a retry of the id is answered as kept (sendLater). Only for a send that asked to be held: any other
 		// held answer is an ordinary refusal, never a kept message its client cannot draw.
@@ -544,9 +563,22 @@ func (h *Hub) deliverOnce(ctx context.Context, m *Machine, p map[string]any) (in
 		status, body := callErrBytes(l, unknownDelivery(l, "hub-send.lost_during"))
 		return status, body, outcome
 	default:
+		if sid != "" && outcome == "" {
+			h.ttft.disarm(m.cfg.ID, sid, sentAt)
+		}
 		status, body := callErrBytes(h.contextLang(ctx), apierr.OnMachine(err, m.name())) // claude_missing on "<name>'s MacBook"
 		return status, body, outcome
 	}
+}
+
+func sendReturnedQueued(out json.RawMessage) bool {
+	if len(out) == 0 {
+		return false
+	}
+	var flag struct {
+		Queued bool `json:"queued"`
+	}
+	return json.Unmarshal(out, &flag) == nil && flag.Queued
 }
 
 // conversationSent tells the conversation's manager how an app's message to it went, delivered or not (the north

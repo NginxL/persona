@@ -10,9 +10,13 @@ import (
 
 	"github.com/nwverse/persona/server/internal/extension/sandbox"
 	"github.com/nwverse/persona/server/internal/extension/sourcevalidate"
+	"github.com/nwverse/persona/server/internal/testhome"
 )
 
 func TestMain(m *testing.M) {
+	// The market tests make and clone repositories of their own: none of that may reach the repository this run was
+	// started from (`git bisect run` exports GIT_DIR; #13610).
+	testhome.ClearGit()
 	if len(os.Args) > 1 {
 		switch os.Args[1] {
 		case sandbox.ValidationRunCommand:

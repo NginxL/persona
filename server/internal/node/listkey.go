@@ -54,6 +54,7 @@ func listKeySized(list []proto.Session, size int) string {
 			w.str(strconv.FormatBool(s.TitleManual), '/')
 			w.int(int64(s.OutputTokens), '\n')
 		}
+		writeContextBreakdownKey(&w, s.ContextBreakdown())
 		writeUltracodeKey(&w, s)
 		if s.ServiceTier != "" || len(s.ServiceTiers) > 0 {
 			fmt.Fprintf(&w.b, "speed:%q/%v\n", s.ServiceTier, s.ServiceTiers)
@@ -106,6 +107,9 @@ func listKeySized(list []proto.Session, size int) string {
 			w.str(c.State, '/')
 			w.int(c.StartedAt.Unix(), '\n')
 		}
+		if s.ContextRestartRecommended {
+			w.b.WriteString("context-restart\n")
+		}
 		// A Codex thread's effort, which may change on the computer without a turn (codex_effort.go).
 		if len(s.Efforts) > 0 {
 			fmt.Fprintf(&w.b, "effort:%s/%v\n", s.Effort, s.Efforts)
@@ -139,7 +143,8 @@ func listKeySized(list []proto.Session, size int) string {
 		for _, t := range s.Background {
 			w.str(t.ID, ',')
 		}
-		w.str(strconv.FormatBool(s.BackgroundWaiting), '\n')
+		w.str(strconv.FormatBool(s.BackgroundWaiting), ',')
+		w.str(strconv.FormatUint(uint64(s.BackgroundStalledSince), 10), '\n') // a stall that begins or ends changes the row; its time is fixed while it lasts
 		for _, t := range s.BackgroundEnded() {
 			w.b.WriteString("ended:")
 			w.str(t.ID, '/')
@@ -292,4 +297,20 @@ func unixOf(t *time.Time) int64 {
 		return 0
 	}
 	return t.Unix()
+}
+
+func writeContextBreakdownKey(w *keyWriter, bd *proto.ContextBreakdown) {
+	if bd == nil {
+		return
+	}
+	w.b.WriteString("ctxbd:")
+	w.str(bd.Source, '/')
+	for _, p := range [...]*int{bd.SystemAndRules, bd.ToolsAndMCP, bd.Conversation, bd.ToolOutputs, bd.Free, bd.AutoCompactThreshold} {
+		if p == nil {
+			w.b.WriteString("-/")
+		} else {
+			w.int(int64(*p), '/')
+		}
+	}
+	w.b.WriteByte('\n')
 }

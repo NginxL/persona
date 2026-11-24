@@ -15,7 +15,7 @@ import (
 
 	"github.com/nwverse/persona/server/internal/assistantwire"
 	"github.com/nwverse/persona/server/internal/connector"
-	"github.com/nwverse/persona/server/internal/connector/imessage"
+	"github.com/nwverse/persona/server/internal/imessagewire"
 	"github.com/nwverse/persona/server/internal/proto"
 	"github.com/nwverse/persona/server/internal/rpc"
 )
@@ -55,6 +55,7 @@ const imessageChatsPage = `{"chats":[{"id":"imessage-0123456789ab","name":"张�
 // The app reads a Mac's Messages through the hub: status with its steps, conversations, messages; the hub passes
 // the pages along, refuses what is not a conversation id, and turns the node's failures into codes the app acts on.
 func TestIMessageThroughTheHub(t *testing.T) {
+	needsIMessageModule(t)
 	h := newTestManager(t)
 	h.connectors = connector.NewRegistry(nil)
 	var logs bytes.Buffer
@@ -99,7 +100,7 @@ func TestIMessageThroughTheHub(t *testing.T) {
 		}
 		return nil, fmt.Errorf("unexpected %s", method)
 	})
-	h.cfg.IMessage = &imessage.Config{Machine: "mac"}
+	h.cfg.IMessage = &imessagewire.Config{Machine: "mac"}
 	if err := h.addIMessage(*h.cfg.IMessage); err != nil {
 		t.Fatal(err)
 	}
@@ -167,13 +168,14 @@ func TestIMessageThroughTheHub(t *testing.T) {
 
 // An old node, and a Mac that is not connected.
 func TestIMessageOldOrOfflineMac(t *testing.T) {
+	needsIMessageModule(t)
 	h := newTestManager(t)
 	h.connectors = connector.NewRegistry(nil)
 	mux := h.routes()
 	m, _ := imessageNode(t, h, func(method string, _ json.RawMessage) (any, error) {
 		return nil, &rpc.Error{Message: "unknown method " + method}
 	})
-	if err := h.addIMessage(imessage.Config{Machine: "mac"}); err != nil {
+	if err := h.addIMessage(imessagewire.Config{Machine: "mac"}); err != nil {
 		t.Fatal(err)
 	}
 	h.imessage().Check(context.Background())
@@ -193,6 +195,7 @@ func TestIMessageOldOrOfflineMac(t *testing.T) {
 
 // "Hand to Persona": on unless the user turned it off; the choice is kept and applied at once.
 func TestIMessageAISwitch(t *testing.T) {
+	needsIMessageModule(t)
 	h := newTestManager(t)
 	h.store = newMemStore() // the choice is kept
 	h.connectors = connector.NewRegistry(nil)
@@ -200,7 +203,7 @@ func TestIMessageAISwitch(t *testing.T) {
 	imessageNode(t, h, func(method string, _ json.RawMessage) (any, error) {
 		return json.RawMessage(`{"connectors":[{"id":"imessage","status":"ok"}]}`), nil
 	})
-	if err := h.addIMessage(imessage.Config{Machine: "mac"}); err != nil {
+	if err := h.addIMessage(imessagewire.Config{Machine: "mac"}); err != nil {
 		t.Fatal(err)
 	}
 	if _, out := call(t, mux, "GET", "/api/v1/imessage", h.cfg.Token, ""); out["ai"] != true {
@@ -217,7 +220,7 @@ func TestIMessageAISwitch(t *testing.T) {
 	}
 	// A restart reads the choice back.
 	h.connectors = connector.NewRegistry(nil)
-	if err := h.addIMessage(imessage.Config{Machine: "mac"}); err != nil {
+	if err := h.addIMessage(imessagewire.Config{Machine: "mac"}); err != nil {
 		t.Fatal(err)
 	}
 	if h.imessage().AI() {
@@ -232,6 +235,7 @@ func TestIMessageAISwitch(t *testing.T) {
 // connectors.archives / connectors.changes) as chat imessage-<the conversation's hash>, senders as the hash of their
 // number: no number in an id; the cursor moves on.
 func TestIMessageArchive(t *testing.T) {
+	needsIMessageModule(t)
 	h := newTestManager(t)
 	h.store = newMemStore()
 	h.connectors = connector.NewRegistry(nil)
@@ -247,7 +251,7 @@ func TestIMessageArchive(t *testing.T) {
 		}
 		return nil, fmt.Errorf("unexpected %s", method)
 	})
-	if err := h.addIMessage(imessage.Config{Machine: "mac"}); err != nil {
+	if err := h.addIMessage(imessagewire.Config{Machine: "mac"}); err != nil {
 		t.Fatal(err)
 	}
 	h.imessage().Check(context.Background())
@@ -262,11 +266,11 @@ func TestIMessageArchive(t *testing.T) {
 	}
 	var archives assistantwire.Archives
 	_ = json.Unmarshal(ask(assistantwire.ConnectorsArchives, map[string]any{}), &archives)
-	if !slices.ContainsFunc(archives.Archives, func(a assistantwire.ArchiveSource) bool { return a.ID == imessage.ID }) {
+	if !slices.ContainsFunc(archives.Archives, func(a assistantwire.ArchiveSource) bool { return a.ID == imessagewire.ID }) {
 		t.Fatalf("archives %+v", archives)
 	}
 	var res assistantwire.ChangesResult
-	_ = json.Unmarshal(ask(assistantwire.ConnectorsChanges, map[string]any{"id": imessage.ID, "cursor": "", "fence_version": assistantwire.ArchiveFenceV1}), &res)
+	_ = json.Unmarshal(ask(assistantwire.ConnectorsChanges, map[string]any{"id": imessagewire.ID, "cursor": "", "fence_version": assistantwire.ArchiveFenceV1}), &res)
 	if res.Next != "9" || len(res.Batches) != 1 {
 		t.Fatalf("changes %+v", res)
 	}
@@ -274,7 +278,7 @@ func TestIMessageArchive(t *testing.T) {
 	if b.Chat.ID != "0123456789ab" || b.Chat.Name != "张三" || b.Chat.Kind != "dm" || len(b.Messages) != 2 {
 		t.Fatalf("batch %+v", b)
 	}
-	if m := b.Messages[0]; m.SenderID != imessage.PersonKey("+15550100") || m.SenderName != "张三" || m.Mine {
+	if m := b.Messages[0]; m.SenderID != imessagePersonKey("+15550100") || m.SenderName != "张三" || m.Mine {
 		t.Fatalf("their message %+v", m)
 	}
 	if !b.Messages[1].Mine {
@@ -290,6 +294,7 @@ func TestIMessageArchive(t *testing.T) {
 // (kb.forget) and the inbox's iMessage items (inbox.forget), both the assistant's in this process, go; the counts are
 // theirs.
 func TestIMessageDelete(t *testing.T) {
+	needsIMessageModule(t)
 	h := newTestManager(t)
 	h.store = newMemStore()
 	h.connectors = connector.NewRegistry(nil)
@@ -302,7 +307,7 @@ func TestIMessageDelete(t *testing.T) {
 	imessageNode(t, h, func(method string, _ json.RawMessage) (any, error) {
 		return json.RawMessage(`{"connectors":[{"id":"imessage","status":"ok"}]}`), nil
 	})
-	if err := h.addIMessage(imessage.Config{Machine: "mac"}); err != nil {
+	if err := h.addIMessage(imessagewire.Config{Machine: "mac"}); err != nil {
 		t.Fatal(err)
 	}
 

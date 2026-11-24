@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/nwverse/persona/server/internal/extension"
+	"github.com/nwverse/persona/server/internal/node/iphoneport"
 	"github.com/nwverse/persona/server/internal/proto"
 )
 
@@ -114,6 +115,14 @@ func TestBuiltinProgramsInInfoAndNeverAPackage(t *testing.T) {
 	n, _ := pluginTestNode(t)
 	if !slices.Equal(builtinProgramIDs, []string{"cua", "ego", "imessage", "iphone"}) {
 		t.Fatalf("builtin_programs %v", builtinProgramIDs)
+	}
+	// node.info lists iphone only with the phone-extra module (internal/node/iphoneport).
+	want := []string{"cua", "ego", "imessage"}
+	if iphoneport.Get() != nil {
+		want = append(want, "iphone")
+	}
+	if got := builtinProgramsInfo(); !slices.Equal(got, want) {
+		t.Fatalf("node.info's builtin_programs %v, want %v", got, want)
 	}
 	for _, id := range builtinProgramIDs {
 		s := proto.PluginNodeStart{ID: id, Version: "1.0.0", Command: "x", RPC: true, Keep: extension.KeepLease}

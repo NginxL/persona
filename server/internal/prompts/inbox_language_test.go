@@ -58,3 +58,39 @@ func TestMalformedInboxMarkerIsNotInferred(t *testing.T) {
 		}
 	}
 }
+
+func TestInboxReplyPolicyPromptLanguages(t *testing.T) {
+	for _, tc := range []struct {
+		language string
+		sysWant  string
+		inWant   string
+	}{
+		{"", "允许的分类", "待评估的回复文本"},
+		{"English", "Allowed categories", "Reply text to evaluate:"},
+		{"日本語", "許可されたカテゴリ", "送信予定の返信テキスト"},
+	} {
+		t.Run(tc.language, func(t *testing.T) {
+			sys := RenderInboxReplyPolicy(InboxReplyPolicy{
+				Language:   tc.language,
+				Owner:      "Alex",
+				Categories: []string{"approval_commitment", "routine_reply"},
+				Rules:      "Keep approvals owner-only",
+			})
+			if !strings.Contains(sys, tc.sysWant) || !strings.Contains(sys, "routine_reply") || !strings.Contains(sys, "approval_commitment") {
+				t.Fatalf("unexpected system prompt (%q):\n%s", tc.language, sys)
+			}
+			in := RenderInboxReplyPolicyInput(InboxReplyPolicyInput{
+				Language:  tc.language,
+				Title:     "Example",
+				Sender:    "Colleague",
+				Source:    "lark",
+				Kind:      "dm",
+				Context:   "Can you check?",
+				ReplyText: "I will check today.",
+			})
+			if !strings.Contains(in, tc.inWant) || !strings.Contains(in, "I will check today.") {
+				t.Fatalf("unexpected input prompt (%q):\n%s", tc.language, in)
+			}
+		})
+	}
+}

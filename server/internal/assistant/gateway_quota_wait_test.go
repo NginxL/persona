@@ -71,6 +71,7 @@ func TestGatewayQuotaWaitParksBeforeAdmissionAndResumes(t *testing.T) {
 		s.admission.machineClaims["busy"] != 0 || s.admission.groupClaims["pool"] != 0 {
 		t.Fatalf("deferral reached admission, reported failure, or reached a node: %+v", todo)
 	}
+	checkPlacementGolden(t, p.Tasks[0].Placement, "v1 enforce busy ->  (assistant-tasks.gateway_quota_wait) | busy assistant-tasks.gateway_quota_wait")
 	card := queuedCard(t, s, p.ID)
 	if card.State != "waiting" || !strings.Contains(card.Reason, q.Reason) {
 		t.Fatalf("the card must explain the wait: %+v", card)

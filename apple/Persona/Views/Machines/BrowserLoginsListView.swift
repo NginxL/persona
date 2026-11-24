@@ -12,19 +12,13 @@ struct BrowserLoginsListView: View {
     @State private var chosen = Set<String>()
     /// The sites the confirmation asks about.
     @State private var clearing: [String]?
-    #if !os(macOS)
     @State private var editMode: EditMode = .inactive
-    #endif
 
     /// The search waits this long after the last key before the list is filtered again.
     private static let settle = Duration.milliseconds(150)
 
     private var selecting: Bool {
-        #if os(macOS)
-        true
-        #else
         editMode.isEditing
-        #endif
     }
 
     var body: some View {
@@ -51,9 +45,7 @@ struct BrowserLoginsListView: View {
                 }
             }
         }
-        #if !os(macOS)
         .environment(\.editMode, $editMode)
-        #endif
         .overlay { placeholder }
         .pageSearchable(text: $typed, prompt: String(localized: "Search Sites"))
         .task(id: typed) {
@@ -72,9 +64,7 @@ struct BrowserLoginsListView: View {
         .browserLoginsClearDialog($clearing, busy: logins.busy) { sites in
             guard await logins.clear(sites) else { return }
             chosen.subtract(sites)
-            #if !os(macOS)
             withAnimation(Theme.Motion.state) { editMode = .inactive }
-            #endif
         }
         .themedPage()
         .detailTitle(String(localized: "Browser Sign-ins"))
@@ -88,7 +78,6 @@ struct BrowserLoginsListView: View {
         if shell != nil {
             ToolbarItem(placement: .topBarTrailing) {
                 Menu {
-                    #if !os(macOS)
                     if editMode.isEditing {
                         Button("Done") {
                             withAnimation(Theme.Motion.state) { editMode = .inactive }
@@ -102,7 +91,6 @@ struct BrowserLoginsListView: View {
                             .disabled(logins.shown.isEmpty || logins.busy)
                             .accessibilityIdentifier("browser-logins-select")
                     }
-                    #endif
                     Section("Sort By") {
                         Toggle("Name", isOn: choice(.name))
                         Toggle("Expiring First", isOn: choice(.expiry))
@@ -112,7 +100,6 @@ struct BrowserLoginsListView: View {
                     .accessibilityIdentifier("browser-logins-sort")
             }
         } else {
-            #if !os(macOS)
             ToolbarItem(placement: .topBarTrailing) {
                 if editMode.isEditing {
                     Button("Done") {
@@ -128,7 +115,6 @@ struct BrowserLoginsListView: View {
                         .accessibilityIdentifier("browser-logins-select")
                 }
             }
-            #endif
             ToolbarItem(placement: .topBarTrailing) {
                 Menu {
                     Section("Sort By") {
@@ -193,9 +179,7 @@ struct BrowserLoginsListView: View {
         try? await Task.sleep(for: .milliseconds(600))
         if open == "search" { typed = "ra" }
         guard open == "select" || open == "confirm" else { return }
-        #if !os(macOS)
         editMode = .active
-        #endif
         let shown = logins.shown.map(\.domain)
         chosen = Set([shown.first, shown.dropFirst(2).first].compactMap { $0 })
         if open == "confirm" {

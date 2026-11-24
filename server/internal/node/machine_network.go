@@ -64,6 +64,8 @@ func (n *Node) machineNetworkOptions() machineNetworkOptions {
 	return machineNetworkOptions{}
 }
 
+func init() { nodeRPC(proto.MethodMachineNetwork, (*Node).machineNetwork) }
+
 // machineNetwork handles the read-only on-demand machine.network RPC.
 func (n *Node) machineNetwork(ctx context.Context, params json.RawMessage) (any, error) {
 	if err := validateMachineNetworkParams(params); err != nil {

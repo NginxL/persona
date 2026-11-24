@@ -39,7 +39,7 @@ import java.io.File
 
 /**
  * The composer's / row and + sheet at 360dp, in every language, style, appearance and text size. No text line is
- * ellipsized and no labels overlap. Fitting default rows keep their origin/main frames. The existing English and Japanese
+ * ellipsized and no labels overlap. Fitting default and capped rows keep their existing inline layout. The existing English and Japanese
  * /clear details already ellipsize at the default size, so the measured-width rule moves those below the command too.
  * PNGs go to `build/composer-large-text-shots/`.
  */
@@ -111,6 +111,8 @@ class ComposerLargeTextShotsTest {
                 if (fontScale == 1f && language == "zh-Hans") {
                     // The fitting default row is pixel-for-pixel the original one (origin/main at xhdpi).
                     assertEquals("$where: the fitting default frame changed", Rect(0f, 8f, 720f, 88f), frame)
+                } else if (fontScale == 2f && language == "zh-Hans") {
+                    assertTrue("$where: the capped detail fits beside the command", detailFrame.top < wordFrame.bottom)
                 } else if (fontScale == 2f) {
                     assertTrue("$where: the overflowing detail moved below the command", detailFrame.top >= wordFrame.bottom)
                 }
@@ -159,7 +161,7 @@ class ComposerLargeTextShotsTest {
 
     private fun textLayout(text: String): TextLayoutResult {
         val layouts = mutableListOf<TextLayoutResult>()
-        rule.onNodeWithText(text, useUnmergedTree = true).fetchSemanticsNode()
+        val _ = rule.onNodeWithText(text, useUnmergedTree = true).fetchSemanticsNode()
             .config[SemanticsActions.GetTextLayoutResult].action!!(layouts)
         return layouts.single()
     }

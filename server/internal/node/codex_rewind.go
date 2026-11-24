@@ -3,7 +3,6 @@ package node
 import (
 	"context"
 	"errors"
-	"os/exec"
 	"strings"
 	"time"
 
@@ -92,7 +91,7 @@ func (n *Node) rewindCodex(ctx context.Context, id string, o rewindOpts) (map[st
 	if o.Restore != RestoreConversation || !n.canRewindCodex(id) {
 		return nil, rewindError(rewindUnsupported, "This Codex session needs a shared app-server and persistent paginated history to rewind.")
 	}
-	if _, err := exec.LookPath("sqlite3"); err != nil {
+	if _, err := codexSQLiteProgram(); err != nil {
 		return nil, rewindError(rewindUnsupported, "The node needs sqlite3 to synchronize Codex history after rewinding.")
 	}
 	ctx, cancel := context.WithTimeout(ctx, rewindTotalLimit)

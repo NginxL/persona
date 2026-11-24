@@ -1,0 +1,10 @@
+{
+  "invalid": "Invalid repository mirror settings. Enable the mirror before turning on auto-sync, and use an interval between 15 and 1440 minutes.",
+  "not_found": "This repository mirror configuration was not found.",
+  "readonly": "This device can only view repository mirror settings.",
+  "store": "Couldn't read or save repository mirror settings. Retry in a moment.",
+  "node_unavailable": "The selected computer is offline or unavailable.",
+  "unsupported": "This computer's Persona Node doesn't support managed bare mirrors yet.",
+  "sync_failed": "Couldn't sync the managed repository mirror on this computer.",
+  "remove_failed": "Couldn't remove the managed repository mirror on this computer."
+}

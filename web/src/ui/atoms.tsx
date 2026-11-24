@@ -615,9 +615,11 @@ export function Menu({
     // eslint-disable-next-line react-hooks/exhaustive-deps -- the handlers read `live`; only the menu's anchor and close change them
   }, [anchor, onClose, id, focusScoped]);
 
+  const inSidePanel = Boolean(anchor?.closest?.("[data-side-panel]"));
   const panelProps = (depth: number) => ({
     id,
     depth,
+    inSidePanel,
     items: levels[depth],
     active: actives[depth] ?? -1,
     confirming,
@@ -674,11 +676,12 @@ type Place =
 
 /** One level of a menu: the rows, the highlight gliding under them, a rename input or a failure where they call for it. */
 function MenuPanel({
-  id, depth, items, active, confirming, renaming, busy, failure, rows: report, keyed, place, header, headerAsWritten, loading, loadError,
+  id, depth, inSidePanel, items, active, confirming, renaming, busy, failure, rows: report, keyed, place, header, headerAsWritten, loading, loadError,
   onHover, onEnter, onLeave, onChoose, onRename, onCancelRename,
 }: {
   id: string;
   depth: number;
+  inSidePanel?: boolean;
   items: MenuItem[];
   active: number;
   confirming: string | null;
@@ -783,6 +786,7 @@ function MenuPanel({
       role={reading ? "dialog" : "menu"}
       aria-label={reading ? (header ?? items[0].label) : undefined}
       data-menu={id}
+      data-side-panel={inSidePanel ? "" : undefined}
       className="fixed z-50 max-h-[calc(100dvh-(--spacing(4)))] overflow-y-auto rounded-[10px] bg-surface p-1 shadow-overlay"
       style={{ ...pos, animation: `pop-in 160ms ${EASE} both`, transformOrigin: origin }}
       onMouseEnter={onEnter}

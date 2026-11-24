@@ -38,9 +38,6 @@ final class MarkdownRenderer {
     private var waiting: [String] = []
     private var drawing = false
     private let dir = URL.cachesDirectory.appending(path: "markdown-render", directoryHint: .isDirectory)
-    #if os(macOS)
-    private var window: NSWindow?
-    #endif
 
     private init() {
         images.totalCostLimit = 48 << 20

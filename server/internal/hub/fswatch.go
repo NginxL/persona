@@ -103,9 +103,44 @@ func (h *Hub) initFSWatchEpoch() {
 	} else if err != nil {
 		h.logf("fs.watch epoch: %v", err)
 	}
+	if !h.quiesce.beginOrDefer(func() {
+		h.fsWatchEpochDeferred.Store(true)
+	}) {
+		return
+	}
+	defer h.quiesce.end()
 	if err := store.PutSetting(context.Background(), fsWatchEpochKey, h.fsWatchEpoch); err != nil {
 		h.logf("fs.watch epoch: save: %v", err)
 	}
+}
+
+func (h *Hub) resumeFSWatchEpoch() {
+	store, ok := h.store.(*db.DB)
+	if !ok {
+		return
+	}
+	if !h.fsWatchEpochDeferred.Swap(false) {
+		return
+	}
+	h.fsWatchGenMu.Lock()
+	epoch := h.fsWatchEpoch
+	h.fsWatchGenMu.Unlock()
+	if epoch == 0 {
+		return
+	}
+	h.nodeWorkers.Add(1)
+	go func() {
+		defer h.nodeWorkers.Done()
+		if !h.quiesce.beginOrDefer(func() {
+			h.fsWatchEpochDeferred.Store(true)
+		}) {
+			return
+		}
+		defer h.quiesce.end()
+		if err := store.PutSetting(context.Background(), fsWatchEpochKey, epoch); err != nil {
+			h.logf("fs.watch epoch: save: %v", err)
+		}
+	}()
 }
 
 func (h *Hub) nextFSWatchGeneration(id string) uint64 {

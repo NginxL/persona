@@ -2,6 +2,7 @@ package persona.feature.machines
 
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyListScope
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
@@ -292,37 +293,118 @@ private fun sampleAge(iso: String, now: Instant): String {
 }
 
 /**
- * "Subscription limits" on the machines overview (the web's sidebar bars and their popover in one): every live account, the fullest
- * first, each window with how much is used, when it starts over and whether use is ahead of an even pace. Hidden
- * entirely while the hub has no data.
+ * "Subscription limits" on the machines overview (the web's sidebar bars and their popover in one; #13173): one card per account type,
+ * every live account in it (the soonest weekly reset first) with its 5-hour and weekly windows, how much is used, when each starts
+ * over, whether use is ahead of an even pace, and the reset timeline. Under the cards a switch per account type; what is off is
+ * only hidden on this phone. Hidden entirely while the hub has no data.
  */
-internal fun LazyListScope.usageWindows(accounts: List<UsageAccount>, now: Instant) {
-    val live = orderedAccounts(liveAccounts(accounts, now))
-    if (live.isEmpty()) return
+internal fun LazyListScope.usageWindows(accounts: List<UsageAccount>, now: Instant, hidden: Set<String> = emptySet(), onShow: (String, Boolean) -> Unit = { _, _ -> }) {
+    val groups = groupByProvider(liveAccounts(accounts, now))
+    if (groups.isEmpty()) return
     item("usage-title") { JSectionHeader(stringResource(R.string.machines_usage_title)) }
-    // The hub's ids can repeat (two accounts without a reset time, #5304), so the position keeps the keys apart.
-    itemsIndexed(live, key = { index, it -> "usage-$index-${it.id}" }, contentType = { _, _ -> "usage" }) { _, account ->
-        JCard(Modifier.padding(bottom = Tokens.Space.m)) { UsageAccountCard(account, now) }
+    items(groups.filter { it.provider !in hidden }, key = { "usage-${it.provider}" }, contentType = { "usage" }) { group ->
+        JCard(Modifier.padding(bottom = Tokens.Space.m)) { UsageProviderCard(group, now) }
+    }
+    item("usage-types") {
+        JCard(Modifier.padding(bottom = Tokens.Space.m)) {
+            Text(stringResource(R.string.machines_usage_types_title), style = PersonaTheme.type.headline, color = PersonaTheme.palette.ink)
+            for (group in groups) JSwitchRow(providerTitle(group.provider), group.provider !in hidden, { onShow(group.provider, it) })
+            Text(stringResource(R.string.machines_usage_types_hint), style = PersonaTheme.type.caption, color = PersonaTheme.palette.ink3)
+        }
+    }
+}
+
+/** The account type as the card names it: the brands by their own spelling, anything else as the hub sends it. */
+@Composable
+private fun providerTitle(provider: String): String = when (provider) {
+    "claude" -> "Claude"
+    "codex" -> "Codex"
+    "xai" -> "xAI"
+    USAGE_OTHER_PROVIDER -> stringResource(R.string.machines_usage_provider_other)
+    else -> provider.replaceFirstChar { it.uppercase() }
+}
+
+@Composable
+private fun UsageProviderCard(group: UsageProviderGroup, now: Instant) {
+    val palette = PersonaTheme.palette
+    Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.m)) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Tokens.Space.s)) {
+            Text(providerTitle(group.provider), style = PersonaTheme.type.headline, color = palette.ink, maxLines = 1)
+            Text(pluralStringResource(R.plurals.machines_usage_accounts, group.accounts.size, group.accounts.size),
+                Modifier.weight(1f), style = PersonaTheme.type.caption, color = palette.ink3, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            group.newestSampledAt?.let { Text(sampleAge(it.toString(), now), style = PersonaTheme.type.caption, color = palette.ink3, maxLines = 1) }
+        }
+        // The hub's ids can repeat (two accounts without a reset time, #5304), so the position keeps the keys apart.
+        group.accounts.forEachIndexed { index, account -> key("$index-${account.id}") { UsageAccountBlock(account, now) } }
+        UsageResetChart(group, now)
     }
 }
 
 @Composable
-private fun UsageAccountCard(a: UsageAccount, now: Instant) {
+private fun UsageAccountBlock(a: UsageAccount, now: Instant) {
     val palette = PersonaTheme.palette
     // The computers that read it by name; never "this computer", which reads as the phone in hand (#1907).
     val sources = a.machines.ifEmpty { listOfNotNull(stringResource(R.string.machines_usage_source_local).takeIf { a.local }) } + a.sources
     val plan = planNote(a)
     Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.s)) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Tokens.Space.s)) {
-            Text(a.name, Modifier.weight(1f), style = PersonaTheme.type.headline, color = palette.ink, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            val age = sampleAge(a.sampledAt, now)
-            Text(if (a.stale) stringResource(R.string.machines_usage_stale_age, age) else age,
-                style = PersonaTheme.type.caption, color = if (a.stale) palette.cautionText else palette.ink3, maxLines = 1)
+            Text(a.name, Modifier.weight(1f), style = PersonaTheme.type.label, color = palette.ink, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            if (a.stale) Text(stringResource(R.string.machines_usage_stale_age, sampleAge(a.sampledAt, now)),
+                style = PersonaTheme.type.caption, color = palette.cautionText, maxLines = 1)
         }
         val line = listOfNotNull(plan.takeIf { it.isNotEmpty() }, sources.takeIf { it.isNotEmpty() }?.joinToString(" · ")).joinToString(" · ")
         if (line.isNotEmpty()) Text(line, style = PersonaTheme.type.caption, color = palette.ink3, maxLines = 1, overflow = TextOverflow.Ellipsis)
         problemText(a.problem)?.let { Text(stringResource(it), style = PersonaTheme.type.caption, color = palette.cautionText) }
-        a.windows.forEach { WindowRow(it, now, a.stale) }
+        orderedWindows(a).forEach { WindowRow(it, now, a.stale) }
+    }
+}
+
+/** A capsule's label: the time left in the short form (45m, 1.5h, 18h, 2d 2h). */
+@Composable
+private fun chartLabel(millis: Long): String = when (val d = chartDuration(millis)) {
+    is ChartDuration.Minutes -> stringResource(R.string.machines_usage_minutes, d.m)
+    is ChartDuration.Hours ->
+        if (d.tenths % 10 == 0L) stringResource(R.string.machines_usage_hours, d.tenths / 10)
+        else stringResource(R.string.machines_usage_hours_tenths, java.text.NumberFormat.getNumberInstance(currentLocale).apply { maximumFractionDigits = 1 }.format(d.tenths / 10.0))
+    is ChartDuration.DaysHours -> stringResource(R.string.machines_usage_days_hours, d.d, d.h)
+}
+
+/**
+ * The card's reset chart (#13173): one shared axis, a row per account in the order of the list above, a capsule per window from now to
+ * its reset. Always shown while an account of the card has a window with a reset time.
+ */
+@Composable
+private fun UsageResetChart(group: UsageProviderGroup, now: Instant) {
+    val palette = PersonaTheme.palette
+    val rows = remember(group, now.epochSecond / 60) { resetChartRows(group.accounts, now) } ?: return
+    val nowLabel = stringResource(R.string.machines_usage_axis_now)
+    val ticks = mutableListOf(JResetChartTick(0f, nowLabel))
+    for (h in RESET_CHART_TICK_HOURS) {
+        ticks += JResetChartTick(resetChartAxis(h * 3_600_000L),
+            if (h < 24) stringResource(R.string.machines_usage_hours, h.toLong()) else stringResource(R.string.machines_usage_days, (h / 24).toLong()))
+    }
+    val specs = mutableListOf<JResetChartRowSpec>()
+    val parts = mutableListOf<String>()
+    for (row in rows) {
+        val five = row.five?.let { JResetBarSpec(it.endFraction, chartLabel(it.resetsInMillis)) }
+        val week = row.week?.let { JResetBarSpec(it.endFraction, chartLabel(it.resetsInMillis)) }
+        specs += JResetChartRowSpec(row.account.name, row.account.plan?.trim().orEmpty().substringBefore(' '), five, week)
+        val windows = listOfNotNull(
+            row.five?.let { stringResource(R.string.machines_usage_timeline_window, "5h", resetText(Instant.ofEpochMilli(now.toEpochMilli() + it.resetsInMillis).toString(), now).orEmpty()) },
+            row.week?.let { stringResource(R.string.machines_usage_timeline_window, "7d", resetText(Instant.ofEpochMilli(now.toEpochMilli() + it.resetsInMillis).toString(), now).orEmpty()) },
+        )
+        parts += stringResource(R.string.machines_usage_chart_row, row.account.name, windows.joinToString(", "))
+    }
+    val anyProtect = group.accounts.any { a -> a.windows.any { protectLine(it) != null } }
+    val legend = listOfNotNull(
+        JResetLegendKind.FiveHour to stringResource(R.string.machines_usage_legend_five),
+        JResetLegendKind.Week to stringResource(R.string.machines_usage_legend_week),
+        JResetLegendKind.Now to stringResource(R.string.machines_usage_legend_now),
+        (JResetLegendKind.Protect to stringResource(R.string.machines_usage_legend_protect)).takeIf { anyProtect },
+    )
+    Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.s)) {
+        Text(stringResource(R.string.machines_usage_chart_title), style = PersonaTheme.type.caption, color = palette.ink3)
+        JResetChart(specs, ticks, legend, parts.joinToString("; "))
     }
 }
 
@@ -341,6 +423,8 @@ private fun WindowRow(w: UsageWindow, now: Instant, stale: Boolean) {
             Text(resetText(w.resetsAt, now).orEmpty(), Modifier.weight(1f), style = PersonaTheme.type.caption, color = palette.ink3,
                 maxLines = 1, overflow = TextOverflow.Ellipsis, textAlign = androidx.compose.ui.text.style.TextAlign.End)
         }
-        JLinearProgress((w.usedPercent / 100).toFloat(), tone = if (isWarn(w.usedPercent)) Tone.Caution else null)
+        // The tick is where an even pace would be; a stale account's numbers say nothing about the pace now (#12411).
+        val protect = protectLine(w)?.let { JProtectLine((it / 100).toFloat(), stringResource(R.string.machines_usage_protect, it.toInt())) }
+        JUsageBar((w.usedPercent / 100).toFloat(), elapsed = if (stale) null else elapsedFraction(w, now)?.toFloat(), tone = if (isWarn(w.usedPercent)) Tone.Caution else null, protect = protect)
     }
 }

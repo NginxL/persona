@@ -1,0 +1,1 @@
+The background supervisor hit a tool permission denial (assistant_denied: task_review). Background retries are paused and this is handed to the main conversation.

@@ -111,6 +111,11 @@ func TestHerdrTUISetModeGivesUpOnBypass(t *testing.T) {
 const (
 	listPicker = "\n Effort\n\n   low\n ❯ medium\n   high\n\n Enter to set as default · s for this session only · Esc to cancel\n"
 	slider     = "\n Effort  low ──●──── max\n\n ←/→ to adjust · Enter to confirm · Esc to cancel\n"
+
+	slider330Body = "\n  Effort\n\n  Faster                             Smarter\n" +
+		"  ────────────────────▲─────────────────────\n  low     medium     high     xhigh      max\n\n"
+	slider330Save  = slider330Body + "  ←/→ to adjust · s to use this session only · Enter to save · Esc to cancel\n"
+	slider330Enter = slider330Body + "  ←/→ to adjust · Enter to use this session only · Esc to cancel\n"
 )
 
 func effortSent(pane string, rights int) []string {
@@ -152,6 +157,30 @@ func TestHerdrTUISetEffortWithTheSlider(t *testing.T) {
 		t.Fatalf("err %v", err)
 	}
 	assertTrace(t, f.trace(), append(effortSent("w1:p1", 4), sendKeys("w1:p1", "enter"), readVisible("w1:p1")))
+}
+
+func TestHerdrTUISetEffortWithThe330Slider(t *testing.T) {
+	for _, tt := range []struct {
+		name, opened, selected, effort, key, outcome string
+		rights                                       int
+	}{
+		{"s applies a savable level", slider330Enter, slider330Save, "medium", "s", "◐ medium · /effort", 1},
+		{"enter applies a session-only level", slider330Save, slider330Enter, "max", "enter", "◈ max · /effort", 4},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			const pane = "w1:p1"
+			n, f, _ := herdrNode(t)
+			seedAgents(t, n, f, claudeAgent(sidA, proto.StatusIdle, pane, "w1:t1", "w1", "/tmp/e", ""))
+			empty := screenFixture(t, "claude-2.1.312-empty-162.txt")
+			done := "  " + tt.outcome + "\n" + empty
+			f.screenSteps(pane, isKeys(), empty, tt.opened, tt.selected, done)
+			if err := setModes(t, n, sidA, "", tt.effort); err != nil {
+				t.Fatal(err)
+			}
+			assertTrace(t, f.trace(), append(effortSent(pane, tt.rights),
+				readVisible(pane), sendKeys(pane, tt.key), readVisible(pane)))
+		})
+	}
 }
 
 // A draft in the box: refused after one read. A picker that never opens: 15 reads, then esc.

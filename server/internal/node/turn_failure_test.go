@@ -325,3 +325,77 @@ func TestQuickMetaKeepsTheResumeNoticeOutOfTheTail(t *testing.T) {
 		t.Fatalf("a message typed cancels it: %+v", m.turnErr)
 	}
 }
+
+func TestUpstreamUnavailableStreakAndReported(t *testing.T) {
+	// Single plain 503 via reported() must not double-count or set upstream_unavailable; explicit pool exhaustion sets it at once.
+	var s proto.Session
+	reported("unexpected status 503 Service Unavailable", proto.TurnErrorTransient,
+		turnFailure{text: "unexpected status 503 Service Unavailable", kind: proto.TurnErrorTransient}).set(&s)
+	if s.TurnErrorCode != "" {
+		t.Fatalf("single reported 503 got code %q", s.TurnErrorCode)
+	}
+	reported("unexpected status 503: no eligible upstream account", proto.TurnErrorTransient, turnFailure{}).set(&s)
+	if s.TurnErrorCode != proto.TurnErrorUpstreamUnavailable {
+		t.Fatalf("reported pool exhaustion got code %q", s.TurnErrorCode)
+	}
+
+	// Incremental bgScan carries a two-turn 503 streak across a quickTail-sized request blob between the two failed turns.
+	path := filepath.Join(t.TempDir(), "s.jsonl")
+	n := &Node{metas: map[string]quickMeta{}, bgScans: map[string]*bgScan{}}
+	prompt := func(id string) string {
+		return `{"type":"user","uuid":"` + id + `","timestamp":"2026-01-01T12:00:00Z","message":{"role":"user","content":"continue"}}`
+	}
+	fail503 := func(id string) string {
+		return `{"type":"assistant","uuid":"` + id + `","timestamp":"2026-01-01T12:00:01Z","isApiErrorMessage":true,"error":"server_error","apiErrorStatus":503,"message":{"id":"m-` + id + `","model":"<synthetic>","role":"assistant","content":[{"type":"text","text":"API Error: 503 Service Unavailable"}]}}`
+	}
+	end := func(id, parent string) string {
+		return `{"type":"system","subtype":"turn_duration","uuid":"` + id + `","parentUuid":"` + parent + `","timestamp":"2026-01-01T12:00:02Z","durationMs":10}`
+	}
+	lines := []string{prompt("u1"), fail503("e1"), end("d1", "e1")}
+	st := writeLines(t, path, lines)
+	if m := n.metaNow(path, st); m.turnErr.code != "" {
+		t.Fatalf("turn 1 code = %q, want empty", m.turnErr.code)
+	}
+	lines = append(lines,
+		`{"type":"api-request-blob","content":"`+strings.Repeat("x", quickTail)+`"}`,
+		prompt("u2"), fail503("e2"), end("d2", "e2"))
+	st = writeLines(t, path, lines)
+	if m := n.metaNow(path, st); m.turnErr.code != proto.TurnErrorUpstreamUnavailable {
+		t.Fatalf("turn 2 across large blob: code = %q, want %q", m.turnErr.code, proto.TurnErrorUpstreamUnavailable)
+	}
+
+	// Appending trailing lines on a >quickTail Codex rollout or legacy cut-off transcript must not re-count the same single 503 turn.
+	cxPath := filepath.Join(t.TempDir(), "rollout.jsonl")
+	cxLines := []string{
+		`{"timestamp":"2026-01-01T12:00:00Z","type":"session_meta","payload":{"id":"cx1","cwd":"/work"}}`,
+		`{"timestamp":"2026-01-01T12:00:00Z","type":"padding","blob":"` + strings.Repeat("p", quickTail) + `"}`,
+		`{"timestamp":"2026-01-01T12:00:01Z","type":"event_msg","payload":{"type":"task_started","turn_id":"t1"}}`,
+		`{"timestamp":"2026-01-01T12:00:02Z","type":"event_msg","payload":{"type":"task_complete","turn_id":"t1","error":{"message":"unexpected status 503 Service Unavailable","codex_error_info":"other"}}}`,
+	}
+	m1 := readQuickMetaSince(cxPath, writeLines(t, cxPath, cxLines), quickMeta{})
+	if m1.turnErr.streak != 1 || m1.turnErr.code != "" {
+		t.Fatalf("codex single 503 read 1: %+v", m1.turnErr)
+	}
+	cxLines = append(cxLines, `{"timestamp":"2026-01-01T12:00:03Z","type":"event_msg","payload":{"type":"token_count","info":null}}`)
+	m2 := readQuickMetaSince(cxPath, writeLines(t, cxPath, cxLines), m1)
+	if m2.turnErr.streak != 1 || m2.turnErr.code != "" {
+		t.Fatalf("codex single 503 after token_count append: %+v", m2.turnErr)
+	}
+
+	legPath := filepath.Join(t.TempDir(), "legacy.jsonl")
+	legLines := []string{
+		`{"type":"api-request-blob","content":"` + strings.Repeat("q", quickTail) + `"}`,
+		prompt("ul1"),
+		`{"type":"assistant","uuid":"le1","timestamp":"2026-01-01T12:00:01Z","message":{"id":"m-le1","model":"claude-opus-5-5","role":"assistant","content":[{"type":"text","text":"API Error: 503 Service Unavailable"}]}}`,
+		end("ld1", "le1"),
+	}
+	lm1 := readQuickMetaSince(legPath, writeLines(t, legPath, legLines), quickMeta{})
+	if lm1.turnErr.streak != 1 || lm1.turnErr.code != "" {
+		t.Fatalf("legacy cut-off read 1: %+v", lm1.turnErr)
+	}
+	legLines = append(legLines, `{"type":"custom-title","customTitle":"renamed"}`)
+	lm2 := readQuickMetaSince(legPath, writeLines(t, legPath, legLines), lm1)
+	if lm2.turnErr.streak != 1 || lm2.turnErr.code != "" {
+		t.Fatalf("legacy cut-off after metadata append: %+v", lm2.turnErr)
+	}
+}

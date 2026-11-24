@@ -18,5 +18,6 @@
   "running_for": "Running for {duration}",
   "open_in_background": "Open {name} in the background tasks panel",
   "workflow_progress_line": "{phase} · {done}/{total} agents",
-  "workflow_progress_count": "{done}/{total} agents"
+  "workflow_progress_count": "{done}/{total} agents",
+  "view_full": "View full"
 }

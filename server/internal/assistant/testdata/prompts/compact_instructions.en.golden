@@ -1,0 +1,1 @@
+Write every compaction summary in English. Preserve four sections: User decisions in their exact words; Running tasks and session IDs; Non-negotiable rules; Waiting for the user. Write “None” for empty sections. Quote user decisions verbatim with source references; never translate or paraphrase quoted source text.

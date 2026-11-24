@@ -17,7 +17,8 @@ APPLE = ROOT / 'apple'
 SWITCH = 'PERSONA_LEAN_DEV_BUILD'
 # What the iPhone app depends on in every build, in project.yml's order, and what only the whole build adds.
 ALWAYS = ['LiveCommunicationKit.framework', 'PersonaWire', 'PersonaWidgets', 'PersonaNotify', 'MarkdownUI', 'BeautifulUI',
-          'PersonaSSH', 'PersonaKit', 'PersonaCore', 'MarqueeGlow', 'PersonaScreenKit', 'PersonaInputKit']
+          'PersonaSSH', 'PersonaKit', 'PersonaCore', 'MarqueeGlow', 'PersonaScreenKit', 'PersonaInputKit',
+          'PersonaModuleAPI']
 WHOLE_ONLY = ['PersonaWatch', 'PersonaShare']
 # Scripts that run `xcodegen generate` on a spec other than apple/project.yml, which the switch does not touch.
 OTHER_PROJECTS = {
@@ -378,6 +379,90 @@ class CommitStampTests(unittest.TestCase):
                     # A Debug build that must name its commit (the README's captures) asks for the stamp.
                     head, _, after = self.stamp(target, 'Debug', dirty, PERSONA_STAMP_COMMIT='YES')
                     self.assertEqual(plistlib.loads(after)['PersonaCommit'], head + ('+' if dirty else ''))
+
+
+
+@unittest.skipUnless(shutil.which('git') and shutil.which('plutil'), 'needs git and plutil')
+class DebugBuildInfoStampTests(unittest.TestCase):
+    """A Debug build names what it was built from (#12926) without making an unchanged build write or sign again
+    (#10713), and without failing when git is not there. Release keeps "Stamp the commit" alone."""
+    SCRIPT = ROOT / 'scripts/app/stamp_debug_build_info.sh'
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+        self.plist = self.root / 'build/Persona.app/Info.plist'
+        self.plist.parent.mkdir(parents=True)
+        self.plist.write_bytes(plistlib.dumps({'CFBundleName': 'Persona'}))
+        self.binary = self.root / 'build/Persona.app/Persona'
+        self.binary.write_bytes(b'code')
+        self.marker = self.root / 'derived/debug-build-info.stamp'
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def repo(self, dirty):
+        repo = self.root / 'repo'
+        git = ['git', '-C', str(repo), '-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.com',
+               '-c', 'commit.gpgsign=false', '-c', 'core.hooksPath=/dev/null']
+        subprocess.run(['git', 'init', '-q', '-b', 'feature/x', str(repo)], check=True)
+        (repo / 'file.txt').write_text('one\n')
+        subprocess.run(git + ['add', '.'], check=True)
+        subprocess.run(git + ['commit', '-q', '-m', 'fixture'], check=True)
+        if dirty:
+            (repo / 'file.txt').write_text('two\n')
+        return repo, subprocess.check_output(['git', '-C', str(repo), 'rev-parse', '--short=10', 'HEAD'], text=True).strip()
+
+    def run_stamp(self, checkout):
+        env = dict(os.environ, CONFIGURATION='Debug', PERSONA_BUILD_MACHINE='build-mac')
+        run = subprocess.run([str(self.SCRIPT), str(self.plist), str(self.binary), str(self.marker), str(checkout)],
+                             env=env, capture_output=True, text=True, timeout=60)
+        self.assertEqual(run.returncode, 0, run.stdout + run.stderr)
+        return plistlib.loads(self.plist.read_bytes()).get('PersonaBuildInfo')
+
+    def test_it_stamps_the_commit_branch_dirty_flag_and_build_time(self):
+        for dirty in (False, True):
+            with self.subTest(dirty=dirty):
+                self.tearDown()
+                self.setUp()
+                repo, head = self.repo(dirty)
+                info = self.run_stamp(repo)
+                self.assertEqual(info['commit'], head)
+                self.assertEqual(info['branch'], 'feature/x')
+                self.assertIs(info['dirty'], dirty)
+                self.assertEqual(info['builder'], 'build-mac')
+                self.assertEqual(info['configuration'], 'Debug')
+                self.assertRegex(info['builtAt'], r'^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$')
+
+    def test_without_git_it_leaves_the_commit_out_and_does_not_fail(self):
+        info = self.run_stamp(self.root / 'not-a-repo')
+        self.assertNotIn('commit', info)
+        self.assertNotIn('branch', info)
+        self.assertNotIn('dirty', info)
+        self.assertIn('builtAt', info)
+
+    def test_an_unchanged_build_writes_nothing_and_a_relinked_one_stamps_again(self):
+        repo, _ = self.repo(False)
+        first = self.run_stamp(repo)
+        written = self.plist.read_bytes()
+        os.utime(self.plist, (1, 1))  # older than the marker, as Xcode leaves it
+        os.utime(self.binary, (1, 1))
+        self.run_stamp(repo)
+        self.assertEqual(self.plist.read_bytes(), written)
+        os.utime(self.binary)  # linked again
+        self.marker.touch()
+        os.utime(self.marker, (2, 2))
+        second = self.run_stamp(repo)
+        self.assertEqual(second['commit'], first['commit'])
+        self.assertGreater(os.stat(self.marker).st_mtime, 2)
+
+    def test_the_project_runs_it_in_debug_only(self):
+        if not shutil.which('xcodegen'):
+            self.skipTest('needs xcodegen')
+        script = next(s['script'] for s in dump()['targets']['Persona']['postBuildScripts']
+                      if s['name'] == 'Stamp the debug build info')
+        self.assertTrue(script.startswith('[ "$CONFIGURATION" = Debug ] || exit 0'))
+        self.assertIn('scripts/app/stamp_debug_build_info.sh', script)
 
 
 if __name__ == '__main__':

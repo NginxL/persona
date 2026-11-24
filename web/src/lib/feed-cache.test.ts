@@ -22,7 +22,7 @@ beforeEach(async () => {
   vi.stubGlobal("location", { origin: "https://hub.example.com" });
   cache = await import("./feed-cache");
 });
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
 describe("main conversation feed cache", () => {
   it("partitions keys by hub, reverse-proxy prefix, device id and credential without exposing them", () => {
@@ -239,6 +239,145 @@ describe("main conversation feed cache", () => {
     expect(cache.feedCacheScope()).toBeNull();
     expect(cache.readFeedCache()).toBeNull();
     expect(() => cache.clearFeedCache()).not.toThrow();
+  });
+
+  it("short-circuits oversized text turns without JSON.stringify or repeated removeItem calls", () => {
+    const scope = cache.feedCacheScope();
+    expect(cache.writeFeedCache(scope, page())).toBe(true);
+    const removeSpy = vi.spyOn(localStorage, "removeItem");
+    const stringifySpy = vi.spyOn(JSON, "stringify");
+    const pageStringifies = () => stringifySpy.mock.calls.filter(([, replacer]) => typeof replacer === "function");
+    const base = [item(1, "user", { text: "Question" }), item(2, "assistant", { text: "a".repeat(cache.FEED_CACHE_MAX_BYTES + 1024) })];
+    expect(cache.writeFeedCache(scope, page({ items: base }))).toBe(false);
+    expect(entries()).toHaveLength(0);
+    expect(removeSpy).toHaveBeenCalledTimes(1);
+    expect(pageStringifies()).toHaveLength(0);
+
+    // Subsequent pushes onto the same oversized window skip both serialization and redundant removeItem.
+    for (let seq = 3; seq <= 7; seq++) {
+      expect(cache.writeFeedCache(scope, page({ items: [...base, item(seq, "assistant", { text: `follow-up ${seq}` })] }))).toBe(false);
+    }
+    expect(removeSpy).toHaveBeenCalledTimes(1);
+    expect(pageStringifies()).toHaveLength(0);
+  });
+
+  it("memoizes serialized-oversized windows across appends and resumes caching once a newer or folded window fits", () => {
+    const scope = cache.feedCacheScope();
+    expect(cache.writeFeedCache(scope, page())).toBe(true);
+    // Keep item.text short so the plain-text floor does not trigger; push over 256 KB via tool_input payload.
+    const heavy = [
+      item(1, "user", { text: "Analyze payload" }),
+      item(2, "assistant", { kind: "tool_use", tool_name: "Read", tool_input: { blob: "b".repeat(cache.FEED_CACHE_MAX_BYTES + 512) } }),
+    ];
+    const removeSpy = vi.spyOn(localStorage, "removeItem");
+    const stringifySpy = vi.spyOn(JSON, "stringify");
+    const pageStringifies = () => stringifySpy.mock.calls.filter(([, replacer]) => typeof replacer === "function");
+    expect(cache.writeFeedCache(scope, page({ items: heavy }))).toBe(false);
+    expect(removeSpy).toHaveBeenCalledTimes(1);
+    expect(pageStringifies()).toHaveLength(1);
+
+    removeSpy.mockClear();
+    stringifySpy.mockClear();
+    // Appending items to the same 2-turn window reuses the oversized memo: no JSON.stringify, no removeItem.
+    const extended = [...heavy, item(3, "assistant", { text: "step 3" }), item(4, "assistant", { text: "step 4" })];
+    expect(cache.writeFeedCache(scope, page({ items: extended }))).toBe(false);
+    expect(cache.writeFeedCache(scope, page({ items: [...extended, item(5, "assistant", { text: "step 5" })] }))).toBe(false);
+    expect(pageStringifies()).toHaveLength(0);
+    expect(removeSpy).not.toHaveBeenCalled();
+
+    // Two new small user turns shift the 2-turn window past the oversized turn, so caching resumes.
+    const recovered = [...extended, item(6, "user", { text: "Short Q1" }), item(7, "assistant", { text: "Short A1" }), item(8, "user", { text: "Short Q2" }), item(9, "assistant", { text: "Short A2" })];
+    expect(cache.writeFeedCache(scope, page({ items: recovered }))).toBe(true);
+    expect(cache.readFeedCache(scope)?.items.map((row) => row.seq)).toEqual([6, 7, 8, 9]);
+
+    // Growing oversized again clears the newly cached entry once.
+    expect(cache.writeFeedCache(scope, page({ items: heavy }))).toBe(false);
+    expect(removeSpy).toHaveBeenCalledTimes(1);
+    expect(cache.readFeedCache(scope)).toBeNull();
+  });
+
+  it("still strips oversized inline data-URI images and private refusal bodies before enforcing the byte limit", () => {
+    const scope = cache.feedCacheScope();
+    const withDataUri = item(1, "assistant", { text: `Preview ![img](data:image/png;base64,${"A".repeat(cache.FEED_CACHE_MAX_BYTES + 2048)})` });
+    expect(cache.writeFeedCache(scope, page({ items: [withDataUri] }))).toBe(true);
+    expect(cache.readFeedCache(scope)?.items[0].text).toBe("Preview ![img]([image omitted])");
+
+    const withPrivateRefusal = item(2, "system", {
+      kind: "notice",
+      text: "x".repeat(cache.FEED_CACHE_MAX_BYTES + 2048),
+      model_refusal: { subtype: "refusal", explanation: "Short public note" },
+    });
+    expect(cache.writeFeedCache(scope, page({ items: [withPrivateRefusal] }))).toBe(true);
+    expect(cache.readFeedCache(scope)?.items[0].text).toBe("Short public note");
+  });
+
+  it("still blocks credentials after an oversized rejection and rejects oversized item counts without stringifying", () => {
+    const scope = cache.feedCacheScope();
+    const stringifySpy = vi.spyOn(JSON, "stringify");
+    const pageStringifies = () => stringifySpy.mock.calls.filter(([, replacer]) => typeof replacer === "function");
+    const many = Array.from({ length: cache.FEED_CACHE_MAX_ITEMS + 1 }, (_, i) => item(i + 1, i ? "assistant" : "user"));
+    expect(cache.writeFeedCache(scope, page({ items: many }))).toBe(false);
+    expect(pageStringifies()).toHaveLength(0);
+
+    expect(cache.writeFeedCache(scope, page({ items: [item(1, "user", { text: `token=${token}` })] }))).toBe(false);
+    expect(entries()).toHaveLength(0);
+  });
+
+  it("evicts oversized, corrupt, and incompatible records on readFeedCache without leaving unreadable entries behind", () => {
+    const scope = cache.feedCacheScope();
+    expect(cache.writeFeedCache(scope, page())).toBe(true);
+    const key = entries()[0][0];
+
+    for (const raw of ["", "{", JSON.stringify({ ...page(), items: [{ id: "a", seq: "bad" }] }),
+      JSON.stringify(page({ items: [item(1, "user", { text: "x".repeat(cache.FEED_CACHE_MAX_BYTES + 128) })] }))]) {
+      stored.set(key, raw);
+      expect(cache.readFeedCache(scope)).toBeNull();
+      expect(entries()).toHaveLength(0);
+    }
+  });
+
+  it("still evicts stale or oversized entries re-introduced externally even when writeFeedCache hits the oversized memo", () => {
+    const scope = cache.feedCacheScope();
+    expect(cache.writeFeedCache(scope, page())).toBe(true);
+    const key = entries()[0][0];
+    const staleRaw = stored.get(key)!;
+
+    const heavy = [
+      item(1, "user", { text: "Analyze payload" }),
+      item(2, "assistant", { kind: "tool_use", tool_name: "Read", tool_input: { blob: "b".repeat(cache.FEED_CACHE_MAX_BYTES + 512) } }),
+    ];
+    expect(cache.writeFeedCache(scope, page({ items: heavy }))).toBe(false);
+    expect(entries()).toHaveLength(0);
+
+    const removeSpy = vi.spyOn(localStorage, "removeItem");
+    const stringifySpy = vi.spyOn(JSON, "stringify");
+    const pageStringifies = () => stringifySpy.mock.calls.filter(([, replacer]) => typeof replacer === "function");
+
+    // Another tab or external writer restores a stale valid entry after the oversized memo was recorded.
+    stored.set(key, staleRaw);
+    expect(cache.readFeedCache(scope)?.sessionID).toBe("main-demo");
+    removeSpy.mockClear();
+    stringifySpy.mockClear();
+    const extended = [...heavy, item(3, "assistant", { text: "step 3" })];
+    expect(cache.writeFeedCache(scope, page({ items: extended }))).toBe(false);
+    expect(entries()).toHaveLength(0);
+    expect(cache.readFeedCache(scope)).toBeNull();
+    expect(removeSpy).toHaveBeenCalledTimes(1);
+    expect(pageStringifies()).toHaveLength(0);
+
+    // An external oversized/corrupt record is likewise evicted on the memoized shortcut, and once absent removeItem is skipped.
+    removeSpy.mockClear();
+    stored.set(key, JSON.stringify(page({ items: [item(1, "user", { text: "z".repeat(cache.FEED_CACHE_MAX_BYTES + 128) })] })));
+    const further = [...extended, item(4, "assistant", { text: "step 4" })];
+    expect(cache.writeFeedCache(scope, page({ items: further }))).toBe(false);
+    expect(entries()).toHaveLength(0);
+    expect(removeSpy).toHaveBeenCalledTimes(1);
+    expect(pageStringifies()).toHaveLength(0);
+
+    removeSpy.mockClear();
+    expect(cache.writeFeedCache(scope, page({ items: [...further, item(5, "assistant", { text: "step 5" })] }))).toBe(false);
+    expect(removeSpy).not.toHaveBeenCalled();
+    expect(pageStringifies()).toHaveLength(0);
   });
 });
 

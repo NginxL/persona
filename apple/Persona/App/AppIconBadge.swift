@@ -1,13 +1,9 @@
 import Foundation
 import Observation
-#if os(macOS)
-import AppKit
-#else
 import UIKit
 import UserNotifications
-#endif
 
-/// The number on the app's icon: the iPhone's home screen, the Mac's Dock (#5824; Apple Vision Pro runs the same).
+/// The number on the app's icon on the home screen (#5824; Apple Vision Pro runs the same).
 /// It is the tab bar's badges added up: the questions waiting in Persona's conversations (`TabBadges.assistant`), the
 /// agents in Needs You (`TabBadges.agents`) and the Inbox's unread items (`InboxStore.unreadCount`). So the icon never
 /// says more or less than the tabs (docs/design/PRINCIPLES.md, "Consistency first"): what they leave out (muted agents,
@@ -26,11 +22,6 @@ nonisolated enum AppIconBadge {
     /// The Dock's label: none at zero.
     static func label(_ n: Int) -> String? { n > 0 ? "\(n)" : nil }
 
-    #if os(macOS)
-    @MainActor static func show(_ n: Int) {
-        NSApp.dockTile.badgeLabel = label(n)
-    }
-    #else
     /// One serial queue: numbers set one after another reach the system in that order. Off the main actor, as
     /// `setBadgeCount` is a call to the notification daemon (docs/apple/performance.md P1). Without the user's
     /// permission for badges (asked with the notifications, `PushRegistrar`) the system shows nothing.
@@ -39,7 +30,6 @@ nonisolated enum AppIconBadge {
     @MainActor static func show(_ n: Int) {
         queue.async { UNUserNotificationCenter.current().setBadgeCount(n) }
     }
-    #endif
 }
 
 /// Keeps the icon's number in step with the tabs while the app runs, window open or not. The app sets it itself, so a
@@ -68,13 +58,11 @@ nonisolated enum AppIconBadge {
         guard self.read == nil else { return }
         self.read = read
         observe()
-        #if !os(macOS)
         // A number set before the user allowed badges (the question comes after pairing, when the counts arrive) is
         // dropped; the answer, or the Badges switch turned on in Settings, brings the app back to the front.
         NotificationCenter.default.addObserver(forName: UIApplication.didBecomeActiveNotification, object: nil, queue: .main) {
             @Sendable [weak self] _ in MainActor.assumeIsolated { self?.resend() }
         }
-        #endif
     }
 
     /// Tells the system the current number again, moved or not.

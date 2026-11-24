@@ -57,7 +57,7 @@ func (s *Service) toolMachineRedeploy(ctx context.Context, currentMachine string
 	if target.ID == currentMachine {
 		return "", fmt.Errorf("cannot redeploy the machine running this conversation; call this tool from another machine")
 	}
-	d, ok := s.devs.(machineRedeployer)
+	d, ok := s.physicalDevices().(machineRedeployer)
 	if !ok {
 		return "", fmt.Errorf("machine redeployment is unavailable")
 	}

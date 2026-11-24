@@ -800,8 +800,9 @@ struct TodoCacheTests {
         try await waitForTodoTest { store.viewsRead }
     }
 
-    /// The places are read with the list while V1 is on and the hub lists them, again only when the list changed. A
-    /// failure keeps the last; a hub without the route (405), or whose hello stopped listing them, has none.
+    /// The places are read with the list while V1 is on and the hub has listed them in this run, again only when the
+    /// list changed. A failure keeps the last; a hub without the route (405), or that never listed them, has none; a
+    /// hello that stops listing them (a manager reconnecting) takes nothing away.
     @Test func placesAreReadWithTheList() async throws {
         let hub = FakeHub()
         hub.on("GET", "/api/v1/todos/places", json: #"{"places":[{"id":"all","kind":"all","title":"","needs_you":2}],"counts":{"needs_you":2}}"#)
@@ -828,15 +829,22 @@ struct TodoCacheTests {
         var v1 = TodoStore.V1.on()
         v1.features = { TodoFeatures(view: true, places: listsPlaces) }
         hub.on("GET", "/api/v1/todos/places", json: #"{"places":[{"id":"all","kind":"all","title":"","needs_you":0}],"counts":{}}"#)
+        var title = "B"
         let unlisted = TodoStore(cachedTodos: [], cacheWriter: nil, hubListChanged: {},
-                                 read: { _, _ in TodosPage(list: [TodoItem(id: "b", title: "B")], etag: nil) }, v1: v1)
+                                 read: { _, _ in TodosPage(list: [TodoItem(id: "b", title: title)], etag: nil) }, v1: v1)
         defer { unlisted.forget() }
         await unlisted.refresh(api: hub.client)
         #expect(unlisted.places != nil && hub.sent("GET", "/api/v1/todos/places").count == 4)
         listsPlaces = false
+        title = "B2"
         await unlisted.refresh(api: hub.client)
-        #expect(unlisted.places == nil && hub.sent("GET", "/api/v1/todos/places").count == 4,
-                "a hub that stops listing todo_places has none, and is not asked")
+        #expect(unlisted.places != nil && hub.sent("GET", "/api/v1/todos/places").count == 5,
+                "listed in this run: a hello without todo_places keeps them, read on")
+        unlisted.forget()
+        title = "B3"
+        await unlisted.refresh(api: hub.client)
+        #expect(unlisted.places == nil && hub.sent("GET", "/api/v1/todos/places").count == 5,
+                "another hub that does not list todo_places has none, and is not asked")
     }
 
     /// One timer to the earliest moment a row changes by time alone reads the list again then, through the app's hub
@@ -891,9 +899,9 @@ struct TodoCacheTests {
     @Test func aRowFiledByTheRulesMovesWithTheClock() async throws {
         let hub = FakeHub()
         var now = Date()
-        // Closed a minute less than Just finished lasts, by the store's clock.
-        let closed = ISO8601DateFormatter().string(from: now.addingTimeInterval(-TodoTriageLogic.justDone + 60))
-        hub.on("GET", "/api/v1/todos", json: TodoViewJSON.list([TodoViewJSON.row("old", extra: #""done_at":"\#(closed)""#)]))
+        // A concern closed a minute less than Just finished lasts, by the store's clock.
+        let closed = ISO8601DateFormatter().string(from: now.addingTimeInterval(-TodoTriageLogic.justDoneAfter + 60))
+        hub.on("GET", "/api/v1/todos", json: TodoViewJSON.list([TodoViewJSON.row("old", extra: #""done_at":"\#(closed)","kind":"concern""#)]))
         hub.on("GET", "/api/v1/todos/places", json: #"{"places":[],"counts":{}}"#)
         var v1 = TodoStore.V1.on()
         v1.now = { now }

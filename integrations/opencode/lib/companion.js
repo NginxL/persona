@@ -24,6 +24,7 @@ import { createSupervisionStore, policyEnvironment, supportsSystemPrompt } from 
 import { defaultDbPath, openReadOnly } from './db.js'
 import {
   acpPermissionCard,
+  acpToolRawName,
   contextTokens,
   fromRow,
   imageOf,
@@ -779,7 +780,7 @@ export function createOpencodeCompanion(options = {}) {
         rt.streamEnd(id)
         flushLiveText(s)
         const callId = upd.toolCallId || `call_${now()}`
-        const rawName = String(upd.kind === 'execute' ? 'bash' : (upd.title || upd.kind || 'tool')).split(/\s+/)[0]
+        const rawName = acpToolRawName(upd)
         const item = appendLiveItem(s, {
           role: 'assistant',
           kind: 'tool_use',

@@ -63,8 +63,11 @@ func fetchGeneric(ctx context.Context, c *client, now time.Time) (Result, error)
 		}
 		var list []proto.UsageWindow
 		checked := map[int]time.Time{}
-		for j, w := range a.Windows {
-			if j >= WindowsMost || w.UsedPercent == nil {
+		for _, w := range a.Windows {
+			if len(list) >= WindowsMost {
+				break
+			}
+			if w.UsedPercent == nil {
 				continue
 			}
 			minutes := w.WindowMinutes

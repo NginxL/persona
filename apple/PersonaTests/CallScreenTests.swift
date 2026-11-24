@@ -93,7 +93,7 @@ struct CallScreenTests {
     /// The + panel (and the iPad's + menu, the iPhone's touch and hold) has no Voice Chat or Call Persona rows any more
     /// (#9887 one button): the composer's phone icon is the one voice entry. The camera leads its rows.
     @Test func thePlusHasNoVoiceOrCallRows() throws {
-        let rows = AttachMoreSection.common(camera: {}, glasses: nil, meeting: {}, mention: {}, context: { _ in })
+        let rows = AttachMoreSection.common(camera: {}, meeting: {}, mention: {}, context: { _ in })
         let ids = rows.flatMap(\.rows).map(\.id)
         #expect(!ids.contains("composer-menu-voice") && !ids.contains("composer-menu-call"))
         let capture = try #require(rows.first { $0.id == "capture" })

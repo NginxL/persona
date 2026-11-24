@@ -1,46 +1,32 @@
-// Contexts waiting in a composer (picked in the link panel): one chip each above the input — what it is, the passage
-// (or the page's title for a whole document; a workspace's name), × to drop it. They go with the next message as <persona-context>.
-// A forwarded message is a card of its own (views/chat/ForwardCard.tsx ForwardBars), not a chip.
-import { removeContext, useContexts, WHOLE } from "../../lib/links";
-import { EASE } from "../../ui/atoms";
-import { Icon } from "../../ui/icons";
-import { QuoteIcon } from "./QuoteIcon";
+// Chat and scheduled prompts share the same chip view. Only a non-empty selection loads it.
+import { Suspense } from "react";
+import { lazyPage } from "../../lib/lazy-page";
+import { removeContext, useContexts, type ContextRef } from "../../lib/links";
 import { t } from "../../i18n";
+import { OverlayBoundary } from "../LazyOverlay";
+
+const ChipList = lazyPage(() => import("./ContextChipList").then((m) => m.ContextChipList));
 
 export function ContextChips({ draftKey }: { draftKey: string }) {
   const refs = useContexts(draftKey).filter((r) => r.kind !== "forward");
+  return <ContextChipList refs={refs} onRemove={(id) => removeContext(draftKey, id)} />;
+}
+
+export function ContextChipList({ refs, onRemove }: { refs: ContextRef[]; onRemove: (id: string) => void }) {
   if (!refs.length) return null;
-  return (
-    <div className="flex flex-wrap gap-1.5 px-0.5 pt-0.5" aria-label={t("link-contextchips.label")}>
-      {refs.map((r) => {
-        const whole = r.text === WHOLE;
-        const workspace = r.kind === "workspace";
-        const repository = r.kind === "repository";
-        const skill = r.kind === "skill";
-        const label = skill ? `${r.title} · ${r.text.split(/\n| · /, 1)[0]}` : workspace || repository ? r.title : whole ? r.title || r.url : r.text.replace(/\s+/g, " ");
-        const kindLabel = skill ? t("link-contextchips.skill") : r.kind === "edit" ? t("link-contextchips.edit") : workspace ? t("link-contextchips.workspace") : repository ? t("link-contextchips.repository") : t("link-contextchips.context");
-        return (
-          <span
-            key={r.id}
-            title={skill ? label : `${r.kind === "edit" ? t("link-contextchips.edit_title") : kindLabel} · ${r.title}\n${whole ? r.url : r.text}`}
-            className={`flex ${skill ? "min-h-11 max-w-full" : "h-7 max-w-[280px]"} min-w-0 items-center gap-1.5 rounded-full bg-accent-tint pr-1 pl-2.5 text-accent-ink`}
-            style={{ animation: `pop-in 180ms ${EASE} both` }}
-          >
-            {r.kind === "edit" || skill ? <Icon name="spark" size={11} /> : workspace ? <Icon name="folder" size={12} /> : repository ? <Icon name="git" size={12} /> : <QuoteIcon size={12} />}
-            <span className="shrink-0 text-[11px] font-semibold">{kindLabel}</span>
-            <span className="min-w-0 truncate text-[12px]">{whole || workspace || repository || skill ? label : t("link-contextchips.quoted", { text: label })}</span>
-            <button
-              type="button"
-              aria-label={t("link-contextchips.remove_label")}
-              title={t("link-contextchips.remove")}
-              onClick={() => removeContext(draftKey, r.id)}
-              className={`flex ${skill ? "size-11" : "size-5"} shrink-0 items-center justify-center rounded-full transition-colors hover:bg-accent-tint`}
-            >
-              <Icon name="x" size={11} stroke={2.4} />
-            </button>
-          </span>
-        );
-      })}
+  const fallback = (
+    <div className="flex flex-wrap gap-1">
+      {refs.map((ref) => (
+        <span key={ref.id} className="flex min-w-0 items-center gap-1 rounded-full bg-accent-tint px-2 text-sm text-accent-ink">
+          <span className="truncate">{ref.title || ref.text}</span>
+          <button type="button" className="size-11 shrink-0" aria-label={t("link-contextchips.remove_label")} onClick={() => onRemove(ref.id)}>×</button>
+        </span>
+      ))}
     </div>
+  );
+  return (
+    <OverlayBoundary open onClose={() => {}} fallback={fallback}>
+      <Suspense fallback={fallback}><ChipList refs={refs} onRemove={onRemove} /></Suspense>
+    </OverlayBoundary>
   );
 }

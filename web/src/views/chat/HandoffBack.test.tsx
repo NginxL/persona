@@ -5,6 +5,7 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { t } from "../../i18n";
+import { navigate } from "../../lib/router";
 import { getState, reset } from "../../lib/store";
 import type { Session } from "../../lib/types";
 import { fromTitle, HandoffBack } from "./HandoffBack";
@@ -14,6 +15,7 @@ import { fromTitle, HandoffBack } from "./HandoffBack";
 let host: HTMLDivElement;
 let root: Root;
 beforeEach(() => {
+  history.replaceState(null, "", "/");
   host = document.createElement("div");
   document.body.append(host);
   root = createRoot(host);
@@ -53,17 +55,32 @@ describe("the way back", () => {
   });
 
   it("says Back to the previous page for a page it has no name for", () => {
-    act(() => root.render(<HandoffBack from={{ path: "/compare/r1" }} onDismiss={() => {}} />));
+    history.replaceState({ handoff: { path: "/compare/r1" } }, "", "/s/m1/s1");
+    act(() => root.render(<HandoffBack onDismiss={() => {}} />));
     expect(host.querySelector("button")!.textContent).toBe(t("chat-backstrip.handoff_previous"));
-    act(() => root.render(<HandoffBack from={{ path: "/kb/projects/p1" }} onDismiss={() => {}} />));
+    history.replaceState({ handoff: { path: "/kb/projects/p1" } }, "", "/s/m1/s1");
+    act(() => root.render(<HandoffBack onDismiss={() => {}} />));
     expect(host.querySelector("button")!.textContent).toBe(t("chat-backstrip.handoff_from", { title: t("sidebar.nav_kb") }));
+  });
+
+  it("disappears when reselecting the Agent makes its page a root, without adding history (#12055)", () => {
+    history.pushState({ handoff: { path: "/kb/projects/p1" } }, "", "/s/m1/s1");
+    const entries = history.length;
+    act(() => root.render(<HandoffBack onDismiss={() => {}} />));
+    expect(host.querySelector("[data-handoff-back]")).not.toBeNull();
+
+    act(() => navigate("/s/m1/s1", true, {}));
+
+    expect(history.state).toEqual({});
+    expect(history.length).toBe(entries);
+    expect(host.querySelector("[data-handoff-back]")).toBeNull();
   });
 
   it("goes back in the history, and is put away by its ✕", () => {
     history.pushState({ handoff: { path: "/persona" } }, "", "/s/m1/s1"); // the card pushed the Agent's page
     const back = vi.spyOn(history, "back").mockImplementation(() => {});
     const dismiss = vi.fn();
-    act(() => root.render(<HandoffBack from={{ path: "/persona" }} onDismiss={dismiss} />));
+    act(() => root.render(<HandoffBack onDismiss={dismiss} />));
     const [go, close] = [...host.querySelectorAll("button")];
     expect(go!.textContent).toBe(t("chat-backstrip.handoff_from", { title: "Persona" }));
     act(() => go!.click());

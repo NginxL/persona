@@ -111,9 +111,19 @@ export function transcriptMarkdown(items: readonly Item[], meta: ExportMeta, o: 
   const first = items.find((i) => i.ts && time(i.ts));
   if (o.partial) out.push(`> ${first?.ts ? w.partial(time(first.ts)) : w.partialUnknown}`, "");
 
-  // each tool call's result, so the call is written with it
+  // each tool call's result and images, so the call is written with them
   const results = new Map<string, Item>();
-  if (o.work) for (const i of items) if (i.kind === "tool_result" && i.tool_use_id) results.set(i.tool_use_id, i);
+  const toolImages = new Map<string, Item[]>();
+  if (o.work) {
+    for (const i of items) {
+      if (i.kind === "tool_result" && i.tool_use_id) results.set(i.tool_use_id, i);
+      else if (i.kind === "image" && i.tool_use_id) {
+        const list = toolImages.get(i.tool_use_id) ?? [];
+        list.push(i);
+        toolImages.set(i.tool_use_id, list);
+      }
+    }
+  }
   const written = new Set<string>();
   let speaker = ""; // the heading the last block went under: a new one only when it changes
   const block = (text: string) => out.push(text, "");
@@ -128,7 +138,7 @@ export function transcriptMarkdown(items: readonly Item[], meta: ExportMeta, o: 
 
   for (const it of items) {
     if (it.kind === "fold" || it.kind === "recap") continue; // the folded work (off), the while-you-were-away recap
-    if (it.role === "user" && (it.kind === "text" || it.kind === "image")) {
+    if (it.role === "user" && (it.kind === "text" || (it.kind === "image" && !it.tool_use_id))) {
       const label = it.injected ? w.persona : it.from ? w.from(it.from) : w.you;
       // one message's items (its words and pictures) share the id the hub tied them by
       heading(`user:${label}:${it.client_msg_id ?? it.id}`, label, it.ts);
@@ -148,7 +158,7 @@ export function transcriptMarkdown(items: readonly Item[], meta: ExportMeta, o: 
       if (!it.text?.trim()) continue;
       agentHeading(it);
       block(it.text.trim() + cutNote(0, (it.full_size ?? 0) > 0));
-    } else if (it.kind === "image") {
+    } else if (it.kind === "image" && !it.tool_use_id) {
       agentHeading(it);
       block(`_[${w.image}]_`);
     } else if (it.kind === "visualization") {
@@ -169,26 +179,46 @@ export function transcriptMarkdown(items: readonly Item[], meta: ExportMeta, o: 
         parts.push(`**${w.input}**`, "", fenced(input.text, "json") + cutNote(input.left), "");
       }
       const result = it.tool_use_id ? results.get(it.tool_use_id) : undefined;
-      if (result) {
-        written.add(result.id);
-        parts.push(...resultParts(result, w, cutNote));
+      const images = it.tool_use_id ? (toolImages.get(it.tool_use_id) ?? []) : [];
+      if (result || images.length) {
+        if (result) written.add(result.id);
+        for (const img of images) written.add(img.id);
+        parts.push(...resultParts(result, images.length, w, cutNote));
       }
       parts.push("</details>");
       block(parts.join("\n"));
     } else if (it.kind === "tool_result" && !written.has(it.id)) {
       // a result whose call is not in the document (the call came before where it starts)
+      const images = it.tool_use_id ? (toolImages.get(it.tool_use_id) ?? []) : [];
+      for (const img of images) written.add(img.id);
       agentHeading(it);
-      block([`<details>\n<summary>${summaryText(it.is_error ? w.error : w.result)}</summary>`, "", ...resultParts(it, w, cutNote), "</details>"].join("\n"));
+      block([`<details>\n<summary>${summaryText(it.is_error ? w.error : w.result)}</summary>`, "", ...resultParts(it, images.length, w, cutNote), "</details>"].join("\n"));
+    } else if (it.kind === "image" && it.tool_use_id && !written.has(it.id)) {
+      const images = toolImages.get(it.tool_use_id) ?? [it];
+      for (const img of images) written.add(img.id);
+      agentHeading(it);
+      block([`<details>\n<summary>${summaryText(w.result)}</summary>`, "", ...resultParts(undefined, images.length, w, cutNote), "</details>"].join("\n"));
     }
   }
   return out.join("\n").trimEnd() + "\n";
 }
 
-function resultParts(result: Item, w: ExportWords, cutNote: (left: number, serverCut?: boolean) => string): string[] {
-  const body = clip(result.text ?? "", RESULT_MAX);
-  const serverCut = (result.full_size ?? 0) > 0;
-  if (!body.text.trim() && body.left <= 0 && !serverCut) return [`**${result.is_error ? w.error : w.result}**`, ""];
-  return [`**${result.is_error ? w.error : w.result}**`, "", fenced(body.text) + cutNote(body.left, serverCut), ""];
+function resultParts(
+  result: Item | undefined,
+  imageCount: number,
+  w: ExportWords,
+  cutNote: (left: number, serverCut?: boolean) => string,
+): string[] {
+  const out = [`**${result?.is_error ? w.error : w.result}**`, ""];
+  if (result) {
+    const body = clip(result.text ?? "", RESULT_MAX);
+    const serverCut = (result.full_size ?? 0) > 0;
+    if (body.text.trim() || body.left > 0 || serverCut) {
+      out.push(fenced(body.text) + cutNote(body.left, serverCut), "");
+    }
+  }
+  for (let i = 0; i < imageCount; i++) out.push(`_[${w.image}]_`, "");
+  return out;
 }
 
 /** The file's name: the title without what file systems refuse, and the day; "conversation" when it has no title. */

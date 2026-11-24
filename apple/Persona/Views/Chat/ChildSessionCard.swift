@@ -1,8 +1,9 @@
 import SwiftUI
 
-/// Folded child rows for the open parent, by session id. The work step reads one, not the whole list.
+/// Folded child rows for the open parent, keyed by full `SessionKey` so cross-machine children sharing a `sessionID`
+/// never collide. The work step reads one, not the whole list.
 struct ChildSessionRowsKey: EnvironmentKey {
-    static let defaultValue: [String: Session] = [:]
+    static let defaultValue: [SessionKey: Session] = [:]
 }
 
 /// Agent chats name what runs the child. Persona's own chats do not (web `childMeta`).
@@ -10,8 +11,33 @@ struct ChildSessionHarnessKey: EnvironmentKey {
     static let defaultValue = true
 }
 
+/// Opens a parent session focused on Session Overview's Subagents section without passing a changing closure into
+/// the environment (P5, matching `SpaceOpener`).
+@MainActor final class SubagentsOverviewOpener {
+    private var open: (SessionKey) -> Void = { _ in }
+
+    func set(_ open: @escaping (SessionKey) -> Void) -> SubagentsOverviewOpener {
+        self.open = open
+        return self
+    }
+
+    func callAsFunction(_ key: SessionKey) { open(key) }
+}
+
+/// Opens a folded child session's full detail page from an inline `ChildSessionCard` (P5, reference object).
+@MainActor final class ChildSessionOpener {
+    private var open: (SessionKey) -> Void = { _ in }
+
+    func set(_ open: @escaping (SessionKey) -> Void) -> ChildSessionOpener {
+        self.open = open
+        return self
+    }
+
+    func callAsFunction(_ key: SessionKey) { open(key) }
+}
+
 extension EnvironmentValues {
-    var childSessionRows: [String: Session] {
+    var childSessionRows: [SessionKey: Session] {
         get { self[ChildSessionRowsKey.self] }
         set { self[ChildSessionRowsKey.self] = newValue }
     }
@@ -20,21 +46,25 @@ extension EnvironmentValues {
         get { self[ChildSessionHarnessKey.self] }
         set { self[ChildSessionHarnessKey.self] = newValue }
     }
+
+    @Entry var openSubagentsOverview: SubagentsOverviewOpener? = nil
+    @Entry var openChildSession: ChildSessionOpener? = nil
 }
 
-/// A folded child inside its parent's work summary. Opening it reads the child's transcript. It does not open the
-/// child's own page.
+/// A folded child inside its parent's work summary. Opening it reads the child's transcript and offers View full
+/// to inspect its complete conversation.
 struct ChildSessionCard: View {
-    var sessionID: String
+    var key: SessionKey
     @Environment(AppModel.self) private var model
     @Environment(\.childSessionRows) private var rows
     @Environment(\.showsChildHarness) private var showsHarness
+    @Environment(\.openChildSession) private var openChildSession
     @Environment(\.dynamicTypeSize) private var typeSize
     @State private var expanded = false
     @State private var detail: ChildSessions.Detail?
     @State private var fullResult: String?
 
-    private var session: Session? { rows[sessionID] }
+    private var session: Session? { rows[key] }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -105,6 +135,18 @@ struct ChildSessionCard: View {
             if let tool = detail?.lastTool {
                 Text("Last tool: \(tool) [Child Session]").font(Theme.Font.label).foregroundStyle(.secondary).lineLimit(1)
             }
+            if let open = openChildSession {
+                Button {
+                    Haptics.tap()
+                    open(session.key)
+                } label: {
+                    Label("View full [Session Overview]", systemImage: Theme.Icon.open)
+                        .font(Theme.Font.labelStrong)
+                        .lineLimit(1)
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(Theme.accent)
+            }
         }
         .padding(.leading, WorkCardSlice.contentLeading(typeSize))
         .padding(.trailing, WorkCardSlice.inset)
@@ -131,7 +173,7 @@ struct ChildSessionCard: View {
     }
 
     private func revealIfAsked() {
-        if model.revealChild?.sessionID == sessionID { expanded = true }
+        if model.revealChild?.matches(key) == true { expanded = true }
     }
 
     private func statusLine(_ status: ChildSessions.Status, now: Date) -> String {
@@ -176,17 +218,62 @@ struct ChildSessionCard: View {
     private static let efforts: Set<String> = ["minimal", "low", "medium", "high", "xhigh", "max", "ultra"]
 }
 
-/// "Subagents running: N" under an agent row. One line, the design system's caption.
+/// Single-line parent-row subagent rollup (#27):
+/// - Waiting for user: `[agent icon] N need you` in attention color.
+/// - Else running: `[working mark] N running` in secondary color.
+/// - All ended: hidden (quiet).
+/// Tapping opens the parent session and focuses Session Overview's Subagents section.
 struct RunningChildrenCaption: View {
     var session: Session
+    @Environment(\.openSubagentsOverview) private var openOverview
 
     var body: some View {
-        if session.shownRunningChildren > 0 {
-            Text("Subagents running: \(session.shownRunningChildren)")
-                .font(Theme.Font.caption)
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-                .minimumScaleFactor(0.8)
+        let rollup = session.childRollup
+        if let text = rollup.subtitle {
+            Button {
+                Haptics.tap()
+                if let openOverview {
+                    openOverview(session.key)
+                } else {
+                    #if os(iOS)
+                    AgentMenuRouting.shared.open(.subagents, at: session.key)
+                    #endif
+                    AppModel.shared.open(session.key)
+                }
+            } label: {
+                captionRow(rollup: rollup, text: text)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(rollup.spoken ?? text)
+            .accessibilityIdentifier("agents.row.child-rollup")
+        }
+    }
+
+    @ViewBuilder private func captionRow(rollup: ChildSessions.Rollup, text: String) -> some View {
+        switch rollup.kind {
+        case .needsYou:
+            HStack(spacing: Theme.Space.xs) {
+                ThemedIcon(Theme.Icon.subagent)
+                    .font(Theme.Font.label)
+                    .foregroundStyle(StatusPalette.needsYou.text)
+                Text(text)
+                    .font(Theme.Font.captionMedium)
+                    .foregroundStyle(StatusPalette.needsYou.text)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+            }
+        case .running:
+            HStack(spacing: Theme.Space.xs) {
+                StatusDot(state: .working, size: Theme.Size.dotXS)
+                    .accessibilityHidden(true)
+                Text(text)
+                    .font(Theme.Font.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+            }
+        case .quiet:
+            EmptyView()
         }
     }
 }

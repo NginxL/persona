@@ -158,6 +158,17 @@ describe("hand-off cards", () => {
     expect(getPanel()).toBeNull();
   });
 
+  it("wraps the recovery instructions and filenames on an interactive failed launch", async () => {
+    const failure = 'The previous workspace has uncommitted changes. Commit or stash them, then retry (task_retry). Changed files include "timeout.ts".';
+    await show({ id: "task-event", conversation, at, kind: "task", ref: "example-task" }, [linked("example-task", "Example task", [], { start_error: failure, done_at: at })], []);
+    const [card] = cards();
+    const reason = card!.querySelector("[data-handoff-failure]");
+    expect(card!.tagName).toBe("BUTTON");
+    expect(reason?.textContent).toContain(failure);
+    expect(reason?.classList.contains("break-words")).toBe(true);
+    expect(reason?.classList.contains("truncate")).toBe(false);
+  });
+
   describe("a to-do continued by later plans (#11854)", () => {
     // three plans on one to-do: the first made it, the next two continued it; each continuation released the Agent
     // before and cleared the older plan's todo_id, as the hub does (tasks_start.go)

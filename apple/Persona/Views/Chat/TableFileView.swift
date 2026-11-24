@@ -115,11 +115,7 @@ final class TableFileModel {
     func rowText(_ row: Int) -> String { (current?.rows[safe: row] ?? []).joined(separator: "\t") }
 }
 
-#if os(iOS) || os(visionOS)
 private typealias PlatformFont = UIFont
-#else
-private typealias PlatformFont = NSFont
-#endif
 
 private extension Array {
     subscript(safe i: Int) -> Element? { indices.contains(i) ? self[i] : nil }
@@ -170,12 +166,8 @@ struct TableFileView: View {
     /// How wide `text` is in the table's font (`Theme.Font.secondary`, digits all one width), or its header's.
     private func measured(_ text: String, header: Bool = false) -> CGFloat {
         let weight: PlatformFont.Weight = header ? .semibold : .regular
-        #if os(iOS) || os(visionOS)
         let points = UIFont.preferredFont(forTextStyle: .subheadline,
                                           compatibleWith: UITraitCollection(preferredContentSizeCategory: UIContentSizeCategory(typeSize))).pointSize
-        #else
-        let points = Theme.Font.pointSize(.secondary)
-        #endif
         let font = PlatformFont.monospacedDigitSystemFont(ofSize: points, weight: weight)
         return ceil((text as NSString).size(withAttributes: [.font: font]).width)
     }
@@ -285,9 +277,6 @@ struct TableFileView: View {
         Color.clear
             .frame(width: Theme.Space.m)
             .contentShape(.rect)
-            #if os(macOS)
-            .onHover { inside in if inside { NSCursor.resizeLeftRight.push() } else { NSCursor.pop() } }
-            #endif
             .gesture(DragGesture(minimumDistance: Theme.Space.xxs).onChanged { g in
                 let base = dragBase ?? width / scale
                 dragBase = base

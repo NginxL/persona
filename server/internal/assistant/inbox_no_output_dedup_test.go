@@ -83,6 +83,7 @@ func TestInboxNoOutputEscalationReplayAfterRestartDoesNotNotifyTwice(t *testing.
 		t.Fatalf("first escalation lost its source: %q", got)
 	}
 	ordinary := inboxRetryEvent(todo.ID, "ordinary-message")
+	s.updateSupervisePending(func(pending map[string]superviseSignal) { pending[ordinary.id()] = ordinary })
 	if !s.deliverDigest(ctx, s.settings(ctx), "conv1", []superviseSignal{ordinary}, "", now.Add(-time.Hour), time.Time{}) {
 		t.Fatal("ordinary Inbox delivery was blocked")
 	}
@@ -201,6 +202,7 @@ func TestInboxNoOutputEscalationRechecksSourceInsteadOfQueuingStaleNotice(t *tes
 	f.setSessions("server", proto.Session{SessionID: "conv1", MachineID: "server",
 		Assistant: true, Status: proto.StatusWorking})
 	ordinary := inboxRetryEvent(todo.ID, "ordinary-message")
+	s.updateSupervisePending(func(pending map[string]superviseSignal) { pending[ordinary.id()] = ordinary })
 	if !s.deliverDigest(ctx, s.settings(ctx), "conv1", []superviseSignal{ordinary}, "", time.Now(), time.Time{}) ||
 		s.queuedFor("conv1") != 1 {
 		t.Fatal("ordinary Inbox notice did not queue behind the supervisor's turn")
@@ -216,14 +218,26 @@ func TestInboxNoOutputEscalationRechecksSourceInsteadOfQueuingStaleNotice(t *tes
 	restarted, again := newQuietServiceOn(t, st)
 	turnInboxSignalsOn(t, restarted)
 	restarted.superviseTimes.gather = time.Hour
+	// Match sendDigest's serialization while this test forces an immediate delivery. A restart timer may win the race,
+	// but it cannot run beside the explicit call and produce a second notice.
+	restarted.supervise.digestMu.Lock()
+	defer restarted.supervise.digestMu.Unlock()
+	restarted.supervise.dedupMu.Lock()
+	defer restarted.supervise.dedupMu.Unlock()
 	if err := restarted.ensureTodosLoaded(ctx); err != nil {
 		t.Fatal(err)
 	}
 	restarted.recoverTaskInboxEvents(ctx)
 	recovered := unhandledInboxSignals(restarted)
-	if len(recovered) != 1 || !restarted.deliverDigest(ctx, restarted.settings(ctx), "conv1",
-		recovered, "", time.Now(), time.Time{}) || len(again.notices()) != 1 {
-		t.Fatal("a supervisor becoming available after restart lost its source-bearing notice")
+	delivered := true
+	if len(again.notices()) == 0 {
+		if len(recovered) != 1 {
+			t.Fatalf("a supervisor becoming available after restart lost its source-bearing notice: recovered=%d", len(recovered))
+		}
+		delivered = restarted.deliverDigest(ctx, restarted.settings(ctx), "conv1", recovered, "", time.Now(), time.Time{})
+	}
+	if !delivered || len(again.notices()) != 1 {
+		t.Fatalf("a supervisor becoming available after restart did not deliver exactly one source-bearing notice: recovered=%d delivered=%v notices=%d queued=%d", len(recovered), delivered, len(again.notices()), restarted.queuedFor("conv1"))
 	}
 }
 

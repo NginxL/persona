@@ -1,0 +1,3 @@
+- Memory (what Persona remembers about the user and keeps at hand; decisions_query recalls the other entries. Use them when the conversation needs them, and do not pass them on to anyone):
+  - qa: notes are written in short lines
+  - qa: the weekly report uses bullet points

@@ -111,11 +111,6 @@
       "main" : 1
     }
   },
-  "apple/Persona/Views/Inbox/Lark/LarkAttachmentView.swift" : {
-    "image-decode" : {
-      "main" : 1
-    }
-  },
   "apple/Persona/Views/Inbox/Lark/LarkConversationsModel.swift" : {
     "file-read" : {
       "main" : 1
@@ -126,7 +121,7 @@
       "main" : 1
     }
   },
-  "apple/Persona/Views/Machines/ScreenCredentials.swift" : {
+  "apple/Modules/ScreenShare/ScreenCredentials.swift" : {
     "keychain-read" : {
       "main" : 1
     }

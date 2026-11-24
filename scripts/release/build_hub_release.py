@@ -79,6 +79,9 @@ def main():
     run(['python3', 'scripts/privacy_check.py'], root)
     run(['go', 'mod', 'verify'], root / 'server')
     run(['go', 'vet', './...'], root / 'server')
+    # Before the tests: the runtime packages are git-ignored build output in this reused checkout, and tests read what
+    # is embedded (internal/claudeplugin). Generated only after a passing run, a stale package failed every later one.
+    run(['go', 'generate', './internal/runtimepkg'], root / 'server')
     sys.path.insert(0, str(root / 'scripts/test'))
     from server_test_env import clean_environment
     test_env = clean_environment(os.environ)
@@ -117,7 +120,6 @@ def main():
         # keep its hashed assets gzipped as the hub sends them (docs/web/web.md "Precompressed assets").
         run(['python3', 'scripts/release/check_bundle_privacy.py', '--whole-short', str(webdist)], root)
         run(['go', 'run', './internal/webasset/precompress', 'internal/hub/webdist'], root / 'server')
-        run(['go', 'generate', './internal/runtimepkg'], root / 'server')
         tags = build_tags(root)
         flags = (f'-s -w -X main.version={version} -X main.channel=release '
                  f'-X main.build={args.build} -X main.commit={sha} -X main.updateURL={args.update_url}')

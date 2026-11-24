@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"net/netip"
 
-	"github.com/nwverse/persona/server/internal/feishubot"
+	"github.com/nwverse/persona/server/internal/botport"
 )
 
 // Shortcuts the tests use into the manager's own code paths, with the defaults a test wants. Production calls the
@@ -28,7 +28,7 @@ func feishuReplyUUID(messageID, kind, content string) string {
 }
 
 // botNote is botNoteIn not in a thread.
-func (h *Manager) botNote(ctx context.Context, api *feishubot.Client, chatID, messageID, text string) {
+func (h *Manager) botNote(ctx context.Context, api botport.Client, chatID, messageID, text string) {
 	h.botNoteIn(ctx, api, chatID, messageID, text, false)
 }
 

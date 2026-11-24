@@ -227,9 +227,9 @@ data class ChatLinkContext(
          * What the link card's "Use as context" sends for the whole of a native Feishu view: a document by [WHOLE], a Moments post
          * by its text once [read] (null until then: no button); null for any other page.
          */
-        internal fun whole(native: persona.feature.inbox.LarkNativeLink?, read: String?): String? = when (native) {
-            is persona.feature.inbox.LarkNativeLink.Document -> WHOLE
-            is persona.feature.inbox.LarkNativeLink.MomentsPost -> read?.ifBlank { WHOLE }
+        internal fun whole(native: persona.core.inbox.LarkNativeLink?, read: String?): String? = when (native) {
+            is persona.core.inbox.LarkNativeLink.Document -> WHOLE
+            is persona.core.inbox.LarkNativeLink.MomentsPost -> read?.ifBlank { WHOLE }
             null -> null
         }
         /** "Quote" on a message of this chat (iOS `ContextRef.quote`): [title] is who wrote it, [QUOTE_ME] for the user's own. */

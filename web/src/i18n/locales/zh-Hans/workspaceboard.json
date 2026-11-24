@@ -112,5 +112,13 @@
   "bulk_undo": "撤销上次修改",
   "selection_hint": "只选择当前可见的工作空间，Agent 会继续运行。",
   "bulk_saving": "正在更新工作空间…",
-  "activity": "活动记录"
+  "activity": "活动记录",
+  "mode_project": "新建项目",
+  "project_name": "项目名称",
+  "project_app": "桌面应用",
+  "project_persona": "仅在 Persona 中管理",
+  "create_project": "创建项目",
+  "create_project_hint": "可选择已有目录，或在已有父目录下填写新目录。创建项目后再新建会话。",
+  "project_desktop_unavailable": "目前无法将项目名称同步到 Codex 或 Claude 桌面侧栏，因此暂不支持在此创建这两类项目。请先在桌面应用中创建，再通过「已有工作空间」关联。",
+  "project_directory_placeholder": "项目目录的完整路径（可选择已有目录或新建）"
 }

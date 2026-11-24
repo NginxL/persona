@@ -187,20 +187,37 @@ func TestInteractionResolveRowLockedPostgres(t *testing.T) {
 	if url == "" {
 		t.Skip("PERSONA_TEST_DATABASE_URL not set")
 	}
-	ctx := context.Background()
-	database, err := db.Open(ctx, url, db.ManagerSet)
+	database, err := db.Open(t.Context(), url, db.ManagerSet)
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(database.Close)
-	shortHistoryTimeout(t, 300*time.Millisecond)
 	ft := newFleetTestOn(t, database)
 	s := ft.s
 
+	// The normal history timeout also applies to the insert. Let it complete
+	// before locking the row, and keep the row locked until both calls return.
+	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+	defer cancel()
 	ix := permission("ix_lock_" + randomHex(6))
-	got := make(chan proto.Resolution, 1)
-	go func() { r, _ := s.waitInteraction(ctx, ix); got <- r }()
-	ft.waitShown(ix.ID, 5*time.Second) // shown after the history has its row
+	ready, done := make(chan struct{}), make(chan struct{})
+	var got proto.Resolution
+	var waitErr error
+	go func() {
+		defer close(done)
+		got, waitErr = s.waitInteractionReady(ctx, ix, nil, ready)
+	}()
+	t.Cleanup(func() {
+		cancel()
+		<-done
+	})
+	select {
+	case <-ready:
+	case <-done:
+		t.Fatalf("interaction ended before registration: %+v, %v", got, waitErr)
+	case <-ctx.Done():
+		t.Fatal("the interaction was not registered")
+	}
 
 	locker, err := pgx.Connect(ctx, url)
 	if err != nil {
@@ -211,7 +228,9 @@ func TestInteractionResolveRowLockedPostgres(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = tx.Rollback(context.Background()) })
+	// On failure the deferred rollback releases the lock before the cleanup
+	// joins the resolver, while the store is still open.
+	defer tx.Rollback(context.Background())
 	var one int
 	if err := tx.QueryRow(ctx, `SELECT 1 FROM interactions WHERE id = $1 FOR UPDATE`, ix.ID).Scan(&one); err != nil {
 		t.Fatalf("lock the row: %v", err)
@@ -219,18 +238,28 @@ func TestInteractionResolveRowLockedPostgres(t *testing.T) {
 
 	yes := true
 	start := time.Now()
-	resolved := make(chan error, 1)
-	go func() { resolved <- s.resolve(ix.ID, proto.Resolution{Allow: &yes}) }()
+	resolved := make(chan struct{})
+	var resolveErr error
+	go func() {
+		defer close(resolved)
+		resolveErr = s.resolve(ix.ID, proto.Resolution{Allow: &yes})
+	}()
+	t.Cleanup(func() { <-resolved })
 	select {
-	case r := <-got:
-		if r.Allow == nil || !*r.Allow {
-			t.Fatalf("hook got %+v", r)
+	case <-done:
+		if waitErr != nil || got.Allow == nil || !*got.Allow {
+			t.Fatalf("hook got %+v, %v", got, waitErr)
 		}
-	case <-time.After(5 * time.Second):
+	case <-ctx.Done():
 		t.Fatal("the hook never got the answer while the row was locked")
 	}
-	if err := <-resolved; err != nil {
-		t.Fatal(err)
+	select {
+	case <-resolved:
+		if resolveErr != nil {
+			t.Fatal(resolveErr)
+		}
+	case <-ctx.Done():
+		t.Fatal("resolve did not return while the row was locked")
 	}
 	t.Logf("answer delivered after %v with the row locked", time.Since(start))
 }

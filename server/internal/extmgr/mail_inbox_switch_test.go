@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	"github.com/nwverse/persona/server/internal/connector"
-	"github.com/nwverse/persona/server/internal/mail"
+	"github.com/nwverse/persona/server/internal/mailwire"
 	"github.com/nwverse/persona/server/internal/subscriptions"
 )
 
@@ -14,7 +14,7 @@ import (
 // no account (the manager keeps the mail it has); on again, the next round reads mail at once.
 func TestMailInboxSwitch(t *testing.T) {
 	ctx := context.Background()
-	m := &slowMail{accounts: []mail.MailAccount{{ID: "a", Email: "a@example.com"}}}
+	m := &slowMail{accounts: []mailwire.MailAccount{{ID: "a", Email: "a@example.com"}}}
 	h := newSlowMailHub(t, m)
 	h.store = newKeepStore()
 	if h.readMail(ctx) == nil {

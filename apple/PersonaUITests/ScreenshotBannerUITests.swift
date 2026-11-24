@@ -136,15 +136,14 @@ final class ScreenshotBannerUITests: XCTestCase {
         return (request.results ?? []).compactMap { o in o.topCandidates(1).first.map { ($0.string, o.boundingBox) } }
     }
 
-    /// Settings › Appearance & Display has the switch (on: the UI tests pass it, a fresh install's default is
+    /// Settings › Advanced › Appearance & Display has the switch (on: the UI tests pass it, a fresh install's default is
     /// `ScreenshotBannerPrefs.enabledByDefault`, ScreenshotBannerTests).
     @MainActor func testTheSwitch() throws {
         for scheme in ["light", "dark"] {
             let app = launch(["-ui.scheme", scheme, "-tab", "settings", "-app.tab", "settings"], banner: true)
             defer { app.terminate() }
-            let appearance = app.descendants(matching: .any)["settings-appearance"].firstMatch
-            XCTAssertTrue(app.descendants(matching: .any)["settings-list"].firstMatch.waitForExistence(timeout: 30), "no Settings")
-            for _ in 0..<8 where !appearance.isHittable { app.swipeUp() }
+            XCTAssertTrue(app.openSettingsAdvancedPage(), "no Settings › Advanced")
+            let appearance = app.settingsAdvancedRow("settings-appearance")
             appearance.tap()
             let toggle = app.switches["settings-screenshot-banner"].firstMatch
             XCTAssertTrue(app.descendants(matching: .any)["settings-style"].firstMatch.waitForExistence(timeout: 15), "no Appearance & Display")

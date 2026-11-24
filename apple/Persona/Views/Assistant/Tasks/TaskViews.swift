@@ -454,9 +454,6 @@ struct PlanEditSheet: View {
                 ToolbarItem(placement: .confirmationAction) { Button("Start") { start(tasks) }.bold() }
             }
         }
-        #if os(macOS)
-        .macSheet()
-        #endif
         .onAppear {
             guard tasks.isEmpty else { return }
             tasks = Ultracode.editsOf(plan, choices: ultracode)
@@ -642,14 +639,12 @@ struct AnsweredLine: View {
         Haptics.tap()
         let opening = !open
         toggleInPlace(pin, pinKey, animation: Theme.Motion.state, unfold: $unfold, closing: open) { open.toggle() }
-        #if os(iOS) || os(visionOS)
         // The line as the chat's last row: the answers open under it, past the composer.
         guard opening, let pin else { return }
         Task { @MainActor in
             try? await Task.sleep(for: .seconds(Theme.Motion.revealTime))
             if open { pin.show(pinKey, bottom: bottom) }
         }
-        #endif
     }
 }
 
@@ -816,102 +811,6 @@ struct MessageCard: View {
 
 // MARK: - Above the composer
 
-/// What the conversation's tasks are asking, at the bottom where the user is: the oldest question under its task's
-/// name, answered where it is; the next comes up when it is done (「还有 N 件」 counts them).
-///
-/// Capped as the cards' stack is (#9392): alone it may take the room a lone question takes (`FooterRoom.cardsRoom`,
-/// never less than half the page), beside the conversation's own cards half of that room, as Android's question does.
-/// Its card fits itself to the cap and scrolls inside. It had no cap: its form's scroll area, offered no height, took all
-/// the page had, the conversation got none (nothing left to scroll) and the card's top, with its fold, went under the
-/// page's top bar.
-struct TaskQuestions: View {
-    var conversation: String
-    var room: FooterRoom
-    private var store: TasksStore { .shared }
-    @State private var labelHeight: CGFloat = 0
-    @State private var shown: CGFloat = 0
-    /// What the footer holds besides both places of cards, held as `PendingCards.footerRest` is (#1580).
-    @State private var footerRest: CGFloat = 0
-    /// The page's (or column's) length, for the card's form (`cardRoom`).
-    @State private var containerLength: CGFloat = 0
-
-    var body: some View {
-        let asks = store.tasks(of: conversation)
-            .flatMap { todo in store.interactions(todo).map { (todo: todo, ix: $0) } }
-            .sorted { ($0.ix.createdAt ?? .distantPast) < ($1.ix.createdAt ?? .distantPast) }
-        if let first = asks.first {
-            let resize = resize(first.ix.id)
-            let cap = cap(resize)
-            let keyboard = keyboardRoom
-            let area = cap > 0 ? max(cap - labelHeight - Theme.Space.xs, Theme.Size.tapTarget) : 0
-            VStack(alignment: .leading, spacing: Theme.Space.xs) {
-                HStack(spacing: Theme.Space.s) {
-                    Label(first.todo.title, systemImage: Theme.Icon.askFirst).lineLimit(1)
-                    Spacer(minLength: Theme.Space.s)
-                    if asks.count > 1 { Text("\(asks.count - 1) more").lineLimit(1).fixedSize() }
-                }
-                .font(Theme.Font.captionStrong)
-                .foregroundStyle(AgentState.needsYou.tone.text)
-                .padding(.horizontal, Theme.Space.xs)
-                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { h in
-                    if abs(h - labelHeight) >= 1 { labelHeight = h }
-                }
-                InteractionPanel(interaction: first.ix)
-                    .environment(\.cardRoom, containerLength)
-                    .environment(\.cardArea, area)
-                    .environment(\.cardFits, keyboard ? area - Theme.Space.l : 0)
-                    // Alone, the cap is its only one (a lone question past half the page, #6277); sized by hand, too.
-                    .environment(\.cardTakesArea, !sharesRoom || resize != nil)
-                    .environment(\.cardResize, resize)
-            }
-            .accessibilityElement(children: .contain)
-            .accessibilityIdentifier("task-question")
-            .id(first.ix.id)
-            .transition(.move(edge: .bottom).combined(with: .opacity))
-            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { h in
-                shown = h
-                if abs(room.taskShown - h) >= 1 { room.taskShown = h }
-            }
-            .onChange(of: room.footer - shown - room.stackShown, initial: true) { _, o in
-                if abs(o - footerRest) >= 1 { footerRest = o }
-            }
-            .onDisappear { room.taskShown = 0 }
-            .background {
-                Color.clear.containerRelativeFrame(.vertical)
-                    .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { containerLength = $0 }
-                    .hidden()
-            }
-        }
-    }
-
-    private var keyboardRoom: Bool { KeyboardState.shared.isUp && room.footer > 0 }
-    /// The conversation's own cards are on screen under the entries: half the room each (#9392).
-    private var sharesRoom: Bool { room.stackShown > 0 }
-
-    private var rest: CGFloat { footerRest > 0 ? footerRest : room.footer - shown - room.stackShown }
-
-    /// How tall the question with its task's name may be; 0 before the page is measured (no cap yet). Beside the
-    /// conversation's own cards each has half the room, and a card that takes less (folded, #12306) leaves the rest to
-    /// the other: a folded card kept its half empty while the question showed one option. The user's height
-    /// (`CardHeight`) wins with the keyboard down.
-    private func cap(_ resize: CardResize?) -> CGFloat {
-        guard room.height > 0, room.footer > 0 else { return 0 }
-        let whole = room.cardsRoom(rest: rest, keyboard: keyboardRoom)
-        if keyboardRoom { return max(Theme.Size.tapTarget, sharesRoom ? whole / 2 : whole) }
-        let fallback = sharesRoom ? max(Theme.Size.tapTarget, whole / 2, whole - room.stackShown) : max(room.height / 2, whole)
-        guard let resize else { return fallback }
-        return CardHeight.shared.cap(default: fallback, range: resize.range, id: resize.id)
-    }
-
-    /// The grabber's terms (#12306), the keyboard down: from the shortest card to all the room above the composer the
-    /// conversation's own cards leave, the conversation keeping a sliver. Beside them the question is the one sized.
-    private func resize(_ id: String) -> CardResize? {
-        guard room.height > 0, room.footer > 0, !keyboardRoom else { return nil }
-        let tallest = room.tallestRoom(rest: rest) - (sharesRoom ? room.stackShown : 0)
-        return CardResize(id: id, height: { shown }, range: FooterRoom.resizeRange(tallest: tallest))
-    }
-}
-
 /// The capsule the row above the assistant's composer draws an entry in: the action bar's Needs You / In Progress (#3393)
 /// and its trays' All, the look the dock's All had (#1094), so the bar is exactly as low as the dock was:
 /// caption medium (13 pt at the default text size; it follows Dynamic Type), 12 pt sideways and 6 pt up and down
@@ -1060,13 +959,8 @@ struct TaskMentionList: View {
 }
 
 extension View {
-    /// The shape a long press lifts for the context menu's preview (iOS). The Mac's right-click menu has no preview,
-    /// and `ContentShapeKinds.contextMenuPreview` does not exist there (#1083).
+    /// The shape a long press lifts for the context menu's preview.
     @ViewBuilder func menuPreviewShape(_ shape: some Shape) -> some View {
-        #if os(iOS) || os(visionOS)
         contentShape(.contextMenuPreview, shape)
-        #else
-        self
-        #endif
     }
 }

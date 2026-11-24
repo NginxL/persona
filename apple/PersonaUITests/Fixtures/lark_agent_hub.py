@@ -13,7 +13,7 @@ spec = importlib.util.spec_from_file_location("persona_model_mock", ROOT / "scri
 mock = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(mock)
 
-PARENT = {"revision": 11, "override": {"provider": "launcher.claude", "model": "agents-default", "effort": "medium"}}
+PARENT = {"revision": 11, "override": {"provider": "launcher.claude", "model": "agents-default", "effort": "medium", "permission_mode": "bypassPermissions"}}
 mock.MODEL_BINDINGS["agent.new"] = PARENT
 # The uses of Agents the user can set apart, in the hub's order, each with its own record and writes.
 CHILDREN = {"inbox.agent": "AI 分身执行", "lark.agent": "飞书 /agent"}
@@ -41,9 +41,11 @@ def catalog(include_uses=False):
             provider = next(p for p in result["providers"] if p["id"] == binding["provider"])
             effective = {"provider": provider["id"], "model": provider.get("model", "")}
         effective.update(binding)
+        if pid == "inbox.agent" and not binding.get("permission_mode"):
+            effective["permission_mode"] = "default"
         purpose = {"id": pid, "category_id": "agent.new", "parent": "agent.new", "name": name,
                    "group": "Agents", "kind": "launcher", "override": binding, "effective": effective,
-                   "revision": state["revision"], "fields": ["provider", "model", "effort"],
+                   "revision": state["revision"], "fields": ["provider", "model", "effort", "permission_mode"],
                    "provider_ids": ["launcher.claude", "launcher.demo", "api.messages"]}
         if not binding:
             purpose["inherited_from"] = "Agents"
@@ -93,13 +95,16 @@ class Handler(mock.H):
             state = STATES[pid]
             if body.get("revision") != state["revision"]:
                 return self.send_json({"error": "配置已在别处修改"}, 409)
-            if set(body) - {"revision", "provider", "model", "effort"}:
+            if set(body) - {"revision", "provider", "model", "effort", "permission_mode"}:
                 return self.send_json({"error": "unsupported field"}, 400)
+            if pid == "inbox.agent" and body.get("permission_mode") == "plan":
+                return self.send_json({"error": "permission mode unsupported"}, 400)
             binding = dict(state["override"])
             if "provider" in body and body["provider"] != binding.get("provider"):
                 binding.pop("model", None)
                 binding.pop("effort", None)
-            for field in ("provider", "model", "effort"):
+                binding.pop("permission_mode", None)
+            for field in ("provider", "model", "effort", "permission_mode"):
                 if field not in body:
                     continue
                 if body[field] is None:

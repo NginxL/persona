@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { useRevealedInputSeq, useUserInputs } from "./useUserInputs";
 import { ApiError } from "../../lib/api";
 import type { UserInputIndex } from "../../lib/user-input-index";
+import { resetPullGatesForTests } from "../../lib/pull-gate";
 
 const pending = vi.hoisted(() => [] as { path: string; resolve: (value: unknown) => void; signal?: AbortSignal }[]);
 vi.mock("../../lib/api", async (importOriginal) => ({
@@ -14,7 +15,7 @@ vi.mock("../../lib/api", async (importOriginal) => ({
 }));
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 let destroy: (() => void) | undefined;
-afterEach(() => { destroy?.(); destroy = undefined; pending.length = 0; vi.useRealTimers(); });
+afterEach(() => { destroy?.(); destroy = undefined; pending.length = 0; resetPullGatesForTests(); vi.useRealTimers(); });
 const answer = (history: string, total = 2): UserInputIndex => ({ total, history, inputs: Array.from({ length: total }, (_, i) => ({ id: `input-${i}#0`, seq: i + 1 })) });
 
 describe("independent user-input metadata", () => {

@@ -1,6 +1,6 @@
 {
-  "unavailable": "No sandbox: {why}",
   "not_applicable": "Only extensions installed on the hub, whose program the hub runs, have a sandbox",
   "no_database": "This hub has no database",
-  "owner_only": "An extension’s sandbox can only be changed on the hub machine (personad extension sandbox …) or in the hub’s admin page"
+  "owner_only": "An extension’s sandbox can only be changed on the hub machine (personad extension sandbox …) or in the hub’s admin page",
+  "start_blocked": "Extension cannot start because its sandbox is unavailable: {why}"
 }

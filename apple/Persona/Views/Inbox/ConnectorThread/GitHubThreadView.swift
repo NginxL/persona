@@ -80,13 +80,9 @@ struct GitHubThreadView: View {
         .task {
             if !model.loaded { await model.load() }
         }
-        #if os(macOS)
-        .macLinkPanel($link)
-        #else
         .sheet(item: $link) { t in
             if let key = app.assistantMain ?? app.assistantCurrent { LinkSheet(target: t, key: key) }
         }
-        #endif
     }
 
     /// Between the description and the timeline: the entries before the oldest shown.

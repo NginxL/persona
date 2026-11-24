@@ -76,7 +76,7 @@ nonisolated enum ShareTargets {
                                        state: s?.state ?? .idle, date: s?.updatedAt)
             }
             out.conversations = a.conversations
-                .filter { $0.sessionID != mainID && $0.archived != true && !$0.isHealth && ($0.origin ?? "user") == "user" && $0.canSend }
+                .filter { $0.sessionID != mainID && $0.archived != true && !$0.inSpace && ($0.origin ?? "user") == "user" && $0.canSend }
                 .sorted { ($0.updatedAt ?? .distantPast) > ($1.updatedAt ?? .distantPast) }
                 .prefix(maxConversations)
                 .map { s in

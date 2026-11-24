@@ -39,6 +39,46 @@ func (p *Peer) EnableLanes(control, bulk []string) {
 	p.lanesUp = make(chan struct{})
 }
 
+// CreditReplies makes this side's answers to methods wait for credit on the lane the table gives them (interactive,
+// unless listed elsewhere), which an answer otherwise never does. It is for answers that can run to megabytes (a page of
+// a transcript, an image): written without credit they went to the transport at once and a pong written after them
+// waited behind all of them (#13677). On the interactive lane they still go ahead of bulk (a session's pushes, file
+// chunks), so a person's read is not held behind a background catch-up. Only for methods whose answer no read loop of
+// this side waits for: a read loop waiting for an answer that waits for credit would wait for an acknowledgement only it
+// reads. Call it after EnableLanes and before Serve; without lanes it does nothing.
+func (p *Peer) CreditReplies(methods ...string) {
+	if p.lanes == nil {
+		return
+	}
+	if p.creditReplies == nil {
+		p.creditReplies = map[string]bool{}
+	}
+	for _, m := range methods {
+		p.creditReplies[m] = true
+	}
+}
+
+// replyRoute is the route of this side's answer to method.
+func (p *Peer) replyRoute(method string) route {
+	r := p.lanes.reply(method)
+	if p.lanes != nil && p.creditReplies[method] && r.lane != LaneControl {
+		r.credit = true
+	}
+	return r
+}
+
+// NotifyBulk sends event like NotifyContext, but on a framed connection on the bulk lane, waiting for credit, whatever
+// lane the table gives the event's name: a push that can be large (a page of a session's items) then never fills the
+// transport ahead of a pong. On lines it is NotifyContext. It must never be called from a read loop (this peer's, or
+// one this peer's read loop waits for): waiting for credit waits for an acknowledgement only this peer's read loop
+// reads (lanes.go "route").
+func (p *Peer) NotifyBulk(ctx context.Context, event string, params any) error {
+	if p.lanes == nil {
+		return p.NotifyContext(ctx, event, params)
+	}
+	return p.notifyRoute(ctx, event, params, route{lane: LaneBulk, credit: true})
+}
+
 // UpgradeLanes asks the other side to frame the connection, and returns once both directions are framed. An error
 // says it did not happen: the other side refused (an older peer does not know rpc.lanes), or ctx ended or the
 // connection closed first; lines go on as before. The other side's answer switches this side whenever it comes, its

@@ -87,10 +87,10 @@ class SshTunnel(
         val current = session ?: return
         // A failed start may already have bound the loopback forward before localPort was assigned. Disconnecting
         // alone leaves that listener accepting health probes, which can reach the SSH server as another connection.
-        runCatching {
+        val _ = runCatching {
             current.portForwardingL.forEach { forwarding ->
                 val port = forwarding.substringBefore(':').toIntOrNull()
-                if (port != null) runCatching { current.delPortForwardingL("127.0.0.1", port) }
+                if (port != null) { val _ = runCatching { current.delPortForwardingL("127.0.0.1", port) } }
             }
         }
         localPort = 0
@@ -160,14 +160,14 @@ class SshTunnel(
     }
 
     private fun unlisten(session: Session, port: Int) {
-        runCatching { session.delPortForwardingL("127.0.0.1", port) }
+        val _ = runCatching { session.delPortForwardingL("127.0.0.1", port) }
     }
 
     private fun listen(session: Session, preferred: Int): Int {
         fun bind(port: Int) = session.setPortForwardingL(
             "127.0.0.1", port, route.targetHost.trim(), route.targetPort, null, timings.openMillis,
         )
-        if (preferred != 0) runCatching { return bind(preferred) }
+        if (preferred != 0) { val _ = runCatching { return bind(preferred) } }
         return bind(0)
     }
 

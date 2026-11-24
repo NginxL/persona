@@ -129,3 +129,25 @@ func TestSourceRuntimeReasonsAreShown(t *testing.T) {
 		}
 	}
 }
+
+// A cached startup refusal stays specific and localized, including raw kernel diagnostics.
+func TestExtensionSandboxStartupFailureText(t *testing.T) {
+	for _, source := range []Lang{En, ZhHans, Ja} {
+		for _, target := range []Lang{En, ZhHans, Ja} {
+			for _, mount := range []bool{false, true} {
+				cause := func(l Lang) string {
+					if mount {
+						return T(l, "extension-status.sandbox_mount", Args{"err": "operation not permitted"})
+					}
+					return T(l, "extension-status.sandbox_no_bwrap")
+				}
+				text := T(source, "hub-extension_sandbox.start_blocked", Args{"why": cause(source)})
+				want := T(target, "hub-extension_sandbox.start_blocked", Args{"why": cause(target)})
+				summary, detail := ExtensionFailureText(target, text, "extension-status.failed")
+				if summary != want || detail != "" {
+					t.Fatalf("%s to %s: %q / %q, want %q", source, target, summary, detail, want)
+				}
+			}
+		}
+	}
+}

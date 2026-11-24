@@ -247,9 +247,11 @@ export class Sanitizer {
       }
       case "a": {
         const id = Number(op[1]);
-        const name = op[2];
+        const rawName = op[2];
         const r = this.nodes.get(id);
-        if (!r || r.tag === "#text" || typeof name !== "string" || name === "autocomplete") return;
+        if (!r || r.tag === "#text" || typeof rawName !== "string") return;
+        const name = r.ns === "svg" ? rawName : rawName.toLowerCase();
+        if (name === "autocomplete") return;
         if (op[3] === null || op[3] === undefined) {
           if (name === "style") this.cssBytes.delete(-id);
           if (/^[a-zA-Z][\w:.-]*$/.test(name)) out.push(["a", id, name, null]);
@@ -286,8 +288,9 @@ export class Sanitizer {
   }
 
   private attr(r: Known, id: number, name: string, value: string): string | null {
-    const v = drawnAttr(r.tag, r.ns, name, value);
-    if (v !== null && name === "style") this.countCss(-id, v.length);
+    const attrName = r.ns === "svg" ? name : name.toLowerCase();
+    const v = drawnAttr(r.tag, r.ns, attrName, value);
+    if (v !== null && attrName === "style") this.countCss(-id, v.length);
     return v;
   }
 
@@ -319,9 +322,14 @@ export class Sanitizer {
     if (drawn.tag === "input" || drawn.tag === "textarea" || drawn.tag === "select") attrs.push(["autocomplete", "off"]);
     if (tag.toLowerCase() === "form") attrs.push(["role", "form"]);
     for (const a of Array.isArray(tree[2]) ? tree[2] : []) {
-      if (!Array.isArray(a) || typeof a[0] !== "string" || a[0] === "autocomplete") continue;
-      const v = this.attr(r, id, a[0], String(a[1] ?? ""));
-      if (v !== null) attrs.push([a[0], v]);
+      if (!Array.isArray(a) || typeof a[0] !== "string") continue;
+      const name = r.ns === "svg" ? a[0] : a[0].toLowerCase();
+      if (name === "autocomplete") continue;
+      const v = this.attr(r, id, name, String(a[1] ?? ""));
+      if (v === null) continue;
+      const prev = attrs.findIndex(([k]) => k === name);
+      if (prev >= 0) attrs[prev] = [name, v];
+      else attrs.push([name, v]);
     }
     if (drawn.tag === "style") this.sheets.set(id, []);
     const kids: unknown[] = [];

@@ -19,9 +19,11 @@ import (
 // The errors seen on broken machines (placeholders for the machines; the texts as the CLIs and gateways wrote them).
 func TestClassifyLauncherError(t *testing.T) {
 	for text, want := range map[string]string{
-		`API Error: 400 {"error":{"message":"Bare Claude model name cannot be routed"}}`:        errKindModelRoute,
-		`API Error: 400 no account match for model speech_o50`:                                  errKindModelRoute,
-		`session.start: context deadline exceeded`:                                              errKindTimeout,
+		`API Error: 400 {"error":{"message":"Bare Claude model name cannot be routed"}}`: errKindModelRoute,
+		`API Error: 400 no account match for model speech_o50`:                           errKindModelRoute,
+		`API Error: 503 no eligible upstream account is currently available`:             errKindUpstream,
+		`API Error: 503 no eligible upstream account for model claude-sonnet-4-5`:        errKindUpstream,
+		`session.start: context deadline exceeded`:                                       errKindTimeout,
 		`90 秒内没有回答`:                                                                             errKindTimeout,
 		`API Error: 401 {"error":"invalid or missing API key"}`:                                 errKindAuth,
 		`Not logged in · Please run /login`:                                                     errKindAuth,
@@ -48,6 +50,9 @@ func TestOnboardingFailureNeverRepairs(t *testing.T) {
 	}
 	if (LauncherHealth{Kind: errKindOnboarding}).repairNow() {
 		t.Fatal("an onboarding failure must not repair on its first failure either")
+	}
+	if (LauncherHealth{Kind: errKindUpstream, Fails: 5}).repairNow() {
+		t.Fatal("an upstream pool outage must not trigger local launcher repair")
 	}
 }
 
@@ -469,6 +474,25 @@ func TestLauncherHealthMovesPlannedTasks(t *testing.T) {
 	if task := p.Tasks[0]; task.Machine != "box" || task.Cwd != "/Users/me/code/app" || !strings.Contains(task.Why, "failed its health check on l4") {
 		t.Fatalf("task: %+v", task)
 	}
+}
+
+// A refusal on the detour happens before bind can fill in the chosen machine.
+func TestAgentStartRecordsRefusedHealthDetour(t *testing.T) {
+	s, f := launcherHealthHub(t)
+	ctx := context.Background()
+	f.checks["server/work"] = proto.LauncherCheck{Error: "unavailable"}
+	s.healthRound(ctx, true)
+	s.devs = &resourceDevs{
+		fleetDevs: newFleetDevs(),
+		machines:  map[string]*proto.Machine{"box": admissionMachine(8)},
+		samples:   map[string]*proto.MetricSample{"box": admissionSample(99, 16<<30, 2<<30, 1)},
+	}
+	_, err := s.runTool(ctx, "server", "conv9", "agent_start", json.RawMessage(`{"machine":"l4","cwd":"/home/me/code/app","prompt":"Check CI"}`))
+	if !isAdmissionDenied(err) || len(f.starts) != 0 {
+		t.Fatalf("expected admission refusal on the detour, got %v, starts %v", err, f.starts)
+	}
+	p := onlyStoredPlacement(t, s.store().(settingsPrefixStore))
+	checkPlacementGolden(t, &p, "v1 enforce l4 -> box (assistant-tasks.admission_load) | l4 launcher_unhealthy no_resources | server launcher_unhealthy no_resources | box assistant-tasks.admission_load health=0")
 }
 
 func TestAgentStartDetourRecomputesLauncherPermission(t *testing.T) {

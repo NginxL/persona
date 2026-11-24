@@ -111,7 +111,7 @@ export function editCounts(use: Item): Counts {
 
 /** The note the hub ends a tool input's string with when it clipped it for good (server/internal/transcript/clip.go
  *  clipNoteFormat). */
-const CLIPPED = /\n…（已截断，共 \d+ 字节）$/; // i18n-ignore: matches the hub's text
+const CLIPPED = /\n…（已截断，共 ≈?\d+ 字节）$/; // i18n-ignore: matches the hub's text
 
 function clipped(v: unknown): boolean {
   if (typeof v === "string") return CLIPPED.test(v);

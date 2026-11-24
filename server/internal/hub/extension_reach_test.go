@@ -220,6 +220,36 @@ func TestTodoRepositoryRoutesStayOnTheirManager(t *testing.T) {
 	}
 }
 
+func TestAssistantEntriesStayOnTokenManager(t *testing.T) {
+	_, url, a, b := reachHub(t)
+	const path = "/api/v1/assistant/entries"
+	beforeA, beforeB := len(reached(a)), len(reached(b))
+	for _, request := range []struct {
+		path   string
+		header map[string]string
+	}{
+		{path, map[string]string{ManagerHeader: assistantwire.AssistantID}},
+		{path + "?manager=assistant&by=user", nil},
+	} {
+		if code, out := extDo(t, url, "GET", request.path, "", request.header); code != http.StatusForbidden || !strings.Contains(out, codeOtherManager) {
+			t.Errorf("another manager's ledger: %d %s", code, out)
+		}
+	}
+	if len(reached(a)) != beforeA || len(reached(b)) != beforeB {
+		t.Fatal("a refused ledger selector reached a manager")
+	}
+	if code, out := extDo(t, url, "GET", path+"?by=user", "", nil); code != http.StatusOK || !strings.Contains(out, `"who":"b"`) {
+		t.Fatalf("the token manager's ledger: %d %s", code, out)
+	}
+	if len(reached(a)) != beforeA {
+		t.Fatal("the ledger read reached another manager")
+	}
+	calls := reached(b)[beforeB:]
+	if len(calls) != 1 || !strings.HasPrefix(calls[0], assistantwire.MethodHTTP+" ") || !strings.Contains(calls[0], path) {
+		t.Fatalf("ledger read did not reach only the token manager: %v", calls)
+	}
+}
+
 // The To-dos view's reads (todo_view.go): one to-do and its timeline go to its own manager (byTodo), another manager's
 // are refused; the places are asked of the extension's own manager alone (mergedAsk), and naming another is refused.
 func TestTodoViewRoutesStayOnTheirManager(t *testing.T) {
@@ -368,11 +398,14 @@ func TestEveryExtensionRouteIsBounded(t *testing.T) {
 		"GET /api/v1/push/stats/daily":                     "manager", // only its manager's counts (pushGradingRoutes, TestPushDailyStatsHeldToManager)
 		"GET /api/v1/assistant":                            "manager",
 		"GET /api/v1/assistant/capabilities":               "manager",
+		"GET /api/v1/assistant/entries":                    "manager", // TestAssistantEntriesStayOnTokenManager
 		"POST /api/v1/assistant/conversations":             "manager",
 		"GET /api/v1/assistant/conversations/{id}/feed":    "path",
 		"POST /api/v1/assistant/conversations/{id}/stop":   "path",
 		"GET /api/v1/assistant/reporters":                  "manager",
 		"GET /api/v1/assistant/leaders":                    "manager",
+		"POST /api/v1/assistant/directions":                "manager", // create validates an optional body Agent against this manager
+		"POST /api/v1/assistant/directions/{id}/progress":  "manager", // current-direction membership is manager-owned
 		"GET /api/v1/assistant/dispatch-policy":            "manager",
 		"PUT /api/v1/assistant/dispatch-policy":            "manager",
 		"GET /api/v1/assistant/dispatch-guard":             "manager",

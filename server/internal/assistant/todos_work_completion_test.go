@@ -140,7 +140,7 @@ func TestCompletedTodoOnlyStopsStillLinkedAgents(t *testing.T) {
 				t.Fatalf("unrelated completed todo blocked continuation: %+v", e)
 			}
 			s.workWake(ctx, s.newWorkView(ctx), [2]string{"box", "s1"}, e.WakeAt.Add(time.Second))
-			if got := f.sentToAgents(); len(got) != 1 || got[0] != "s1: "+continueText {
+			if got := f.sentToAgents(); len(got) != 1 || got[0] != "s1: "+autoContinueTextForTest(continueText) {
 				t.Fatalf("continuation = %v", got)
 			}
 		})
@@ -167,7 +167,7 @@ func TestCompletedTodoManualTurnPreservesReopeningRules(t *testing.T) {
 			if err := s.sendToSession(ctx, "box", "s1", "Check one more case."); err != nil {
 				t.Fatal(err)
 			}
-			s.taskWorking(ctx, "box", "s1")
+			s.taskWorking(ctx, "box", "s1", startRow{})
 			s.workStarted(ctx, "box", "s1", time.Now())
 			wantReopen := doneBy == db.DoneByAuto
 			if reopened := todoNow(s, "todo_done").DoneAt == nil; reopened != wantReopen {
@@ -264,7 +264,7 @@ func TestCompletedTodoReadFailureRetriesTriageAndWake(t *testing.T) {
 				t.Fatalf("recovered read did not allow a wake: %+v", e)
 			}
 			s.workWake(ctx, s.newWorkView(ctx), key, e.WakeAt.Add(time.Second))
-			if got := f.sentToAgents(); len(got) != 1 || got[0] != "ci: "+continueText {
+			if got := f.sentToAgents(); len(got) != 1 || got[0] != "ci: "+autoContinueTextForTest(continueText) {
 				t.Fatalf("continuation after recovery = %v", got)
 			}
 			s.waitWorkEvents()

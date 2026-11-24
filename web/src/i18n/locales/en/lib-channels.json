@@ -24,6 +24,7 @@
   "max_text": "Up to {count} characters per message, longer ones are split",
   "asks_text": "Reply to questions and approvals with a number or text",
   "asks_buttons": "Tap buttons for questions and approvals",
+  "reply_only": "Replies to incoming messages only",
   "typing": "Shows \"typing\" while working",
   "progress": "Shows progress while working",
   "bind_qr": "Scan to bind",

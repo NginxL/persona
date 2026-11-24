@@ -1,5 +1,6 @@
 {
   "pair_hint": "Not paired yet. In the Persona app, go to Settings › Connectors › Lark bot, tap Pair, and send me the 6-digit code it shows.",
+  "pair_save_failed": "Couldn't save the pairing. Please try sending the same code again before it expires.",
   "pair_wrong": "That code is wrong. You have {n} more tries.",
   "pair_expired": "That code has expired. Open the app and generate a new one.",
   "owner_only": "This bot only works for its owner.",

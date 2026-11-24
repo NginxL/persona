@@ -6,10 +6,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/nwverse/persona/server/internal/cliwire"
+
 	"github.com/nwverse/persona/server/internal/assistantwire"
 	"github.com/nwverse/persona/server/internal/i18n"
-	adapter "github.com/nwverse/persona/server/internal/larkcli"
-	"github.com/nwverse/persona/server/internal/mail"
+	"github.com/nwverse/persona/server/internal/mailwire"
 	"github.com/nwverse/persona/server/internal/rpc"
 )
 
@@ -77,8 +78,8 @@ func inboxSendOutcome(err error) string {
 	case err == nil:
 		return sendDelivered
 	case errors.Is(err, context.DeadlineExceeded), errors.Is(err, context.Canceled), errors.Is(err, rpc.ErrDropped),
-		adapter.KindOf(err) == adapter.KindTimeout, // lark-cli stopped by its own deadline: the message may be out
-		errors.Is(err, mail.ErrMaybeSent):          // the SMTP server has the whole mail and never answered it (#9166)
+		cliwire.KindOf(err) == cliwire.KindTimeout, // lark-cli stopped by its own deadline: the message may be out
+		errors.Is(err, mailwire.ErrMaybeSent):      // the SMTP server has the whole mail and never answered it (#9166)
 		return sendUnknown
 	}
 	var re *rpc.Error
@@ -101,7 +102,7 @@ func (h *Manager) replyMail(ctx context.Context, ref assistantwire.InboxMailRef,
 }
 
 // mailReply is a reply to orig: Re: subject, threading headers, the original quoted below.
-func mailReply(lang i18n.Lang, accountID string, orig *mail.MailMessage, text string) mail.SendRequest {
+func mailReply(lang i18n.Lang, accountID string, orig *mailwire.MailMessage, text string) mailwire.SendRequest {
 	subject := orig.Subject
 	if !strings.HasPrefix(strings.ToLower(subject), "re:") {
 		subject = "Re: " + subject
@@ -119,6 +120,6 @@ func mailReply(lang i18n.Lang, accountID string, orig *mail.MailMessage, text st
 		from = orig.From.Email
 	}
 	body := text + "\n\n" + i18n.T(lang, "hub-inbox.reply_attribution", i18n.Args{"date": orig.Date, "from": from}) + "\n" + strings.Join(quoted, "\n")
-	return mail.SendRequest{AccountID: accountID, To: []mail.Address{orig.From}, Subject: subject, Text: body,
-		InReplyTo: orig.MessageID, References: mail.MessageIDs(strings.Join(refs, " "))}
+	return mailwire.SendRequest{AccountID: accountID, To: []mailwire.Address{orig.From}, Subject: subject, Text: body,
+		InReplyTo: orig.MessageID, References: mailwire.MessageIDs(strings.Join(refs, " "))}
 }

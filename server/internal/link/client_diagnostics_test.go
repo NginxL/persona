@@ -243,7 +243,7 @@ func TestDiagnosticWaitWakeReasons(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			o.wait(ctx, d, time.Time{})
+			o.wait(ctx, d, fileStamp{})
 			requireDiagnostic(t, logs, "retry_wait planned_us=", "actual_us=", "wake="+reason)
 		})
 	}

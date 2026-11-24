@@ -1,4 +1,3 @@
-#if os(iOS) || os(visionOS)
 import Combine
 import SwiftUI
 import UIKit
@@ -338,5 +337,4 @@ private struct ConfirmationDialogLabelProbe: UIViewRepresentable {
         return found
     }
 }
-#endif
 #endif

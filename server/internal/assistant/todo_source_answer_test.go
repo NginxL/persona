@@ -15,6 +15,7 @@ import (
 )
 
 func TestSourceReportFullTaskAnswer(t *testing.T) {
+	needsLarkLayer(t)
 	forStores(t, func(t *testing.T, e *askEnv, _ *db.DB) {
 		e.fullReply = true
 		e.ask(ownerAsk("om_task_result", "/ai Check the release notes"))
@@ -67,6 +68,7 @@ func TestSourceReportFullTaskAnswer(t *testing.T) {
 }
 
 func TestSourceReportMainAnswerWaitsForItsOwnTurn(t *testing.T) {
+	needsLarkLayer(t)
 	forStores(t, func(t *testing.T, e *askEnv, database *db.DB) {
 		minutes := 0
 		e.fullReply, e.reportDelay = true, &minutes
@@ -106,6 +108,7 @@ func TestSourceReportMainAnswerWaitsForItsOwnTurn(t *testing.T) {
 }
 
 func TestSourceReportMainAnswerWaitsForItsBackgroundWork(t *testing.T) {
+	needsLarkLayer(t)
 	forStores(t, func(t *testing.T, e *askEnv, _ *db.DB) {
 		minutes := 0
 		e.fullReply, e.reportDelay = true, &minutes
@@ -180,6 +183,7 @@ func TestSourceMainReplyMatchesWakeForAHeldRun(t *testing.T) {
 }
 
 func TestSourceReportImmediateAnswerWaitsForLateHandoff(t *testing.T) {
+	needsLarkLayer(t)
 	forStores(t, func(t *testing.T, e *askEnv, _ *db.DB) {
 		minutes := 0
 		e.fullReply, e.reportDelay = true, &minutes
@@ -232,6 +236,7 @@ func backgroundHandoff(handoff string) []proto.Item {
 // While background work runs past sourceReportWait, a read that fails must keep waiting instead
 // of sending the fallback.
 func TestSourceReportBackgroundWaitSurvivesUnclearReads(t *testing.T) {
+	needsLarkLayer(t)
 	e := newAskEnv(t, nil)
 	minutes := 0
 	e.fullReply, e.reportDelay = true, &minutes
@@ -286,6 +291,7 @@ func TestSourceReportBackgroundWaitSurvivesUnclearReads(t *testing.T) {
 // back. The reply is the handoff's own last words, not the later continuation, and it goes out
 // even though the requests pushed the handoff's prompt out of the last five turns.
 func TestSourceReportEndsAtAnotherRequest(t *testing.T) {
+	needsLarkLayer(t)
 	e := newAskEnv(t, nil)
 	minutes := 0
 	e.fullReply, e.reportDelay = true, &minutes
@@ -451,6 +457,7 @@ func TestSourceMainReplyWaitsForItsContinuation(t *testing.T) {
 // The handoff's background work wakes it after the short wait, and its channel run is gone (it
 // can fold into another run). The continuation keeps the long wait until its turn ends.
 func TestSourceReportWaitsForTheContinuationTurn(t *testing.T) {
+	needsLarkLayer(t)
 	e := newAskEnv(t, nil)
 	minutes := 0
 	e.fullReply, e.reportDelay = true, &minutes
@@ -507,6 +514,7 @@ func TestSourceAnswerPollBacksOff(t *testing.T) {
 }
 
 func TestSourceReportDoesNotShareAnUnrelatedTurn(t *testing.T) {
+	needsLarkLayer(t)
 	e := newAskEnv(t, nil)
 	minutes := 0
 	e.fullReply, e.reportDelay = true, &minutes
@@ -527,6 +535,7 @@ func TestSourceReportDoesNotShareAnUnrelatedTurn(t *testing.T) {
 }
 
 func TestSourceReportFullPreviewCanBeCancelled(t *testing.T) {
+	needsLarkLayer(t)
 	e := newAskEnv(t, nil)
 	e.fullReply = true
 	e.ask(ownerAsk("om_cancellable_result", "/ai What shipped?"))

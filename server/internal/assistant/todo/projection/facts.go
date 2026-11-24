@@ -119,6 +119,9 @@ type DecisionReview struct {
 // Supervision is a supervised task's ledger: the review state, the park that holds it, the reviews (latest last) and
 // the moments that count as activity.
 type Supervision struct {
+	// Supervisor: the conversation that handed it out and supervises it. Its failed starts and the cards it routes are
+	// that conversation's to handle, not the owner's.
+	Supervisor   string     `json:"supervisor,omitempty"`
 	State        string     `json:"state"`
 	Parked       *Parked    `json:"parked,omitempty"`
 	Reviews      []Review   `json:"reviews"`

@@ -172,6 +172,8 @@ fun ExtensionPage(
     manager: String? = null,
     /** Opens its connectors' source subscriptions (#2041); without it, or for another manager's, the row is left out. */
     onSubscriptions: (() -> Unit)? = null,
+    /** What it may read of personal information (#13500), the default manager's; null, or another manager's page: left out. */
+    trust: persona.core.contracts.api.ExtensionTrustSource? = null,
 ) {
     val subscriptionCounts = rememberSubscriptionCounts(extensions.takeIf { manager == null && onSubscriptions != null }) { it.extension == extensionId }
     val owner = remember(extensions, extensionId, manager) { ExtensionOwners.of(manager) }
@@ -186,6 +188,8 @@ fun ExtensionPage(
     val res = LocalResources.current
     val uri = LocalUriHandler.current
     val model = remember(api, extensionId, res, owner) { ExtensionModel(api, extensionId, res, owner) }
+    // What it may read of personal information (#13500): the default manager's grants, so another manager's page has none.
+    val trustAccess = rememberExtensionInfoAccess(trust.takeIf { manager == null }, extensionId)
     val logoLoader = rememberExtensionLogoLoader(api)
     val state by model.state.collectAsState()
     val scope = rememberCoroutineScope()
@@ -331,6 +335,8 @@ fun ExtensionPage(
                 sandbox(detail.extension.sandbox, detail.extension.name.ifBlank { extensionId },
                     onAllow = api.adminNetworkUrl(extensionId)?.let { url -> { uri.openUri(url) } })
                 permissions(detail)
+                if (manager == null && trustAccess != null) extensionInfoAccess(trustAccess,
+                    editable = !detail.readOnly && detail.extension.source !in listOf("dev", "hub.json"))
             }
         })
     if (auth != null) ExtensionSignInSheet(auth, detail.extension.name.ifBlank { extensionId }, signInState.bind, signIn)

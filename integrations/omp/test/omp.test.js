@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { startFakeNode } from '../../runtime-sdk/testing/fake-node.js'
+import { startFakeNode, until } from '../../runtime-sdk/testing/fake-node.js'
 import { agentDir, ompConfigPath, oneShot } from '../lib/compat.js'
 import { host, options } from '../lib/host.js'
 
@@ -58,6 +58,7 @@ test('settings are the pi extension\'s, read from omp\'s own directory', (t) => 
   assert.equal(o.instance, 'omp-4242')
   assert.equal(o.interactionPrefix, 'omp')
   assert.deepEqual(o.resumeCommand, ['omp', '--resume'])
+  assert.deepEqual(o.settleEvents, ['agent_end'], 'omp dispatches no agent_settled; a turn ends with agent_end')
 
   const d = options({ PI_CODING_AGENT_DIR: ompDir(t, null) }, 1)
   assert.deepEqual(d.approve, [])
@@ -87,4 +88,34 @@ test('the process connects to the node as omp, in the omp slot', async (t) => {
   const b = host(deps(), env)
   assert.equal(b, a, 'one host per process')
   assert.equal(globalThis.__personaPi, piSlot, 'the pi slot is untouched')
+})
+
+test('a session the host serves stops listing as working when its turn ends (omp dispatches no agent_settled)', async (t) => {
+  clearSlots()
+  t.after(clearSlots)
+  const n = await startFakeNode(t)
+  const a = host(deps(), { PI_CODING_AGENT_DIR: ompDir(t, { socket: n.path }) })
+  t.after(() => a.stop())
+  const handlers = new Map()
+  const entries = [
+    { type: 'message', id: 'u1', parentId: null, message: { role: 'user', content: 'one' } },
+    { type: 'message', id: 'a1', parentId: 'u1', message: { role: 'assistant', content: [{ type: 'text', text: 'done' }] } },
+  ]
+  const sm = {
+    entries, leaf: 'a1',
+    getSessionId: () => 's-end', getCwd: () => '/w/app', getSessionName: () => '', getEntries: () => entries,
+    getBranch: () => entries,
+  }
+  const ctx = { sessionManager: sm, mode: 'tui' }
+  const pi = { on: (e, fn) => (handlers.get(e) ?? handlers.set(e, []).get(e)).push(fn) }
+  a.register(pi)
+  const fire = (e) => { for (const fn of handlers.get(e) ?? []) fn({}, ctx) }
+  fire('session_start')
+  await n.ready
+  const status = () => n.last('runtime.sessions')?.sessions.find((s) => s.session_id === 's-end')?.status
+  await until('listed done', () => status() === 'done')
+  fire('agent_start')
+  await until('working', () => status() === 'working')
+  fire('agent_end')
+  await until('back to done', () => status() === 'done')
 })

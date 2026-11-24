@@ -369,15 +369,11 @@ func (b *tuiBridge) awaitReady(ctx context.Context) error {
 		if dead, status := b.dead(ctx); dead || err != nil {
 			return errors.New(b.ended(ctx, plain, status, true))
 		}
-		keys := trustKeys(plain)
-		if keys == nil {
-			keys = firstRunKeys(plain)
-		}
-		if keys == nil && b.spec.AcceptBypass {
-			if keys = bypassConfirmKeys(plain); keys != nil {
-				if bypassTries++; bypassTries > bypassConfirmTries {
-					return errors.New(bypassNotAccepted)
-				}
+		// The start-up dialogs a terminal start answers (startdialogs.go claudeStartDialogs).
+		d, keys := matchStartDialog(claudeStartDialogs, plain, b.spec.AcceptBypass)
+		if d != nil && d.Name == startDialogBypass {
+			if bypassTries++; bypassTries > bypassConfirmTries {
+				return errors.New(bypassNotAccepted)
 			}
 		}
 		if keys == nil && screen.Guide(plain) != "" {

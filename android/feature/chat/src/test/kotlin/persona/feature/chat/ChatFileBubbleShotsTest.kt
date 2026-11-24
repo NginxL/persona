@@ -133,7 +133,7 @@ class ChatFileBubbleShotsTest {
 
     private fun textLayout(text: String): TextLayoutResult {
         val layouts = mutableListOf<TextLayoutResult>()
-        rule.onNodeWithText(text, useUnmergedTree = true).fetchSemanticsNode()
+        val _ = rule.onNodeWithText(text, useUnmergedTree = true).fetchSemanticsNode()
             .config[SemanticsActions.GetTextLayoutResult].action!!(layouts)
         return layouts.single()
     }

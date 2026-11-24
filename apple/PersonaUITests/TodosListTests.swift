@@ -121,6 +121,35 @@ final class TodosListTests: XCTestCase {
         app?.terminate()
     }
 
+    /// The row names the Agent at work (#10904), with captures in light, dark and at the largest interface text size.
+    @MainActor func testAgentMetadataLightDarkAndLargestText() throws {
+        guard let hub = ProcessInfo.processInfo.environment["PERSONA_TODOS_HUB"] else {
+            throw XCTSkip("needs scripts/mock/mock_hub.py with MOCK_TODO_LIST=1 (PERSONA_TODOS_HUB)")
+        }
+        continueAfterFailure = false
+        let pair = "persona://pair?url=" + hub.addingPercentEncoding(withAllowedCharacters: .alphanumerics)! + "&token=mock"
+        for (scheme, largest) in [("light", false), ("dark", false), ("light", true)] {
+            app?.terminate()
+            app = XCUIApplication()
+            let size = largest ? ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryXXXL"] : []
+            app.launchArguments = ["-pairURL", pair, "-tab", "assistant", "-openShellPage", "todos",
+                                   "-todos.view", "list", "-todos.filter", "all", "-todos.sort", "recent",
+                                   "-ui.scheme", scheme, "-AppleLanguages", "(en)", "-AppleLocale", "en_US"] + size
+            app.launchPinned()
+            let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+            for label in ["OK", "好", "Don't Allow", "Don’t Allow", "不允许"] where springboard.alerts.buttons[label].waitForExistence(timeout: 3) {
+                springboard.alerts.buttons[label].tap()
+            }
+            let row = reveal("tl_widget", wait: 60)
+            XCTAssertTrue(row.label.contains("MacBook"), "the computer's display name: \(row.label)")
+            XCTAssertTrue(row.label.contains("Opus"), "the model's friendly name: \(row.label)")
+            XCTAssertTrue(row.label.contains("High"), "the session's effort: \(row.label)")
+            XCTAssertFalse(row.label.contains("1 agent"), "the known row no longer falls back to a count: \(row.label)")
+            shot("todos-agent-metadata-\(scheme)-\(largest ? "largest" : "default")")
+        }
+        app?.terminate()
+    }
+
     @MainActor private func reveal(_ id: String, towardTop: Bool = false, wait: TimeInterval = 2) -> XCUIElement {
         let row = app.descendants(matching: .any)["todos.row.\(id)"].firstMatch
         let window = app.windows.firstMatch.frame

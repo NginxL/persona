@@ -1,15 +1,9 @@
 import Foundation
 import UserNotifications
-#if os(macOS)
-import AppKit
-#else
 import UIKit
-#endif
 
-/// Registers for APNs and tells the hub where to push (interactions, finished turns). The iPhone and the Mac app the
-/// same way, as kind `iphone` / `mac`: same bundle id, so the same APNs topic, and both through the relay for a hub
-/// without the app's key. While the Mac app is connected the hub leaves the agents' alerts to it (MacAttentionWatcher
-/// posts them); a Mac never gets the phone's wake pushes.
+/// Registers for APNs and tells the hub where to push (interactions, finished turns), as kind `iphone`, through the
+/// relay for a hub without the app's key.
 final class PushRegistrar {
     static let shared = PushRegistrar()
 
@@ -44,6 +38,8 @@ final class PushRegistrar {
         var hubs: @MainActor () async -> [Hub]? = { [] }
         /// The relay's grants for the APNs token (hex), in this environment and topic.
         var grants: @MainActor (_ token: String, _ env: String, _ topic: String?) async -> Grants = { _, _, _ in Grants() }
+        /// The relay this build can attempt, from its Info.plist; nil: no relay is configured.
+        var relayURL: @MainActor () -> URL? = { PushRelay.url }
         var now: @MainActor () -> Date = { Date() }
         /// Waits before a retry that is due while the app stays open; false: cancelled.
         var sleep: @MainActor (Duration) async -> Bool = { d in (try? await Task.sleep(for: d)) != nil }
@@ -258,26 +254,24 @@ final class PushRegistrar {
         #else
         let env = "production"
         #endif
-        #if os(macOS)
-        let kind = "mac"
-        let features: [String]? = nil
-        #else
         let kind = "iphone"
         let features: [String]? = Self.features(RequestClientMetadata.current)
-        #endif
         let base = APIClient.DeviceBody(deviceID: Self.deviceID, name: UIDevice.current.name, kind: kind, apnsToken: hex,
                                         apnsEnv: env, topic: Bundle.main.bundleIdentifier, features: features)
         // A hub without the app's APNs key pushes through the relay, sealed to this group's key (docs/operations/push-relay.md);
         // the notification service extension opens it. The hub decides: with its own key it ignores these.
         let grants = await system.grants(hex, env, base.topic)
+        let relay = system.relayURL()
         let relayError = PushHealth(relay: grants.relay).relayError
         health.update { $0.apnsError = nil; $0.relay = grants.relay }
         var done = Set<String>()
         for hub in hubs {
             var body = base
-            if let grant = grants.grant, let relay = PushRelay.url, let key = PushCrypto.ensureKey(group: hub.group) {
-                body.relayGrant = grant
+            if let relay, grants.relay != .notConfigured {
                 body.relayURL = relay.absoluteString
+            }
+            if let grant = grants.grant, relay != nil, let key = PushCrypto.ensureKey(group: hub.group) {
+                body.relayGrant = grant
                 body.pushKey = PushCrypto.publicKey(key)
             } else {
                 body.relayError = relayError
@@ -395,11 +389,7 @@ extension PushRegistrar.System {
         },
         allowed: { await UNUserNotificationCenter.current().notificationSettings().authorizationStatus.allowsNotifications },
         register: {
-            #if os(macOS)
-            NSApplication.shared.registerForRemoteNotifications()
-            #else
             UIApplication.shared.registerForRemoteNotifications()
-            #endif
         },
         hubs: {
             // The keychain read stays off the main thread (docs/apple/performance.md P1).

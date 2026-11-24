@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/nwverse/persona/server/internal/proto"
 )
@@ -328,6 +329,38 @@ func TestCodexBackgroundCommandCompletes(t *testing.T) {
 	}
 	if len(meta.codexPending) != 0 {
 		t.Fatalf("the terminal record must clear the pending id: %+v", meta.codexPending)
+	}
+}
+
+func TestLateCodexCommandKeepsItemsWithoutAdvancingActivity(t *testing.T) {
+	var meta Meta
+	for i, line := range []string{
+		codexTestSession,
+		codexTestEvent(`{"type":"task_started","turn_id":"t1"}`),
+		codexTestItem(codexTestUser("u1", "Run the checks")),
+		codexTestItem(codexCommandItem(t, "async-1", "backgrounded", "starting", 0, 1)),
+		codexTestEvent(`{"type":"task_complete","turn_id":"t1"}`),
+	} {
+		ParseLine(i+1, []byte(line), &meta)
+	}
+	before := meta.LastActivity
+	command := func(at time.Time, turnID, id string) []byte {
+		return fmt.Appendf(nil, `{"timestamp":%q,"type":"event_msg","payload":{"type":"item_completed","turn_id":%q,"item":%s}}`,
+			at.Format(time.RFC3339Nano), turnID, codexCommandItem(t, id, "completed", "all checks passed", 0, 2))
+	}
+	items := ParseLine(6, command(before.Add(time.Minute), "t1", "async-1"), &meta)
+	if len(items) != 1 || items[0].Kind != proto.KindToolResult || items[0].Text != "all checks passed" || len(meta.codexPending) != 0 {
+		t.Fatalf("late result was not applied: items = %+v, pending = %v", items, meta.codexPending)
+	}
+	if !items[0].TS.After(before) || !meta.LastActivity.Equal(before) || !meta.TurnClosed {
+		t.Fatalf("result at %v moved closed-turn activity: got %v, want %v", items[0].TS, meta.LastActivity, before)
+	}
+	// Some older rollouts omit task_started even for a new turn. Its id still
+	// distinguishes its commands from a late result on the closed turn.
+	at := before.Add(2 * time.Minute)
+	ParseLine(7, command(at, "t2", "new-command"), &meta)
+	if !meta.LastActivity.Equal(at) {
+		t.Fatalf("new turn's command did not advance activity: got %v, want %v", meta.LastActivity, at)
 	}
 }
 

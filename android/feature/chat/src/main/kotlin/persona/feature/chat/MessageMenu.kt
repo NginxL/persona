@@ -1,5 +1,6 @@
 package persona.feature.chat
 
+import persona.core.moduleapi.asMenuActions
 import android.app.Activity
 import android.content.Context
 import android.content.ContextWrapper
@@ -52,6 +53,7 @@ internal data class MessageTarget(
     val id: String, val text: String, val user: Boolean, val editText: String = text,
     val pending: DeliveryState? = null, val time: String? = null,
     val raw: String = text, val from: String? = null, val cut: String? = null,
+    val starItem: persona.core.contracts.Item? = null,
 )
 
 /** Which message the long-press menu is open for (iOS `MessageMenu`); the page shows the menu, rows open it. */
@@ -180,6 +182,10 @@ internal fun MessageMenuSheet(
     onDelete: ((MessageTarget) -> Unit)? = null,
     /** Who answers here and where: on Glass "Share" opens the message's picture (iOS `MessageShareSheet`); without, it shares the text. */
     share: ShareCardSource? = null,
+    /** Star state for the currently opened message: null = unavailable, false = offer Star, true = offer Unstar. */
+    star: Boolean? = null,
+    /** Toggle star on [MessageTarget]; second argument is true when currently starred (unstar), false when unstarring -> star. */
+    onStar: ((MessageTarget, Boolean) -> Unit)? = null,
 ) {
     var sharing by remember { mutableStateOf<MessagePicture?>(null) }
     val pictures = share?.takeIf { PersonaTheme.style == AppStyle.Glass }
@@ -190,7 +196,10 @@ internal fun MessageMenuSheet(
     val target = menu.target
     val resources = LocalResources.current
     val extras = MessageExtras(fork = onFork != null, rewind = rewind != null, rewindBlock = rewind?.block, delete = onDelete != null,
-        dontSend = PersonaTheme.style == AppStyle.Glass)
+        dontSend = PersonaTheme.style == AppStyle.Glass, star = if (onStar != null) star else null)
+    // The modules' message actions (#13847), last, while a message's menu is open.
+    val moduleActions = if (target == null) emptyList() else persona.core.moduleapi.LocalModuleActions.current.actions(
+        persona.core.moduleapi.MenuSlot.MessageActions, persona.core.moduleapi.ModuleActionTarget(messageId = target.id, text = target.text))
     if (target != null) MessageMenuOverlay(menu.pointerAnchor,
         messageMenuActions(target, writes, onForward != null, resources, extras) { action ->
         when (action) {
@@ -201,6 +210,8 @@ internal fun MessageMenuSheet(
                 if (pictures != null) { sharing = messagePicture(target, pictures) }
                 else if (!shareText(context, target.text)) { onNotice(resources.getString(R.string.chat_menu_no_share)) }
             }
+            MessageAction.Star -> onStar?.invoke(target, false)
+            MessageAction.Unstar -> onStar?.invoke(target, true)
             MessageAction.Forward -> onForward?.invoke(target)
             MessageAction.Context -> onContext(target.text)
             MessageAction.Edit -> onEdit(target.editText)
@@ -208,7 +219,7 @@ internal fun MessageMenuSheet(
             MessageAction.Rewind -> rewinding = target
             MessageAction.Delete -> onDelete?.invoke(target)
         }
-    }, onDismiss = menu::close)
+    } + moduleActions.asMenuActions(menu::close), onDismiss = menu::close)
     // "Rewind chat only" / "Rewind code and chat" (web's submenu); the second asks again: it puts files back too. Where the
     // node says it puts no files back (`rewind_code` false: a runtime's session, a Codex thread) only the first.
     rewinding?.let { at ->
@@ -236,7 +247,8 @@ internal fun messagePicture(target: MessageTarget, source: ShareCardSource): Mes
 /** What the menu offers, in order. */
 internal enum class MessageAction(@StringRes val label: Int) {
     Copy(R.string.chat_menu_copy), Select(R.string.chat_menu_select), Quote(R.string.chat_menu_quote), Forward(R.string.chat_menu_forward),
-    Share(R.string.chat_menu_share), Context(R.string.chat_menu_context), Edit(R.string.chat_menu_edit),
+    Share(R.string.chat_menu_share), Star(R.string.chat_menu_star), Unstar(R.string.chat_menu_unstar),
+    Context(R.string.chat_menu_context), Edit(R.string.chat_menu_edit),
     Fork(R.string.chat_menu_fork), Rewind(R.string.chat_menu_rewind), Delete(R.string.chat_delivery_delete),
 }
 
@@ -247,7 +259,9 @@ internal enum class MessageAction(@StringRes val label: Int) {
 internal data class MessageExtras(val fork: Boolean = false, val rewind: Boolean = false, val rewindBlock: String? = null,
     val delete: Boolean = false,
     /** Deleting one still waiting reads "Don't send", the word of its mark's menu on Glass ([OutboxBubble], iOS); else "Cancel send". */
-    val dontSend: Boolean = false)
+    val dontSend: Boolean = false,
+    /** Starred messages state: null = unavailable, false = offer Star, true = offer Unstar. */
+    val star: Boolean? = null)
 
 /** The menu's actions for [target]: [writes] for the composer ones, [forward] when "Forward" is offered. */
 internal fun messageActions(target: MessageTarget, writes: Boolean, forward: Boolean,
@@ -262,6 +276,7 @@ internal fun messageActions(target: MessageTarget, writes: Boolean, forward: Boo
     if (writes) add(MessageAction.Quote)
     if (forward) add(MessageAction.Forward)
     add(MessageAction.Share)
+    extras.star?.let { starred -> add(if (starred) MessageAction.Unstar else MessageAction.Star) }
     if (writes) add(MessageAction.Context)
     if (writes && target.user) add(MessageAction.Edit)
     // "Branch to new chat" on a reply that is a transcript line of its own; "Rewind to here" on your messages.
@@ -284,6 +299,7 @@ internal fun messageMenuActions(target: MessageTarget, writes: Boolean, forward:
             MessageAction.Quote -> PhIcons.Quotes
             MessageAction.Forward -> PhIcons.ArrowBendUpRight
             MessageAction.Share -> PhIcons.ShareNetwork
+            MessageAction.Star, MessageAction.Unstar -> PersonaIcons.pluginStar
             MessageAction.Context -> PhIcons.Paperclip
             MessageAction.Edit -> PhIcons.PencilSimple
             MessageAction.Fork -> PhIcons.GitBranch

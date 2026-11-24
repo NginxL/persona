@@ -107,7 +107,8 @@ struct TaskCardsFusionTests {
 
     // MARK: Decision rounds
 
-    private func todo(round: String? = "2026-11-12T01:02:03.456789Z", dismissal: String? = nil, manager: String? = nil) -> TodoItem {
+    private func todo(round: String? = "2026-11-12T01:02:03.456789Z", dismissal: String? = nil, manager: String? = nil,
+                      latestReview: String? = nil) -> TodoItem {
         var t: [String: Any] = ["id": "t1", "title": "Pick a cache", "origin": "main", "created_at": iso(30), "updated_at": iso(30)]
         if let round {
             var review: [String: Any] = ["review_at": round]
@@ -115,25 +116,44 @@ struct TaskCardsFusionTests {
             t["decision_review"] = review
         }
         if let manager { t["manager"] = manager }
+        if let latestReview {
+            t["supervision"] = ["supervisor": "main", "state": "needs_user",
+                                "reviews": [["at": latestReview, "verdict": "needs_user"]]]
+        }
         return decode(t)
     }
 
     @Test func decisionReviewKeepsTheHubsOwnRoundString() {
         let t = todo(dismissal: "d1")
         #expect(t.decisionReview?.reviewAt == "2026-11-12T01:02:03.456789Z")
-        #expect(t.decisionReview?.dismissed == true)
-        #expect(todo().decisionReview?.dismissed == false)
+        #expect(t.decisionDismissed)
+        #expect(!todo().decisionDismissed)
         #expect(todo(round: nil).decisionReview == nil)
+    }
+
+    @Test func invalidLegacyRoundKeepsHubDismissalOnlyUntilANewerReview() {
+        let legacy = todo(round: "legacy-round", dismissal: "d1")
+        #expect(legacy.decisionDismissed)
+        #expect(TasksStore(toast: { _ in }).decisionHidden(legacy))
+        let newer = todo(round: "legacy-round", dismissal: "d1", manager: "owner", latestReview: "2026-11-12T02:00:00Z")
+        #expect(!newer.decisionDismissed)
+        #expect(!TasksStore(toast: { _ in }).decisionHidden(newer))
     }
 
     @Test func aDecisionIsHiddenByLaterOrDismissalOfItsOwnRoundOnly() {
         let store = TasksStore(toast: { _ in })
         let t = todo(manager: "owner")
-        #expect(TasksStore.decisionKey(t) == "decision:owner:t1:2026-11-12T01:02:03.456789Z")
+        let round = JSON.parseDate("2026-11-12T01:02:03.456789Z")!.timeIntervalSince1970
+        #expect(TasksStore.decisionKey(t) == "decision:owner:t1:\(round)")
         #expect(!store.decisionHidden(t))
         store.laterDecision(t)
         #expect(store.decisionHidden(t))
-        // a new round is a new question
+        let sameReview = todo(manager: "owner", latestReview: "2026-11-12T01:02:03.456789Z")
+        #expect(TasksStore.decisionKey(t) == TasksStore.decisionKey(sameReview))
+        #expect(store.decisionHidden(sameReview))
+        // a newer latest review releases the local Later even when decision_review still names the old round
+        #expect(!store.decisionHidden(todo(manager: "owner", latestReview: "2026-11-12T02:00:00Z")))
+        // a new hub round is a new question
         #expect(!store.decisionHidden(todo(round: "2026-11-12T02:00:00Z", manager: "owner")))
         // the hub's own dismissal hides it too, with nothing local
         #expect(TasksStore(toast: { _ in }).decisionHidden(todo(dismissal: "d1")))
@@ -163,6 +183,8 @@ struct TaskCardsFusionTests {
         let dismiss = try #require(hub.sent("POST", "/api/v1/todos/t1/decision-dismiss").first)
         #expect(try JSONSerialization.jsonObject(with: #require(dismiss.body)) as? [String: String] == ["review_at": "2026-11-12T01:02:03.456789Z"])
         #expect(store.decisionHidden(t))
+        #expect(store.decisionHidden(todo(manager: "owner", latestReview: "2026-11-12T01:02:03.456789Z")))
+        #expect(!store.decisionHidden(todo(manager: "owner", latestReview: "2026-11-12T02:00:00Z")))
         #expect(toasts.last?.action != nil)
         #expect(toasts.last?.duration == Theme.Motion.draftUndo)
         #expect(await store.undoDecisionDismissal(t, receipt: "d1", api: hub.client))

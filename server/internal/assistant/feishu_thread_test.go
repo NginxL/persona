@@ -9,9 +9,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/nwverse/persona/server/internal/botcard"
 	"github.com/nwverse/persona/server/internal/channel"
 	"github.com/nwverse/persona/server/internal/db"
-	"github.com/nwverse/persona/server/internal/feishubot"
 	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/proto"
 	"github.com/nwverse/persona/server/internal/rpc"
@@ -60,8 +60,8 @@ func (e *threadEnv) topicTodo(title string) string {
 }
 
 // topicEvent is a reply in the topic (from the owner: the hub checks who); rootEvent is the message that starts it.
-func topicEvent(id, text string) feishubot.MessageEvent {
-	var ev feishubot.MessageEvent
+func topicEvent(id, text string) botcard.MessageEvent {
+	var ev botcard.MessageEvent
 	ev.Message.MessageID, ev.Message.ChatID, ev.Message.ChatType, ev.Message.ThreadID = id, testChat, "group", testThread
 	ev.Message.RootID, ev.Message.ParentID = "om_root", "om_root"
 	ev.Message.MessageType = "text"
@@ -71,13 +71,13 @@ func topicEvent(id, text string) feishubot.MessageEvent {
 	return ev
 }
 
-func rootEvent(id, text string) feishubot.MessageEvent {
+func rootEvent(id, text string) botcard.MessageEvent {
 	ev := topicEvent(id, text)
 	ev.Message.RootID, ev.Message.ParentID = "", ""
 	return ev
 }
 
-func privateEvent(id, text string) feishubot.MessageEvent {
+func privateEvent(id, text string) botcard.MessageEvent {
 	ev := topicEvent(id, text)
 	ev.Message.ChatType, ev.Message.ChatID, ev.Message.ThreadID = "p2p", "oc_private", ""
 	ev.Message.RootID, ev.Message.ParentID = "", ""
@@ -85,7 +85,7 @@ func privateEvent(id, text string) feishubot.MessageEvent {
 }
 
 // deliver hands ev to the handler the way FeishuMessage does once it has taken it.
-func (e *threadEnv) deliver(ev feishubot.MessageEvent) {
+func (e *threadEnv) deliver(ev botcard.MessageEvent) {
 	e.t.Helper()
 	st, err := e.s.feishuStatus(context.Background())
 	if err != nil {
@@ -307,6 +307,7 @@ func TestTopicWithoutAnOpenTodoIsToldOnce(t *testing.T) {
 // A run asked in a topic puts its progress, its answer and its notes into that topic (chat_id, in_thread); one asked in
 // the private chat sends neither field, as ever.
 func TestRunAnswersGoBackIntoTheTopic(t *testing.T) {
+	needsLarkLayer(t)
 	e := newThreadEnv(t, nil)
 	ctx := context.Background()
 	sink := feishuSink{e.s}
@@ -353,12 +354,9 @@ func TestRunAnswersGoBackIntoTheTopic(t *testing.T) {
 		t.Fatalf("posts for the topic %d, for the private chat %d: %v", inTopic, inPrivate, posts)
 	}
 	// Loading either run permits an existing agent message; creation for a new topic run is gated by topic_cot and
-	// the first process item (covered in feishu_topic_cot_test.go).
-	var tp, pp cotProgress
-	e.s.loadCot(&tp, &topicRun)
-	e.s.loadCot(&pp, &privateRun)
-	if tp.off || pp.off {
-		t.Fatalf("agent messages: off for the topic's run %v, for the private run %v; want both usable", tp.off, pp.off)
+	// the first process item (covered in internal/modules/lark/topic_cot_test.go).
+	if tp, pp := e.s.runExt(&topicRun, "cot_off") != "", e.s.runExt(&privateRun, "cot_off") != ""; tp || pp {
+		t.Fatalf("agent messages: off for the topic's run %v, for the private run %v; want both usable", tp, pp)
 	}
 	e.s.fbot.mu.Lock()
 	_, remembered := e.s.fbot.st.Threads["om_post"]
@@ -481,10 +479,10 @@ func TestTopicMessageOnlyFromTheOwner(t *testing.T) {
 	database := todoTestDB(t)
 	e := newThreadEnv(t, database)
 	id := e.topicTodo("发版")
-	for i, mod := range []func(*feishubot.MessageEvent){
-		func(ev *feishubot.MessageEvent) { ev.Sender.SenderID.OpenID = "ou_someone" },
-		func(ev *feishubot.MessageEvent) { ev.Sender.SenderType = "app" },
-		func(ev *feishubot.MessageEvent) { ev.Sender.SenderID.OpenID = "" },
+	for i, mod := range []func(*botcard.MessageEvent){
+		func(ev *botcard.MessageEvent) { ev.Sender.SenderID.OpenID = "ou_someone" },
+		func(ev *botcard.MessageEvent) { ev.Sender.SenderType = "app" },
+		func(ev *botcard.MessageEvent) { ev.Sender.SenderID.OpenID = "" },
 	} {
 		ev := topicEvent("om_o"+string(rune('1'+i)), "删掉所有东西")
 		mod(&ev)
@@ -732,12 +730,24 @@ func TestCardOfATopicsRunFallsBackToTheDMOnlyWhenRefused(t *testing.T) {
 // The progress card of a topic's run has its Stop button, and a press (the hub lets the owner's from the group through)
 // stops that run's conversation.
 func TestStopButtonOnATopicsProgressCard(t *testing.T) {
+	needsLarkLayer(t)
 	e := newThreadEnv(t, nil)
 	e.topicTodo("发版")
 	e.deliver(topicEvent("om_t1", "开始"))
 	ctx := context.Background()
-	r := e.s.channelRuns(channel.Feishu)[0]
-	feishuSink{e.s}.progress(ctx, &r, time.Second, []string{"读文件"}, "")
+	runID := e.s.channelRuns(channel.Feishu)[0].ID
+	// Production posts progress from the registered watcher under its progress lock. Use the same ownership here instead
+	// of racing the watcher's initial devices.list or a lifecycle change while calling the sink directly.
+	waitFor(t, "topic run watcher", func() bool { _, prog := e.s.channelRunByID(runID); return prog != nil })
+	_, prog := e.s.channelRunByID(runID)
+	prog.mu.Lock()
+	r, live := e.s.channelRunByID(runID)
+	if r == nil || live != prog {
+		prog.mu.Unlock()
+		t.Fatal("topic run changed before its progress post")
+	}
+	feishuSink{e.s}.progress(ctx, r, time.Second, []string{"读文件"}, "")
+	prog.mu.Unlock()
 	var card string
 	for _, p := range e.f.appParams(AppFeishu, FeishuPost) {
 		if c, _ := p["card"].(string); strings.Contains(c, `"a":"stop"`) && p["chat_id"] == testChat {
@@ -747,9 +757,14 @@ func TestStopButtonOnATopicsProgressCard(t *testing.T) {
 	if card == "" {
 		t.Fatalf("no progress card with a Stop button went into the topic: %v", e.f.appParams(AppFeishu, FeishuPost))
 	}
-	var a feishubot.CardAction
+	// Stop acts only from the run's current progress card (#12710): press it on that card's own message.
+	mid := e.s.channelRuns(channel.Feishu)[0].Ext["card"]
+	if mid == "" {
+		t.Fatal("the run does not record its progress card")
+	}
+	var a botcard.CardAction
 	a.Action.Value = map[string]any{"a": "stop", "k": targetPersona, "m": r.MachineID, "s": r.SessionID}
-	a.Context.MessageID, a.Context.ChatID = "om_post", testChat
+	a.Context.MessageID, a.Context.ChatID = mid, testChat
 	if res := e.s.botCardAction(ctx, &a, ""); res.Toast == nil {
 		t.Fatalf("no answer to the press: %+v", res)
 	}

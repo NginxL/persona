@@ -26,10 +26,12 @@ type workspaceJournal struct {
 	InFlight   bool              `json:"in_flight"`
 }
 type workspaceExecutor struct {
-	n       *Node
-	journal workspaceJournal
-	path    string
-	locks   []*os.File
+	n                *Node
+	journal          workspaceJournal
+	path             string
+	locks            []*os.File
+	mirrorRepos      []string
+	mirrorTTLSeconds int
 }
 
 func workspaceNoLinks(path string) error {
@@ -245,7 +247,7 @@ func (n *Node) taskWorkspace(ctx context.Context, method string, raw, start json
 		return nil, err
 	}
 	keys := []string{"workspace-" + taskworkspace.Hash(req.WorkspaceID), "root-" + taskworkspace.Hash(req.Plan.RootPath)}
-	e := &workspaceExecutor{n: n}
+	e := &workspaceExecutor{n: n, mirrorRepos: req.MirrorRepos, mirrorTTLSeconds: req.MirrorTTLSeconds}
 	defer func() {
 		for _, f := range e.locks {
 			f.Close()

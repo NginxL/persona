@@ -23,6 +23,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/nwverse/persona/server/internal/bus"
 	"github.com/nwverse/persona/server/internal/db"
 	"github.com/nwverse/persona/server/internal/devicewire"
 	"github.com/nwverse/persona/server/internal/i18n"
@@ -56,9 +57,11 @@ type nodeStateStore interface {
 type Options struct {
 	// ProjectState lets the owning manager retain transport identities independently of computers.
 	ProjectState func(devicewire.States) devicewire.States
-	Hub          Host
-	Store        Store // nil: nothing is kept (tests)
-	Logf         func(format string, args ...any)
+	// PackageHub supplies the bound address, TLS transport and manager credential for confirmed development packages.
+	PackageHub func() *bus.Client
+	Hub        Host
+	Store      Store // nil: nothing is kept (tests)
+	Logf       func(format string, args ...any)
 	// ManagerID is the manager these devices are ("" and "assistant": the built-in one): its health space on a computer
 	// is named after it (identity.HealthDirName, healthreports.go).
 	ManagerID string
@@ -93,6 +96,9 @@ type Options struct {
 	HiddenAgentDirsChanged func(machine string)
 	// Location is the user's time zone ("today" of the token usage); nil: the machine's.
 	Location func() *time.Location
+	// UpdateHandoffGrace bounds how long a node update waits for natural idle before refusing new headless turns.
+	// Nil uses the shared default; zero preserves the indefinite natural-idle wait.
+	UpdateHandoffGrace func() time.Duration
 	// PromptLanguage is the owner language for newly generated node-side prompt wrappers.
 	// Nil retains legacy Chinese; it is display policy, never an authority input.
 	PromptLanguage func() string

@@ -127,6 +127,16 @@ describe("an agent's row with 「Agent 行显示详情」 (#2430)", () => {
     expect(danger).toContain("text-orange");
     expect(danger).not.toContain("text-red");
   });
+  it("renders the agy context bar and share only with a known window", () => {
+    setAgentDetails(true);
+    const agy = { ...session, agent: "agy", model: "gemini-4-carbon-high", context_tokens: 262_144 };
+    const known = render({ ...agy, context_window: 1_048_576 });
+    expect(known).toContain('role="progressbar"');
+    expect(known).toContain('aria-valuenow="25"');
+    expect(known).toContain(t("context.label", { percent: 25 }));
+    const unknown = render({ ...agy, model: "custom", context_window: 0 });
+    expect(unknown).not.toMatch(/progressbar|%/);
+  });
   it("draws no second line for a session that says nothing, or for a conversation of the assistant", () => {
     setAgentDetails(true);
     const plain = { ...session, cwd: "" };

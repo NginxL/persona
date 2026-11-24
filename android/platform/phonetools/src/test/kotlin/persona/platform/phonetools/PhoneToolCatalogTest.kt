@@ -41,6 +41,19 @@ class PhoneToolCatalogTest {
         "phone_health_summary" to " When the iPhone is locked the app cannot read HealthKit: it returns the last snapshot " +
             "saved while the device was unlocked (\"source\": \"snapshot\" with \"as_of\"), or a device_locked error " +
             "when no snapshot exists yet.",
+        // iPhone-only behavior (#13740): a locked iPhone answers from the snapshot phone_health_watch keeps. Android has no
+        // phone_health_watch (the hub never wakes it), so it never promises one.
+        "phone_health_samples" to " When the iPhone is locked the app cannot read Apple Health: a type kept current with " +
+            "phone_health_watch answers from the on-device snapshot (\"source\": \"snapshot\" with \"as_of\"; its samples " +
+            "may repeat ones you already have, so match them by id), any other type answers status: device_locked.",
+        "phone_health_sources" to " When the iPhone is locked it answers from the on-device snapshots of the types " +
+            "phone_health_watch keeps current (\"source\": \"snapshot\").",
+        // iPhone-only fields (#12926): the iOS app returns its build stamp and hub connection as "build" and "runtime"
+        // (AppDebugInfo, the same value as About's Debug info). Android's build has no such stamp yet; drop this entry
+        // when it returns the same fields.
+        "phone_device_info" to " Also \"build\" (what this app was built from: commit, dirty, branch, built_at, " +
+            "builder, xcode, swift, configuration, bundle_id; Debug builds have them all, Release builds the commit) " +
+            "and \"runtime\" (hub_host, hub_version, hub_connection, launched_at); any field may be missing.",
     )
 
     @Test fun everyToolIsDeclaredWordForWordAsOnIos() {

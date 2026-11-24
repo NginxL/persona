@@ -70,6 +70,10 @@ func wireSamples(t *testing.T, ty reflect.Type) []reflect.Value {
 		for _, n := range []int32{-7, 1 << 20, math.MaxInt32, math.MinInt32} {
 			add(n)
 		}
+	case ty == reflect.TypeFor[UnixTime32]():
+		for _, n := range []UnixTime32{1, 1700000000, math.MaxUint32} {
+			add(n)
+		}
 	case ty.Kind() == reflect.Uint16:
 		for _, n := range []uint16{1, 7, math.MaxUint16} {
 			add(n)
@@ -295,5 +299,26 @@ func TestWireStringMatchesEncodingJSON(t *testing.T) {
 	}
 	for _, s := range wireStrings {
 		check(s)
+	}
+}
+
+// background_stalled_since (#13744) goes out as RFC 3339, only when set, and reads back to the same second.
+func TestBackgroundStalledSinceWire(t *testing.T) {
+	at := time.Date(2026, 11, 23, 1, 2, 3, 0, time.UTC)
+	s := Session{SessionID: "s1", BackgroundStalledSince: UnixTime32Of(at)}
+	b, err := json.Marshal(&s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(b, []byte(`"background_stalled_since":"2026-11-23T01:02:03Z"`)) {
+		t.Fatalf("not on the wire: %s", b)
+	}
+	var back Session
+	if err := json.Unmarshal(b, &back); err != nil || !back.BackgroundStalledSince.Time().Equal(at) {
+		t.Fatalf("round trip: %v, %v", back.BackgroundStalledSince.Time(), err)
+	}
+	b, _ = json.Marshal(&Session{SessionID: "s1"})
+	if bytes.Contains(b, []byte("background_stalled_since")) {
+		t.Fatalf("an unset one is omitted: %s", b)
 	}
 }

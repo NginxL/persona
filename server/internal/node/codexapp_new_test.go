@@ -1,13 +1,15 @@
-//go:build !windows
-
 package node
 
 import (
+	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -42,7 +44,7 @@ func writeCodexAppRollout(t *testing.T, home, thread, originator, cwd string) st
 		t.Fatal(err)
 	}
 	p := filepath.Join(dir, "rollout-2026-11-12T09-00-00-"+thread+".jsonl")
-	meta := `{"timestamp":"2026-11-12T09:00:00Z","type":"session_meta","payload":{"id":"` + thread + `","originator":"` + originator + `","source":"vscode","cwd":"` + cwd + `"}}`
+	meta := fmt.Sprintf(`{"timestamp":"2026-11-12T09:00:00Z","type":"session_meta","payload":{"id":%q,"originator":%q,"source":"vscode","cwd":%q}}`, thread, originator, cwd)
 	if err := os.WriteFile(p, []byte(meta+"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -55,7 +57,8 @@ func codexAppNode(t *testing.T) (*Node, *fakeCodexBus, *fakeCodexAppSeed, *[]str
 	t.Helper()
 	busHome, bus := startFakeCodexBus(t, "")
 	n, _ := testNode(t)
-	n.dir, n.sessionScope = t.TempDir(), &nodeSessionScope{codex: busHome}
+	n.dir, n.home = t.TempDir(), filepath.Dir(busHome)
+	n.metas, n.bgScans = map[string]quickMeta{}, map[string]*bgScan{}
 	shellLaunchers(t)
 	cli := filepath.Join(t.TempDir(), "codex")
 	if err := os.WriteFile(cli, []byte("#!/bin/sh\n"), 0o755); err != nil {
@@ -148,6 +151,164 @@ func TestNewAgentWithTheCodexAppLauncherStartsTheChatInTheApp(t *testing.T) {
 	}
 }
 
+func TestCodexAppSettingsChangeSupersedesPendingSetup(t *testing.T) {
+	for _, tc := range []struct {
+		name, model, effort, wantModel, wantEffort string
+		refused                                    bool
+	}{
+		{name: "model only", model: "gpt-y", wantModel: "gpt-y", wantEffort: "high"},
+		{name: "effort only", effort: "low", wantModel: "gpt-x", wantEffort: "low"},
+		{name: "both", model: "gpt-y", effort: "low", wantModel: "gpt-y", wantEffort: "low"},
+		{name: "new model reconciles effort", model: "gpt-low", wantModel: "gpt-low", wantEffort: "low"},
+		{name: "new model has no effort", model: "gpt-plain", wantModel: "gpt-plain"},
+		{name: "incompatible explicit effort", model: "gpt-plain", effort: "high", refused: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			n, bus, _, _ := codexAppNode(t)
+			n.codices = newCodexRegistry()
+			n.configureCodex(proto.CodexConfig{LegacyHome: n.codexHome()})
+			withCodexAppModels(t, n.codexHome(), map[string]codexModelEfforts{
+				"gpt-x": {levels: []string{"low", "high"}}, "gpt-y": {levels: []string{"low", "high"}},
+				"gpt-low": {levels: []string{"low"}, def: "low"}, "gpt-plain": {},
+			})
+			thread := newUUID()
+			path := writeCodexAppRollout(t, n.codexHome(), thread, codexAppClient, t.TempDir())
+			bus.later = thread
+			id := n.codexPublicID(n.codexHome(), thread)
+			n.state.put(id, sessionState{Launcher: codexAppLauncher, Cwd: filepath.Dir(path),
+				DesktopPendingModel: "gpt-x", DesktopPendingEffort: "high"})
+			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+			defer cancel()
+			err := n.codexDesktopModes(ctx, id, codexSource{home: n.codexHome(), thread: thread, path: path}, tc.model, "", tc.effort)
+			state, _ := n.state.get(id)
+			if tc.refused {
+				if err == nil || state.DesktopPendingModel != "gpt-x" || state.DesktopPendingEffort != "high" || n.codexAppPickOf(id) != nil {
+					t.Fatalf("incompatible patch changed pending or confirmed settings: %+v, %v", state, err)
+				}
+				if len(bus.settings) != 0 {
+					t.Fatal("incompatible patch reached the desktop")
+				}
+				return
+			}
+			if err != nil || state.DesktopPendingModel != "" || state.DesktopPendingEffort != "" {
+				t.Fatalf("successful patch left older setup pending: %+v, %v", state, err)
+			}
+			select {
+			case request := <-bus.settings:
+				settings, _ := request["threadSettings"].(map[string]any)
+				actualEffort, _ := settings["effort"].(string)
+				if settings["model"] != tc.wantModel || actualEffort != tc.wantEffort {
+					t.Fatalf("partial patch did not resolve the remaining setup: %v", request)
+				}
+			default:
+				t.Fatal("settings were not confirmed by the desktop")
+			}
+			if err := n.send(ctx, id, "hello", nil, sendOpts{}); err != nil {
+				t.Fatal(err)
+			}
+			if len(bus.settings) != 0 {
+				t.Fatal("first message replayed superseded settings")
+			}
+			if pick := n.codexAppPickOf(id); pick == nil || pick.model != tc.wantModel || pick.effort != tc.wantEffort {
+				t.Fatalf("first message changed the confirmed choice: %+v", pick)
+			}
+		})
+	}
+}
+
+func TestCodexAppSettingsFailureRetriesOnCreatedSession(t *testing.T) {
+	n, bus, seed, _ := codexAppNode(t)
+	n.codices = newCodexRegistry()
+	n.configureCodex(proto.CodexConfig{LegacyHome: n.codexHome()})
+	withCodexAppModels(t, n.codexHome(), map[string]codexModelEfforts{
+		"gpt-x": {levels: []string{"low", "high"}, def: "low"},
+	})
+	var persisted []byte
+	n.state.persist = func(_ string, state sessionState) {
+		var err error
+		persisted, err = json.Marshal(state)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	bus.mu.Lock()
+	bus.refuse = "thread-stream-owner-unavailable"
+	bus.mu.Unlock()
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	s, err := n.newCodexAppChat(ctx, runtimeStartParams{
+		Cwd: t.TempDir(), Launcher: codexAppLauncher, Prompt: "hello", Model: "gpt-x", Effort: "high",
+	}, "")
+	if s == nil {
+		t.Fatalf("settings failure lost the created session: %v", err)
+	}
+	checkDesktopCreationError(t, err, s.SessionID)
+	var re *rpc.Error
+	if !errors.As(err, &re) || !strings.Contains(string(re.Data), `"first_message_delivered":"none"`) {
+		t.Fatalf("settings failure claimed a possible first message: %v", err)
+	}
+	if s.Model != "" || s.Effort != "" || n.codexAppPickOf(s.SessionID) != nil {
+		t.Fatalf("unconfirmed settings were reported as applied: %+v", s)
+	}
+	// The shared creation response and a node restart must keep setup intent on this native ID.
+	_, _ = n.creationResult(s, err, "", "creation", "incarnation")
+	var saved sessionState
+	if err := json.Unmarshal(persisted, &saved); err != nil {
+		t.Fatal(err)
+	}
+	if saved.DesktopPendingModel != "gpt-x" || saved.DesktopPendingEffort != "high" {
+		t.Fatalf("initial setup was not persisted: %+v", saved)
+	}
+	n.state = newState()
+	n.state.merge(map[string]sessionState{s.SessionID: saved})
+	if err := n.send(ctx, s.SessionID, "hello", nil, sendOpts{}); refusalCode(err) != "codex_refused" {
+		t.Fatalf("retry ignored the failed initial setup: %v", err)
+	}
+	select {
+	case turn := <-bus.turns:
+		t.Fatalf("message reached the desktop before settings were confirmed: %v", turn)
+	default:
+	}
+	if state, _ := n.state.get(s.SessionID); state.DesktopPendingModel != "gpt-x" || state.DesktopPendingEffort != "high" {
+		t.Fatalf("failed retry erased setup intent: %+v", state)
+	}
+	bus.mu.Lock()
+	bus.refuse = ""
+	bus.mu.Unlock()
+	if err := n.send(ctx, s.SessionID, "hello", nil, sendOpts{}); err != nil {
+		t.Fatalf("retry could not finish setup on the original native session: %v", err)
+	}
+	seeds := seed.seeded()
+	if len(seeds) != 1 || n.codexPublicID(n.codexHome(), seeds[0].thread) != s.SessionID {
+		t.Fatalf("retry duplicated the native session: %+v", seeds)
+	}
+	for range 3 {
+		select {
+		case settings := <-bus.settings:
+			values, _ := settings["threadSettings"].(map[string]any)
+			if settings["conversationId"] != seeds[0].thread || values["model"] != "gpt-x" || values["effort"] != "high" {
+				t.Fatalf("retry changed setup intent or the native session: %v", settings)
+			}
+		default:
+			t.Fatal("retry did not reapply the requested settings before sending")
+		}
+	}
+	select {
+	case turn := <-bus.turns:
+		if turn["conversationId"] != seeds[0].thread {
+			t.Fatalf("retry sent to another native session: %v", turn)
+		}
+	case <-ctx.Done():
+		t.Fatal("retry sent no first message")
+	}
+	if state, _ := n.state.get(s.SessionID); state.DesktopPendingModel != "" || state.DesktopPendingEffort != "" {
+		t.Fatalf("confirmed setup was left pending: %+v", state)
+	}
+	if pick := n.codexAppPickOf(s.SessionID); pick == nil || pick.model != "gpt-x" || pick.effort != "high" {
+		t.Fatalf("confirmed settings were not exposed: %+v", pick)
+	}
+}
+
 // With no folder the chat gets one of its own where the App keeps a chat in no project, named after the title.
 func TestACodexAppStartWithNoFolderGetsOneWhereTheAppKeepsChats(t *testing.T) {
 	n, _, seed, _ := codexAppNode(t)
@@ -178,6 +339,7 @@ func TestACodexAppStartRefusesWhatTheAppCannotRun(t *testing.T) {
 		says   string
 	}{
 		{map[string]any{"cwd": dir, "launcher": "codex-app", "prompt": "  "}, "", "第一条消息"},
+		{map[string]any{"cwd": dir, "launcher": "codex-app", "task_instructions": "Keep the task scope."}, "codex_needs_prompt", ""},
 		{map[string]any{"cwd": dir, "launcher": "codex-app", "prompt": "look", "permission_mode": "plan"}, "readonly_unsupported", ""},
 		{map[string]any{"cwd": filepath.Join(dir, "a", "b"), "launcher": "codex-app", "prompt": "hi"}, "", "does not exist"},
 		{map[string]any{"cwd": dir, "launcher": "codex-app", "prompt": "hi", "secret_ticket": strings.Repeat("a", 64)}, secretEnvAgentCode, ""},
@@ -191,8 +353,10 @@ func TestACodexAppStartRefusesWhatTheAppCannotRun(t *testing.T) {
 	if len(seed.seeded()) != 0 || len(*opened) != 0 {
 		t.Fatalf("seeded %v, opened %v", seed.seeded(), *opened)
 	}
-	n.sessionScope = &nodeSessionScope{codex: t.TempDir()} // a home with no bus: the App is not running for it
-	if _, err := startCodexApp(t, n, map[string]any{"cwd": dir, "launcher": "codex-app", "prompt": "hi"}); err == nil || !strings.Contains(err.Error(), "没在运行") {
+	n.home = t.TempDir() // a home with no bus: the App is not running for it
+	noFakeCodexBus(t)
+	_, err := startCodexApp(t, n, map[string]any{"cwd": dir, "launcher": "codex-app", "prompt": "hi"})
+	if code, data := refusalOf(t, err); code != "codex_read_only" || data["delivered"] != deliveredNone {
 		t.Fatalf("no App: %v", err)
 	}
 }
@@ -243,7 +407,8 @@ func TestTheCodexAppLauncherIsOfferedWhereTheAppRuns(t *testing.T) {
 		t.Error("offered with no Codex CLI")
 	}
 	codexAppCLI = old
-	n.sessionScope = &nodeSessionScope{codex: t.TempDir()}
+	n.home = t.TempDir() // the original home still has the fake App listener
+	noFakeCodexBus(t)
 	if _, added := n.withCodexAppLauncher(nil); added {
 		t.Error("offered with the App not running")
 	}
@@ -275,23 +440,27 @@ func TestPersonasAppChatsAreTheAppsChats(t *testing.T) {
 // The App's codex starts the chat over stdio as Persona's App client, in its folder, and names it, which writes it; it
 // never starts a turn.
 func TestCodexAppChatStartsWithTheAppsCodexAndNoTurn(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the native Windows seed is covered by TestWindowsCodexMetadataSession")
+	}
 	bin, seen := t.TempDir(), filepath.Join(t.TempDir(), "seen")
 	cli := filepath.Join(bin, "codex")
-	// A fake app-server: answers the three requests in order, writes what it got and where it ran.
+	// A fake app-server: answers metadata requests in order, writes what it got and where it ran.
 	script := `#!/bin/sh
 { pwd; echo "args:$*"; echo "home:$CODEX_HOME"; } > ` + seen + `
 read l1; echo "$l1" >> ` + seen + `; printf '{"id":1,"result":{}}\n'
 read l2; echo "$l2" >> ` + seen + `
-read l3; echo "$l3" >> ` + seen + `; printf '{"method":"thread/started","params":{}}\n{"id":2,"result":{"thread":{"id":"t-1","path":"/x"}}}\n'
-read l4; echo "$l4" >> ` + seen + `; printf '{"id":3,"result":{}}\n'
-read l5
+read l3; echo "$l3" >> ` + seen + `; printf '{"id":2,"error":{"code":-32601,"message":"unknown method"}}\n'
+read l4; echo "$l4" >> ` + seen + `; printf '{"method":"thread/started","params":{}}\n{"id":3,"result":{"thread":{"id":"aaaaaaaa-0000-4000-8000-000000000111","path":"/x"}}}\n'
+read l5; echo "$l5" >> ` + seen + `; printf '{"id":4,"result":{}}\n'
+read l6
 `
 	if err := os.WriteFile(cli, []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	dir, home := t.TempDir(), t.TempDir()
 	thread, err := startCodexAppChat(context.Background(), cli, home, dir, "修复导出")
-	if err != nil || thread != "t-1" {
+	if err != nil || thread != "aaaaaaaa-0000-4000-8000-000000000111" {
 		t.Fatalf("%q %v", thread, err)
 	}
 	b, _ := os.ReadFile(seen)
@@ -301,7 +470,7 @@ read l5
 		t.Errorf("ran in %q", first)
 	}
 	for _, want := range []string{"args:app-server", "home:" + home, `"name":"persona_codex_app"`, `"method":"initialized"`,
-		`"method":"thread/start","params":{"cwd":"` + dir + `"}`, `"method":"thread/name/set","params":{"name":"修复导出","threadId":"t-1"}`} {
+		`"method":"project/list"`, `"method":"thread/start","params":{"cwd":"` + dir + `"}`, `"method":"thread/name/set","params":{"name":"修复导出","threadId":"aaaaaaaa-0000-4000-8000-000000000111"}`} {
 		if !strings.Contains(got, want) {
 			t.Errorf("missing %s in:\n%s", want, got)
 		}
@@ -312,6 +481,9 @@ read l5
 }
 
 func TestCodexStdioCancellationStopsWrapperChild(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the wrapper fixture needs Unix shell and FIFO semantics")
+	}
 	home := t.TempDir()
 	cli := filepath.Join(home, "codex")
 	// The wrapper waits for a child with inherited stdout. Closing the wrapper alone cannot unblock initialize.
@@ -363,5 +535,36 @@ func TestCodexAppSlugIsTheTitlesASCIIWords(t *testing.T) {
 		if got := codexAppSlug(c.title); got != c.want {
 			t.Errorf("%q: %q, want %q", c.title, got, c.want)
 		}
+	}
+}
+
+type codexStdioTestInput struct{ bytes.Buffer }
+
+func (*codexStdioTestInput) Close() error { return nil }
+
+func TestCodexStdioSupportsModelListAndPreservesRPCErrors(t *testing.T) {
+	in := &codexStdioTestInput{}
+	s := &codexStdio{ctx: context.Background(), cancel: func() {}, in: in,
+		lines: bufio.NewScanner(strings.NewReader(`{"method":"thread/status","params":{}}
+{"id":99,"result":{}}
+{"id":1,"result":{"data":[{"model":"gpt-example"}],"nextCursor":null}}
+{"id":2,"error":{"code":-32601,"message":"unknown method"}}
+`))}
+	var models struct {
+		Data []struct {
+			Model string `json:"model"`
+		} `json:"data"`
+	}
+	if err := s.call(context.Background(), "model/list", map[string]any{"includeHidden": true}, &models); err != nil ||
+		len(models.Data) != 1 || models.Data[0].Model != "gpt-example" {
+		t.Fatalf("model/list = %+v, %v", models, err)
+	}
+	err := s.call(context.Background(), "project/list", map[string]any{}, nil)
+	var rpcErr *codexAppServerError
+	if !errors.As(err, &rpcErr) || rpcErr.Method != "project/list" || rpcErr.Code != -32601 {
+		t.Fatalf("lost native RPC error: %v", err)
+	}
+	if !strings.Contains(in.String(), `"method":"model/list","params":{"includeHidden":true}`) {
+		t.Fatalf("model request changed: %s", in.String())
 	}
 }

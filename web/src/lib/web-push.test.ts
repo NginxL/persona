@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { ApiError } from "./api";
+import { ApiError, setPairedToken } from "./api";
 
 const api = vi.fn();
 vi.mock("./api", async (orig) => ({ ...(await orig<typeof import("./api")>()), api: (...a: unknown[]) => api(...a) }));
@@ -139,9 +139,19 @@ beforeEach(() => {
   Object.defineProperty(navigator, "serviceWorker", { configurable: true, value: { ready: Promise.resolve(registration), getRegistration: () => Promise.resolve(registration) } });
   vi.stubGlobal("Notification", { permission: "granted", requestPermission: vi.fn(() => Promise.resolve("granted")) });
 });
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  vi.unstubAllEnvs();
+  vi.unstubAllGlobals();
+});
 
 const device = () => deviceId().id;
+
+function stubSyncSupport() {
+  // jsdom runs as a dev build: make the support check pass without changing the permission guard.
+  vi.stubEnv("PROD", true);
+  Object.defineProperty(window, "isSecureContext", { configurable: true, value: true });
+  vi.stubGlobal("PushManager", function PushManager() {});
+}
 
 describe("turning Web Push on and off", () => {
   it("subscribes with the hub's key and hands the hub the subscription, its language and what it can show", async () => {
@@ -212,10 +222,7 @@ describe("turning Web Push on and off", () => {
 describe("syncWebPush", () => {
   it("renews the subscription once a load, only where it was turned on and notifications are allowed", async () => {
     api.mockImplementation((path: string, init?: { method?: string }) => Promise.resolve(path === "/push/web" ? { key: KEY } : init?.method === "PUT" ? { subscribed: true } : {}));
-    // jsdom runs as a dev build: the support check says "dev"; the rest of the conditions are what this test covers
-    vi.stubEnv("PROD", true);
-    Object.defineProperty(window, "isSecureContext", { configurable: true, value: true });
-    vi.stubGlobal("PushManager", function PushManager() {});
+    stubSyncSupport();
     await syncWebPush("first");
     expect(api).not.toHaveBeenCalled(); // not turned on here
     localStorage.setItem("persona.webPush", "1");
@@ -226,7 +233,113 @@ describe("syncWebPush", () => {
     vi.stubGlobal("Notification", { permission: "denied", requestPermission: vi.fn() });
     await syncWebPush("third");
     expect(api.mock.calls.filter((c) => c[1]?.method === "PUT")).toHaveLength(1);
-    vi.unstubAllEnvs();
+  });
+
+  it("retries a failed initial key lookup without reloading", async () => {
+    stubSyncSupport();
+    localStorage.setItem("persona.webPush", "1");
+    let keyReads = 0;
+    api.mockImplementation((path: string, init?: { method?: string }) => {
+      if (path === "/push/web") {
+        keyReads++;
+        return keyReads === 1 ? Promise.reject(new Error("offline")) : Promise.resolve({ key: KEY });
+      }
+      if (init?.method === "PUT") return Promise.resolve({ subscribed: true });
+      return Promise.reject(new Error(`unexpected ${path}`));
+    });
+    await syncWebPush("retry-key-lookup");
+    expect(keyReads).toBe(1);
+    expect(api.mock.calls.filter((c) => c[1]?.method === "PUT")).toHaveLength(0);
+    await syncWebPush("retry-key-lookup");
+    expect(keyReads).toBe(2);
+    expect(api.mock.calls.filter((c) => c[1]?.method === "PUT")).toHaveLength(1);
+    await syncWebPush("retry-key-lookup");
+    expect(keyReads).toBe(2);
+  });
+
+  it("PUTs again after 401 recovery pairs another credential in the same document", async () => {
+    stubSyncSupport();
+    localStorage.setItem("persona.webPush", "1");
+    api.mockImplementation((path: string, init?: { method?: string }) => Promise.resolve(path === "/push/web" ? { key: KEY } : init?.method === "PUT" ? { subscribed: true } : {}));
+    setPairedToken("web-push-credential-a");
+    await syncWebPush();
+    expect(api.mock.calls.filter((c) => c[1]?.method === "PUT")).toHaveLength(1);
+    // App handles a later 401 by pairing credential B without reloading this document.
+    setPairedToken("web-push-credential-b");
+    await syncWebPush();
+    expect(api.mock.calls.filter((c) => c[1]?.method === "PUT")).toHaveLength(2);
+    await syncWebPush();
+    expect(api.mock.calls.filter((c) => c[1]?.method === "PUT")).toHaveLength(2);
+    expect(subscribed).toEqual([KEY]);
+  });
+
+  it("coalesces concurrent calls until their shared registration succeeds", async () => {
+    stubSyncSupport();
+    localStorage.setItem("persona.webPush", "1");
+    let finish!: (status: { subscribed: boolean }) => void;
+    api.mockImplementation((path: string, init?: { method?: string }) => {
+      if (path === "/push/web") return Promise.resolve({ key: KEY });
+      if (init?.method === "PUT") return new Promise<{ subscribed: boolean }>((resolve) => { finish = resolve; });
+      return Promise.reject(new Error(`unexpected ${path}`));
+    });
+    const first = syncWebPush("concurrent");
+    await vi.waitFor(() => expect(api.mock.calls.filter((c) => c[1]?.method === "PUT")).toHaveLength(1));
+    const second = syncWebPush("concurrent");
+    let secondSettled = false;
+    void second.then(() => { secondSettled = true; });
+    await Promise.resolve();
+    await Promise.resolve();
+    const settledBeforeSuccess = secondSettled;
+    finish({ subscribed: true });
+    await Promise.all([first, second]);
+    expect(settledBeforeSuccess).toBe(false);
+    expect(api.mock.calls.filter((c) => c[1]?.method === "PUT")).toHaveLength(1);
+    expect(subscribed).toEqual([KEY]);
+  });
+
+  it("runs a credential change after the registration under way, with no second browser subscription", async () => {
+    stubSyncSupport();
+    localStorage.setItem("persona.webPush", "1");
+    const finishes: ((status: { subscribed: boolean }) => void)[] = [];
+    api.mockImplementation((path: string, init?: { method?: string }) => {
+      if (path === "/push/web") return Promise.resolve({ key: KEY });
+      if (init?.method === "PUT") return new Promise<{ subscribed: boolean }>((resolve) => { finishes.push(resolve); });
+      return Promise.reject(new Error(`unexpected ${path}`));
+    });
+    const puts = () => api.mock.calls.filter((c) => c[1]?.method === "PUT").length;
+    const first = syncWebPush("credential-under-way");
+    await vi.waitFor(() => expect(puts()).toBe(1));
+    const second = syncWebPush("credential-next");
+    // One macrotask lets every microtask chain settle: a parallel registration would have sent its PUT by now.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(puts()).toBe(1);
+    finishes[0]!({ subscribed: true });
+    await vi.waitFor(() => expect(puts()).toBe(2));
+    finishes[1]!({ subscribed: true });
+    await Promise.all([first, second]);
+    await syncWebPush("credential-next");
+    expect(puts()).toBe(2);
+    expect(subscribed).toEqual([KEY]);
+  });
+
+  it("marks a credential complete only after its registration PUT succeeds", async () => {
+    stubSyncSupport();
+    localStorage.setItem("persona.webPush", "1");
+    let puts = 0;
+    api.mockImplementation((path: string, init?: { method?: string }) => {
+      if (path === "/push/web") return Promise.resolve({ key: KEY });
+      if (init?.method === "PUT") {
+        puts++;
+        return puts === 1 ? Promise.reject(new ApiError(500, "offline", {})) : Promise.resolve({ subscribed: true });
+      }
+      return Promise.reject(new Error(`unexpected ${path}`));
+    });
+    await syncWebPush("put-completion");
+    await syncWebPush("put-completion");
+    expect(puts).toBe(2);
+    expect(subscribed).toEqual([KEY]);
+    await syncWebPush("put-completion");
+    expect(puts).toBe(2);
   });
 });
 

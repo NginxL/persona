@@ -11,6 +11,7 @@ import { sessionAgent, agentName } from "../../lib/agent-kind";
 import { childCall, childCardKey } from "../../lib/child-cards";
 import { readChildDetail, type ChildDetail } from "../../lib/child-detail";
 import { stateOf } from "../../lib/format";
+import { openPanel } from "../../lib/panel";
 import { effortTitle } from "../../lib/session-actions";
 import { getSession, useStore } from "../../lib/store";
 import { modelChipLabel } from "../../lib/tasks";
@@ -68,13 +69,14 @@ export function childMeta(s: Session, harness: boolean): { harness?: string; mod
   };
 }
 
-export const ChildSessionCard = memo(function ChildSessionCard({ mid, sid, scope }: { mid: string; sid: string; scope: string }) {
+export const ChildSessionCard = memo(function ChildSessionCard({ mid, sid, parentMid, parentSid, scope }: { mid: string; sid: string; parentMid?: string; parentSid?: string; scope: string }) {
   // the row its parent's chat holds (a paging hub's is a list summary), else the store's
   const held = useChildRow(mid, sid);
   const stored = useStore(() => (held ? undefined : getSession(mid, sid)));
   const child = held ?? stored;
   const { lineStyle } = useChatContext();
-  const [open, setOpen] = useExpanded(childCardKey(scope, sid));
+  const cardMid = parentMid && parentMid !== mid ? mid : undefined;
+  const [open, setOpen] = useExpanded(childCardKey(scope, sid, cardMid));
   if (!child) return null;
   const status = childStatus(child);
   const title = compactText(child.title, 96) || t("chat-subagentcard.untitled_task");
@@ -95,10 +97,10 @@ export const ChildSessionCard = memo(function ChildSessionCard({ mid, sid, scope
       onClick={() => setOpen((o) => !o)}
       expanded={open}
       ariaLabel={open ? t("chat-subagentcard.collapse_details") : t("chat-subagentcard.expand_details")}
-      data={{ "data-child-card": status, "data-tool-use": childCall(sid) }}
+      data={{ "data-child-card": status, "data-tool-use": childCall(sid, cardMid) }}
     >
       <Collapse open={open} lazy>
-        <ChildDetails mid={mid} child={child} running={status === "running"} />
+        <ChildDetails mid={mid} child={child} parentMid={parentMid} parentSid={parentSid} running={status === "running"} />
       </Collapse>
     </TaskCard>
   );
@@ -106,7 +108,7 @@ export const ChildSessionCard = memo(function ChildSessionCard({ mid, sid, scope
 
 /** The opened part: mounted only while the card is open, and only then is the child's transcript read. Until it is in,
  *  and when it has no words of the child's, the row's last words stand for its result. */
-function ChildDetails({ mid, child, running }: { mid: string; child: Session; running: boolean }) {
+function ChildDetails({ mid, child, parentMid, parentSid, running }: { mid: string; child: Session; parentMid?: string; parentSid?: string; running: boolean }) {
   const sid = child.session_id;
   const detail = useChildDetail(mid, sid, child.updated_at, running);
   const prompt = detail?.prompt ?? "";
@@ -116,6 +118,23 @@ function ChildDetails({ mid, child, running }: { mid: string; child: Session; ru
       {prompt && <p className="mb-1" data-subagent-prompt>{compactText(prompt, 260)}</p>}
       <SubagentResult item={detail?.result} fallback={child.last_text ?? ""} mid={mid} sid={sid} />
       {tool && <p className="text-[12px] leading-4 text-ink-3" data-subagent-last-tool>{t("chat-subagentcard.last_tool", { tool: childToolName(tool) })}</p>}
+      <div className="mt-1.5">
+        <button
+          type="button"
+          data-subagent-view-full
+          onClick={() => openPanel({
+            kind: "subagent",
+            mid,
+            sid,
+            parentMid: parentMid ?? child.folded_under_machine_id ?? child.parent_machine_id ?? mid,
+            parentSid: parentSid ?? child.folded_under ?? child.parent_session_id,
+            from: "card",
+          })}
+          className="whitespace-nowrap text-xs font-medium text-accent-ink hover:underline"
+        >
+          {t("chat-subagentcard.view_full")}
+        </button>
+      </div>
     </div>
   );
 }

@@ -72,7 +72,9 @@ struct TodoLineTextTests {
         #expect(say("failed_start", ["error": "Desk Mac is offline"])?.tone == .danger)
         #expect(say("finished", [:])?.tone == .ready)
         #expect(say("persona_working", ["text": "writing part 2 of 3"]) == TodoLineText.Said(lead: "Persona", rest: "writing part 2 of 3"))
-        #expect(say("decision", ["text": "Which of 3?", "step": "Ryokan"])?.lead == "Ryokan · Which of 3?", "a step's line names it")
+        #expect(say("decision", ["text": "Which of 3?", "step": "Ryokan"])?.lead == "Ryokan" + TodoTimeWords.separator + "Which of 3?",
+                "a step's line names it")
+        #expect(TodoTimeWords.separator == "\u{00A0}· ", "the dot stays with the word before it when a line wraps")
         #expect(say("no_such_key", [:]) == nil, "a key this build does not know is not said")
         #expect(TodoLineText.said(nil, now: now) == nil)
     }
@@ -91,8 +93,8 @@ struct TodoLineTextTests {
         #expect(today.hasPrefix("Persona picks Ryokan Hanami at ") && today.contains(":"), "\(today)")
     }
 
-    /// Absolute times become words relative to now, in the model, never in a body: today by the clock, the week by its
-    /// day, further by its date.
+    /// Absolute times become words relative to now, in the model, never in a body: a line's today by the clock, the week
+    /// by its day, further by its date; the row's end says what its time is ("Due Fri", "16m ago"), an age never a day.
     @Test func timesAreWords() {
         let words = TodoWords(locale: Locale(identifier: "en_US"))
         var utc = Calendar(identifier: .gregorian)
@@ -101,14 +103,43 @@ struct TodoLineTextTests {
         #expect(hour.contains(":"))
         let weekday = TodoTimeWords.day(now.addingTimeInterval(-86_400 * 2), now: now, words: words, calendar: utc)
         #expect(weekday.count <= 4 && !weekday.contains(":"))
-        #expect(TodoTimeWords.age(now.addingTimeInterval(-16 * 60), now: now, words: words, calendar: utc) == "16m")
-        #expect(TodoTimeWords.age(now.addingTimeInterval(-3 * 3600), now: now, words: words, calendar: utc) == "3h")
-        #expect(TodoTimeWords.due(now, now: now, words: words, calendar: utc) == "Today")
+        #expect(TodoTimeWords.age(now.addingTimeInterval(-16 * 60), now: now, words: words, calendar: utc) == "16m ago")
+        #expect(TodoTimeWords.age(now.addingTimeInterval(-3 * 3600), now: now, words: words, calendar: utc) == "3h ago")
+        #expect(TodoTimeWords.age(now.addingTimeInterval(-86_400 * 2), now: now, words: words, calendar: utc) == "2d ago")
+        #expect(TodoTimeWords.age(now.addingTimeInterval(-86_400 * 40), now: now, words: words, calendar: utc) == "40d ago")
+        #expect(TodoTimeWords.due(now, now: now, words: words, calendar: utc) == "Due today")
+        let friday = TodoTimeWords.due(now.addingTimeInterval(86_400 * 3), now: now, words: words, calendar: utc)
+        #expect(friday.hasPrefix("Due ") && friday.count <= 7, "\(friday)")
+        #expect(TodoTimeWords.due(now.addingTimeInterval(86_400 * 30), now: now, words: words, calendar: utc).hasPrefix("Due "))
+        #expect(TodoTimeWords.spokenAge(now.addingTimeInterval(-86_400 * 2), now: now, words: words, calendar: utc) == "2 days ago")
+    }
+
+    /// The row's time words in every language: none keeps its catalog context, Chinese and Japanese say them in their
+    /// own script.
+    @Test(arguments: ["en", "zh-Hans", "ja"]) func theRowsTimesInEveryLanguage(_ language: String) {
+        let words = TodoWords(locale: Locale(identifier: language))
+        var utc = Calendar(identifier: .gregorian)
+        utc.timeZone = TimeZone(identifier: "UTC")!
+        let said = [TodoTimeWords.due(now, now: now, words: words, calendar: utc),
+                    TodoTimeWords.due(now.addingTimeInterval(86_400 * 3), now: now, words: words, calendar: utc),
+                    TodoTimeWords.age(now.addingTimeInterval(-16 * 60), now: now, words: words, calendar: utc),
+                    TodoTimeWords.age(now.addingTimeInterval(-3 * 3600), now: now, words: words, calendar: utc),
+                    TodoTimeWords.age(now.addingTimeInterval(-86_400 * 2), now: now, words: words, calendar: utc),
+                    TodoTimeWords.spokenAge(now.addingTimeInterval(-86_400 * 2), now: now, words: words, calendar: utc)]
+        for text in said {
+            #expect(!text.contains("["), "\(language): \(text)")
+            if language != "en" { #expect(text.unicodeScalars.contains { $0.value >= 0x3040 }, "\(language): \(text)") }
+        }
+        // A due day at a row's end never reads as a parked row's "until …" on line 2, a day's name or a date.
+        for day in [now.addingTimeInterval(86_400 * 3), now.addingTimeInterval(86_400 * 30)] {
+            let until = words("until \(TodoTimeWords.day(day, now: now, words: words, calendar: utc)) [To-dos Line]")
+            #expect(TodoTimeWords.due(day, now: now, words: words, calendar: utc) != until, "\(language): \(until)")
+        }
     }
 }
 
 /// A row's content (#10465): a line this build cannot say still draws the section's mark and word; VoiceOver hears the
-/// state, the line, the door and the time in full words.
+/// state, the line (with how many asks) and the time in full words; the row's end says no time a line already says.
 struct TodoRowContentTests {
     private let now = Date(timeIntervalSince1970: 1_800_000_000)
     private let words = TodoWords(locale: Locale(identifier: "en_US"))
@@ -126,21 +157,56 @@ struct TodoRowContentTests {
     @Test(arguments: [TodoListSection.needsYou, TodoListSection.working, TodoListSection.waiting, TodoListSection.justFinished])
     func aLineThisBuildCannotSayKeepsTheMark(_ section: String) {
         let c = TodoRowContentLogic.content(filed("a", section), item: TodoItem(id: "a", title: "A"),
-                                            view: view(section, key: "computer_offline"), grouping: .phase, now: now, words: words)
+                                            view: view(section, key: "computer_offline"), now: now, words: words)
         #expect(c.mark != nil, "\(section): the mark is drawn on line 2")
         #expect(c.said?.lead != nil, "\(section): the section's word in place of the line")
     }
 
-    @Test func theRowIsSpokenInFullWords() {
+    @MainActor @Test func theRowIsSpokenInFullWords() {
         let item = TodoItem(id: "a", title: "Plan the Kyoto trip", updatedAt: now.addingTimeInterval(-16 * 60))
         let asks = [OwnerAsk(id: "todo:decision@1", kind: "plan", home: "todo"), OwnerAsk(id: "todo:decision@2", kind: "decision", home: "todo")]
         let c = TodoRowContentLogic.content(filed("a", TodoListSection.needsYou), item: item,
-                                            view: view(TodoListSection.needsYou, key: "decision", asks: asks), grouping: .phase,
-                                            now: now, words: words)
-        #expect(c.trailing == "16m")
+                                            view: view(TodoListSection.needsYou, key: "decision", asks: asks), now: now, words: words)
+        #expect(c.trailing == "16m ago")
+        let drawn = c.said.map { String(TodoListRow.attributed($0).characters) }
+        #expect(drawn?.hasSuffix(TodoTimeWords.separator + "2 asks") == true, "line 2 ends with how many asks: \(String(describing: drawn))")
         #expect(c.spoken.hasPrefix("Plan the Kyoto trip, "), "\(c.spoken)")
         #expect(c.spoken.contains(StateName.todoNeedsYou), "the state its mark draws: \(c.spoken)")
-        #expect(c.spoken.contains("Review Plan") && c.spoken.contains("2 asks"), "\(c.spoken)")
+        #expect(!c.spoken.contains("Review") && c.spoken.contains("2 asks"), "no door to speak: \(c.spoken)")
         #expect(c.spoken.hasSuffix("16 minutes ago"), "the time in words, never \"16m\": \(c.spoken)")
+    }
+
+    /// A high-priority to-do: "!" before its title in the caution tone, "High priority" said after the title; none once
+    /// it is closed, nor on normal and low ones.
+    @MainActor @Test func aHighPriorityRowIsMarked() {
+        let high = TodoItem(id: "a", title: "Fix the login", priority: "high")
+        let c = TodoRowContentLogic.content(filed("a", TodoListSection.todo), item: high, view: nil, now: now, words: words)
+        #expect(c.highPriority && c.spoken.hasPrefix("Fix the login, High priority"), "\(c.spoken)")
+        #expect(String(TodoListRow.title(c).characters) == "!\u{00A0}Fix the login")
+        let low = TodoItem(id: "a", title: "Fix the login", priority: "low")
+        #expect(!TodoRowContentLogic.content(filed("a", TodoListSection.todo), item: low, view: nil, now: now, words: words).highPriority)
+        var closed = filed("a", TodoListSection.done)
+        closed.closed = true
+        let done = TodoRowContentLogic.content(closed, item: high, view: nil, now: now, words: words)
+        #expect(!done.highPriority && String(TodoListRow.title(done).characters) == "Fix the login")
+    }
+
+    /// A line that says a time ("since Tue") leaves the row's end without one; a due day stays; a closed row says how long
+    /// ago it closed.
+    @Test func theRowsEndSaysNoTimeTwice() {
+        let item = TodoItem(id: "a", title: "Fix the login", updatedAt: now.addingTimeInterval(-3600))
+        var waiting = view(TodoListSection.waiting, key: "pr_open")
+        waiting.since = now.addingTimeInterval(-86_400 * 2).formatted(.iso8601)
+        let c = TodoRowContentLogic.content(filed("a", TodoListSection.waiting), item: item, view: waiting, now: now, words: words)
+        #expect(c.said?.timed == true && c.trailing == nil, "\(String(describing: c.trailing))")
+        #expect(!c.spoken.contains("ago"), "\(c.spoken)")
+        let due = TodoItem(id: "a", title: "Fix the login", dueAt: now.addingTimeInterval(86_400 * 2))
+        let dated = TodoRowContentLogic.content(filed("a", TodoListSection.waiting), item: due, view: waiting, now: now, words: words)
+        #expect(dated.trailing?.hasPrefix("Due ") == true, "a due day is not what the line says")
+        var closed = filed("d", TodoListSection.done)
+        closed.closed = true
+        let done = TodoRowContentLogic.content(closed, item: TodoItem(id: "d", title: "Booked", doneAt: now.addingTimeInterval(-7200)),
+                                               view: nil, now: now, words: words)
+        #expect(done.trailing == "2h ago" && done.spoken.hasSuffix("Done 2 hours ago"), "\(done.spoken)")
     }
 }

@@ -77,7 +77,14 @@ nonisolated enum AssistantBadges {
         for s in sessions where s.group == group && bySession[s.key] == nil { bySession[s.key] = s }
         var agents: [String: Set<SessionKey>] = [:]
         var tally: [String: Int] = [:]
+        // A card its task's supervisor holds is the supervisor's (`Interaction.supervisorHeld`): it counts nowhere, and
+        // neither does a session in Needs You whose cards are all held (`AgentsNeedsYou.rows`).
+        var held: Set<SessionKey> = []
         for ix in interactions where ix.group == group {
+            if ix.supervisorHeld {
+                if !ix.isSessionless { held.insert(ix.sessionKey) }
+                continue
+            }
             if ix.isSessionless {
                 tally[roster.owner(ix.manager), default: 0] += 1
                 continue
@@ -87,7 +94,9 @@ nonisolated enum AssistantBadges {
             guard counts(key, session) else { continue }
             agents[roster.owner(ix.manager ?? session?.manager), default: []].insert(key)
         }
-        for s in bySession.values where !s.assistant && s.countedState == .needsYou && counts(s.key, s) {
+        let open = Set(agents.values.joined())
+        for s in bySession.values where !s.assistant && s.countedState == .needsYou && counts(s.key, s)
+            && (!held.contains(s.key) || open.contains(s.key)) {
             agents[roster.owner(s.manager), default: []].insert(s.key)
         }
         for (manager, keys) in agents { tally[manager, default: 0] += keys.count }

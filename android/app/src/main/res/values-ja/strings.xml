@@ -7,13 +7,12 @@
     <string name="app_show_list">一覧を表示</string>
     <string name="app_tab_settings">設定</string>
     <string name="app_demo_badge">体験</string>
-    <string name="app_try_demo">ハブがない場合は体験モードへ</string>
+    <string name="app_try_demo">デモ</string>
     <string name="app_back">戻る</string>
     <string name="app_unavailable_phone_tools">このモードではスマートフォンのツールを使えません</string>
     <string name="app_demo_no_terminal">体験モードにはターミナルのデータがありません</string>
     <string name="app_demo_no_machines">体験モードにはマシン監視のデータがありません</string>
-    <string name="app_demo_no_knowledge">体験モードにはナレッジのデータがありません</string>
-    <string name="app_demo_no_voice">体験モードには音声チャットがありません</string>
+    <string name="app_page_unavailable">このページは現在利用できません</string>
     <string name="app_pane_agents_title">セッションを選択</string>
     <string name="app_pane_agents_detail">左側のセッションとターミナルがここに表示されます。</string>
     <string name="app_pane_inbox_title">メッセージを選択</string>

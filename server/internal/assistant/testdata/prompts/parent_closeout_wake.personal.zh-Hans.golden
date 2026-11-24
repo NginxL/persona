@@ -1,0 +1,4 @@
+全部 1 个 part_of 子待办均已完成。
+   已完成子待办：
+   - 「Implement API」（todo_child_1；PR：https://github.com/example/app/pull/101）
+   收口指引：若该父待办仅用于聚合这些子任务，请调用 todo_complete 关闭父待办并向用户汇总结果。该父待办没有归属会话（用户个人普通待办）：若仍需用户审阅，切勿静默自动关闭，请向用户汇总已完成交付并保持父待办打开等待确认。

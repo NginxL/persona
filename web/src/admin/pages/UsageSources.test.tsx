@@ -315,4 +315,18 @@ describe("the usage sources page", () => {
     await open();
     expect(text()).toContain("还没有来源");
   });
+
+  it("writes usage.hidden_providers from one switch per provider (#13173)", async () => {
+    view = { ...fresh(), providers: ["claude", "codex", "xai"], hidden_providers: ["codex"] };
+    await open();
+    const switches = () => [...host.querySelectorAll<HTMLElement>('[role="switch"]')];
+    // the master switch, then one per provider in order (claude, codex, xai), then one per source
+    expect(switches().slice(1, 4).map((s) => s.getAttribute("aria-checked"))).toEqual(["true", "false", "true"]);
+    await act(async () => switches()[3].click()); // hide xai
+    await flush();
+    expect(calls.filter((c) => c.method === "PUT" && c.path === "/usage-sources").at(-1)?.body).toEqual({ hidden_providers: ["codex", "xai"] });
+    await act(async () => switches()[2].click()); // show codex again
+    await flush();
+    expect(calls.filter((c) => c.method === "PUT" && c.path === "/usage-sources").at(-1)?.body).toEqual({ hidden_providers: ["xai"] });
+  });
 });

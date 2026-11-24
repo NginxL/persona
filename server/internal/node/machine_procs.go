@@ -80,14 +80,17 @@ func lookupCurrentUser() string {
 	return strconv.Itoa(os.Getuid())
 }
 
+// The listening port inspector and process management. machine.ports and machine.processes take their params decoded
+// (nodeRPC answers "bad machine.ports params" to ones that do not decode); machine.process.kill decodes its own, since
+// it refuses empty params.
+func init() {
+	nodeRPC(proto.MethodMachinePorts, (*Node).machinePorts)
+	nodeRPC(proto.MethodMachineProcesses, (*Node).machineProcesses)
+	nodeRPC(proto.MethodMachineProcessKill, (*Node).machineProcessKill)
+}
+
 // machinePorts handles the read-only machine.ports Node RPC.
-func (n *Node) machinePorts(ctx context.Context, params json.RawMessage) (any, error) {
-	var p proto.MachinePortsParams
-	if len(params) > 0 {
-		if err := json.Unmarshal(params, &p); err != nil {
-			return nil, errors.New("bad machine.ports params")
-		}
-	}
+func (n *Node) machinePorts(ctx context.Context, p proto.MachinePortsParams) (any, error) {
 	protocol := strings.ToLower(strings.TrimSpace(p.Protocol))
 	switch protocol {
 	case "", "tcp", "udp":
@@ -117,13 +120,7 @@ func (n *Node) machinePorts(ctx context.Context, params json.RawMessage) (any, e
 }
 
 // machineProcesses handles the read-only machine.processes Node RPC.
-func (n *Node) machineProcesses(ctx context.Context, params json.RawMessage) (any, error) {
-	var p proto.MachineProcessesParams
-	if len(params) > 0 {
-		if err := json.Unmarshal(params, &p); err != nil {
-			return nil, errors.New("bad machine.processes params")
-		}
-	}
+func (n *Node) machineProcesses(ctx context.Context, p proto.MachineProcessesParams) (any, error) {
 	sortBy := strings.ToLower(strings.TrimSpace(p.Sort))
 	switch sortBy {
 	case "":

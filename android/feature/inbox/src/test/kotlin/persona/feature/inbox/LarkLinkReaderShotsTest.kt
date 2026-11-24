@@ -47,6 +47,7 @@ import persona.core.designsystem.AppStyle
 import persona.core.designsystem.PersonaTheme
 import java.io.File
 import java.time.Instant
+import persona.core.inbox.*
 
 /**
  * The conversation link card's native Feishu views (G184 G185 G187), on the JVM with Robolectric's native graphics, in

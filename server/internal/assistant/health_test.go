@@ -123,6 +123,17 @@ func TestGoldenHealthClaudeMD(t *testing.T) {
 	golden(t, "health_claude_md", s.healthClaudeMD(context.Background(), "server"))
 }
 
+func TestGoldenHealthClaudeMDLanguage(t *testing.T) {
+	for _, lang := range []string{"en", "ja"} {
+		t.Run(lang, func(t *testing.T) {
+			f := healthHub()
+			f.hello.Owner, f.hello.OwnerNotes, f.hello.Locale = "Example user", "Example health notes.", lang
+			s := newTestService(t, f)
+			golden(t, "health_claude_md."+lang, s.healthClaudeMD(context.Background(), "server"))
+		})
+	}
+}
+
 // A health conversation's follow-up and routine keep the health space, so a run that starts a conversation starts it
 // there; kb_update is refused; and a conversation the machine doesn't list can't be taken for the assistant's own.
 func TestHealthSpaceTasksAndRefusals(t *testing.T) {
@@ -166,12 +177,18 @@ func TestHealthSpaceTasksAndRefusals(t *testing.T) {
 // and says what goes out.
 func answerOutbound(t *testing.T, s *Service, self, tool, says string, allow bool) {
 	t.Helper()
+	answerOutboundIn(t, s, self, tool, says, "/home/me/.persona/health", allow)
+}
+
+// answerOutboundIn is answerOutbound for a conversation in directory cwd.
+func answerOutboundIn(t *testing.T, s *Service, self, tool, says, cwd string, allow bool) {
+	t.Helper()
 	go func() {
 		for deadline := time.Now().Add(5 * time.Second); time.Now().Before(deadline); time.Sleep(5 * time.Millisecond) {
 			if qs := s.pendingQuestions(); len(qs) == 1 {
 				ix := qs[0]
 				if ix.Kind != proto.IxPermission || ix.ToolName != tool || ix.SessionID != self || !strings.Contains(ix.Summary, says) ||
-					ix.Cwd != "/home/me/.persona/health" {
+					ix.Cwd != cwd {
 					t.Errorf("card: %+v", ix)
 				}
 				raw, _ := json.Marshal(proto.Resolution{Allow: &allow})
@@ -303,7 +320,7 @@ func testHealthPhoneNotify(t *testing.T) {
 						t.Fatal(err)
 					}
 					if tc.redact {
-						want["title"], want["body"] = healthNotice(i18n.Lang(locale))
+						want["title"], want["body"] = spaceNotice(i18n.Lang(locale))
 					}
 					gotJSON, _ := json.Marshal(call["args"])
 					wantJSON, _ := json.Marshal(want)

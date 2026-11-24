@@ -111,7 +111,7 @@ class ConnectionRuntimeStartupTest {
         }
         field(runtime.dataStore, "lock", pausingLock)
         val startFinished = CompletableDeferred<Throwable?>()
-        thread(isDaemon = true, name = "connection-runtime-start") {
+        val _ = thread(isDaemon = true, name = "connection-runtime-start") {
             startFinished.complete(runCatching { runtime.start() }.exceptionOrNull())
         }
         var released = false

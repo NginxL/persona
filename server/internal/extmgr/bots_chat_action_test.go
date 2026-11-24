@@ -13,6 +13,7 @@ import (
 
 // Each of the owner's plain messages reaches the assistant with a fresh, one-use owner action, like a card press.
 func TestBotMessageCarriesTheOwnersAction(t *testing.T) {
+	needsLarkModule(t)
 	w := newBotWorld(t)
 	w.pair(t)
 	if _, err := w.h.botEvent(w.ctx, botMessageEvent("om_ask", "ou_me", "text", textContent("2"), nil)); err != nil {

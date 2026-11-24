@@ -1414,17 +1414,18 @@ test('send_and_interrupt_say_queued_and_settled_as_the_driver_does', async (t) =
   assert.deepEqual(await n.peer.call('session.interrupt', { session_id: 's1' }), { ok: true, settled: true })
 })
 
-test('supervision_policy is advertised only when both assistant and supervisionPolicy are enabled (#11173)', async (t) => {
+test('supervision_policy and assistant_environment are explicit assistant-only capabilities', async (t) => {
   const full = await startFakeNode(t)
   const capable = createRuntime(
     minimal({ start: async () => ({ session: { session_id: 's1', status: 'idle' } }), send: async () => {} }),
-    { runtime: 'agy-like', socketPath: full.path, retryMs: 20, assistant: true, supervisionPolicy: true },
+    { runtime: 'agy-like', socketPath: full.path, retryMs: 20, assistant: true, supervisionPolicy: true, assistantEnvironment: true },
   )
   t.after(() => capable.stop())
   capable.start()
   await full.ready
   assert.equal(full.hello.caps.assistant, true)
   assert.equal(full.hello.caps.supervision_policy, true)
+  assert.equal(full.hello.caps.assistant_environment, true)
 
   const legacy = await startFakeNode(t)
   const plainAsst = createRuntime(
@@ -1436,26 +1437,29 @@ test('supervision_policy is advertised only when both assistant and supervisionP
   await legacy.ready
   assert.equal(legacy.hello.caps.assistant, true)
   assert.equal(legacy.hello.caps.supervision_policy, undefined, 'absent unless explicitly opted in')
+  assert.equal(legacy.hello.caps.assistant_environment, undefined, 'environment is absent unless explicitly opted in')
 
   const noAsst = await startFakeNode(t)
   const nonAsst = createRuntime(
     minimal({ start: async () => ({ session: { session_id: 's1', status: 'idle' } }), send: async () => {} }),
-    { runtime: 'plain', socketPath: noAsst.path, retryMs: 20, assistant: false, supervisionPolicy: true },
+    { runtime: 'plain', socketPath: noAsst.path, retryMs: 20, assistant: false, supervisionPolicy: true, assistantEnvironment: true },
   )
   t.after(() => nonAsst.stop())
   nonAsst.start()
   await noAsst.ready
   assert.equal(noAsst.hello.caps.assistant, false)
   assert.equal(noAsst.hello.caps.supervision_policy, undefined, 'never advertised without assistant')
+  assert.equal(noAsst.hello.caps.assistant_environment, undefined)
 
   const noSend = await startFakeNode(t)
   const incomplete = createRuntime(
     minimal({ start: async () => ({ session: { session_id: 's1', status: 'idle' } }) }),
-    { runtime: 'half-asst', socketPath: noSend.path, retryMs: 20, assistant: true, supervisionPolicy: true },
+    { runtime: 'half-asst', socketPath: noSend.path, retryMs: 20, assistant: true, supervisionPolicy: true, assistantEnvironment: true },
   )
   t.after(() => incomplete.stop())
   incomplete.start()
   await noSend.ready
   assert.equal(noSend.hello.caps.assistant, false)
   assert.equal(noSend.hello.caps.supervision_policy, undefined, 'never advertised when start/send are incomplete')
+  assert.equal(noSend.hello.caps.assistant_environment, undefined)
 })

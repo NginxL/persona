@@ -15,7 +15,7 @@ beforeEach(() => {
   vi.stubGlobal("CSS", { escape: (value: string) => value });
   window.matchMedia = ((query: string) => ({
     // NARROW is a max-width query: a phone matches it, a desktop does not
-    matches: narrow && query.includes("max-width"),
+    get matches() { return narrow && query.includes("max-width"); },
     media: query,
     onchange: null,
     addEventListener() {},
@@ -58,6 +58,7 @@ describe("menu and Back", () => {
     expect(history.length).toBe(before + 1);
     expect(location.pathname).toBe("/t/m/w/tab/s1");
     await back();
+    await act(async () => vi.waitFor(() => expect(onClose).toHaveBeenCalledTimes(1)));
     expect(onClose).toHaveBeenCalledTimes(1);
     expect(location.pathname).toBe("/t/m/w/tab/s1");
   });

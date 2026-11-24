@@ -24,6 +24,7 @@ var sessionWritesWithReceipts = []string{
 	"POST /api/v1/sessions/{mid}/{sid}/keys",
 	"POST /api/v1/sessions/{mid}/{sid}/rewind",
 	"POST /api/v1/sessions/{mid}/{sid}/restore-model",
+	"POST /api/v1/sessions/{mid}/{sid}/continue-in-new-chat",
 	"POST /api/v1/sessions/{mid}/{sid}/fork",
 	"POST /api/v1/sessions/{mid}/{sid}/close",
 	"POST /api/v1/sessions/{mid}/{sid}/queue/send-now",

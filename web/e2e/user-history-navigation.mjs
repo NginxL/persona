@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { chromium } from "playwright-core";
+import { checkInterruptedJump, interruptedJumps } from "./interrupted-history-jump.mjs";
 
 const [address, directory, count = "678", conversation = "main", initialPage = "2", textSize = "standard", mode] = process.argv.slice(2);
 const base = new URL(address);
@@ -25,6 +26,9 @@ const items = inputs.flatMap((input, i) => [
 ]);
 const index = { total: COUNT, inputs, history: "synthetic-history-v1" };
 const session = { machine_id: MID, session_id: SID, title: "Synthetic full-history navigation", agent: "claude", status: "idle", state: "idle", capabilities: { read: true, send: true, terminal: false } };
+const assistant = conversation === "leader"
+  ? { machine_id: MID, main: "example-main", leaders: [SID], conversations: [{ ...session, session_id: "example-main" }, session] }
+  : { machine_id: MID, main: SID, conversations: [session] };
 const machine = { id: MID, name: "Example computer", online: true };
 const results = { status: "running", realConversationUsed: false, messagesSent: 0, forwardedWrites: 0, runs: [], errors: [] };
 let browser;
@@ -38,9 +42,10 @@ function pageFor(before = 0) {
 }
 
 try {
-  browser = await chromium.launch({ channel: "chrome", headless: true, ignoreDefaultArgs: ["--hide-scrollbars"] });
-  for (const theme of ["light", "dark"]) for (const size of ["wide", "narrow"]) {
-    const run = { name: `${size}-${theme}`, serverTotal: COUNT, initialBodies: 0, beforeTicks: 0, afterTicks: 0, olderReads: 0, pageErrors: [], screenshots: [] };
+  browser = await chromium.launch({ channel: "chrome", executablePath: process.env.CHROME_BIN, headless: true, ignoreDefaultArgs: ["--hide-scrollbars"] });
+  const cases = mode === "cancel" ? interruptedJumps : ["light", "dark"].flatMap(theme => ["wide", "narrow"].map(size => ({ theme, size })));
+  for (const { theme, size, source, action } of cases) {
+    const run = { name: `${size}-${theme}`, serverTotal: COUNT, olderReads: 0, pageErrors: [], screenshots: [] };
     results.runs.push(run);
     const context = await browser.newContext({ viewport: size === "wide" ? { width: 1600, height: 900 } : { width: 1024, height: 820 }, colorScheme: theme, locale: "en-US", hasTouch: false, serviceWorkers: "block" });
     await context.addInitScript(({ theme, textSize }) => { localStorage.setItem("persona.token", "synthetic-only"); localStorage.setItem("persona.language", "en"); localStorage.setItem("persona.theme", theme); localStorage.setItem("persona.text-size", textSize); }, { theme, textSize });
@@ -72,7 +77,7 @@ try {
       }
       const json = {
         "/sessions": { sessions: [session], total: 1, has_more: false }, [`/sessions/${MID}/${SID}/info`]: session,
-        "/machines": { machines: [machine] }, "/assistant": { machine_id: MID, main: SID, conversations: [session] },
+        "/machines": { machines: [machine] }, "/assistant": assistant,
         "/interactions": { interactions: [] }, "/todos": { todos: [] }, "/mutes": { spaces: [], sessions: [], allowed: [] },
         "/pins": { spaces: [], sessions: [], sections: [] }, "/agents/sessions": { sessions: [] }, "/agents/prefs": {},
         "/managers": { managers: [], default_id: "" }, "/personas": { personas: [] }, "/assistant/personas": { personas: [] },
@@ -80,7 +85,9 @@ try {
       }[path] ?? {};
       return route.fulfill({ json });
     });
+    let hubSocket;
     await context.routeWebSocket("**/*", socket => {
+      if (new URL(socket.url()).pathname.startsWith("/api/")) hubSocket = socket;
       assert.equal(new URL(socket.url()).host, base.host);
       socket.send(JSON.stringify({ type: "hello", server_version: "mock", protocol: 1, features: [] }));
       socket.send(JSON.stringify({ type: "machines", machines: [machine] }));
@@ -89,6 +96,27 @@ try {
     });
     const page = await context.newPage(); page.setDefaultTimeout(20_000);
     page.on("pageerror", error => run.pageErrors.push(error.message));
+    if (mode === "cancel") {
+      const held = Promise.withResolvers();
+      olderGate = held.promise;
+      release();
+      const url = new URL(`/persona/${SID}`, base);
+      await checkInterruptedJump({
+        page, url, run, output, source, action, release: held.resolve,
+        target: inputs[COUNT - INITIAL_MARKS], second: inputs.at(-4), secondOrdinal: COUNT - 3,
+        append: () => {
+          const seq = items.at(-1).seq + 1;
+          const live = [
+            { id: "compact", seq, role: "system", kind: "notice", compact: { trigger: "manual", pre_tokens: 12000 } },
+            { id: "supervisor", seq: seq + 1, role: "user", kind: "text", text: "Check the fictional task.", injected: { kind: "system", state: "supervise", line: "Review the task" } },
+            { id: "report", seq: seq + 2, role: "assistant", kind: "text", text: "Checking the task.", narration: true },
+          ];
+          hubSocket.send(JSON.stringify({ type: "items", machine_id: MID, session_id: SID, history: index.history, items: live, to_seq: live.at(-1).seq }));
+        },
+      });
+      await context.close();
+      continue;
+    }
     await page.goto(new URL(conversation === "main" ? "/" : `/s/${MID}/${SID}`, base).href);
     await page.locator(`${RAIL} button[data-tick]`).first().waitFor();
     await page.waitForFunction(count => document.querySelectorAll("[data-user-bubble]").length === count, INITIAL_BODIES);
@@ -201,7 +229,7 @@ try {
     await context.close();
   }
   results.status = "pass";
-} catch (error) { results.status = "fail"; results.errors.push(error.message); process.exitCode = 1; }
+} catch (error) { results.status = "fail"; results.errors.push(error.message); console.error(error.message); process.exitCode = 1; }
 finally {
   clearTimeout(deadline); await browser?.close();
   await writeFile(join(output, "results.json"), JSON.stringify(results, null, 2));

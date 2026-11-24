@@ -81,6 +81,7 @@ func (d *Devices) diskUsage() (UsageConfig, error) {
 	if err := json.Unmarshal(b, &cfg); err != nil {
 		return cfg.Usage, err
 	}
+	cfg.Usage.HiddenProviders = canonicalHiddenUsageProviders(cfg.Usage.HiddenProviders)
 	return cfg.Usage, nil
 }
 
@@ -518,15 +519,15 @@ const hiddenProvidersMost = 16
 
 var providerName = lazyre.New(`^[a-z0-9][a-z0-9_-]{0,31}$`)
 
-// cleanHiddenProviders lowercases, drops repeats and sorts the providers to hide; false when one is not a provider
-// name or there are too many.
+// cleanHiddenProviders canonicalizes, deduplicates and sorts the providers to hide; false when one is not a
+// provider name or there are too many.
 func cleanHiddenProviders(in []string) ([]string, bool) {
 	if len(in) > hiddenProvidersMost {
 		return nil, false
 	}
 	var out []string
 	for _, p := range in {
-		p = strings.ToLower(strings.TrimSpace(p))
+		p = canonicalUsageProvider(p)
 		if !providerName.MatchString(p) {
 			return nil, false
 		}

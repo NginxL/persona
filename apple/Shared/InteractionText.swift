@@ -45,6 +45,7 @@ nonisolated struct SecretHandoffRequest: Sendable {
         var id: String { name }
     }
     var variables: [Variable]
+    var isStore: Bool
     var agent: String
     var machine: String
     var cwd: String
@@ -52,6 +53,7 @@ nonisolated struct SecretHandoffRequest: Sendable {
 
     init(_ input: JSONValue?) {
         func text(_ v: JSONValue?) -> String { v?.string?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "" }
+        isStore = ["create", "edit"].contains(text(input?["store_operation"]))
         variables = (input?["variables"]?.array ?? []).compactMap { v in
             let name = text(v["name"])
             guard !name.isEmpty else { return nil }
@@ -164,7 +166,7 @@ nonisolated extension Interaction {
     /// is still loading. Any other card whose session is unknown stays blocked.
     func canAnswer(session: Session?) -> Bool {
         if let session { return isSessionless || session.canApprove }
-        if let under = foldedUnder, !under.isEmpty, under != sessionID { return true }
+        if requestHomeKey != sessionKey { return true }
         return isSessionless
     }
 

@@ -1,7 +1,7 @@
 // One tool call in a work group (cindy's AgentActionRow): [status][verb][what it worked on][+N -N][›]. A command and
 // the like open in place (what went in, what came out, in full); an edit opens the changes side panel; a read opens
 // the file in the side panel.
-import { memo, useMemo } from "react";
+import { lazy, memo, Suspense, useMemo } from "react";
 import { useExpanded } from "./expanded";
 import { diffLines, type Op } from "../../lib/diff-lines";
 import { fileName, toolFile } from "../../lib/files";
@@ -10,7 +10,7 @@ import { getSession } from "../../lib/store";
 import { taskBadge } from "../../lib/tasks";
 import { ownEntry, personaToolVerb, SUBJECT_KEYS, toolChip, toolDisplayName, toolLabel } from "../../lib/turns";
 import type { Item } from "../../lib/types";
-import { toolDurationLabel, type ToolStep } from "../../lib/work-groups";
+import { toolDurationLabel, toolDurationMs, type ToolStep } from "../../lib/work-groups";
 import { cx, Spinner } from "../../ui/atoms";
 import { Icon } from "../../ui/icons";
 import { NARROW, useMedia } from "../../ui/media-query";
@@ -22,6 +22,9 @@ import { hasStepDetail, showsResult, StepDetail } from "./StepDetail";
 import { useReveal } from "./search-reveal";
 import { Thumb } from "./Steps";
 import { t } from "../../i18n";
+
+// L3 per-step attribution badges load lazily only when a step with telemetry is expanded (#13054).
+const StepTelemetry = lazy(() => import("./StepTelemetry").then((m) => ({ default: m.StepTelemetry })));
 
 /** The row's chrome, shared with the thought rows (ThinkingRow.tsx) so a mixed list reads as one (cindy's
  *  activityRowChrome): radius, padding, the hover lift. On a touch screen a row is a finger tall (40). */
@@ -224,6 +227,11 @@ export const ActionRow = memo(function ActionRow({ step, running, mid, sid, trac
   // the call's own elapsed time (#8163): a quiet suffix on wide rows, the row's hover title on compact layouts
   const narrow = useMedia(NARROW);
   const duration = toolDurationLabel(step);
+  const rawDurationMs = toolDurationMs(step);
+  const hasTelemetry =
+    (rawDurationMs !== null && rawDurationMs > 0) ||
+    Boolean(use.usage?.length || result?.usage?.length || (typeof use.ttft_ms === "number" && use.ttft_ms >= 0));
+  const stepItems = useMemo(() => [use, result], [use, result]);
 
   const activate = () => {
     if (trace) return setOpen((o) => !o);
@@ -296,6 +304,11 @@ export const ActionRow = memo(function ActionRow({ step, running, mid, sid, trac
       )}
       {open && (
         <div className="mx-2 mt-1 mb-1 cursor-text rounded-[6px] border border-line bg-neutral-bubble px-[10px] py-2 font-mono text-label leading-[17px] text-ink select-text" data-inline-detail>
+          {hasTelemetry && (
+            <Suspense fallback={null}>
+              <StepTelemetry items={stepItems} durationMs={rawDurationMs} className="mb-2 border-b border-line pb-1.5" />
+            </Suspense>
+          )}
           {detail && (
             <div className="font-sans">
               <StepDetail use={use} result={result} />

@@ -69,8 +69,8 @@ func deliveryOn(t *testing.T, s *Service) {
 	}
 }
 
-// With done_needs_delivery on, a task done as asked but stopped at a PR stays open with where it is held, is listed
-// for the user's nod, and closes once the work is live; off (the default) it closes as before.
+// With done_needs_delivery on, a task done as asked but stopped at a PR stays open with where it is held. Live work is
+// delivered for review too: neither it nor the default (delivery off) closes the todo without the owner (#5732).
 func TestAutoFinishHoldsUndeliveredWork(t *testing.T) {
 	s, f := newTaskService(t)
 	deliveryOn(t, s)
@@ -102,8 +102,8 @@ func TestAutoFinishHoldsUndeliveredWork(t *testing.T) {
 		Text: "已合并并部署，接口实测返回 200\n交付：已上线并实测；卡点：无；谁来解：无"})
 	f.judge = `{"verdict":"done","reason":"已上线","delivery":"live"}`
 	s.autoFinishTask(todoNow(s, "todo_d"), time.Now(), true)
-	if got := todoNow(s, "todo_d"); got.DoneAt == nil || got.Delivery.State != deliveryLive {
-		t.Fatalf("live work not closed: %+v", got)
+	if got := todoNow(s, "todo_d"); got.DoneAt != nil || got.Delivery.State != deliveryLive || got.Check == nil || got.Check.Verdict != verdictDone {
+		t.Fatalf("live work not delivered for review: %+v", got)
 	}
 	if a := s.snapshotApprovals(context.Background(), ""); len(a) != 0 {
 		t.Fatalf("a closed task still waits for a nod: %+v", a)
@@ -116,7 +116,7 @@ func TestAutoFinishHoldsUndeliveredWork(t *testing.T) {
 	f2.setItems(proto.Item{Kind: proto.KindText, Role: "assistant", Text: "PR https://github.com/o/r/pull/7 已合并"})
 	f2.judge = `{"verdict":"done","reason":"已合并"}`
 	s2.autoFinishTask(todoNow(s2, "todo_o"), now, true)
-	if got := todoNow(s2, "todo_o"); got.DoneAt == nil || got.Delivery != nil {
+	if got := todoNow(s2, "todo_o"); got.DoneAt != nil || got.Delivery != nil || got.Check == nil || got.Check.Verdict != verdictDone {
 		t.Fatalf("by default (off): %+v", got)
 	}
 }

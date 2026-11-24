@@ -351,37 +351,3 @@ extension AppModel {
         return out
     }
 }
-
-extension Session {
-    /// Row-only fields are authoritative, but absent chat fields do not mean that background work stopped.
-    func preservingDetails(from old: Session?) -> Session {
-        guard listWaiting != nil, let old else { return self }
-        var row = self
-        row.background = old.background
-        row.subagents = old.subagents
-        row.workflows = old.workflows
-        if !row.assistant, row.undelivered == nil { row.undelivered = old.undelivered }
-        row.queued = old.queued
-        row.ports = old.ports
-        row.permissionMode = old.permissionMode
-        row.bypassAvailable = old.bypassAvailable
-        // The pending choice and the confirmed effort come from the same session snapshot.
-        if row.pendingEffort == nil && old.pendingEffort == nil, row.effort == nil { row.effort = old.effort }
-        row.efforts = old.efforts
-        row.serviceTier = old.serviceTier
-        row.serviceTiers = old.serviceTiers
-        row.ultracode = old.ultracode
-        row.launcher = old.launcher
-        row.suggestion = old.suggestion
-        row.suggestionRisky = old.suggestionRisky
-        row.codexRoute = old.codexRoute
-        row.codexRouteNote = old.codexRouteNote
-        row.runtime = old.runtime
-        row.runtimeFallback = old.runtimeFallback
-        row.modelFallback = old.modelFallback
-        row.modelRestore = old.modelRestore
-        row.compaction = old.compaction
-        row.asks = old.asks
-        return row
-    }
-}

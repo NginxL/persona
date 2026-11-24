@@ -154,7 +154,7 @@ class ExtensionPackSwitchShotsTest {
 
     private fun assertOneWholeLine(label: String) {
         val layouts = mutableListOf<TextLayoutResult>()
-        rule.onNodeWithText(label).fetchSemanticsNode().config.getOrNull(SemanticsActions.GetTextLayoutResult)?.action?.invoke(layouts)
+        val _ = rule.onNodeWithText(label).fetchSemanticsNode().config.getOrNull(SemanticsActions.GetTextLayoutResult)?.action?.invoke(layouts)
         assertEquals("$label is laid out once", 1, layouts.size)
         assertEquals("$label stays on one line", 1, layouts.single().lineCount)
         assertFalse("$label is not truncated", layouts.single().isLineEllipsized(0))

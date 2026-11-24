@@ -2,6 +2,11 @@ package persona.feature.settings
 
 import persona.core.designsystem.text
 import android.content.ClipboardManager
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.ui.semantics.Role
+import persona.core.designsystem.icons.PhIcon
 import android.content.Context
 import android.content.res.Resources
 import androidx.annotation.StringRes
@@ -68,7 +73,7 @@ fun PairingScreen(
     diagnostics: SettingsDiagnostics? = null,
     onCredentialsSaved: () -> Unit = {},
     onBack: (() -> Unit)? = null,
-    footer: @Composable () -> Unit = {},
+    footer: @Composable (welcome: Boolean) -> Unit = {},
     /** Saves the engine of the hub's machine, the step between pairing and the checklist (docs/integrations/engines.md). */
     machines: MachineManagement? = null,
     /** Start at the connect step instead of the welcome page (adding another hub). */
@@ -333,37 +338,45 @@ fun PairingScreen(
     } else if (readiness) {
         ReadinessScreen(sessions, diagnostics, notificationsOnly = false,
             onDiagnostics = onDiagnostics, onDone = { records.pending(false); onReady() }, onLater = later, onBack = null,
-            readiness = mainReadiness, footer = footer)
+            readiness = mainReadiness, footer = { footer(false) })
     } else PairingLinkHost(hosted = !skipWelcome && guideUrl != null) { PairingListPage(page, onBack = back, state = key(page) { rememberLazyListState() }) {
         when (page) {
             PairingPage.Welcome -> {
                 item {
-                    Column(Modifier.padding(vertical = Tokens.Space.l), verticalArrangement = Arrangement.spacedBy(Tokens.Space.s)) {
+                    Column(
+                        Modifier.fillMaxWidth().padding(vertical = Tokens.Space.section),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(Tokens.Space.l),
+                    ) {
+                        JAppMark(Tokens.Size.box80)
                         Text(stringResource(R.string.settings_pairing_welcome_title), style = PersonaTheme.type.largeTitle,
                             color = PersonaTheme.palette.ink, modifier = Modifier.semantics { heading() })
-                        Text(stringResource(R.string.settings_pairing_welcome_body), style = PersonaTheme.type.body, color = PersonaTheme.palette.ink2)
                     }
                 }
-                item { JGroupItem(GroupPosition.of(0, 3)) { JRow("Agents", leadingIcon = PhIcons.Robot, subtitle = stringResource(R.string.settings_pairing_welcome_agents), subtitleLines = 3) } }
-                item { JGroupItem(GroupPosition.of(1, 3)) { JRow(stringResource(R.string.settings_pairing_welcome_inbox_title), leadingIcon = PhIcons.Tray, subtitle = stringResource(R.string.settings_pairing_welcome_inbox), subtitleLines = 3) } }
-                item { JGroupItem(GroupPosition.of(2, 3)) { JRow(stringResource(R.string.settings_pairing_welcome_assistant_title), leadingIcon = PhIcons.Sparkle, subtitle = stringResource(R.string.settings_pairing_welcome_assistant), subtitleLines = 3) } }
-                item { SettingsCaption(stringResource(R.string.settings_pairing_welcome_push), Modifier.padding(vertical = Tokens.Space.m)) }
                 // A phone that already has a hub: scanning here still ends at the confirm page, which says it replaces that pairing.
                 if (paired) item {
                     JNotice(stringResource(R.string.settings_pairing_replace_body), title = stringResource(R.string.settings_pairing_replace_title),
                         status = Status.NeedsYou)
                 }
                 item { PairingActions { PairingScanButton(::scanFromWelcomePage) } }
-                item { SettingsCaption(stringResource(R.string.settings_pairing_connect_body), Modifier.padding(top = Tokens.Space.m)) }
-                // Without a hub there is nothing else to see: the guide (when this build has one), then the typed and command-line ways.
                 item {
-                    Column(Modifier.fillMaxWidth().padding(top = Tokens.Space.m), horizontalAlignment = Alignment.CenterHorizontally) {
-                        guideUrl?.let { url ->
-                            // Read here, inside the link host's content: outside it this is the activity's handler, which opens the system browser.
-                            val links = LocalUriHandler.current
-                            JTextButton(stringResource(R.string.settings_pairing_welcome_guide), { links.openUri(url) }, Modifier.fillMaxWidth())
+                    FlowRow(Modifier.fillMaxWidth().padding(top = Tokens.Space.l),
+                        horizontalArrangement = Arrangement.spacedBy(Tokens.Space.m, Alignment.CenterHorizontally)) {
+                        PairingShortcut(stringResource(R.string.settings_pairing_other_ways), PhIcons.Keyboard, ::showOtherWays)
+                        PairingShortcut(stringResource(R.string.settings_pairing_help), PhIcons.Question) { info = true }
+                        footer(true)
+                    }
+                    if (info) {
+                        val links = LocalUriHandler.current
+                        JDialog(onDismiss = { info = false }, title = stringResource(R.string.settings_pairing_help),
+                            text = stringResource(R.string.settings_pairing_connect_body),
+                            confirm = stringResource(R.string.settings_pairing_got_it) to { info = false }, dismiss = null) {
+                            Text(stringResource(R.string.settings_pairing_saved_body), style = PersonaTheme.type.body)
+                            guideUrl?.let { url ->
+                                JTextButton(stringResource(R.string.settings_pairing_welcome_guide), { info = false; links.openUri(url) },
+                                    icon = PhIcons.BookOpen)
+                            }
                         }
-                        JTextButton(stringResource(R.string.settings_pairing_other_ways), ::showOtherWays, Modifier.fillMaxWidth())
                     }
                 }
             }
@@ -501,10 +514,12 @@ fun PairingScreen(
             }
         }
         notice?.let { id -> item { JNotice(stringResource(id), Modifier.padding(top = Tokens.Space.m)) } }
-        item { JTextButton(stringResource(R.string.settings_pairing_saved_title), { info = true }, Modifier.padding(top = Tokens.Space.m)) }
-        item { footer() }
+        if (page != PairingPage.Welcome) {
+            item { JTextButton(stringResource(R.string.settings_pairing_saved_title), { info = true }, Modifier.padding(top = Tokens.Space.m)) }
+            item { footer(false) }
+        }
     } }
-    if (info) JDialog(onDismiss = { info = false }, title = stringResource(R.string.settings_pairing_saved_title),
+    if (info && page != PairingPage.Welcome) JDialog(onDismiss = { info = false }, title = stringResource(R.string.settings_pairing_saved_title),
         text = stringResource(R.string.settings_pairing_saved_body),
         confirm = stringResource(R.string.settings_pairing_got_it) to { info = false }, dismiss = null)
 }
@@ -519,6 +534,17 @@ fun PairingScreen(
 @Composable
 private fun PairingLinkHost(hosted: Boolean, content: @Composable () -> Unit) {
     if (hosted) ChatLinkHost { content() } else content()
+}
+
+@Composable
+fun PairingShortcut(title: String, icon: PhIcon, onClick: () -> Unit) {
+    Column(Modifier.clickable(role = Role.Button, onClick = onClick).widthIn(min = Tokens.Size.box64),
+        horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(Tokens.Space.xs)) {
+        Box(Modifier.size(Tokens.MinTouch.android).background(PersonaTheme.palette.surfaceStrong, CircleShape), contentAlignment = Alignment.Center) {
+            JIcon(icon, size = Tokens.Size.iconS, tint = PersonaTheme.palette.ink)
+        }
+        Text(title, style = PersonaTheme.type.label, color = PersonaTheme.palette.ink2, maxLines = 1)
+    }
 }
 
 /** The main action of the welcome page and of the connect choices. */
@@ -554,6 +580,7 @@ private fun PairingListPage(page: PairingPage, onBack: (() -> Unit)?, state: Laz
             val pad = pagePadding
             LazyColumn(
                 Modifier.fillMaxSize(), state = state,
+                verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally,
                 contentPadding = PaddingValues(start = pad, end = pad, top = insets.calculateTopPadding() + Tokens.Space.xs,
                     bottom = insets.calculateBottomPadding() + Tokens.Space.section),
                 content = content,

@@ -51,7 +51,7 @@ func Split(s string, n int) []string {
 		if !degraded {
 			m, head, bare = fenceLine(strings.TrimRight(line, "\n"))
 		}
-		opens := fenceMark == "" && m != ""
+		opens := fenceMark == "" && validFenceOpener(m, head)
 		closes := fenceMark != "" && m != "" && m[0] == fenceMark[0] && len(m) >= len(fenceMark) && bare
 		if opens {
 			if curLen > 0 && curLen+len(runes)+len(m)+1 > n {
@@ -97,7 +97,7 @@ func Split(s string, n int) []string {
 		curLen += len(runes)
 		if m != "" && !degraded { // degrade on this very line invalidates its own marker
 			switch {
-			case fenceMark == "":
+			case opens:
 				fenceMark = m
 				fenceHead = head // cap the reopen copy so a long info string cannot eat the next piece's budget
 				if r := []rune(head); len(r) > max(len(m), 20) {
@@ -148,6 +148,12 @@ func fenceLine(line string) (marker, head string, bare bool) {
 	}
 	rest := strings.TrimRight(line[i:], " \r") // CommonMark: only spaces may follow the run; CR comes from CRLF
 	return line[start:i], strings.TrimSpace(line[start:]), rest == ""
+}
+
+// validFenceOpener reports whether fenceLine's marker+head can open a CommonMark fenced code block: a backtick
+// fence's info string cannot contain backticks (CommonMark 4.5), otherwise the line begins with inline code.
+func validFenceOpener(marker, head string) bool {
+	return marker != "" && (marker[0] != '`' || !strings.ContainsRune(head[len(marker):], '`'))
 }
 
 // safeCut chooses how many leading runes of an over-long line the current piece takes (1 <= k <= max),

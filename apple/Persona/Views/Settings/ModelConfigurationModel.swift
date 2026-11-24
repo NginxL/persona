@@ -106,6 +106,12 @@ nonisolated enum ModelSettingsOwner: Equatable, Sendable {
     }
 
     private func accept(_ detail: ModelPurposeDetail) {
+        var detail = detail
+        // Legacy Plan and unknown Inbox values behave as default on the hub; do not present them as a valid current choice.
+        if detail.purpose.id == "inbox.agent", let mode = detail.purpose.override.permissionMode,
+           mode == "plan" || !SessionModes.permissionModes.contains(where: { $0.id == mode }) {
+            detail.purpose.override.permissionMode = nil
+        }
         purpose = detail.purpose
         providers = detail.providers
         candidateProviders = Self.directProviders(in: detail)
@@ -121,6 +127,60 @@ nonisolated enum ModelSettingsOwner: Equatable, Sendable {
     }
 
     var isLarkAgent: Bool { purpose?.id == "lark.agent" }
+    var isInboxAgent: Bool { purpose?.id == "inbox.agent" }
+
+    /// The value the hub actually applies. An untouched AI twin never displays the parent Agents' permission as its own.
+    static func permissionModeInEffect(_ p: ModelPurpose) -> String? {
+        guard p.kind == "launcher" else { return nil }
+        if p.id == "inbox.agent" {
+            guard let mode = p.override.permissionMode, mode != "plan",
+                  SessionModes.permissionModes.contains(where: { $0.id == mode }) else { return "default" }
+            return mode
+        }
+        return p.effective.permissionMode
+    }
+
+    var permissionModeInEffect: String? { purpose.map(Self.permissionModeInEffect) ?? nil }
+
+    /// The selected launcher's modes. A custom list replaces the standard set; runtimes without modes offer no picker.
+    var permissionModes: [SessionModes.Option] {
+        guard let purpose, purpose.supports("permission_mode") else { return [] }
+        let id = draft.provider ?? purpose.effective.provider
+        let provider = providers.first { $0.id == id }
+        let modes: [SessionModes.Option]
+        if let listed = provider?.permissionModes, !listed.isEmpty {
+            guard listed.count >= 2 else { return [] }
+            modes = listed.map(SessionModes.listedOption)
+        } else {
+            let agent = provider?.agent ?? Self.providerAgent(provider)
+            if ["omp", "traex", "pi", "cursor"].contains(agent) { return [] }
+            modes = SessionModes.assistantModes
+        }
+        return isInboxAgent ? modes.filter { $0.id != "plan" } : modes
+    }
+
+    private static func providerAgent(_ provider: ModelProvider?) -> String {
+        switch provider?.id ?? "" {
+        case "launcher.codex": "codex"
+        case "launcher.agy": "agy"
+        case "launcher.omp": "omp"
+        case "launcher.traex": "traex"
+        default: "claude"
+        }
+    }
+
+    var permissionModeDefaultLabel: String {
+        isInboxAgent ? String(localized: "Default Permissions") : String(localized: "Default [Model Configuration View a44f9f]")
+    }
+
+    var permissionModeHint: String? {
+        guard purpose?.supports("permission_mode") == true else { return nil }
+        if isInboxAgent {
+            return String(localized: "Only the AI twin's own choice applies. Default permissions asks before edits or commands. New chats and stopped chats use the choice when they resume; a running chat keeps its current mode.")
+        }
+        guard let mode = draft.permissionMode else { return nil }
+        return SessionModes.assistantModes.first { $0.id == mode }?.detail
+    }
 
     /// A use of Agents the hub lets the user set apart (Lark /agent, the Inbox's AI twin): fields of its own, following
     /// Agents while they are empty. An older hub sends no fields for it, and it stays a read-only use of Agents.
@@ -166,7 +226,8 @@ nonisolated enum ModelSettingsOwner: Equatable, Sendable {
     func modelSummary(_ p: ModelPurpose) -> String {
         let model = p.effective.model
         let effort = p.effective.effort.map { value in SessionModes.effortLevels.first { $0.id == value }?.title ?? value }
-        let result = [model, effort].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · ")
+        let permission = Self.permissionModeInEffect(p).map { SessionModes.mode($0)?.title ?? SessionModes.listedOption($0).title }
+        let result = [model, effort, permission].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · ")
         if !result.isEmpty { return result }
         return p.effective.provider == nil ? String(localized: "Not set up") : String(localized: "Default [Prompt Composer 844b8c]")
     }
@@ -191,7 +252,7 @@ nonisolated enum ModelSettingsOwner: Equatable, Sendable {
         return purpose.runtimes ?? []
     }
 
-    /// Another provider clears the model and the effort; the runtime is not the provider's and stays.
+    /// Another provider clears the model, effort and permission; the runtime is not the provider's and stays.
     func chooseProvider(_ id: String) {
         let selected = id.isEmpty ? nil : id
         guard selected != draft.provider else { return }
@@ -258,7 +319,7 @@ nonisolated enum ModelSettingsOwner: Equatable, Sendable {
             }
             requestAPI = api
             let binding = ModelBinding(provider: Self.trim(draft.provider), model: Self.trim(draft.model), effort: Self.trim(draft.effort),
-                                       runtime: Self.trim(draft.runtime))
+                                       runtime: Self.trim(draft.runtime), permissionMode: Self.trim(draft.permissionMode))
             var fields = purpose.fields ?? ["provider", "model"]
             if purpose.isExtensionPurpose {
                 let changed = [("provider", draft.provider != purpose.override.provider), ("model", draft.model != purpose.override.model),

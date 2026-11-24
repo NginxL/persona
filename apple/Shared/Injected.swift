@@ -23,6 +23,21 @@ nonisolated enum Supervision {
         }
     }
 
+    /// A completed round whose canonical finish receipt succeeded with `visibility: "silent"`, and which nothing
+    /// promoted to the user. This is deliberately narrower than `!visible`: a legacy quiet round without that receipt
+    /// keeps its existing record line, while a failed or malformed receipt never removes history from the main chat.
+    static func completedSilent(_ items: [Item], results: [String: Item], live: Bool,
+                                routineMainRelay: Bool = false) -> Bool {
+        guard !live, !visible(items, results: results, live: live, routineMainRelay: routineMainRelay) else { return false }
+        for use in items where use.kind == .toolUse && tool(use.toolName) == "supervision_finish" {
+            guard let result = use.toolUseID.flatMap({ results[$0] }), result.isError != true,
+                  let text = result.text, let receipt = try? JSONDecoder().decode(JSONValue.self, from: Data(text.utf8)),
+                  case .string(let disposition)? = receipt["visibility"], disposition == "silent" else { continue }
+            return true
+        }
+        return false
+    }
+
     static func visible(_ items: [Item], results: [String: Item], live: Bool, routineMainRelay: Bool = false) -> Bool {
         if items.contains(where: { it in
             it.supervisionUser == true || it.fold?.supervisionUser == true ||
@@ -48,6 +63,15 @@ nonisolated enum Supervision {
             }
         }
         return !live && !silent && !routineMainRelay && hasBackgroundReply(items)
+    }
+
+    /// A pending card in the main conversation's own attention list, not an Agent's general Needs-you state.
+    /// Current non-delegating questions / elicitations and owner-proposal permissions stay; Agent permissions,
+    /// plan approvals, terminal dialogs and cards still being delegated do not.
+    static func directUserRequest(_ interaction: Interaction) -> Bool {
+        if interaction.isDelegating { return false }
+        if interaction.kind == .question || interaction.kind == .elicitation { return true }
+        return interaction.kind == .permission && interaction.ownerProposal == true
     }
 
     private static func hasBackgroundReply(_ items: [Item]) -> Bool {

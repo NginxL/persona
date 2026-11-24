@@ -1,9 +1,11 @@
 {
   "takeover": "引き継ぐ",
   "takeover_new": "新しいセッションで続ける",
+  "takeover_new_short": "新規で続ける",
   "takeover_title": "Codex を引き継ぐ",
   "takeover_confirm": "引き継ぐ",
   "takeover_running_confirm": "ターミナルで実行中のターンを終了します。",
+  "takeover_done": "引き継ぎました",
   "reason_encrypted_context": "暗号化された会話コンテキストはこのセッションで再開できません。新しいセッションで続けてください。",
   "reason_unavailable": "この会話は現在のセッションで再開できません。新しいセッションで続けてください。"
 }

@@ -2,7 +2,6 @@ package assistant
 
 import (
 	"context"
-	"errors"
 	"slices"
 	"strings"
 	"testing"
@@ -11,10 +10,10 @@ import (
 	"github.com/nwverse/persona/server/internal/proto"
 )
 
-// When the background supervisor is replaced (#7315, supervise_round.go backgroundOutgrown).
+// A legacy background conversation whose rounds can no longer start clean moves its unread work to main (#5732, #7315).
+// It is never archived and no replacement conversation is created.
 
-// drainingRound has the relay book say a queued message is going into conversation id (drainRelays marks it before
-// deliverRelay sends, while the session list may still say Idle), or no longer.
+// drainingRound has the relay book say a queued message is going into conversation id, or no longer.
 func drainingRound(s *Service, id string, going bool) {
 	b := &s.relays
 	b.mu.Lock()
@@ -27,10 +26,9 @@ func drainingRound(s *Service, id string, going bool) {
 	}
 }
 
-// A background supervisor that is to be replaced is not while a message is going into it, though listed Idle: the
-// round going in would otherwise run in an archived conversation that is no longer the background supervisor, and
-// its task_review, task_scope and agent_send would be refused. Once that is over, it is replaced.
-func TestBackgroundNotReplacedWhileAMessageGoesIn(t *testing.T) {
+// An outgrown legacy background is not retired while a message is going into it. Once that drain is over, its unread
+// work can move to main without archiving the conversation or starting another one.
+func TestBackgroundNotRetiredWhileAMessageGoesIn(t *testing.T) {
 	s, f, _, _ := newRoundService(t)
 	ctx := context.Background()
 	bg := withBackgroundBG1(t, s, f)
@@ -38,101 +36,122 @@ func TestBackgroundNotReplacedWhileAMessageGoesIn(t *testing.T) {
 
 	drainingRound(s, bg, true)
 	if id, gone := s.ensureBackground(ctx); id != bg || gone != "" {
-		t.Fatalf("replaced while a message goes in: %q %q", id, gone)
+		t.Fatalf("retired while a message goes in: %q %q", id, gone)
 	}
 	if s.isArchived(bg) || len(conversationStarts(f)) != 0 || s.settings(ctx).BackgroundSupervisor != bg {
 		t.Fatalf("put away while a message goes in: archived %v, %d starts", s.isArchived(bg), len(conversationStarts(f)))
 	}
 	if why := outgrownOf(s, bg); why != "no_anchor" {
-		t.Fatalf("forgot why it is to be replaced: %q", why)
+		t.Fatalf("forgot why it cannot continue: %q", why)
 	}
 
 	drainingRound(s, bg, false)
-	if id, gone := s.ensureBackground(ctx); id == bg || id == "" || gone != bg || !s.isArchived(bg) {
-		t.Fatalf("not replaced once the message went in: %q %q, archived %v", id, gone, s.isArchived(bg))
+	if id, gone := s.ensureBackground(ctx); id != "" || gone != bg {
+		t.Fatalf("not retired once the message went in: %q %q", id, gone)
+	}
+	b := &s.supervise
+	b.dedupMu.Lock()
+	s.backgroundLost(ctx, bg, "conv1", s.webBase(ctx))
+	b.dedupMu.Unlock()
+	if s.isArchived(bg) || len(conversationStarts(f)) != 0 {
+		t.Fatalf("retirement archived or replaced the legacy conversation: archived %v, %d starts", s.isArchived(bg), len(conversationStarts(f)))
+	}
+	s.relays.mu.Lock()
+	reserved := s.relays.replacing[bg]
+	s.relays.mu.Unlock()
+	if reserved {
+		t.Fatal("the legacy conversation is still reserved after its work moved")
 	}
 }
 
-// The background supervisor is reserved for its replacement in one step with the look that nothing goes into it. A
-// conversation writing to it while the replacement starts finds it waiting, so its message queues, and the drain that
-// follows (or a session list the node pushes meanwhile) leaves it there: it moves to the replacement with the rest,
-// and nothing goes into the old one, which is archived and no longer the background supervisor (a round there would
-// have its task_review refused). A replacement that does not start lets the old one take what waits for it.
-func TestNothingGoesIntoABackgroundSupervisorBeingReplaced(t *testing.T) {
-	for _, starts := range []bool{true, false} {
-		name := "the replacement starts"
-		if !starts {
-			name = "the replacement does not start"
-		}
-		t.Run(name, func(t *testing.T) {
-			s, f, _, _ := newRoundService(t)
+// Reserving the legacy conversation and checking that it is idle are one step. A message racing the move queues instead
+// of entering the old conversation, then moves to main with the rest of its unread work.
+func TestNothingGoesIntoALegacyBackgroundBeingRetired(t *testing.T) {
+	s, f, _, _ := newRoundService(t)
+	ctx := context.Background()
+	bg := withBackgroundBG1(t, s, f)
+	s.superviseRoundAnswered(bg, superviseRoundReply{Context: "kept", Why: "no_anchor"})
+	const words = "顺便看看 while the legacy work moves"
+	msg := relayMsg{From: "conv1", FromTitle: "Main", Tool: "conversation_send", Text: words, At: time.Now().UTC()}
+	if s.queueRelay(bg, msg) == 0 {
+		t.Fatal("could not queue the legacy message")
+	}
+	if id, gone := s.ensureBackground(ctx); id != "" || gone != bg || !s.relayWaits(bg, msg) {
+		t.Fatalf("the retiring conversation still accepts a message: id %q, gone %q", id, gone)
+	}
+	b := &s.supervise
+	b.dedupMu.Lock()
+	s.backgroundLost(ctx, bg, "conv1", s.webBase(ctx))
+	b.dedupMu.Unlock()
+	waitFor(t, "the moved message in main", func() bool {
+		return slices.ContainsFunc(f.noticesTo("conv1"), func(n string) bool { return strings.Contains(n, words) })
+	})
+	if got := f.noticesTo(bg); len(got) != 0 {
+		t.Fatalf("the retired conversation got %q", got)
+	}
+	if s.queuedFor(bg) != 0 || s.isArchived(bg) || len(conversationStarts(f)) != 0 {
+		t.Fatalf("after the move: old queue %d, archived %v, starts %d", s.queuedFor(bg), s.isArchived(bg), len(conversationStarts(f)))
+	}
+}
+
+// A digest containing only new main-supervised work still reconciles an outgrown legacy queue. A healthy legacy
+// conversation keeps the same queue: the reconciliation must not reroute work merely because a background exists.
+func TestMainOnlyDigestReconcilesLegacyQueue(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		outgrown bool
+	}{
+		{"outgrown moves to main", true},
+		{"healthy stays queued", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s, f, todo, _ := newRoundService(t)
 			ctx := context.Background()
 			bg := withBackgroundBG1(t, s, f)
-			s.superviseRoundAnswered(bg, superviseRoundReply{Context: "kept", Why: "no_anchor"})
-			const words = "顺便看看 while it is replaced"
-			msg := relayMsg{From: "conv1", FromTitle: "Main", Tool: "conversation_send", Text: words, At: time.Now().UTC()}
-			idle := []proto.Session{{SessionID: bg, MachineID: "server", Assistant: true, Status: proto.StatusIdle}}
-			waited, drained := false, false
-			f.mu.Lock()
-			f.onAssistantSend = func(f *fakeHub, a map[string]any) {
-				if id, _ := a["session_id"].(string); id != "" {
-					f.failAssistant = nil
-					return
-				}
-				// The replacement starts: a conversation writes to the old one (conversation_send queues what has to
-				// wait, then drains), as the node pushes a list with it idle.
-				if waited = s.relayWaits(bg, msg); waited {
-					s.queueRelay(bg, msg)
-				}
-				s.drainRelays("server", idle)
-				s.relays.mu.Lock()
-				drained = s.relays.draining[bg]
-				s.relays.mu.Unlock()
-				if !starts {
-					f.failAssistant = errors.New("the launcher cannot start")
-				}
+			if tc.outgrown {
+				s.superviseRoundAnswered(bg, superviseRoundReply{Context: "kept", Why: "no_anchor"})
 			}
-			f.mu.Unlock()
+			listRound(f, bg, proto.StatusWorking, false)
+			wakeRound(s, superviseSignal{Todo: todo.ID, Kind: sigStalled, Key: "legacy-waiting", Minutes: 50})
+			if got := s.queuedFor(bg); got != 1 {
+				t.Fatalf("the legacy notice did not queue: %d", got)
+			}
 
-			id, gone := s.ensureBackground(ctx)
-			if !waited || drained {
-				t.Fatalf("while it was replaced: the message waited %v, a drain went into it %v", waited, drained)
+			listRound(f, bg, proto.StatusIdle, false)
+			g := superviseSignal{Todo: todo.ID, Kind: sigInterrupted, Key: "main-only", At: time.Now().Add(-time.Minute)}
+			b := &s.supervise
+			b.mu.Lock()
+			b.init()
+			b.pending[g.id()] = g // no explicit legacy target: this is new work routed to main
+			b.last = time.Time{}
+			b.mu.Unlock()
+			s.updateSupervisePending(func(pending map[string]superviseSignal) { pending[g.id()] = g })
+			s.sendDigest(ctx)
+
+			waitFor(t, "the main-only signal", func() bool {
+				return strings.Contains(strings.Join(f.noticesTo("conv1"), "\n"), "被模型服务出错打断了")
+			})
+			got := strings.Join(f.noticesTo("conv1"), "\n")
+			moved := strings.Contains(got, "50 分钟没有进展")
+			if moved != tc.outgrown {
+				t.Fatalf("legacy work moved = %v, want %v; main notices:\n%s", moved, tc.outgrown, got)
 			}
-			if starts {
-				if id == bg || gone != bg {
-					t.Fatalf("not replaced: %q %q", id, gone)
-				}
-				b := &s.supervise
-				b.dedupMu.Lock()
-				s.backgroundLost(ctx, gone, id, s.webBase(ctx)) // as the digest does next
-				b.dedupMu.Unlock()
-				if s.queuedFor(bg) != 0 || s.queuedFor(id) != 1 {
-					t.Fatalf("queued: old %d, new %d", s.queuedFor(bg), s.queuedFor(id))
-				}
-				if got := f.noticesTo(bg); len(got) != 0 {
-					t.Fatalf("the old one got %q", got)
-				}
-			} else {
-				if id != bg || gone != "" {
-					t.Fatalf("replaced though the replacement did not start: %q %q", id, gone)
-				}
-				waitFor(t, "the message in the old one", func() bool {
-					return slices.ContainsFunc(f.noticesTo(bg), func(n string) bool { return strings.Contains(n, words) })
-				})
+			wantQueued := 1
+			if tc.outgrown {
+				wantQueued = 0
 			}
-			s.relays.mu.Lock()
-			reserved := s.relays.replacing[bg]
-			s.relays.mu.Unlock()
-			if reserved {
-				t.Fatal("still reserved for a replacement")
+			if queued := s.queuedFor(bg); queued != wantQueued {
+				t.Fatalf("legacy queue = %d, want %d", queued, wantQueued)
+			}
+			if len(conversationStarts(f)) != 0 || s.isArchived(bg) {
+				t.Fatalf("reconciliation archived or replaced the old conversation: %d starts, archived %v", len(conversationStarts(f)), s.isArchived(bg))
 			}
 		})
 	}
 }
 
-// The size limit counts only for a round that restarted the process (fresh, or start_failed resumed as before):
-// one that keeps its context for good (unsupported: an older Claude Code, another runtime) or was busy is neither
-// restarted per round nor spared idle compaction, so a large transcript is no reason to throw its context away.
+// The size limit counts only for a round that restarted the process (fresh, or start_failed resumed as before): one
+// that keeps its context for good or was busy is neither restarted per round nor spared idle compaction.
 func TestBackgroundOversizedOnlyWhereRoundsRestart(t *testing.T) {
 	s, f, _, _ := newRoundService(t)
 	ctx := context.Background()
@@ -144,11 +163,11 @@ func TestBackgroundOversizedOnlyWhereRoundsRestart(t *testing.T) {
 	} {
 		s.superviseRoundAnswered(bg, res)
 		if why := outgrownOf(s, bg); why != "" {
-			t.Fatalf("%+v: to be replaced (%s)", res, why)
+			t.Fatalf("%+v: cannot continue (%s)", res, why)
 		}
 	}
 	if id, gone := s.ensureBackground(ctx); id != bg || gone != "" || len(conversationStarts(f)) != 0 {
-		t.Fatalf("replaced: %q %q", id, gone)
+		t.Fatalf("retired: %q %q", id, gone)
 	}
 	s.superviseRoundAnswered(bg, superviseRoundReply{Context: "kept", Why: "start_failed", TranscriptBytes: big})
 	if why := outgrownOf(s, bg); why != "oversized" {

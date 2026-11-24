@@ -37,6 +37,7 @@ import persona.core.designsystem.PersonaTheme
 import persona.core.domain.inbox.InboxItem
 import persona.core.navigation.AppTab
 import persona.core.navigation.Navigator
+import persona.core.inbox.*
 
 /**
  * Another manager's chat opened from the inbox reads where to open (its unread position) as that manager, and its

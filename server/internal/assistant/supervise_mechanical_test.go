@@ -258,6 +258,37 @@ func mechanicalPRSet(f *fakeHub, pr map[string]any) {
 	f.answerNode("git.pr", func(string, json.RawMessage) (any, error) { return map[string]any{"pr": pr}, nil })
 }
 
+func TestMechanicalSignalFutureNativeWakeSurvivesTurnError(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		mutate func(*proto.Session)
+	}{
+		{name: "turn error", mutate: func(c *proto.Session) { c.TurnError = "synthetic turn failure" }},
+		{name: "needs you", mutate: func(c *proto.Session) {
+			c.State = proto.StateNeedsYou
+			c.PendingInteractions = 1
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s, f, todo, c, now := mechanicalFixture(t)
+			todo.Delivery = nil
+			next := now.Add(time.Hour)
+			tc.mutate(&c)
+			c.Loop = &proto.LoopInfo{Kind: "wakeup", NextAt: next}
+			f.setSessions("box", c)
+			s.todos.mu.Lock()
+			copy := copyTodoLocked(&todo)
+			s.todos.todos[todo.ID] = &copy
+			s.todos.mu.Unlock()
+			g := superviseSignal{Todo: todo.ID, Kind: sigIdle, Machine: c.MachineID, Session: c.SessionID, Key: "turn-1"}
+			handled, retry := s.mechanicalSignal(context.Background(), g, now)
+			if handled || !retry.Equal(next) {
+				t.Fatalf("%s overrode the future native wakeup: handled=%v retry=%v want=%v", tc.name, handled, retry, next)
+			}
+		})
+	}
+}
+
 func TestScreenMechanicalSignalsKeepsMixedInboxAndIdle(t *testing.T) {
 	s, f, todo, c, now := mechanicalFixture(t)
 	list := []superviseSignal{{Todo: todo.ID, Kind: sigInbox, Key: "new-comment", Machine: "box", Session: c.SessionID},
@@ -413,18 +444,18 @@ func TestSendDigestRoutesOpenReviewForSupervision(t *testing.T) {
 	b.pending[g.id()] = g
 	b.last = time.Time{}
 	b.mu.Unlock()
+	// signal normally writes the durable outbox before sendDigest. This fixture seeds pending directly, so establish the
+	// same prerequisite rather than testing a direct delivery that production would never attempt (#5732).
+	s.updateSupervisePending(func(pending map[string]superviseSignal) { pending[g.id()] = g })
 	s.sendDigest(context.Background())
 	if got := todoNow(s, todo.ID); got.Supervision.State != "" || len(got.Supervision.Reviews) != 0 || got.DoneAt != nil {
 		t.Fatalf("digest fabricated a park or closed the task: %+v", got)
 	}
-	bg := s.settings(context.Background()).BackgroundSupervisor
-	if bg == "" || bg == "conv1" || len(conversationStarts(f)) != 1 {
-		t.Fatalf("unsupported parking did not reach ordinary background supervision: %q", bg)
+	if bg := s.settings(context.Background()).BackgroundSupervisor; bg != "" || len(conversationStarts(f)) != 0 {
+		t.Fatalf("new work started a legacy background supervisor: %q", bg)
 	}
-	listBackground(t, s, f, bg)
-	waitFor(t, "the external wait's supervision message", func() bool { return len(f.noticesTo(bg)) == 1 })
-	if notices := f.noticesTo(bg); !strings.Contains(notices[0], "signal=idle") || len(f.noticesTo("conv1")) != 0 {
-		t.Fatalf("open review did not reach its responsible supervisor alone: %q", notices)
+	if notices := f.noticesTo("conv1"); len(notices) != 1 || !strings.Contains(notices[0], "signal=idle") {
+		t.Fatalf("open review did not reach main supervision alone: %q", notices)
 	}
 	if len(f.asked) != 0 {
 		t.Fatalf("mechanical screening called a model instead of routing the signal: %d", len(f.asked))

@@ -44,7 +44,7 @@ func (e *gatewayQuotaWaitError) Error() string { return e.queue.Reason }
 
 type gatewayQueueStore interface {
 	UnstartedQueuedTodo(context.Context, string, string, time.Time) (bool, error)
-	ClaimUnstartedTaskQueue(context.Context, string, int, string, time.Time, json.RawMessage, json.RawMessage, time.Time) (bool, error)
+	ClaimUnstartedTaskQueue(context.Context, string, int, string, time.Time, json.RawMessage, json.RawMessage, json.RawMessage, time.Time) (bool, error)
 }
 
 type gatewayQueueStateError struct{ cause error }
@@ -136,6 +136,7 @@ func (s *Service) persistGatewayWait(ctx context.Context, task PlanTask, wait Ta
 	return s.patchPlanTask(pctx, task.planID, task.planIndex, func(current *PlanTask) {
 		if current.TodoID == task.TodoID && current.Queue == nil {
 			current.Queue = &wait
+			current.Placement = queuedPlacement(task, &wait)
 			current.Error, current.ErrorCode, current.ErrorArgs = "", "", nil
 		}
 	})

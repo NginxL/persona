@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { agentCommands, paneClaude, rankCommands, SLASH_LIMIT } from "./composer-commands";
+import { agentCommands, hasSlashSkillQuery, paneClaude, rankCommands, rankSlashSkills, SLASH_LIMIT } from "./composer-commands";
 import { t } from "../i18n";
 import { WORKFLOWS_COMMAND } from "./background-panel";
 import { LOOP_TEXT } from "./loop-command";
@@ -131,6 +131,37 @@ describe("rankCommands", () => {
     expect(rankCommands(list, "")).toHaveLength(25);
     // the exact hit is first even when it sits past the limit in the list
     expect(rankCommands(list, "c39")[0].word).toBe("/c39");
+  });
+});
+
+describe("rankSlashSkills", () => {
+  const skill = (id: string, name: string, description = "") => ({ id, name, description });
+
+  it("keeps bare / and whitespace queries free of skills", () => {
+    const list = [skill("1", "persona-office", "Generate Office documents"), skill("2", "grill-me", "Interview plan")];
+    expect(hasSlashSkillQuery("")).toBe(false);
+    expect(hasSlashSkillQuery("   ")).toBe(false);
+    expect(hasSlashSkillQuery(null)).toBe(false);
+    expect(hasSlashSkillQuery(undefined)).toBe(false);
+    expect(hasSlashSkillQuery("persona")).toBe(true);
+    expect(rankSlashSkills(list, "")).toEqual([]);
+    expect(rankSlashSkills(list, "   ")).toEqual([]);
+    expect(rankSlashSkills([], "persona")).toEqual([]);
+  });
+
+  it("ranks non-empty keyword matches by exact, prefix, contains and description without a 25-row cap", () => {
+    const list = [
+      skill("desc", "audit", "Review the change"),
+      skill("contains", "preview", ""),
+      skill("prefix", "review-later", ""),
+      skill("exact", "/review", ""),
+    ];
+    expect(rankSlashSkills(list, "REVIEW").map((s) => s.id)).toEqual(["exact", "prefix", "contains", "desc"]);
+    expect(rankSlashSkills(list, "zzz")).toEqual([]);
+
+    const large = Array.from({ length: 30 }, (_, i) => skill(`s${i}`, `persona-skill-${i}`));
+    expect(rankSlashSkills(large, "persona")).toHaveLength(30);
+    expect(rankSlashSkills(large, "persona-skill-29")[0].id).toBe("s29");
   });
 });
 

@@ -171,8 +171,15 @@ func TestNoLockHoldsUntilLetGoOrRunOut(t *testing.T) {
 		t.Fatal("off: let go")
 	}
 	noLock.set(true)
-	time.Sleep(noLockFor + time.Second)
-	if noLock.held() {
-		t.Fatal("not said again: run out by itself")
+	start := time.Now()
+	// Not said again: it runs out by itself once caffeinate's window is over, whenever the loaded machine gets there.
+	for noLock.held() {
+		if time.Since(start) > noLockFor+10*time.Second {
+			t.Fatal("not said again: run out by itself")
+		}
+		<-time.After(20 * time.Millisecond)
+	}
+	if took := time.Since(start); took < noLockFor/2 {
+		t.Fatalf("let go after %v, before its %v window", took, noLockFor)
 	}
 }

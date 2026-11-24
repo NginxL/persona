@@ -5,11 +5,7 @@ struct ExtensionReviewBar: View {
     var review: ExtensionReview
     @Bindable var model: ExtensionViewModel
     @Binding var link: LinkTarget?
-    #if os(macOS)
-    @State private var expanded = true
-    #else
     @State private var expanded = false
-    #endif
 
     private var text: Binding<String> {
         Binding(get: { model.values[review.name] ?? "" }, set: { model.values[review.name] = $0 })

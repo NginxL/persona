@@ -1,18 +1,33 @@
 // Protocol 1 between this plugin and the local Persona node (README.md): where the node's socket is, what a poll's
-// answer holds, which messages or turn interrupts may go in as the person's own, and session-scoped model / effort
-// overrides. Pure functions; register.ts does the I/O.
+// answer holds, which messages or turn interrupts may go in as the person's own, session-scoped model / effort
+// overrides, and permission / question approval bridging. Pure functions; register.ts does the I/O.
 
 /** The base of the node's endpoints; the host name is not used (the request goes over the socket). */
 export const BASE = 'http://persona/claude-plugin/v1'
 
 /** Optional protocol capabilities this plugin version serves on /poll. */
-export const CAPABILITIES = ['busy_input', 'interrupt', 'settings'] as const
+export const CAPABILITIES = ['busy_input', 'interrupt', 'settings', 'permissions'] as const
 
-/** How long deliver waits for $.prompt.submit to reject or drop before treating a mid-turn call as queued. */
+/** How long deliver waits before releasing the poll loop while the real submit result continues asynchronously. */
 export const SUBMIT_QUEUE_SETTLE_MS = 250
 
-/** How long the node may hold a poll: under the 30 s after which Claude Code's fetch gives up. */
+/** How long the node may hold a poll or permission wait: under the 30 s after which Claude Code's fetch gives up. */
 export const POLL_WAIT_MS = 25_000
+export const PERMISSION_WAIT_MS = 25_000
+
+/** Short grace window giving fast local command hooks (such as bypass-allow) a chance to decide before opening a card. */
+export const PERMISSION_GRACE_MS = 500
+
+/** Maximum total time one permission request keeps renewing before falling back to passthrough. */
+export const PERMISSION_MAX_WAIT_MS = 24 * 60 * 60 * 1_000
+
+/** Retry spacing on transient /permission errors; initial errors fail fast, while already-registered cards reconnect up to 2 minutes (matching nodeclient.ResumeWait). */
+export const PERMISSION_RETRY_MS = 1_000
+export const PERMISSION_MAX_ERRORS = 3
+export const PERMISSION_RECONNECT_MS = 2 * 60 * 1_000
+
+/** Maximum serialized permission request body sent to the node (matches node's 4 MiB /permission cap). */
+export const PERMISSION_BODY_MOST = 4 * 1024 * 1024
 
 /** Backoff while no node answers: from the first to the most, doubling. */
 export const BACKOFF_FIRST_MS = 2_000
@@ -23,6 +38,22 @@ export const TEXT_MOST = 200_000
 
 const ID = /^[A-Za-z0-9_-]{1,128}$/
 const MODEL = /^[A-Za-z0-9._:/[\]-]{1,200}$/
+const PRE_TOOL_META = new Set([
+  'tool',
+  'tool_name',
+  'tool_use_id',
+  'tool_input',
+  'hook_event_name',
+  'session_id',
+  'transcript_path',
+  'cwd',
+  'permission_mode',
+  'prompt_id',
+  'agent_id',
+  'agent_type',
+  'scratchpad_dir',
+  'effort',
+])
 
 export type EffortChoice = 'low' | 'medium' | 'high' | 'xhigh' | 'max' | 'auto'
 
@@ -83,27 +114,51 @@ export type SessionOverride = {
 
 /** What a poll came to. */
 export type PollAnswer =
-  | { kind: 'messages'; messages: Message[]; interrupt?: InterruptRequest; settings?: SettingsUpdate; retryMs: number }
+  | {
+      kind: 'messages'
+      messages: Message[]
+      interrupt?: InterruptRequest
+      settings?: SettingsUpdate
+      permissions: boolean
+      retryMs: number
+    }
   | { kind: 'refused'; retryMs: number } // the node does not take this process for this session
   | { kind: 'unavailable' } // no node, an old node, or no answer
 
+/** Decision object returned to Claude Code from `classic.PermissionRequest`. */
+export type PermissionDecision =
+  | { behavior: 'allow'; updatedInput?: Record<string, unknown>; updatedPermissions?: unknown[] }
+  | { behavior: 'deny'; message: string; interrupt?: boolean }
+
+/** Outcome of one `POST /claude-plugin/v1/permission` call. */
+export type PermissionAnswer =
+  | { action: 'renew' }
+  | { action: 'decide'; decision: PermissionDecision }
+  | { action: 'passthrough' }
+  | { action: 'refused' }
+  | { action: 'unavailable' }
+
+function isRecord(v: unknown): v is Record<string, unknown> {
+  return typeof v === 'object' && v !== null && !Array.isArray(v)
+}
+
 function readInterrupt(raw: unknown): InterruptRequest | undefined {
-  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return undefined
-  const { id, deadline_ms: deadline } = raw as Record<string, unknown>
+  if (!isRecord(raw)) return undefined
+  const { id, deadline_ms: deadline } = raw
   if (typeof id !== 'string' || !ID.test(id) || typeof deadline !== 'number') return undefined
   return { id, deadlineMs: deadline }
 }
 
 function readSettings(raw: unknown): SettingsUpdate | undefined {
-  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return undefined
-  const { id, model, effort } = raw as Record<string, unknown>
+  if (!isRecord(raw)) return undefined
+  const { id, model, effort } = raw
   if (typeof id !== 'string' || !ID.test(id)) return undefined
   if (model !== undefined && model !== '' && !validModel(model)) return undefined
   if (effort !== undefined && effort !== '' && !isEffortChoice(effort)) return undefined
   const m = typeof model === 'string' && model !== '' ? model : undefined
   const ef = isEffortChoice(effort) ? effort : undefined
   if (m === undefined && ef === undefined) return undefined
-  return { id, ...(m !== undefined ? { model: m } : {}), ...(ef !== undefined ? { effort: ef } : {})
+  return { id, ...(m !== undefined ? { model: m } : {}), ...(ef !== undefined ? { effort: ef } : {}) }
 }
 
 /** Reads a poll's answer: status and body as `$.http.fetch` resolved them. */
@@ -115,8 +170,8 @@ export function readPoll(status: number, body: string): PollAnswer {
   const list = Array.isArray(answer.messages) ? answer.messages : []
   const messages: Message[] = []
   for (const m of list) {
-    if (typeof m !== 'object' || m === null) continue
-    const { id, text, deadline_ms: deadline } = m as Record<string, unknown>
+    if (!isRecord(m)) continue
+    const { id, text, deadline_ms: deadline } = m
     if (typeof id !== 'string' || !ID.test(id) || typeof deadline !== 'number') continue
     messages.push({ id, text, deadlineMs: deadline })
   }
@@ -127,8 +182,280 @@ export function readPoll(status: number, body: string): PollAnswer {
     messages,
     ...(interrupt !== undefined ? { interrupt } : {}),
     ...(settings !== undefined ? { settings } : {}),
+    permissions: answer.permissions === true,
     retryMs: retryOf(answer, 0),
   }
+}
+
+/** Parses and validates a `PermissionDecision` object. */
+export function readPermissionDecision(raw: unknown): PermissionDecision | undefined {
+  if (!isRecord(raw)) return undefined
+  if (raw.behavior === 'allow') {
+    const out: { behavior: 'allow'; updatedInput?: Record<string, unknown>; updatedPermissions?: unknown[] } = {
+      behavior: 'allow',
+    }
+    if (isRecord(raw.updatedInput)) out.updatedInput = raw.updatedInput
+    if (Array.isArray(raw.updatedPermissions)) out.updatedPermissions = raw.updatedPermissions
+    return out
+  }
+  if (raw.behavior === 'deny' && typeof raw.message === 'string') {
+    const out: { behavior: 'deny'; message: string; interrupt?: boolean } = {
+      behavior: 'deny',
+      message: raw.message,
+    }
+    if (typeof raw.interrupt === 'boolean') out.interrupt = raw.interrupt
+    return out
+  }
+  return undefined
+}
+
+/** Reads a `POST /claude-plugin/v1/permission` answer. */
+export function readPermissionAnswer(status: number, body: string): PermissionAnswer {
+  if (status === 403) return { action: 'refused' }
+  if (status === 404 || status === 400 || status === 413) return { action: 'passthrough' }
+  if (status !== 200) return { action: 'unavailable' }
+  const answer = parse(body)
+  if (answer === undefined) return { action: 'unavailable' }
+  if (answer.action === 'renew') return { action: 'renew' }
+  if (answer.action === 'passthrough') return { action: 'passthrough' }
+  if (answer.action === 'decide') {
+    const decision = readPermissionDecision(answer.decision)
+    return decision !== undefined ? { action: 'decide', decision } : { action: 'passthrough' }
+  }
+  return { action: 'passthrough' }
+}
+
+/** Reports whether a `classic.PermissionRequest` hook result carries an explicit allow/deny decision. */
+export function hasPermissionDecision(value: unknown): boolean {
+  return isRecord(value) && readPermissionDecision(value.decision) !== undefined
+}
+
+/** Deterministic JSON key with sorted object keys so flat PreToolUse and nested PermissionRequest inputs match. */
+export function canonicalJson(value: unknown): string {
+  const seen = new Set<unknown>()
+  const encode = (v: unknown): string => {
+    if (v === null || typeof v !== 'object') return JSON.stringify(v) ?? 'null'
+    if (seen.has(v)) return '"[Circular]"'
+    seen.add(v)
+    try {
+      if (Array.isArray(v)) return `[${v.map(encode).join(',')}]`
+      const rec = v as Record<string, unknown>
+      const keys = Object.keys(rec).sort()
+      const parts: string[] = []
+      for (const k of keys) {
+        if (rec[k] === undefined) continue
+        parts.push(`${JSON.stringify(k)}:${encode(rec[k])}`)
+      }
+      return `{${parts.join(',')}}`
+    } finally {
+      seen.delete(v)
+    }
+  }
+  return encode(value)
+}
+
+/** Tool call lookup key isolated by `agentId`, shared by PreToolUse pairing and PostToolUse fallback matching. */
+export function toolCallKey(toolName: string, toolInput: unknown, stripAnswers = false, agentId = ''): string {
+  let input: unknown = isRecord(toolInput) ? toolInput : {}
+  if (stripAnswers && isRecord(input) && 'answers' in input) {
+    const copy: Record<string, unknown> = {}
+    for (const [k, v] of Object.entries(input)) {
+      if (k !== 'answers') copy[k] = v
+    }
+    input = copy
+  }
+  return `${agentId}\0${toolName}\0${canonicalJson(input)}`
+}
+
+/** Extracts `(agentId, toolName, toolUseId, toolInput)` from `classic.PreToolUse` (flat on 2.1.330, or nested). */
+export function extractPreToolUse(
+  raw: unknown,
+): { agentId: string; toolName: string; toolUseId: string; toolInput: Record<string, unknown> } | undefined {
+  if (!isRecord(raw)) return undefined
+  const toolName =
+    typeof raw.tool === 'string' && raw.tool !== ''
+      ? raw.tool
+      : typeof raw.tool_name === 'string' && raw.tool_name !== ''
+        ? raw.tool_name
+        : ''
+  const toolUseId = typeof raw.tool_use_id === 'string' ? raw.tool_use_id : ''
+  if (toolName === '' || toolUseId === '') return undefined
+  const agentId = typeof raw.agent_id === 'string' ? raw.agent_id : ''
+  if (isRecord(raw.tool_input)) {
+    return { agentId, toolName, toolUseId, toolInput: raw.tool_input }
+  }
+  const toolInput: Record<string, unknown> = {}
+  for (const [k, v] of Object.entries(raw)) {
+    if (!PRE_TOOL_META.has(k) && v !== undefined) toolInput[k] = v
+  }
+  return { agentId, toolName, toolUseId, toolInput }
+}
+
+const CACHE_MOST = 128
+
+/**
+ * Bounded cache pairing `classic.PreToolUse` `tool_use_id`s with subsequent `classic.PermissionRequest` events.
+ * Calls are isolated by `agent_id`. When two or more uncompleted identical calls overlap for the same
+ * `(agent_id, tool, input)`, that key is marked ambiguous and `takePreTool` leaves `tool_use_id` empty rather than
+ * guessing (preventing a completion for call 1 from withdrawing call 2's card).
+ */
+export type PreToolCache = {
+  pending: Map<string, string[]>
+  ambiguous: Map<string, Set<string>>
+  order: { key: string; id: string }[]
+  completed: Set<string>
+  completedOrder: string[]
+}
+
+export function createPreToolCache(): PreToolCache {
+  return {
+    pending: new Map(),
+    ambiguous: new Map(),
+    order: [],
+    completed: new Set(),
+    completedOrder: [],
+  }
+}
+
+export function recordPreTool(cache: PreToolCache, raw: unknown): void {
+  const info = extractPreToolUse(raw)
+  if (info === undefined || cache.completed.has(info.toolUseId)) return
+  const key = toolCallKey(info.toolName, info.toolInput, false, info.agentId)
+  const amb = cache.ambiguous.get(key)
+  if (amb !== undefined) {
+    amb.add(info.toolUseId)
+    return
+  }
+  let ids = cache.pending.get(key)
+  if (ids !== undefined) {
+    // Drop already-completed entries before checking for concurrent ambiguity.
+    ids = ids.filter(id => !cache.completed.has(id))
+    if (ids.length === 0) cache.pending.delete(key)
+    else cache.pending.set(key, ids)
+  }
+  if (ids !== undefined && ids.length > 0) {
+    if (ids.includes(info.toolUseId)) return
+    // Multiple concurrent uncompleted calls share the exact same (agent_id, tool, input): mark ambiguous.
+    const set = new Set<string>(ids)
+    set.add(info.toolUseId)
+    cache.ambiguous.set(key, set)
+    cache.pending.delete(key)
+    for (const id of ids) removeOrder(cache, id)
+    return
+  }
+  cache.pending.set(key, [info.toolUseId])
+  cache.order.push({ key, id: info.toolUseId })
+  while (cache.order.length > CACHE_MOST) {
+    const oldest = cache.order.shift()
+    if (oldest !== undefined) removePending(cache, oldest.key, oldest.id)
+  }
+}
+
+export function takePreTool(
+  cache: PreToolCache,
+  toolName: string,
+  toolInput: unknown,
+  agentId = '',
+  hasActiveSameKey = false,
+): { id: string; ambiguous: boolean } {
+  const key = toolCallKey(toolName, toolInput, false, agentId)
+  if (cache.ambiguous.has(key)) return { id: '', ambiguous: true }
+  const ids = cache.pending.get(key)
+  if (ids === undefined || ids.length === 0) {
+    return { id: '', ambiguous: hasActiveSameKey }
+  }
+  const live = ids.filter(id => !cache.completed.has(id))
+  cache.pending.delete(key)
+  for (const id of ids) removeOrder(cache, id)
+  if (live.length === 0) return { id: '', ambiguous: hasActiveSameKey }
+  if (live.length > 1 || hasActiveSameKey) {
+    cache.ambiguous.set(key, new Set(live))
+    return { id: '', ambiguous: true }
+  }
+  return { id: live[0] ?? '', ambiguous: false }
+}
+
+export function markToolCompleted(cache: PreToolCache, toolUseId: string): void {
+  if (toolUseId === '') return
+  if (!cache.completed.has(toolUseId)) {
+    cache.completed.add(toolUseId)
+    cache.completedOrder.push(toolUseId)
+    while (cache.completedOrder.length > CACHE_MOST) {
+      const oldest = cache.completedOrder.shift()
+      if (oldest !== undefined) cache.completed.delete(oldest)
+    }
+  }
+  for (const [key, ids] of cache.pending) {
+    if (ids.includes(toolUseId)) removePending(cache, key, toolUseId)
+  }
+  for (const [key, set] of cache.ambiguous) {
+    if (set.delete(toolUseId) && set.size === 0) {
+      cache.ambiguous.delete(key)
+    }
+  }
+  removeOrder(cache, toolUseId)
+}
+
+/** Clears pending and ambiguous PreToolUse state for an agent when its turn completes. */
+export function clearAgentPreTools(cache: PreToolCache, agentId: string): void {
+  const prefix = `${agentId}\0`
+  for (const key of [...cache.pending.keys()]) {
+    if (key.startsWith(prefix)) cache.pending.delete(key)
+  }
+  for (const key of [...cache.ambiguous.keys()]) {
+    if (key.startsWith(prefix)) cache.ambiguous.delete(key)
+  }
+  cache.order = cache.order.filter(item => !item.key.startsWith(prefix))
+}
+
+export function isToolCompleted(cache: PreToolCache, toolUseId: string): boolean {
+  return toolUseId !== '' && cache.completed.has(toolUseId)
+}
+
+function removePending(cache: PreToolCache, key: string, id: string): void {
+  const ids = cache.pending.get(key)
+  if (ids === undefined) return
+  const idx = ids.indexOf(id)
+  if (idx >= 0) ids.splice(idx, 1)
+  if (ids.length === 0) cache.pending.delete(key)
+}
+
+function removeOrder(cache: PreToolCache, id: string): void {
+  const idx = cache.order.findIndex(item => item.id === id)
+  if (idx >= 0) cache.order.splice(idx, 1)
+}
+
+/** Builds the JSON body for `POST /claude-plugin/v1/permission`. */
+export function buildPermissionPayload(
+  sessionId: string,
+  reqId: string,
+  toolUseId: string,
+  raw: Record<string, unknown>,
+  waitMs: number,
+): Record<string, unknown> {
+  const payload: Record<string, unknown> = {
+    session_id: sessionId,
+    req_id: reqId,
+    wait_ms: waitMs,
+    tool_name: typeof raw.tool_name === 'string' ? raw.tool_name : '',
+    tool_input: isRecord(raw.tool_input) ? raw.tool_input : {},
+  }
+  if (toolUseId !== '') payload.tool_use_id = toolUseId
+  if (typeof raw.cwd === 'string' && raw.cwd !== '') payload.cwd = raw.cwd
+  if (typeof raw.transcript_path === 'string' && raw.transcript_path !== '') {
+    payload.transcript_path = raw.transcript_path
+  }
+  if (typeof raw.permission_mode === 'string' && raw.permission_mode !== '') {
+    payload.permission_mode = raw.permission_mode
+  }
+  if (typeof raw.prompt_id === 'string' && raw.prompt_id !== '') payload.prompt_id = raw.prompt_id
+  if (typeof raw.agent_id === 'string' && raw.agent_id !== '') payload.agent_id = raw.agent_id
+  if (typeof raw.agent_type === 'string' && raw.agent_type !== '') payload.agent_type = raw.agent_type
+  if (isRecord(raw.mcp_server)) payload.mcp_server = raw.mcp_server
+  if (Array.isArray(raw.permission_suggestions) && raw.permission_suggestions.length > 0) {
+    payload.permission_suggestions = raw.permission_suggestions
+  }
+  return payload
 }
 
 /** Merges a new settings update into the active session override. */
@@ -202,7 +529,7 @@ export function nextBackoff(last: number): number {
 function parse(body: string): Record<string, unknown> | undefined {
   try {
     const v: unknown = JSON.parse(body)
-    return typeof v === 'object' && v !== null && !Array.isArray(v) ? (v as Record<string, unknown>) : undefined
+    return isRecord(v) ? v : undefined
   } catch {
     return undefined
   }

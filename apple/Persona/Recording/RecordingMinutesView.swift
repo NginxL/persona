@@ -1,4 +1,3 @@
-#if os(iOS) || os(visionOS)
 import SwiftUI
 import UIKit
 
@@ -257,7 +256,12 @@ struct RecordingMinutesSections: View {
         case .waitingForSync:
             waiting(String(localized: "Minutes are written once the text reaches the hub."), busy: false)
         case .writing:
-            waiting(String(localized: "The hub is turning the transcript into key points, decisions, action items and open questions."), busy: true)
+            // The hub may check the whole recording first (#13461): the line says so, with how far it is.
+            let line = MinutesWaitLine.of(model.transcription)
+            waiting(line == .writing
+                    ? String(localized: "The hub is turning the transcript into key points, decisions, action items and open questions.")
+                    : String(localized: "For a more accurate transcript, the hub is listening to the whole recording again. The minutes come right after."),
+                    busy: true, title: line.title)
         case .unsupported:
             Section("Minutes") {
                 Text("This hub doesn't write meeting minutes yet. They come after it's updated.")
@@ -279,11 +283,11 @@ struct RecordingMinutesSections: View {
         }
     }
 
-    private func waiting(_ detail: String, busy: Bool) -> some View {
+    private func waiting(_ detail: String, busy: Bool, title: String? = nil) -> some View {
         Section("Minutes") {
             HStack(spacing: Theme.Space.s) {
                 if busy { ProgressView() }
-                Text(busy ? String(localized: "Writing the minutes…") : String(localized: "Minutes come next")).font(Theme.Font.bodyStrong)
+                Text(title ?? (busy ? String(localized: "Writing the minutes…") : String(localized: "Minutes come next"))).font(Theme.Font.bodyStrong)
             }
             .accessibilityElement(children: .combine)
             .accessibilityIdentifier("minutes-waiting")
@@ -526,6 +530,5 @@ struct MinutesPhoto: View {
         .fullScreenCover(item: $viewing) { item in MeetingPhotoViewer(recording: recording, item: item) }
     }
 }
-#endif
 #endif
 import PersonaWire

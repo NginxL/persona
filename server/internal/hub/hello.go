@@ -46,6 +46,8 @@ func (h *Hub) hello() map[string]any {
 		"push_grading": h.push.pushGradingOn(),
 		// the user's language (feature locale, locale.go)
 		"locale": string(h.userLang()),
+		// The pictures a message may carry (#12973): the clients size their pickers by them, the send routes check them.
+		"image_limits": proto.HubImageLimits,
 	}
 	// The address the hub's own links use (hub.json public_url; the assistant's /s/…, /persona/…, /todos links, #2194): the
 	// apps tell those links from other sites by it even when they reach the hub at another address (#2696). Only when set.

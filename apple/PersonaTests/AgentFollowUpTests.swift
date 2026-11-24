@@ -9,6 +9,7 @@ import PersonaWire
 struct AgentFollowUpTests {
     private static let state = #"""
     {"machine_id":"box","launcher":"claude","cwd":"/a","conversations":[],"manager":"assistant",
+     "default_permission_mode":"default",
      "start_requested_tasks":true,"task_workspace_preference":"prefer-existing","main_supervises_own_tasks":false,
      "agent_tasks":false,"close_ended_terminals":false,"idle_close_hours":12,"archive_closed_days":3,
      "agent_auto_naming":true,"agent_auto_naming_max":1,"agent_auto_naming_interval_hours":0}
@@ -50,6 +51,7 @@ struct AgentFollowUpTests {
         #expect(s.closeEndedTerminals == false, "close-on-end is off by default (#10355)")
         #expect(s.idleCloseHours == 12 && s.archiveClosedDays == 3 && s.agentAutoNaming == true && s.agentAutoNamingMax == 1)
         #expect(s.agentAutoNamingIntervalHours == 0 && s.manager == "assistant" && page.namesShown)
+        #expect(Self.wire(s)["default_permission_mode"] as? String == "default", "the shared new-conversation default must survive decoding")
         #expect(AgentFollowUpModel.offered(s))
 
         let older = try JSON.decoder.decode(APIClient.AssistantState.self, from: Data(Self.old.utf8))
@@ -69,7 +71,8 @@ struct AgentFollowUpTests {
 
     @Test func eachChangeSendsOnlyItsFieldNamingTheAssistantThatAnswered() async throws {
         let cases: [(AgentFollowUpModel.Change, String, Any)] = [
-            (.startRequested(false), "start_requested_tasks", false), (.workspace("prefer-new"), "task_workspace_preference", "prefer-new"),
+            (.startRequested(false), "start_requested_tasks", false), (.defaultPermission("bypassPermissions"), "default_permission_mode", "bypassPermissions"),
+            (.workspace("prefer-new"), "task_workspace_preference", "prefer-new"),
             (.mainSupervises(true), "main_supervises_own_tasks", true), (.agentTasks(true), "agent_tasks", true),
             (.closeEndedTerminals(true), "close_ended_terminals", true),
             (.idleHours(0), "idle_close_hours", 0), (.archiveDays(30), "archive_closed_days", 30),
@@ -121,6 +124,26 @@ struct AgentFollowUpTests {
         await page.load()
         await page.set(.archiveDays(30))
         #expect(page.state?.archiveClosedDays == 7)
+    }
+
+    @Test func defaultPermissionRollsBackWhenTheHubDoesNotConfirmIt() async throws {
+        let hub = FakeHub()
+        hub.on("GET", "/api/v1/assistant", json: Self.state)
+        hub.on("PUT", "/api/v1/assistant", json: Self.state.replacingOccurrences(of: "     \"default_permission_mode\":\"default\",\n", with: ""))
+        let seen = Seen()
+        let page = page(hub, seen: seen)
+        await page.load()
+        await page.set(.defaultPermission("bypassPermissions"))
+        #expect(page.state?.defaultPermissionMode == "default")
+        #expect(seen.toasts.map(\.style) == [.error] && seen.saved.isEmpty)
+        #expect(page.saving.isEmpty)
+    }
+
+    @Test func defaultPermissionAloneDoesNotOfferAgentFollowUp() throws {
+        let json = #"{"machine_id":"box","launcher":"claude","cwd":"/a","conversations":[],"default_permission_mode":"default"}"#
+        let state = try JSON.decoder.decode(APIClient.AssistantState.self, from: Data(json.utf8))
+        #expect(state.defaultPermissionMode == "default")
+        #expect(!AgentFollowUpModel.offered(state), "Default Permissions lives in Settings › Agent and Direction, not on the Agent Follow-Up page")
     }
 
     @Test func anotherAssistantsPageNamesThatOne() async throws {

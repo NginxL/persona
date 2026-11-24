@@ -161,6 +161,16 @@ export function i18nRest(): Promise<void> | undefined {
   return loading;
 }
 
+/** Adds a catalog that loads on demand (a feature module's strings, core/module-host.ts loadModule): the page's
+ *  language's part, or the fallback language's when it has none. Resolves once t() can read it. */
+export async function addCatalogs(loaders: CatalogLoaders): Promise<void> {
+  const call = initCalls;
+  const load = loaders[lang] ?? loaders[FALLBACK_LANG];
+  if (!load) return;
+  const module = await load();
+  if (call === initCalls) merge(module);
+}
+
 // The name vite.config.ts holdLazyImports calls: the chunks it rewrites cannot import this module.
 (globalThis as { __personaI18nRest?: typeof i18nRest }).__personaI18nRest = i18nRest;
 

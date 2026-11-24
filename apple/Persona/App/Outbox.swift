@@ -54,11 +54,14 @@ extension AppModel {
         if wait.gaveUp, session(key) == nil {
             // No row for its chat after a minute on a link that is up (deleted, or its computer removed, on another
             // device): the chat's other waiting messages have nowhere to go either, and fail with it under one notice.
+            let reason = String(localized: "Waiting messages weren't sent: their chat wasn't found on the hub.")
+            store.pending[i].failure = reason
             for j in store.pending.indices where store.pending[j].state == .waiting {
                 store.pending[j].state = .failed
+                store.pending[j].failure = reason
                 store.pending[j].stalledSince = nil
             }
-            toast = Toast(String(localized: "Waiting messages weren't sent: their chat wasn't found on the hub."), style: .error)
+            toast = Toast(reason, style: .error)
         }
         if wait.outcome == .sent { _ = completeInboxHandOff(key, store.pending[i]) }
         saveOutbox()
@@ -253,12 +256,11 @@ extension AppModel {
         for e in StateCache.load(Self.outboxName, as: [OutboxEntry].self, in: stateFolder) ?? [] {
             var msg = e.message
             switch msg.state {
-            case .failed: // a failed one stays failed, the user decides; not forever
-                if let at = msg.createdAt, at < Date().addingTimeInterval(-86400) { continue }
+            case .failed: // a failed one stays failed, the user decides
+                break
             case .sent:
                 if let at = msg.createdAt, at < Date().addingTimeInterval(-Self.sentWait) { continue }
-            case .sending, .waiting: // a week on, its chat may be long gone
-                if let at = msg.createdAt, at < Date().addingTimeInterval(-OutboxWait.restoreLimit) { continue }
+            case .sending, .waiting:
                 msg.state = .waiting
             }
             let store = chat(e.key)
@@ -293,8 +295,6 @@ nonisolated enum OutboxFlush {
 nonisolated enum OutboxWait {
     /// How long sends may keep coming back waiting on a link that is up: about six tries, 10 seconds apart.
     static let connectedLimit: TimeInterval = 60
-    /// How old a waiting message may be and still come back at launch.
-    static let restoreLimit: TimeInterval = 7 * 86400
 
     struct Next: Equatable {
         /// The outcome to record.

@@ -3,6 +3,7 @@ package persona.feature.inbox
 import persona.core.chatlist.ChatReadingPosition
 import org.junit.Assert.*
 import org.junit.Test
+import persona.core.inbox.*
 
 class LarkListNavigationTest {
     @Test fun unreadEntryWinsAndSavedAnchorRestoresWithoutOpeningTail() {

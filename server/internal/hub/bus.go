@@ -107,6 +107,16 @@ type busState struct {
 	// under mu. needsYouDelay is that delay for tests; zero is inboxNeedsYouPushDelay.
 	needsYouPush  bool
 	needsYouDelay time.Duration
+	// seen holds per-identity serialized SeeBusIdentity persistence state (including deferred writes during quiesce).
+	seenMu sync.Mutex
+	seen   map[string]*busSeenEntry
+}
+
+type busSeenEntry struct {
+	mu      sync.Mutex // serializes SeeBusIdentity writes for this identity
+	pending bool
+	where   *db.BusIdentity
+	gen     uint64
 }
 
 // busConn is one service connection.
@@ -156,8 +166,10 @@ type busPresence struct {
 	Deploy  string `json:"deploy,omitempty"`
 	Version string `json:"version,omitempty"`
 	// Capabilities are what its manager.hello names (assistantwire.Capability*).
-	Capabilities []string  `json:"capabilities,omitempty"`
-	Since        time.Time `json:"since"`
+	Capabilities []string `json:"capabilities,omitempty"`
+	// Features are the loaded built-in modules' flags to expose through the hub hello.
+	Features []string  `json:"features,omitempty"`
+	Since    time.Time `json:"since"`
 }
 
 // close sends the close frame saying why; the read loop then ends the connection.
@@ -192,6 +204,7 @@ func (e *everyMinute) Allow(now time.Time) bool {
 // it on to its center (memberForward).
 func (h *Hub) busRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET "+bus.Path, h.serveBus)
+	mux.HandleFunc("GET "+devicewire.DevelopmentPackagesPath+"/{commit}/{version}/{file}", h.serveDevelopmentPackage)
 	h.relayRoutes(mux) // the manager's second channel: the connections relayed to it (devices_relay.go)
 }
 
@@ -371,6 +384,7 @@ type busManagerHello struct {
 	Deploy       string   `json:"deploy"`
 	Version      string   `json:"version"`
 	Capabilities []string `json:"capabilities"`
+	Features     []string `json:"features"`
 }
 
 // busHelloReply is manager.hello's answer: who the hub knows the service as, the managers, and the assistant's hello
@@ -400,7 +414,7 @@ func (h *Hub) managerHello(ctx context.Context, c *busConn, params json.RawMessa
 		return c.refuse(h, fmt.Errorf("manager.hello says %q but the token is %q's", clip(p.ID, 64), c.ident.ID))
 	}
 	if err := h.busAccept(ctx, c, busPresence{Host: clip(p.Host, 200), OS: clip(p.OS, 40), Arch: clip(p.Arch, 40),
-		Deploy: clip(p.Deploy, 40), Version: clip(p.Version, 80), Capabilities: capabilityList(p.Capabilities)}); err != nil {
+		Deploy: clip(p.Deploy, 40), Version: clip(p.Version, 80), Capabilities: capabilityList(p.Capabilities), Features: capabilityList(p.Features)}); err != nil {
 		return nil, err
 	}
 	if c.ident.Role == bus.RoleManager && !slices.Contains(p.Capabilities, assistantwire.CapabilityConfigOwn) {
@@ -683,10 +697,106 @@ func (h *Hub) stopBus() []*busConn {
 // busSeen keeps in the roster that identity id is connected now (where: its handshake's place) or just dropped, and
 // tells the apps (managers.go).
 func (h *Hub) busSeen(ctx context.Context, id string, where *db.BusIdentity) {
-	if s := h.managerStore(); s != nil {
-		if err := s.SeeBusIdentity(ctx, id, where); err != nil {
-			h.logf("bus: [%s] roster: %v", id, err)
+	if h.managerStore() != nil {
+		var cp *db.BusIdentity
+		if where != nil {
+			v := *where
+			cp = &v
 		}
+		h.bus.seenMu.Lock()
+		if h.bus.seen == nil {
+			h.bus.seen = map[string]*busSeenEntry{}
+		}
+		e := h.bus.seen[id]
+		if e == nil {
+			e = &busSeenEntry{}
+			h.bus.seen[id] = e
+		}
+		e.where = cp
+		e.pending = true
+		e.gen++
+		wantGen := e.gen
+		h.bus.seenMu.Unlock()
+		h.flushBusSeen(ctx, id, e, wantGen)
 	}
 	h.managersChanged()
+}
+
+func (h *Hub) flushBusSeen(ctx context.Context, id string, e *busSeenEntry, wantGen uint64) {
+	if h.managerStore() == nil {
+		return
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	first := true
+	for {
+		h.bus.seenMu.Lock()
+		if !e.pending {
+			h.bus.seenMu.Unlock()
+			return
+		}
+		where := e.where
+		gen := e.gen
+		e.pending = false
+		h.bus.seenMu.Unlock()
+		if !h.quiesce.beginOrDefer(func() {
+			h.bus.seenMu.Lock()
+			if e.gen == gen {
+				e.pending = true
+			}
+			h.bus.seenMu.Unlock()
+		}) {
+			return
+		}
+		useCallerCtx := first && wantGen != 0 && gen == wantGen && ctx != nil && ctx.Err() == nil
+		first = false
+		s := h.managerStore()
+		if s != nil {
+			var wctx context.Context
+			var cancel context.CancelFunc
+			if useCallerCtx {
+				wctx = ctx
+			} else {
+				// Coalesced trailing writes and resumed/overwritten writes get a
+				// fresh bounded context instead of inheriting an older caller's
+				// expiring or canceled context.
+				wctx, cancel = context.WithTimeout(context.Background(), 5*time.Second)
+			}
+			if err := s.SeeBusIdentity(wctx, id, where); err != nil {
+				h.logf("bus: [%s] roster: %v", id, err)
+			}
+			if cancel != nil {
+				cancel()
+			}
+		}
+		h.quiesce.end()
+	}
+}
+
+func (h *Hub) resumeBusSeen() {
+	if h.managerStore() == nil {
+		return
+	}
+	type item struct {
+		id string
+		e  *busSeenEntry
+	}
+	h.bus.seenMu.Lock()
+	var todo []item
+	for id, e := range h.bus.seen {
+		if e.pending {
+			todo = append(todo, item{id: id, e: e})
+		}
+	}
+	h.bus.seenMu.Unlock()
+	if len(todo) == 0 {
+		return
+	}
+	h.nodeWorkers.Add(1)
+	go func() {
+		defer h.nodeWorkers.Done()
+		for _, it := range todo {
+			h.flushBusSeen(nil, it.id, it.e, 0)
+		}
+	}()
 }

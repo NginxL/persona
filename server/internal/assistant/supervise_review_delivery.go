@@ -390,41 +390,15 @@ func (s *Service) provenForeignPR(ctx context.Context, u string) bool {
 	return known && !owned
 }
 
-// setTodoLinkRole rewrites the role of one saved link (by canonical URL) through the store's full-set transaction,
-// preserving every other association. It is the supported alternative to deleting a misattributed link.
+// setTodoLinkRole rewrites the role of one saved link (by canonical URL) in a single store transaction, so a
+// concurrent edit to another link cannot be reverted. It is the supported alternative to deleting a misattributed
+// link.
 func (s *Service) setTodoLinkRole(ctx context.Context, id, canonicalURL, role string) error {
-	st, ok := s.store().(todoRepositoryStore)
-	if !ok {
-		return repository.Problem("store_unavailable")
-	}
-	set, err := st.TodoRepositories(ctx, id)
-	if err != nil {
-		return err
-	}
-	changed := false
-	for ri := range set.Repositories {
-		for li := range set.Repositories[ri].Links {
-			l := &set.Repositories[ri].Links[li]
-			if l.CanonicalURL == canonicalURL {
-				normalized, perr := repository.NormalizeLinkRole(role)
-				if perr != "" {
-					return perr
-				}
-				if l.Role != normalized {
-					l.Role = normalized
-					changed = true
-				}
-			}
-		}
-	}
-	if !changed {
-		return nil
-	}
 	linksStore, ok := s.store().(todoRepositoryRoleStore)
 	if !ok {
 		return repository.Problem("store_unavailable")
 	}
-	_, err = linksStore.SetTodoRepositoryLinkRoles(ctx, id, set.Repositories)
+	_, err := linksStore.SetTodoRepositoryLinkRole(ctx, id, canonicalURL, role)
 	return err
 }
 

@@ -92,6 +92,9 @@ type InboxAgent struct {
 	Changes []DocChange `json:"changes,omitempty"`
 	Error   string      `json:"error,omitempty"`
 	Of      string      `json:"of,omitempty"` // the item's Last the work answers
+	// InterruptedByDisable marks unfinished work released only because the twin was switched off. It survives reload and
+	// gets one escalation when re-enabled; a genuine processing failure leaves it false (#11219).
+	InterruptedByDisable bool `json:"interrupted_by_disable,omitempty"`
 	// TodoID: the user's task the item is about (model 2's task_id, docs/assistant/unified-entry.md): the draft tells its
 	// progress, and the task's conversation gets a card for it.
 	TodoID    string     `json:"todo_id,omitempty"`
@@ -207,8 +210,11 @@ func (s *Service) handInbox(ctx context.Context) {
 
 // handPass is one pass of handInbox, with b.handing held.
 func (s *Service) handPass(ctx context.Context) {
-	cfg := s.inboxConfig(ctx).Agent
+	inboxCfg := s.inboxConfig(ctx)
+	cfg := inboxCfg.Agent
+	policy := compileReplyPolicy(inboxCfg.ReplyPolicy)
 	b := &s.inbox
+	s.forwardInboxToTodos(ctx)
 	s.linkInboxTaskURLs(ctx)
 	s.checkInboxFollowUps(ctx, cfg, time.Now())
 	if !cfg.Enabled {
@@ -220,7 +226,8 @@ func (s *Service) handPass(ctx context.Context) {
 	}
 	now := time.Now()
 	s.sweepInboxAgents(ctx, cfg, now)
-	escalated := b.escalate(now.Add(-agentMaxAge(cfg)), now)
+	s.gateReplyPolicyQueue(ctx, policy, now.Add(-agentMaxAge(cfg)))
+	escalated := b.escalateWithPolicy(now.Add(-agentMaxAge(cfg)), now, policy)
 	linked := map[*InboxItem]bool{}
 	if tasks := s.activeTasks(ctx); len(tasks) > 0 { // which of the user's tasks a new one is about
 		for _, w := range escalated {
@@ -260,7 +267,7 @@ func (s *Service) releaseInboxAgents(ctx context.Context) {
 	var changed []*inboxWrite
 	now := time.Now()
 	for _, it := range b.items {
-		if w := b.releaseInboxAgent(it, HandlingFailed, i18n.T(b.userLang(), "assistant-inbox_agent.disabled"), now); w != nil {
+		if w := b.releaseInboxAgent(it, HandlingFailed, i18n.T(b.userLang(), "assistant-inbox_agent.disabled"), now, true); w != nil {
 			changed = append(changed, w)
 		}
 	}
@@ -270,8 +277,9 @@ func (s *Service) releaseInboxAgents(ctx context.Context) {
 
 // releaseInboxAgent drops queued work and releases an unfinished item. Completed suggestions and confirmed
 // actions waiting for a reply stay available. HandlingDone restores the item's tier; HandlingFailed returns it to
-// Needs you. The caller holds b.mu and persists the returned write.
-func (b *inboxBook) releaseInboxAgent(it *InboxItem, state, reason string, now time.Time) *inboxWrite {
+// Needs you. byDisable is true only for the twin's off transition, and is what distinguishes that interruption from a
+// genuine failure for the next enabled pass. The caller holds b.mu and persists the returned write.
+func (b *inboxBook) releaseInboxAgent(it *InboxItem, state, reason string, now time.Time, byDisable bool) *inboxWrite {
 	active, pending := inboxAgentReleaseState(it)
 	if !active && !pending {
 		return nil
@@ -286,6 +294,7 @@ func (b *inboxBook) releaseInboxAgent(it *InboxItem, state, reason string, now t
 		}
 	}
 	if a := it.Agent; a != nil {
+		a.InterruptedByDisable = byDisable && active
 		a.Pending, a.Wake, a.Back, a.RetryAfter = nil, false, "", nil
 		a.DeferredAt, a.WakeSlot = nil, false
 	}
@@ -315,6 +324,7 @@ func (s *Service) startInboxAgents(ctx context.Context, cfg InboxAgentConfig) {
 	owner, language := inboxPromptOwner(hello), answerLanguage(hello.Locale)
 	loc := s.location(ctx) // the chain's times, read in the user's zone (the hub runs in UTC)
 	now := time.Now().UTC()
+	policy := compileReplyPolicy(s.inboxConfig(ctx).ReplyPolicy)
 	byEvent := s.conversationsByEvent(ctx)
 	b.mu.Lock()
 	running := 0
@@ -330,7 +340,13 @@ func (s *Service) startInboxAgents(ctx context.Context, cfg InboxAgentConfig) {
 		case it.Agent.State == AgentQueued && it.Agent.SessionID == "" && it.open() && !it.Agent.savingRetry:
 			// Recheck before backoff, capacity or adoption: a saved rule also covers work already queued.
 			if b.policyTwin(it) == TwinNever {
-				if w := b.releaseInboxAgent(it, HandlingDone, i18n.T(b.userLang(), "assistant-inbox_agent.never"), now); w != nil {
+				if w := b.releaseInboxAgent(it, HandlingDone, i18n.T(b.userLang(), "assistant-inbox_agent.never"), now, false); w != nil {
+					released = append(released, w)
+				}
+				continue
+			}
+			if !replyPolicyAllowsQueueLocked(it, policy) {
+				if w := b.releaseInboxAgent(it, HandlingDone, i18n.T(b.userLang(), "assistant-inbox_agent.reply_policy_blocked"), now, false); w != nil {
 					released = append(released, w)
 				}
 				continue

@@ -375,7 +375,7 @@ func TestTaskReviewDismissalSameEverywhere(t *testing.T) {
 		}
 		return triageTodo(list[0], noSessions, time.Now(), time.Time{}, time.UTC, false), health
 	}
-	if tr, health := read(); tr.Rule != ruleOwnerDecides || health != "等你决定" {
+	if tr, health := read(); tr.Rule != ruleOwnerDecides || health != "等你处理" {
 		t.Fatalf("before: %+v %q", tr, health)
 	}
 	dismissReview(t, e, at)

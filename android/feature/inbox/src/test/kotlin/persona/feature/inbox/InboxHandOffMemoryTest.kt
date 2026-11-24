@@ -12,6 +12,7 @@ import kotlinx.serialization.json.jsonPrimitive
 import org.junit.Assert.assertEquals
 import org.junit.Test
 import java.io.File
+import persona.core.inbox.*
 
 /** Hand to AI remembers, per source, where an item was last handed (#2121): spec/fixtures/inbox/handoff_memory.json. */
 class InboxHandOffMemoryTest {

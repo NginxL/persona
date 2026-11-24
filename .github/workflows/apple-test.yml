@@ -12,7 +12,7 @@ on:
       lane:
         description: Apple platform lane
         type: choice
-        options: [ios, ios18, ios-build, packages, ios-focused, ios-regressions, ios-ipad-diagnostic]
+        options: [ios, ios18, ios-build, packages, ios-focused, ios-regressions, ios-model-picker, ios-ipad-diagnostic]
         default: ios
         required: true
 permissions:
@@ -24,7 +24,7 @@ concurrency:
 jobs:
   apple:
     if: inputs.lane != 'ios18'
-    name: ${{ inputs.lane == 'packages' && 'Native package tests (Xcode 26.0)' || inputs.lane == 'ios-build' && 'Unsigned iOS and Watch build (Xcode 26.0)' || inputs.lane == 'ios-focused' && 'Focused iOS and About tests (Xcode 26.0)' || inputs.lane == 'ios-regressions' && 'iOS stack and Live Activity regressions (Xcode 26.0)' || inputs.lane == 'ios-ipad-diagnostic' && 'Regular iPad app-host launch diagnostics (Xcode 26.0)' || 'iOS, Watch and HTML tests (Xcode 26.0)' }}
+    name: ${{ inputs.lane == 'packages' && 'Native package tests (Xcode 26.0)' || inputs.lane == 'ios-build' && 'Unsigned iOS and Watch build (Xcode 26.0)' || inputs.lane == 'ios-focused' && 'Focused iOS and About tests (Xcode 26.0)' || inputs.lane == 'ios-regressions' && 'iOS stack and Live Activity regressions (Xcode 26.0)' || inputs.lane == 'ios-model-picker' && 'iOS Assistant model picker regressions (Xcode 26.0)' || inputs.lane == 'ios-ipad-diagnostic' && 'Regular iPad app-host launch diagnostics (Xcode 26.0)' || 'iOS, Watch and HTML tests (Xcode 26.0)' }}
     runs-on: macos-26
     timeout-minutes: 120
     env:

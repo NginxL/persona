@@ -68,10 +68,12 @@ func (b *inboxBook) tell(it *InboxItem, n inboxNote, wake bool, now time.Time) {
 	b.wakeInboxConversation(it, now)
 }
 
-// wakeInboxConversation applies tell's wake bookkeeping without adding another note. Under b.mu.
+// wakeInboxConversation applies tell's wake bookkeeping without adding another note. A wake also consumes an
+// off-transition interruption: this turn, rather than another escalation for the same Last, owns the recovery. Under b.mu.
 func (b *inboxBook) wakeInboxConversation(it *InboxItem, now time.Time) {
 	a := it.Agent
 	a.Wake = true
+	a.InterruptedByDisable = false
 	if h := it.Handling; h != nil && h.State != HandlingLooking {
 		a.Back = h.State
 	}
@@ -232,6 +234,7 @@ func (b *inboxBook) setHandling(it *InboxItem, state, errText string, now time.T
 	if a == nil {
 		return
 	}
+	a.InterruptedByDisable = false // a newer handling state supersedes the off-transition interruption
 	if state != HandlingAgent {
 		a.WakeSlot = false
 	}
@@ -261,6 +264,7 @@ func (b *inboxBook) failHandling(it *InboxItem, reason string, now time.Time) {
 	it.Suggestion = nil
 	if it.Agent != nil {
 		it.Agent.Wake = false
+		it.Agent.InterruptedByDisable = false // a later genuine failure supersedes an off-transition interruption
 	}
 	b.dropInboxWakes(it)
 	b.setHandling(it, HandlingFailed, reason, now)
@@ -299,17 +303,25 @@ func ownSend(it *InboxItem, last string) bool {
 // conversation (queued); new content of an event that has one — being handled, or triaged Needs you again — is sent into
 // that conversation. It returns the items it moved, settled (inbox_rollback.go).
 func (b *inboxBook) escalate(since, now time.Time) []*inboxWrite {
+	return b.escalateWithPolicy(since, now, replyPolicySpec{})
+}
+
+func (b *inboxBook) escalateWithPolicy(since, now time.Time, policy replyPolicySpec) []*inboxWrite {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	var changed []*inboxWrite
 	for _, it := range b.items {
 		a := it.Agent
-		if !it.open() || it.Context == "" || a != nil && (a.Of == it.Last || a.savingRetry) {
+		if !it.open() || it.Context == "" ||
+			a != nil && (a.Of == it.Last && !a.InterruptedByDisable || a.savingRetry) {
 			continue
 		}
 		handled := it.handled()
 		twin := b.policyTwin(it) // the user's policy (inbox_policies.go): first takes what is not Needs you too
 		if !handled && (twin == TwinNever || it.Tier != TierAction && twin != TwinFirst || !it.tiered()) {
+			continue
+		}
+		if !replyPolicyAllowsQueueLocked(it, policy) {
 			continue
 		}
 		// A URL-only link has an Agent record but has never asked the twin to work. It follows the same age
@@ -402,7 +414,7 @@ func (s *Service) deliverNotes(ctx context.Context, it *InboxItem) {
 		return
 	}
 	if !enabled {
-		w := b.releaseInboxAgent(it, HandlingFailed, i18n.T(b.userLang(), "assistant-inbox_agent.disabled"), time.Now())
+		w := b.releaseInboxAgent(it, HandlingFailed, i18n.T(b.userLang(), "assistant-inbox_agent.disabled"), time.Now(), true)
 		b.mu.Unlock()
 		if w != nil {
 			s.saveWrites(ctx, []*inboxWrite{w}, "the disabled AI twin's work")

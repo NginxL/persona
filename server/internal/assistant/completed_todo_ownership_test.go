@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/nwverse/persona/server/internal/assistantwire"
+	"github.com/nwverse/persona/server/internal/db"
 	"github.com/nwverse/persona/server/internal/proto"
 )
 
@@ -22,6 +23,8 @@ func TestCompletedTodoOwnershipDoesNotBecomeActiveWork(t *testing.T) {
 		}})
 	putTodo(e.s, Todo{ID: "open", Title: "Current task",
 		Agents: []TodoAgent{{MachineID: "box", SessionID: "reused"}}})
+	putTodo(e.s, Todo{ID: "cancelled", Title: "Cancelled task", DoneAt: &now, DoneBy: db.DoneByCancelled,
+		Agents: []TodoAgent{{MachineID: "box", SessionID: "cancelled-history"}}})
 	report := e.s.todoReport(context.Background())
 	if len(report.Links) != 1 || report.Links[0].TodoID != "open" {
 		t.Fatalf("completed work entered active links: %+v", report.Links)

@@ -1,6 +1,7 @@
 import XCTest
 
-/// A question card over the composer never takes the conversation away (#9392). On iPad and the open iPhone Duo a task's
+/// A question card over the composer never takes the conversation away (#9392). In the assistant's conversation the cards
+/// are one pager behind To Decide since #12831 (`QuestionDockTests`): its fold collapses the pager into the entry. On iPad and the open iPhone Duo a task's
 /// question in Persona's conversation took the whole page: its form had no cap, the conversation got no room (nothing
 /// to scroll) and the card's top, its fold with it, sat under the page's top bar. Now:
 /// - the card's title row and fold are on the page, under the top bar, with conversation over it;
@@ -14,7 +15,7 @@ import XCTest
 ///   PERSONA_TASK_HUB:  MOCK_AGENTS=1 MOCK_TASKS=1 MOCK_CARD_SOURCE=1
 ///   PERSONA_BOTH_HUB:  MOCK_AGENTS=1 MOCK_TASKS=1 MOCK_ASK_LONG=source MOCK_CARD_SOURCE=1
 ///   PERSONA_BOTH_LONG_HUB: MOCK_AGENTS=1 MOCK_TASKS=1 MOCK_ASK_LONG=source MOCK_CARD_SOURCE=1 MOCK_TASK_ASK_LONG=1
-/// The grabber (#12306): a folded card leaves its half to the task's question, and the grabber on the question's top edge
+/// The grabber (#12306): the grabber on the question's top edge
 /// makes it taller and shorter by dragging, the tallest and back by a tap, the choice kept after a relaunch.
 /// Screenshots: PERSONA_SHOTS=<dir> (PERSONA_SHOTS_DEVICE names the device in the file names; PERSONA_SHOTS_EXTERNAL=1
 /// asks the host for them, as the open Duo's own come out black: /tmp's shot watcher, `simctl io … screenshot`).
@@ -98,8 +99,26 @@ final class QuestionCardFoldTests: XCTestCase {
     }
 
     /// The card's title row and fold are on the page under the top bar, with the conversation's room over the card.
+    /// The card's fold: an Agent's card folds to one line, the assistant's pager collapses into To Decide (#12831).
+    @MainActor private func foldControl(_ card: XCUIElement) -> XCUIElement {
+        let collapse = card.buttons["question-dock.collapse"].firstMatch
+        return collapse.exists ? collapse : card.buttons["interaction-fold"].firstMatch
+    }
+
+    @MainActor private var dock: XCUIElement { app.otherElements["question-dock"].firstMatch }
+    @MainActor private var entry: XCUIElement { app.buttons["action-bar.to-decide"].firstMatch }
+
+    /// The pager on the task's question, its second card: the conversation's own first (#12831). A card that comes in
+    /// later never moves the pager, so it goes to the first and then one on.
+    @MainActor private func showTasksQuestion() {
+        let previous = app.buttons["question-dock.previous"]
+        for _ in 0..<5 where previous.exists && previous.isEnabled { previous.tap(); settle(0.5) }
+        app.buttons["question-dock.next"].tap()
+        settle()
+    }
+
     @MainActor private func assertInPage(_ card: XCUIElement, _ step: String, file: StaticString = #filePath, line: UInt = #line) {
-        let fold = card.buttons["interaction-fold"].firstMatch
+        let fold = foldControl(card)
         XCTAssertTrue(fold.exists && fold.isHittable, "\(step): the card's fold is not on screen", file: file, line: line)
         let bar = barBottom(left: card.frame.minX)
         XCTAssertGreaterThanOrEqual(fold.frame.minY, bar, "\(step): the fold (\(fold.frame)) is under the top bar (\(bar))", file: file, line: line)
@@ -149,41 +168,39 @@ final class QuestionCardFoldTests: XCTestCase {
     }
 
     /// The report's case: a task's question in Persona's conversation, light and dark. It is capped under the top bar with
-    /// conversation over it, the conversation scrolls, and it folds to one line and back.
+    /// conversation over it, the conversation scrolls, and it collapses into To Decide and back (#12831).
     @MainActor func testATasksQuestionKeepsTheConversation() throws {
         let hub = try hub("PERSONA_TASK_HUB")
         continueAfterFailure = true
         for look in ["light", "dark"] {
             launch(hub, chat: Self.main, scheme: look)
-            let card = app.otherElements["task-question"].firstMatch
+            let card = dock
             XCTAssertTrue(card.waitForExistence(timeout: 20), "no task question (\(look))")
             dismissIconAlert()
             settle(2)
             shot("task-open-\(look)")
             assertInPage(card, "task, open (\(look))")
             assertConversationScrolls(above: card, "task, open (\(look))")
-            let open = card.frame.height
-            card.buttons["interaction-fold"].firstMatch.tap()
+            foldControl(card).tap()
             settle()
-            XCTAssertLessThanOrEqual(card.frame.height, Self.foldedAtMost + 40, "folded, the task's card is \(card.frame.height) pt (\(look))")
-            XCTAssertLessThan(card.frame.height, open, "folding gave nothing back (\(look))")
-            XCTAssertFalse(text("Swift Testing").isHittable, "folded, its options still show (\(look))")
+            XCTAssertFalse(card.exists, "collapsed, the pager is still drawn (\(look))")
+            XCTAssertFalse(text("Swift Testing").isHittable, "collapsed, its options still show (\(look))")
             shot("task-folded-\(look)")
-            card.buttons["interaction-fold"].firstMatch.tap()
+            entry.tap()
             settle()
-            XCTAssertTrue(text("Swift Testing").waitForExistence(timeout: 3) && text("Swift Testing").isHittable, "unfolded, no options (\(look))")
+            XCTAssertTrue(text("Swift Testing").waitForExistence(timeout: 3) && text("Swift Testing").isHittable, "opened, no options (\(look))")
             app.terminate()
         }
     }
 
-    /// Persona's own question alone, light and dark: on the page under the top bar, the conversation scrolls open and
-    /// folded, it folds and unfolds, and View in Chat brings the message it is about into view and folds it.
+    /// Persona's own question alone, light and dark: on the page under the top bar, the conversation scrolls, it collapses
+    /// into To Decide and opens again, and View in Chat brings the message it is about into view and collapses it.
     @MainActor func testTheMainQuestionFoldsAndLeadsBackToItsMessage() throws {
         let hub = try hub("PERSONA_CARD_HUB")
         continueAfterFailure = true
         for look in ["light", "dark"] {
             launch(hub, chat: Self.main, scheme: look)
-            let cards = app.scrollViews["pending-cards"]
+            let cards = dock
             XCTAssertTrue(cards.waitForExistence(timeout: 20), "no card (\(look))")
             dismissIconAlert()
             settle(2)
@@ -192,62 +209,52 @@ final class QuestionCardFoldTests: XCTestCase {
             assertSkipInTitleRow(cards, "main, open (\(look))")
             assertConversationScrolls(above: cards, "main, open (\(look))")
 
-            cards.buttons["interaction-fold"].firstMatch.tap()
+            foldControl(cards).tap()
             settle()
-            XCTAssertLessThanOrEqual(cards.frame.height, Self.foldedAtMost, "folded, the card is \(cards.frame.height) pt (\(look))")
-            XCTAssertFalse(text("拿到任务编号再查").isHittable, "folded, its options still show (\(look))")
-            XCTAssertTrue(cards.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "构建卡在打包")).firstMatch.exists,
-                          "folded, its line does not say the question (\(look))")
+            XCTAssertFalse(cards.exists, "collapsed, the pager is still drawn (\(look))")
+            XCTAssertFalse(text("拿到任务编号再查").isHittable, "collapsed, its options still show (\(look))")
             shot("main-folded-\(look)")
-            assertConversationScrolls(above: cards, "main, folded (\(look))")
 
-            cards.buttons["interaction-fold"].firstMatch.tap()
+            entry.tap()
             settle()
-            XCTAssertTrue(text("拿到任务编号再查").isHittable, "unfolded, no options (\(look))")
+            XCTAssertTrue(text("拿到任务编号再查").isHittable, "opened, no options (\(look))")
 
-            // View in Chat: the message the card is about, in view over the folded card.
+            // View in Chat: the message the card is about, in view over the entries.
             let source = cards.buttons["interaction-source"].firstMatch
             XCTAssertTrue(source.exists && source.isHittable, "no View in Chat (\(look))")
             // Away from it first, so the jump has somewhere to go.
             assertConversationScrolls(above: cards, "main, before View in Chat (\(look))")
             source.tap()
             settle(1.5)
-            XCTAssertLessThanOrEqual(cards.frame.height, Self.foldedAtMost, "View in Chat did not fold the card (\(look))")
+            XCTAssertFalse(cards.exists, "View in Chat did not collapse the pager (\(look))")
             let message = text("看了构建记录")
             XCTAssertTrue(message.exists, "View in Chat: the message is not drawn (\(look))")
-            XCTAssertTrue(message.frame.minY >= barBottom(left: cards.frame.minX) - 1 && message.frame.minY < cards.frame.minY,
-                          "View in Chat: the message (\(message.frame)) is not in view over the card (\(cards.frame)) (\(look))")
+            XCTAssertTrue(message.frame.minY >= barBottom(left: entry.frame.minX) - 1 && message.frame.minY < entry.frame.minY,
+                          "View in Chat: the message (\(message.frame)) is not in view over the entries (\(entry.frame)) (\(look))")
             shot("main-source-\(look)")
             app.terminate()
         }
     }
 
-    /// A question of several: folded it says how many are left, and folding keeps its page and picks.
-    @MainActor func testAQuestionOfSeveralSaysWhatIsLeftAndKeepsItsPage() throws {
+    /// A question of several in the assistant's pager: collapsing it keeps the card's page and picks (#12831, as a folded
+    /// card does, #9392).
+    @MainActor func testAQuestionOfSeveralKeepsItsPageWhenCollapsed() throws {
         let hub = try hub("PERSONA_CARD2_HUB")
         launch(hub, chat: Self.main, scheme: "dark")
-        let cards = app.scrollViews["pending-cards"]
+        let cards = dock
         XCTAssertTrue(cards.waitForExistence(timeout: 20), "no card")
         dismissIconAlert()
         settle(2)
         assertInPage(cards, "several, open")
-        let fold = cards.buttons["interaction-fold"].firstMatch
-        fold.tap()
-        settle()
-        let left = cards.staticTexts["interaction-questions-left"].firstMatch
-        XCTAssertTrue(left.exists, "folded, it does not say how many are left")
-        XCTAssertTrue(left.label.contains("2"), "folded, it says \(left.label), not 2 left")
-        fold.tap()
-        settle()
         text("拿到任务编号再查").tap()
         XCTAssertTrue(text("查完把结论发到哪里").waitForExistence(timeout: 5), "a pick did not go on to the second question")
-        fold.tap()
+        foldControl(cards).tap()
         settle()
-        XCTAssertTrue(left.label.contains("1"), "after one answer, folded it says \(left.label), not 1 left")
+        XCTAssertFalse(cards.exists, "collapsed, the pager is still drawn")
         shot("several-folded-dark")
-        fold.tap()
+        entry.tap()
         settle()
-        XCTAssertTrue(text("查完把结论发到哪里").isHittable, "unfolded, it went back to the first question")
+        XCTAssertTrue(text("查完把结论发到哪里").isHittable, "opened again, it went back to the first question")
     }
 
     /// An Agent's question in its own chat: on the page, folds, and View in Chat brings its message into view.
@@ -272,41 +279,22 @@ final class QuestionCardFoldTests: XCTestCase {
         shot("agent-source-dark")
     }
 
-    /// Persona's own question and a task's at once: both on the page with their title rows, sharing the room (#9392,
-    /// as Android's), and the conversation keeps its room over them.
-    @MainActor func testATasksQuestionAndTheConversationsShareTheRoom() throws {
+    /// Persona's own question and its tasks' at once: one pager, the conversation's own first (#12831), on the page under
+    /// the top bar with the conversation's room over it.
+    @MainActor func testATasksQuestionAndTheConversationsShareThePager() throws {
         let hub = try hub("PERSONA_BOTH_HUB")
         launch(hub, chat: Self.main, scheme: "dark")
-        let task = app.otherElements["task-question"].firstMatch
-        let cards = app.scrollViews["pending-cards"]
-        XCTAssertTrue(task.waitForExistence(timeout: 20) && cards.waitForExistence(timeout: 5), "not both places")
+        XCTAssertTrue(dock.waitForExistence(timeout: 20), "no pager")
         dismissIconAlert()
         settle(2)
         shot("both-dark")
-        assertInPage(task, "both: the task's")
-        let fold = cards.buttons["interaction-fold"].firstMatch
-        XCTAssertTrue(fold.exists && fold.isHittable, "both: the conversation's card's fold is not on screen")
-    }
-
-    /// The report (#12306): on the open Duo held sideways a task's question beside the conversation's folded card showed one
-    /// option. The folded card gives its half back: folding it makes the question taller.
-    @MainActor func testAFoldedCardLeavesItsRoomToTheTasksQuestion() throws {
-        let hub = try hub("PERSONA_BOTH_LONG_HUB")
-        launch(hub, chat: Self.main, scheme: "light")
-        let task = app.otherElements["task-question"].firstMatch
-        let cards = app.scrollViews["pending-cards"]
-        XCTAssertTrue(task.waitForExistence(timeout: 20) && cards.waitForExistence(timeout: 5), "not both places")
-        dismissIconAlert()
-        settle(2)
-        let shared = task.frame.height
-        // A page tall enough for the whole question beside the open card (iPad) has nothing to give it.
-        if showsWhole(task) { throw XCTSkip("the question shows whole beside the open card: nothing to give") }
-        cards.buttons["interaction-fold"].firstMatch.tap()
-        settle()
-        shot("both-folded-light")
-        XCTAssertGreaterThan(task.frame.height, shared + 20,
-                             "the conversation's card folded, the task's question stayed \(task.frame.height) pt (was \(shared))")
-        assertInPage(task, "the other folded")
+        // The conversation's own question first, then the tasks' (the network tests' question and its build approval).
+        XCTAssertTrue(app.staticTexts["question-dock.position"].firstMatch.label.hasSuffix("/ 3"), "not one pager of three")
+        XCTAssertFalse(app.scrollViews["pending-cards"].exists, "the conversation's card is still in the stack")
+        assertInPage(dock, "both: the pager")
+        showTasksQuestion()
+        XCTAssertTrue(text("Swift Testing").waitForExistence(timeout: 3), "the second page is not the task's question")
+        assertInPage(dock, "both: the task's")
     }
 
     /// The grabber (#12306), light and dark, beside the conversation's folded card as in the report: down makes the task's
@@ -317,17 +305,13 @@ final class QuestionCardFoldTests: XCTestCase {
         continueAfterFailure = true
         for look in ["light", "dark"] {
             launch(hub, chat: Self.main, scheme: look)
-            let task = app.otherElements["task-question"].firstMatch
-            let cards = app.scrollViews["pending-cards"]
-            XCTAssertTrue(task.waitForExistence(timeout: 20) && cards.waitForExistence(timeout: 5), "not both places (\(look))")
+            let task = dock
+            XCTAssertTrue(task.waitForExistence(timeout: 20), "no pager (\(look))")
             dismissIconAlert()
             settle(2)
-            cards.buttons["interaction-fold"].firstMatch.tap()
-            settle()
+            showTasksQuestion()
             let grabber = task.descendants(matching: .any)["interaction-grabber"].firstMatch
             XCTAssertTrue(grabber.exists && grabber.isHittable, "no grabber on the task's question (\(look))")
-            XCTAssertFalse(cards.descendants(matching: .any)["interaction-grabber"].firstMatch.exists,
-                          "the conversation's card has a grabber beside the task's question (\(look))")
             let start = task.frame.height
             // On a tall page (iPad) the question shows whole: taller has nothing more to show, shorter still works.
             let whole = showsWhole(task)
@@ -365,11 +349,10 @@ final class QuestionCardFoldTests: XCTestCase {
             let chosen = task.frame.height
             app.terminate()
             launch(hub, chat: Self.main, scheme: look, keepHeight: true)
-            XCTAssertTrue(task.waitForExistence(timeout: 20) && cards.waitForExistence(timeout: 5), "not both places, relaunched (\(look))")
+            XCTAssertTrue(task.waitForExistence(timeout: 20), "no pager, relaunched (\(look))")
             dismissIconAlert()
             settle(2)
-            cards.buttons["interaction-fold"].firstMatch.tap()
-            settle()
+            showTasksQuestion()
             XCTAssertEqual(task.frame.height, chosen, accuracy: 4, "relaunched, the question is not the height chosen (\(look))")
             app.terminate()
         }
@@ -385,7 +368,7 @@ final class QuestionCardFoldTests: XCTestCase {
     /// the options but the card's margin: Skip had a row of its own there, about 60 pt for one word.
     @MainActor private func assertSkipInTitleRow(_ card: XCUIElement, _ step: String, file: StaticString = #filePath, line: UInt = #line) {
         let skip = card.buttons["question-skip"].firstMatch
-        let fold = card.buttons["interaction-fold"].firstMatch
+        let fold = foldControl(card)
         XCTAssertTrue(skip.exists && skip.isHittable, "\(step): no Skip", file: file, line: line)
         XCTAssertEqual(skip.frame.midY, fold.frame.midY, accuracy: 4, "\(step): Skip (\(skip.frame)) is not in the title row (\(fold.frame))",
                        file: file, line: line)
@@ -407,7 +390,7 @@ final class QuestionCardFoldTests: XCTestCase {
     /// The card's grabber and fold are on the page under the top bar: made taller by hand the conversation may keep only a
     /// sliver over it, never the card's top under the bar.
     @MainActor private func assertOnPage(_ card: XCUIElement, _ step: String, file: StaticString = #filePath, line: UInt = #line) {
-        let fold = card.buttons["interaction-fold"].firstMatch
+        let fold = foldControl(card)
         let bar = barBottom(left: card.frame.minX)
         XCTAssertTrue(fold.exists && fold.isHittable, "\(step): the card's fold is not on screen", file: file, line: line)
         XCTAssertGreaterThanOrEqual(card.frame.minY, bar, "\(step): the card (\(card.frame)) is under the top bar (\(bar))", file: file, line: line)

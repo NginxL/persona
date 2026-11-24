@@ -51,7 +51,18 @@ enum LocationTool {
         case .limited, .notNeeded: break
         }
 
-        let location = try await OneShotLocation.fetch(timeout: 15)
+        let location: CLLocation
+        do {
+            location = try await OneShotLocation.fetch(timeout: 15)
+        } catch {
+            #if os(iOS)
+            throw whileUsingRefusal(error, level: LocationAccess.level(), inFront: PhoneToolRegistry.inFront()) {
+                BackgroundLocation.shared.noteRefusedInBackground()
+            }
+            #else
+            throw error
+            #endif
+        }
         let address = await reverseGeocode(location)
 
         var pairs: [(String, JSONValue?)] = [
@@ -65,6 +76,20 @@ enum LocationTool {
         if let address { pairs.append(("address", address)) }
         return Output.json(Output.object(pairs))
     }
+
+    #if os(iOS)
+    /// A read that failed while Persona was not in front with only While Using allowed: iOS gives an app its location
+    /// then only while it is in use (#13200). The model hears why and what the user can do, and `note` has Persona offer
+    /// Always the next time it is opened. Any other failure is passed on as it was.
+    static func whileUsingRefusal(_ error: any Error, level: LocationLevel, inFront: Bool, note: () -> Void) -> any Error {
+        guard level == .whileUsing, !inFront else { return error }
+        note()
+        return ToolFailure(.unavailable, "The iPhone lets Persona read its location only while Persona is open (Location: "
+            + "While Using), and Persona is not open now. Ask the user to open Persona and try again. Persona then offers "
+            + "to allow it when Persona isn't open too; the user can also set it in Persona › Settings › Connectors › "
+            + "This iPhone › Location.")
+    }
+    #endif
 
     static func search(_ args: JSONValue) async throws -> [ToolContent] {
         guard let query = ToolArgs.string(args, "query") else {

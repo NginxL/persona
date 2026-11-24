@@ -9,7 +9,7 @@ import { api, enc, errorText } from "../../lib/api";
 import { ago } from "../../lib/format";
 import { Button, cx, Loading, toast } from "../../ui/atoms";
 import { textareaClass } from "../assistant/parts";
-import { Group } from "./SettingsParts";
+import { Group, Row } from "./SettingsParts";
 
 /** The hub keeps at most this many characters (directionNotesMost). */
 export const DIRECTION_NOTES_MAX = 4000;
@@ -37,7 +37,7 @@ export function directionNotesDeps(scoped: typeof api = api): DirectionNotesDeps
   };
 }
 
-export function DirectionNotes({ deps }: { deps: DirectionNotesDeps }) {
+export function DirectionNotes({ deps, onOpenPermissions }: { deps: DirectionNotesDeps; onOpenPermissions?: () => void }) {
   const [list, setList] = useState<DirectionNotesEntry[] | null>(null);
   const [error, setError] = useState("");
   useEffect(() => {
@@ -50,6 +50,9 @@ export function DirectionNotes({ deps }: { deps: DirectionNotesDeps }) {
   }, [deps]);
   return (
     <Group anchor="direction-notes" title={t("settings-directionnotes.title")} footer={t("settings-directionnotes.footer")}>
+      {onOpenPermissions && (
+        <Row anchor="direction-permissions" label={t("settings-directionnotes.permissions")} hint={<span className="whitespace-normal">{t("settings-directionnotes.permissions_hint")}</span>} wrapHint onClick={onOpenPermissions} />
+      )}
       {list === null ? (
         <div className="px-4 py-4"><Loading /></div>
       ) : list.length === 0 ? (

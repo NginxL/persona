@@ -1,6 +1,6 @@
 {
   "name": "agent_supervise",
-  "description": "Main only: adopt an Agent opened manually or by agent_start without a task. Creates a to-do/card, supervision signals and task_review closeout, as task_plan does. The background supervisor reviews it unless assistant.main_supervises_own_tasks is on; the answer names the supervisor, and main can still review. Already your task: done_when/expect_minutes change its brief scope (prefer task_scope). Another conversation's task stays theirs; use agent_transfer to move it.",
+  "description": "主对话或方向主管可收编没有进行中任务的 Agent。省略 role 即为 worker；leader 需要 done_when，不能使用工作信任电脑。它可用 task_plan 分派直属 worker，用 task_review 验收；worker 不能继续派活。已有任务用 task_scope 调整验收条件或预计用时，用 agent_transfer 转交其他对话的任务。",
   "input_schema": {
     "type": "object",
     "required": [
@@ -19,6 +19,12 @@
       "title": {
         "type": "string",
         "description": "Chinese task title, under 20 characters; empty: Agent title"
+      },
+      "role": {
+        "type": "string",
+        "enum": [
+          "leader"
+        ]
       },
       "done_when": {
         "type": "array",

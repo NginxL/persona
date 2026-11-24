@@ -1,4 +1,4 @@
-"""Mail in the mock hub (server/internal/mail, docs/extensions/mail.md; fake data only, first for the Android mail lane),
+"""Mail in the mock hub (server/internal/modules/mail, docs/extensions/mail.md; fake data only, first for the Android mail lane),
 a domain of scripts/mock/mock_domains.py that moved out of mock_hub.py's "area: mail" (#11543).
 
 The accounts (GET / POST /api/v1/mail/accounts, POST …/accounts/{id}/test, DELETE …/accounts/{id}) and the mail's write

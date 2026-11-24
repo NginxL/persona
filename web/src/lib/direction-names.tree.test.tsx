@@ -4,7 +4,7 @@
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { readDirectionTree, resetDirectionNames, useDirectionNames, useLeaderCounts } from "./direction-names";
+import { directionExternal, readDirectionTree, resetDirectionNames, useDirectionNames, useLeaderCounts } from "./direction-names";
 import { useDirectionTree } from "./direction-tree";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -16,9 +16,13 @@ const tree = (running: boolean) => ({
   ],
 });
 
-let seen: { names?: ReadonlyMap<string, string>; counts?: ReadonlyMap<string, { running: boolean; needs_you: number }>; tree?: unknown } = {};
-function Probe() {
-  seen = { names: useDirectionNames("lead-a\u0000Growth"), counts: useLeaderCounts(), tree: useDirectionTree() };
+let seen: { names?: ReadonlyMap<string, string>; counts?: ReadonlyMap<string, { running: boolean; needs_you: number }>; externals?: Record<string, { external: true; machine_id?: string; session_id?: string } | undefined>; tree?: unknown } = {};
+function Probe({ nameKey = "lead-a\u0000Growth" }: { nameKey?: string }) {
+  seen = { names: useDirectionNames(nameKey), counts: useLeaderCounts(), externals: {
+    "direction-outside": directionExternal("direction-outside"),
+    "direction-targetless": directionExternal("direction-targetless"),
+    "agent-7": directionExternal("agent-7"),
+  }, tree: useDirectionTree() };
   return null;
 }
 
@@ -59,6 +63,26 @@ describe("the 常驻 names and counts", () => {
     await vi.waitFor(() => expect(seen.names?.get("lead-a")).toBe("Old name"));
     expect(seen.tree).toBeNull();
     expect(seen.counts?.size).toBe(0);
+    act(() => root.unmount());
+  });
+
+  it("falls back with only conversationless ids and preserves their external targets", async () => {
+    const fetch = vi.fn(async (url: string) => (url.includes("/directions/tree")
+      ? new Response("{}", { status: 404 })
+      : new Response(JSON.stringify({ leaders: [
+        { id: "direction-outside", name: "Outside", external: true, machine_id: "mac", session_id: "agent-7" },
+        { id: "direction-targetless", name: "Targetless", external: true },
+      ] }), { headers: { "Content-Type": "application/json" } })));
+    vi.stubGlobal("fetch", fetch);
+    const host = document.createElement("div");
+    const root = createRoot(host);
+    act(() => root.render(<Probe nameKey={"direction-outside\u0000\u0001direction-targetless\u0000"} />));
+    await vi.waitFor(() => expect(seen.externals?.["direction-outside"]).toBeDefined());
+    expect(seen.names?.get("direction-outside")).toBe("Outside");
+    expect(seen.externals?.["direction-outside"]).toEqual({ external: true, machine_id: "mac", session_id: "agent-7" });
+    expect(seen.externals?.["direction-targetless"]).toEqual({ external: true });
+    expect(seen.externals?.["agent-7"]).toBeUndefined();
+    expect(fetch.mock.calls.some(([url]) => String(url).includes("/assistant/leaders"))).toBe(true);
     act(() => root.unmount());
   });
 });

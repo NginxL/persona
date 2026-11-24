@@ -377,7 +377,8 @@ func NormalizeSSH(server, target string, always bool, eps []Endpoint) (*SSH, err
 	return &SSH{Server: canonServer, Target: canonTarget, Always: always}, nil
 }
 
-// SetSSH writes or removes (when ssh is nil) the SSH tunnel in link.json at path.
+// SetSSH writes or removes (when ssh is nil) the SSH tunnel in link.json at path. Always is refused while proxy-only
+// mode (Config.ProxyAlways) is on.
 func SetSSH(path string, ssh *SSH) (*SSH, error) {
 	var saved *SSH
 	err := Update(path, func(c *Config) error {
@@ -388,6 +389,9 @@ func SetSSH(path string, ssh *SSH) (*SSH, error) {
 		norm, err := NormalizeSSH(ssh.Server, ssh.Target, ssh.Always, c.Endpoints)
 		if err != nil {
 			return err
+		}
+		if norm.Always && c.ProxyAlways {
+			return ErrSSHAlwaysProxyAlways
 		}
 		c.SSH = norm
 		saved = cloneSSH(norm)

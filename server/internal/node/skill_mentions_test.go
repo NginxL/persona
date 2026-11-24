@@ -96,6 +96,47 @@ func TestSkillCatalogToClaudeDelivery(t *testing.T) {
 	}
 }
 
+func TestAssistantSkillSelectionKeepsSourceProfile(t *testing.T) {
+	fakeClaudeManagedSettings(t)
+	f := cliTestBash(t)
+	f.n.machineID = "computer"
+	cwd, profile := t.TempDir(), t.TempDir()
+	file := filepath.Join(profile, "skills", "review", "SKILL.md")
+	writeFile(t, file, "---\nname: review\ndescription: Review synthetic notes\n---\nRead the notes.\n")
+	start, err := nodeCall(t, f.n, "assistant.send", map[string]any{
+		"cwd": cwd, "launcher": "claude", "config_dir": profile, "permission_mode": "default",
+	})
+	var session struct {
+		ID string `json:"session_id"`
+	}
+	if err != nil || json.Unmarshal(start, &session) != nil || session.ID == "" {
+		t.Fatalf("start source: %s, %v", start, err)
+	}
+
+	out, err := nodeCall(t, f.n, "skills.list", map[string]any{
+		"catalog": true, "session_id": session.ID, "cwd": cwd, "launcher": "claude", "machine_id": f.n.machineID, "skill_owner": "helper",
+	})
+	var catalog assistantskills.Catalog
+	if err != nil || json.Unmarshal(out, &catalog) != nil || len(catalog.Skills) != 1 {
+		t.Fatalf("source catalog: %s, %v", out, err)
+	}
+	text := `<persona-context kind="skill" ref="` + catalog.Skills[0].ID + `">Review</persona-context>` + "\n\nReview the notes"
+	if _, err := nodeCall(t, f.n, "assistant.content", map[string]any{
+		"session_id": session.ID, "cwd": cwd, "launcher": "claude", "skill_owner": "helper", "text": text,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := nodeCall(t, f.n, "assistant.send", map[string]any{
+		"session_id": session.ID, "launcher": "claude", "skill_owner": "helper", "text": text, "resume_only": true, "task_input": true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	cliWait(t, "the selected skill in the source profile", func() bool {
+		delivered := f.file("stdin.jsonl")
+		return strings.Contains(delivered, "Instruction file:") && strings.Contains(delivered, resolved(t, file))
+	})
+}
+
 func TestClaudeSkillCatalogDoesNotBypassCustomizationOrSkillPermissions(t *testing.T) {
 	fakeClaudeManagedSettings(t)
 	profile, cwd := t.TempDir(), t.TempDir()

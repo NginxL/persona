@@ -262,7 +262,7 @@ func sameProcess(pid int, start string) bool {
 		return false
 	}
 	if start != "" {
-		if cur := procStartMark(pid); cur != "" || strings.HasPrefix(start, "linux:") || strings.HasPrefix(start, "windows:") {
+		if cur := procStartMark(pid); cur != "" || strings.HasPrefix(start, "linux:") || strings.HasPrefix(start, "windows:") || strings.HasPrefix(start, "darwin:") {
 			return cur == start
 		}
 	}

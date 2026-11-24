@@ -31,9 +31,11 @@ export function startFailurePlain(raw: string): string | undefined {
   // Remove only the hub's stop/confirmation wrappers. Unknown formats may also contain internal IDs.
   const text = raw.trim().replace(/^continues: cannot (?:stop agent [^/\s]+\/\S+ on to-do \S+|confirm agent [^/\s]+\/\S+ stopped):(?:\s+|$)/, "");
   if (!text || text.startsWith("continues:")) return undefined;
-  const cause = startFailureCause(text);
+  const sentence = readsAsSentence(text);
+  // Quoted file paths in an actionable error can contain words like "timeout".
+  const cause = startFailureCause(sentence ? text.replace(/"(?:[^"\\]|\\.)*"/g, "") : text);
   if (cause) return t(`assistant-tasks.start_cause_${cause}`);
-  return readsAsSentence(text) ? text : undefined;
+  return sentence ? text : undefined;
 }
 
 /** The hand-off card's line: "Didn't start: <why>", or that the details say why. */

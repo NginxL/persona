@@ -11,5 +11,6 @@
   "bad_idle_auto_compact_minutes": "idle_auto_compact_minutesは1〜1440の整数分で指定してください。",
   "bad_idle_auto_compact_tokens": "idle_auto_compact_tokensは10000〜10000000の整数で指定してください。",
   "bad_idle_release_minutes": "idle_release_minutesは5〜55の整数分で指定してください。",
-  "bad_supervision_batch_minutes": "supervision_batch_minutesは0〜1440の整数分で指定してください。"
+  "bad_supervision_batch_minutes": "supervision_batch_minutesは0〜1440の整数分で指定してください。",
+  "bad_cache_keepalive": "キャッシュ更新間隔は 1〜55 分、連続更新の上限は 1〜144 の整数を指定してください。"
 }

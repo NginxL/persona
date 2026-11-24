@@ -1,0 +1,199 @@
+# The top-level declarations server/internal/prompts/assistant.go may have (a method as Type.Method), frozen (#12844):
+# server/internal/archguard/central_lists_test.go fails on any other. A new prompt's types and Render function go in a
+# file of their own, prompts/assistant_<topic>.go (docs/server/architecture.md "Registering a domain's entries").
+# Delete a line once the test's notice names it; add none.
+Acceptance
+AskLater
+AskTodoAnswer
+AskTodoChoice
+AssistantClaudeMD
+AssistantContext
+AssistantGuestClaudeMD
+AssistantHealthClaudeMD
+AssistantMachine
+AssistantSelectedSkill
+AssistantViewRepair
+BriefAccept
+BriefCriterion
+BriefDay
+BriefDayAction
+BriefDayEntry
+BriefDayGap
+BriefDayPart
+BriefDayRunes
+BriefDirection
+BriefDisabledRoutine
+BriefFacts
+BriefFailed
+BriefFollow
+BriefLeader
+BriefProgress
+BriefTask
+BriefWait
+ChatReply
+CodexMemory
+ContextDirection
+DecisionAgentReply
+DirectionNotes
+DirectionNotes.Empty
+DraftPR
+EstimateDue
+FormerEveningRoutines
+FormerMorningRoutines
+HandoffTurn
+InboxToAgent
+Interject
+MainHandoff
+PRFollowupNotice
+Relay
+RelayLater
+RelayLaterItem
+RelayQuote
+RelayRefused
+RenderAcceptance
+RenderAcceptanceInput
+RenderAskLater
+RenderAskTodoAnswer
+RenderAssistantClaudeMD
+RenderAssistantContext
+RenderAssistantGuestClaudeMD
+RenderAssistantHealthClaudeMD
+RenderAssistantSelectedSkills
+RenderAssistantViewRepair
+RenderBriefFacts
+RenderChatReply
+RenderCodexInstructions
+RenderCodexMemory
+RenderDirectionNotes
+RenderDraftPR
+RenderEstimateDue
+RenderEveningRoutine
+RenderInboxToAgent
+RenderInterject
+RenderLostTasks
+RenderMainHandoff
+RenderMemoryDream
+RenderModelRetry
+RenderMorningRoutine
+RenderNorthStarFacts
+RenderPRFollowupNotice
+RenderRefused
+RenderRelay
+RenderRelayLater
+RenderRelayRefused
+RenderRouteAgent
+RenderRouteInput
+RenderRuntimeInstructions
+RenderSegmentHandoff
+RenderSegmentSummary
+RenderSideConversation
+RenderSnapshot
+RenderSnapshotWorkflow
+RenderSpawnNotice
+RenderSupervise
+RenderSuperviseReviewRework
+RenderSuperviseRework
+RenderSupervisionInstructions
+RenderSupervisorStart
+RenderTaskAttachments
+RenderTaskDelivery
+RenderTaskDone
+RenderTaskDoneInput
+RenderTaskDoneWhen
+RenderTaskEnded
+RenderTaskGoal
+RenderTaskNotice
+RenderTaskRun
+RenderTodoDirection
+RenderTurnContext
+RenderUsageRetry
+RenderWorkoutReport
+RenderWorkspaceMention
+RouteInput
+RouteLeader
+RuntimeGate
+RuntimeInstructions
+SegmentHandoff
+Snapshot
+Snapshot.Down
+Snapshot.FollowingLeft
+Snapshot.Up
+Snapshot.Upcoming
+Snapshot.machines
+SnapshotAccept
+SnapshotAgent
+SnapshotAgentCloseout
+SnapshotAgentPlan
+SnapshotApp
+SnapshotApproval
+SnapshotAsked
+SnapshotCalendar
+SnapshotChat
+SnapshotChats
+SnapshotChats.Total
+SnapshotCut
+SnapshotEvent
+SnapshotFollowing
+SnapshotFollowup
+SnapshotMachine
+SnapshotMiss
+SnapshotOmit
+SnapshotOpenTodo
+SnapshotOwner
+SnapshotPlan
+SnapshotProfile
+SnapshotReport
+SnapshotRoutine
+SnapshotTask
+SnapshotTier
+SnapshotWorkflow
+SpawnNotice
+Supervise
+SuperviseAsk
+SuperviseCheck
+SuperviseCloseout
+SuperviseDecision
+SuperviseEntry
+SuperviseInbox
+SuperviseLastReview
+SuperviseOption
+SuperviseParked
+SuperviseReviewRework
+SuperviseReviewed
+SuperviseRework
+SupervisorStart
+TaskAttachments
+TaskDone
+TaskDoneInput
+TaskDoneReply
+TaskEnded
+TaskFile
+TaskNotice
+TaskRun
+TurnContext
+TurnSection
+UrgentCall
+UrgentCallRule
+UrgentRuleBuiltin
+UrgentRuleBuiltinIn
+WorkspaceMention
+WorkspaceProject
+WorkspaceSession
+urgentRuleTemplates
+
+# Pending: the names the PRs open when this freeze landed were adding, each with its PRs
+# (python3 scripts/test/name_freezes.py pending --write, 2026-11-22; drafts idle more than 14 days left out).
+# A name stays when its PR merges; a rerun of --write drops one whose PRs have all closed. No PR opened later gets a
+# line here.
+AssistantSelectedFile #11552 #11612 #11681 #12378
+DispatchEval #4862
+DispatchEvalInput #4862
+DispatchEvalMachine #4862
+DispatchEvalProject #4862
+RenderAssistantSelectedFiles #11552 #11612 #11681 #12378
+RenderDispatchEval #4862
+RenderDispatchEvalInput #4862
+RenderSessionHandoff #11276 #12751
+SupervisePrerequisite #12626
+SuperviseTodoReady #12626
+quoteSelectedFileValue #11552 #12378

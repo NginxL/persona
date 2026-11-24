@@ -384,7 +384,7 @@ func ExtensionCommand(ctx context.Context, args []string, stdin io.Reader, stdou
 		case sb.Enabled && sb.Active:
 			fmt.Fprintln(stdout, i18n.T(l, "extmgr-cli.sandbox_active", i18n.Args{"id": d.ID}))
 		case sb.Enabled:
-			fmt.Fprintln(stdout, i18n.T(l, "extmgr-cli.sandbox_proxy_only", i18n.Args{"id": d.ID, "why": sb.Why}))
+			fmt.Fprintln(stdout, i18n.T(l, "extmgr-cli.sandbox_blocked", i18n.Args{"id": d.ID, "why": sb.Why}))
 		default:
 			fmt.Fprintln(stdout, i18n.T(l, "extmgr-cli.sandbox_off", i18n.Args{"id": d.ID}))
 		}

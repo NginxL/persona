@@ -31,4 +31,29 @@ describe("a previewed page's style sheets beside it", () => {
     const doc = new DOMParser().parseFromString(html, "text/html");
     expect(doc.querySelector("style")?.textContent).toBe(`${imported}\np{margin:0}`);
   });
+
+  it("preserves @import media, supports, and layer conditions and escapes </style> inside inlined sheets", async () => {
+    const read = files({
+      "/site/print.css": "body{display:none}",
+      "/site/dark.css": "html{background:#000}",
+      "/site/layered.css": ".btn{color:red}",
+      "/site/tricky.css": `.note::after{content:"</style><div id=leaked>x</div>"}`,
+    });
+    const page = `<html><head>
+      <link rel="stylesheet" href="tricky.css">
+      <style>
+        @import "print.css" print;
+        @IMPORT url("dark.css") supports(display: grid) screen and (prefers-color-scheme: dark);
+        @import "layered.css" layer(components);
+      </style>
+    </head><body><p>ok</p></body></html>`;
+    const { html } = await inlineSiblings(page, "/site/index.html", read);
+    const doc = new DOMParser().parseFromString(html, "text/html");
+    expect(doc.getElementById("leaked")).toBeNull();
+    const styles = [...doc.querySelectorAll("style")].map((s) => s.textContent ?? "");
+    expect(styles[0]).toContain("<\\/style");
+    expect(styles[1]).toContain("@media print {\nbody{display:none}\n}");
+    expect(styles[1]).toContain("@media screen and (prefers-color-scheme: dark) {\n@supports (display: grid) {\nhtml{background:#000}\n}\n}");
+    expect(styles[1]).toContain("@layer components {\n.btn{color:red}\n}");
+  });
 });

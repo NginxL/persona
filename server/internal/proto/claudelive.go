@@ -24,6 +24,9 @@ const (
 	AttentionClaudeComputerBefore5965 = "它在等电脑上的一个问题或权限请求：手机上答不了，请到电脑上处理"
 	// AttentionClaudeComputer: it waits on a question or a permission prompt, which only the computer can answer.
 	AttentionClaudeComputer = "它在等电脑上的一个问题或权限请求：手机上答不了，请到电脑上处理。下次在 tmux 里或从 Persona 启动 Claude，就能在手机上回答"
+	// AttentionClaudeDesktopComputer: a Claude Desktop session with Persona's permission plugin is still waiting on a
+	// prompt that bypassed hooks (for example an Auto-mode safety review that Claude Code restricts to the computer).
+	AttentionClaudeDesktopComputer = "它在等 Claude 桌面端的安全复核或仅限电脑确认的请求：Claude Code 仅允许在电脑端批准此类操作，请到电脑上处理"
 	// AttentionClaudeAnswer: it waits on a question it asked, and a message through its inbox answers it: the question's
 	// card (node/claudeoutside_ask.go) sends the picks as that message. The hub words it in the app's language; this text
 	// is what the node and the hub match on, so it stays as it is.

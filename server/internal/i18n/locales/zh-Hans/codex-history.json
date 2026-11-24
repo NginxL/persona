@@ -1,0 +1,8 @@
+{
+  "stalled_turn": "{holder} 长时间无输出，可能正在电脑终端等待确认或已停滞；只能同步本地历史",
+  "shared_socket_gone": "app-server 正在运行，但共享控制 socket 已失效（请在电脑上运行 codex app-server daemon restart 后重试）；当前只能同步本地历史",
+  "shared_endpoint_invalid": "app-server 正在运行，但 Persona 无法验证其共享入口；当前只能同步本地历史",
+  "shared_unreachable": "app-server 正在运行，但 Persona 暂时连不上它的共享入口；当前只能同步本地历史",
+  "shared_home_mismatch": "app-server 正在运行，但它的 CODEX_HOME 与此会话不匹配；当前只能同步本地历史",
+  "shared_not_loaded": "app-server 正在运行，但此会话尚未在共享入口加载；当前只能同步本地历史"
+}

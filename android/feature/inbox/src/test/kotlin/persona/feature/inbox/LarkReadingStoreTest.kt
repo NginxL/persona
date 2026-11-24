@@ -6,6 +6,7 @@ import kotlinx.coroutines.*
 import kotlinx.coroutines.test.*
 import org.junit.Assert.*
 import org.junit.Test
+import persona.core.inbox.*
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class LarkReadingStoreTest {

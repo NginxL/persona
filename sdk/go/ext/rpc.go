@@ -72,6 +72,9 @@ func (p *peer) serve(ctx context.Context, r io.Reader) error {
 		}
 		switch {
 		case f.Method != "":
+			if f.ID == "" {
+				continue
+			}
 			rctx := ctx
 			if p.onRead != nil {
 				rctx = p.onRead(ctx, f.Method)

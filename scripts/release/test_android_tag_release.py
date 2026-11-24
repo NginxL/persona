@@ -39,7 +39,7 @@ class AndroidTagReleaseTest(unittest.TestCase):
 
     def fakes(self, signed=b"PK signed by the release key", inspected=None):
         """build writes the unsigned APK, the signer the signed one; inspect reads the APK as aapt2 and apksigner do."""
-        def build(config, checkout, sha, directory, name):
+        def build(config, checkout, sha, directory, name, release_only=False):
             (directory / "unsigned.apk").write_bytes(b"PK unsigned")
             return dict(repository=config["repository"], source_sha=sha, unsigned_sha256="u" * 64,
                         package=config["application_id"], version_code=100001, version_name=name)

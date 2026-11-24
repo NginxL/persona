@@ -7,6 +7,7 @@ import org.junit.Assert.assertNull
 import org.junit.Test
 import persona.core.contracts.JsonCodec
 import persona.core.contracts.api.LarkMention
+import persona.core.inbox.*
 
 /** #576 G122: the iOS LarkMentions contract for Android's group and topic reply boxes. */
 class LarkMentionsTest {

@@ -135,11 +135,7 @@ nonisolated final class LiftScrolled {
 /// parts above the pressed one after the first frame (`AnswerPartsLift`), and Select Text's steps (`LiftUITextView`).
 /// Steps run on the main thread; held by what runs them and stopped when it goes.
 @MainActor final class LiftFrames {
-    #if os(macOS)
-    private var link: Timer?
-    #else
     private var link: CADisplayLink?
-    #endif
     private var step: (() -> Bool)?
     private var skip = 0
 
@@ -149,16 +145,8 @@ nonisolated final class LiftScrolled {
         stop()
         self.step = step
         skip = 1
-        #if os(macOS)
-        let t = Tick(self)
-        // The timer is not handed into the main-actor closure (Swift 6 reads that as a race): the tick keeps it weakly.
-        let l = Timer(timeInterval: 1.0 / 60, repeats: true) { _ in MainActor.assumeIsolated { t.fire() } }
-        t.timer = l
-        RunLoop.main.add(l, forMode: .common)
-        #else
         let l = CADisplayLink(target: Tick(self), selector: #selector(Tick.tick))
         l.add(to: .main, forMode: .common)
-        #endif
         link = l
     }
 
@@ -183,20 +171,10 @@ nonisolated final class LiftScrolled {
 
         init(_ frames: LiftFrames) { self.frames = frames }
 
-        #if os(macOS)
-        /// The timer firing it, which the run loop keeps.
-        weak var timer: Timer?
-
-        func fire() {
-            guard let frames else { timer?.invalidate(); return }
-            MainActor.assumeIsolated { frames.tick() }
-        }
-        #else
         @objc func tick(_ link: CADisplayLink) {
             guard let frames else { return link.invalidate() }
             MainActor.assumeIsolated { frames.tick() }
         }
-        #endif
     }
 }
 

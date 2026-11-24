@@ -55,8 +55,11 @@ class FeedbackGate(
 
     /** Never folded into an earlier one: each carries its own "Undo". */
     @Synchronized
-    override fun notice(message: String, action: FeedbackAction): Boolean {
-        queue.tryEmit(FeedbackNotice(message, action))
+    override fun notice(message: String, action: FeedbackAction): Boolean = notice(message, action, FeedbackStyle.Info)
+
+    @Synchronized
+    override fun notice(message: String, action: FeedbackAction, style: FeedbackStyle): Boolean {
+        queue.tryEmit(FeedbackNotice(message, action, style = style))
         return true
     }
 }

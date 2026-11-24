@@ -5,13 +5,8 @@ import Testing
 struct VisiblePeriodicScheduleTests {
     @Test func phoneSceneInactivityDoesNotChangeMacFocusSemantics() {
         #expect(VisibleScenePolicy.permits(.active))
-        #if os(iOS) || os(visionOS)
         #expect(!VisibleScenePolicy.permits(.inactive))
         #expect(!VisibleScenePolicy.permits(.background))
-        #else
-        #expect(VisibleScenePolicy.permits(.inactive))
-        #expect(VisibleScenePolicy.permits(.background))
-        #endif
     }
 
     @Test func pausedScheduleHasOneCurrentEntryAndThenEnds() {
@@ -71,7 +66,6 @@ struct VisiblePeriodicScheduleTests {
     }
 }
 
-#if os(iOS) || os(visionOS)
 import UIKit
 
 /// Actual hosting scopes, including a partly visible row and a non-scrolling decoration.
@@ -297,4 +291,3 @@ import UIKit
         #expect(moving(try #require(face(in: window))))
     }
 }
-#endif

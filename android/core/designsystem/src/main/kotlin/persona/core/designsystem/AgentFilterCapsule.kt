@@ -13,6 +13,9 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
@@ -166,4 +169,141 @@ private suspend fun LazyListState.place(index: Int, fade: Float, spec: Animation
     val delta = if (item.size > layout.viewportSize.width - 2 * fade) item.offset - (fade - layout.beforeContentPadding)
         else item.offset + item.size / 2f - (layout.viewportStartOffset + layout.viewportEndOffset) / 2f
     if (spec == null) scrollBy(delta) else animateScrollBy(delta, spec)
+}
+
+/**
+ * Glass Inbox section capsule (iOS `CapsuleFilterBar` in `InboxView.swift`): pins the first choice ("Needs you") at the
+ * leading edge so its count stays visible, scrolls the remaining choices with edge fades and reveals the selected choice
+ * automatically, uses soft tinted selection fill instead of a solid dark/white slab, and hosts an optional inline
+ * grouping menu at the trailing end.
+ */
+@Composable
+fun JInboxSectionCapsule(
+    bays: List<Bay>,
+    selected: Int,
+    onSelect: (Int) -> Unit,
+    groupLabel: String,
+    groupActions: List<JAction>,
+    modifier: Modifier = Modifier,
+) {
+    val palette = PersonaTheme.palette
+    val surface = if (PersonaTheme.style == AppStyle.Glass && !palette.dark) Tokens.Semantic.Glass.Light.pageBackground else palette.surfaceOpaque
+    val textScale = LocalDensity.current.fontScale.coerceAtLeast(1f)
+    val visualHeight = AgentFilterTokens.height * textScale
+    val fadeWidth = AgentFilterTokens.fade * textScale
+    val scroll = rememberScrollState()
+    var menu by remember { mutableStateOf(false) }
+    val reduceMotion = PersonaTheme.reduceMotion
+    val fadeSpec: AnimationSpec<Float> = if (reduceMotion) SharedMotion.instant() else SharedMotion.reveal()
+    val measured = scroll.viewportSize > 0
+    val leading = animateFloatAsState(if (measured && scroll.canScrollBackward) 1f else 0f, fadeSpec, label = "inbox-capsule-leading")
+    val trailing = animateFloatAsState(if (measured && scroll.canScrollForward) 1f else 0f, fadeSpec, label = "inbox-capsule-trailing")
+    val fading by remember { derivedStateOf { leading.value > 0f || trailing.value > 0f } }
+    val pinned = if (bays.size > 1) 1 else 0
+    val fadeModifier = if (fading) Modifier.agentFilterEdgeFade(surface, fadeWidth, { leading.value }, { trailing.value }) else Modifier
+
+    @Composable
+    fun choiceChip(index: Int) {
+        val bay = bays[index]
+        val isSelected = index == selected
+        val spoken = bay.countTone?.let { spokenCount(bay.label, bay.count) }
+        val type = PersonaTheme.type.callout.copy(fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Medium)
+        Row(
+            Modifier
+                .revealWhenSelected(scroll.takeIf { index >= pinned }, isSelected, fadeWidth)
+                .heightIn(min = Tokens.MinTouch.android)
+                .clip(CircleShape)
+                .selectable(selected = isSelected, role = Role.Tab, onClick = { onSelect(index) })
+                .semantics(mergeDescendants = true) {
+                    spoken?.let { contentDescription = it }
+                }
+                .padding(vertical = Tokens.Space.xs),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Row(
+                Modifier
+                    .heightIn(min = AgentFilterTokens.chipHeight)
+                    .clip(CircleShape)
+                    .background(if (isSelected) palette.accent.copy(alpha = AgentFilterTokens.selectedFillAlpha) else palette.surfaceOpaque.copy(alpha = 0f))
+                    .padding(horizontal = AgentFilterTokens.chipPadding),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(AgentFilterTokens.contentGap),
+            ) {
+                Text(
+                    bay.label,
+                    style = type,
+                    color = if (isSelected) palette.accent else palette.ink,
+                    maxLines = 1,
+                    softWrap = false,
+                )
+                val count = bay.count
+                val tone = bay.countTone
+                if (count != null && tone != null) {
+                    JToneCount(count, tone, onFill = false)
+                }
+            }
+        }
+    }
+
+    Box(modifier.fillMaxWidth().heightIn(min = Tokens.MinTouch.android)) {
+        Box(
+            Modifier
+                .align(Alignment.Center)
+                .fillMaxWidth()
+                .height(visualHeight)
+                .clip(CircleShape)
+                .background(surface)
+                .border(AgentFilterTokens.stroke, palette.line, CircleShape),
+        )
+        Row(
+            Modifier
+                .align(Alignment.Center)
+                .fillMaxWidth()
+                .heightIn(min = Tokens.MinTouch.android)
+                .clip(CircleShape),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            if (pinned > 0) {
+                Box(Modifier.padding(start = AgentFilterTokens.inset)) { choiceChip(0) }
+                Row(
+                    Modifier
+                        .weight(1f)
+                        .then(fadeModifier)
+                        .horizontalScroll(scroll)
+                        .padding(start = AgentFilterTokens.gap, end = AgentFilterTokens.inset),
+                    horizontalArrangement = Arrangement.spacedBy(AgentFilterTokens.gap),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    (pinned until bays.size).forEach { choiceChip(it) }
+                }
+            } else {
+                Row(
+                    Modifier
+                        .weight(1f)
+                        .then(fadeModifier)
+                        .horizontalScroll(scroll)
+                        .padding(horizontal = AgentFilterTokens.inset),
+                    horizontalArrangement = Arrangement.spacedBy(AgentFilterTokens.gap),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    bays.indices.forEach { choiceChip(it) }
+                }
+            }
+            if (groupActions.isNotEmpty()) {
+                Box(Modifier.width(AgentFilterTokens.stroke).height(AgentFilterTokens.separatorHeight).background(palette.line))
+                Box(
+                    Modifier
+                        .width(AgentFilterTokens.groupWidth)
+                        .heightIn(min = Tokens.MinTouch.android)
+                        .testTag("inbox-grouping")
+                        .clickable(role = Role.Button) { menu = true }
+                        .semantics { contentDescription = groupLabel },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    JIcon(PersonaIcons.filter, null, size = AgentFilterTokens.icon, tint = palette.ink, decorative = true)
+                    JMenu(menu, { menu = false }, groupActions)
+                }
+            }
+        }
+    }
 }

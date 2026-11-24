@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 // The sidebar's pages as arranged in Settings › General › Sidebar pages: the order, the list and More, the defaults for new pages.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { arrangePages, EXTENSION_CAP, getSidebarPrefs, inList, movePage, ordered, parsePrefs, resetSidebarPrefs, setPageOrder, setPageShown, type SidebarPrefs } from "./sidebar-pages";
+import { arrangePages, EXTENSION_CAP, getSidebarPrefs, inList, movePage, ordered, parsePrefs, resetSidebarPrefs, setMoreShown, setPageOrder, setPageShown, type SidebarPrefs } from "./sidebar-pages";
 
 const NONE: SidebarPrefs = { order: [], shown: [], hidden: [] };
 const pages = (...ks: string[]) => ks.map((k) => ({ k }));
@@ -50,6 +50,15 @@ describe("inList", () => {
 });
 
 describe("arrangePages", () => {
+  it("hides More without losing its pages or moving them into the sidebar", () => {
+    const prefs: SidebarPrefs = { order: [], shown: [], hidden: ["inbox", "health"], more: false };
+    const arranged = arrangePages(pages("home", "inbox", "health", "kb", "settings"), prefs);
+    expect(keys(arranged.shown)).toEqual(["home", "kb", "settings"]);
+    expect(arranged.more).toEqual([]);
+    expect(arrangePages(pages("home", "inbox", "health", "kb", "settings"), { ...prefs, more: true }).more.map((p) => p.k)).toEqual(["inbox", "health"]);
+    expect(arrangePages(pages("home", "kb", "settings"), { ...prefs, hidden: [] }).more).toEqual([]);
+  });
+
   it("splits into the list and 更多, both in the user's order", () => {
     const { shown, more } = arrangePages(pages("home", "inbox", "health", "kb", "settings"), { order: ["kb", "home"], shown: [], hidden: ["health", "inbox"] });
     expect(keys(shown)).toEqual(["kb", "home", "settings"]);
@@ -69,6 +78,19 @@ describe("the stored choices", () => {
     expect(parsePrefs("{not json")).toEqual(NONE);
     expect(parsePrefs(JSON.stringify({ order: [1, "home"], shown: "x" }))).toEqual({ order: ["home"], shown: [], hidden: [] });
   });
+  it("persists hiding More alone, round-trips the hub shape, and restores the default", () => {
+    expect(getSidebarPrefs().more).toBeUndefined();
+    setMoreShown(false);
+    expect(getSidebarPrefs()).toEqual({ order: [], shown: [], hidden: [], more: false });
+    expect(parsePrefs(localStorage.getItem("sidebar.pages")).more).toBe(false);
+    expect(parsePrefs('{"order":[],"shown":[],"hidden":[],"more":"no"}')).toEqual(NONE);
+    setMoreShown(true);
+    expect(getSidebarPrefs().more).toBe(true);
+    resetSidebarPrefs();
+    expect(getSidebarPrefs()).toEqual(NONE);
+    expect(localStorage.getItem("sidebar.pages")).toBeNull();
+  });
+
   it("ignores putting 设置 away", () => {
     setPageShown("settings", false);
     expect(getSidebarPrefs()).toEqual(NONE);

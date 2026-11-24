@@ -31,8 +31,8 @@ extension Theme {
         /// A status dot (online, unread).
         static let dot = "circle.fill"
         static let time = "clock"
-        /// Someday on a to-do (#10465): the owner's own "not now", put aside for some other day (its swipe, its menu and
-        /// the list's Show Someday). Not `time`, which is Waiting's clock.
+        /// Someday on a to-do (#10465): the owner's own "not now", put aside for some other day (its swipe and its
+        /// menu). Not `time`, which is Waiting's clock.
         static let someday = "moon.stars.fill"
         /// An agent that only waits on background commands (Waiting in the Background, #6045): the mark in place of its dot.
         static let backgroundWaiting = "clock.fill"
@@ -307,6 +307,8 @@ extension Theme {
         /// Archive a conversation (out of the list, kept under Archived) and bring it back.
         static let archive = "archivebox"
         static let unarchive = "tray.and.arrow.up"
+        /// Move To…: file a chat or an Agent under one of the owner's long-running matters, or on its own (#11516).
+        static let moveTo = "rectangle.stack.badge.plus"
         static let mute = "bell.slash"
         static let unmute = "bell"
         /// An Inbox rule: where a chat's, sender's or repository's items go and what the AI twin does with them.
@@ -395,6 +397,15 @@ extension Theme {
         static let contexts = "rectangle.stack"
         static let space = "square.stack.3d.up"
         static let spaceFilled = "square.stack.3d.up.fill"
+        /// A domain space (#13500, docs/assistant/health.md "Tracks and kinds"): one part of the user's life with its own
+        /// conversations and notes, the Assistant sidebar's Spaces section and its fallback mark. Not `space`, which is an
+        /// Agents engine's space of agents.
+        static let domainSpace = "square.3.layers.3d"
+        /// A domain space's own icons (the server's `layers` … `sun` tokens, `SpaceIcon`) where no meaning above has them.
+        static let spaceBook = "book.closed"
+        static let spaceFlag = "flag"
+        static let spaceSun = "sun.haze"
+        static let spaceSmile = "face.smiling.inverse"
         /// Open Space: go into a space from its menu.
         static let openSpace = "arrow.right.square"
         /// A busy space's idle agents folded into one row (N more idle).
@@ -647,12 +658,8 @@ extension Theme {
         static let pairing = "link.badge.plus"
         /// Settings › Connectors: the data sources Persona reads and acts in (this device, mail, Lark).
         static let connectors = "point.3.connected.trianglepath.dotted"
-        /// This device as a connector (its contacts, calendar, photos…): iPhone, iPad or Mac.
-        #if os(macOS)
-        static let thisDevice = laptop
-        #else
+        /// This device as a connector (its contacts, calendar, photos…): iPhone or iPad.
         static let thisDevice = "iphone.gen3"
-        #endif
         /// AI Draft Reply: a reply drafted in the user's voice.
         static let draftReply = "pencil.and.scribble"
         /// A drafted reply that will not go out: its message was handled elsewhere first (a message card, #4797).
@@ -665,6 +672,9 @@ extension Theme {
         static let quickCommands = "slash.circle"
         /// The day's Today card at the top of the assistant's conversation (docs/assistant/unified-entry.md).
         static let today = "sun.max.fill"
+        /// To-dos' Today place (#10465, DESIGN_SYSTEM 3.5 "To-dos places"): an outline among the sidebar's outlined
+        /// places, and its empty state.
+        static let todoToday = "sun.min"
         /// Something done on the phone from the conversation: an event added to its calendar, a reminder.
         static let addedEvent = "calendar.badge.plus"
         static let addedReminder = "checklist.checked"
@@ -733,6 +743,10 @@ extension Theme {
         /// Health: the health space (docs/assistant/health.md), its entry and its conversations' mark.
         static let health = "heart"
         static let healthFilled = "heart.fill"
+        /// Health intake and the iPhone's Activity summary.
+        static let water = pluginDroplet
+        static let protein = "fork.knife"
+        static let fitness = "figure.run"
         /// What stays private (Health's note on where its conversations and memory are kept).
         static let privacy = "checkmark.shield"
         /// A tool the app has no symbol for.

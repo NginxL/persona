@@ -21,5 +21,6 @@
   "question_more_other": "还有 {count} 个问题",
   "usage_limit": "订阅的用量额度用完了，重置后再让它继续：{error}",
   "private_card": "Persona 需要你回复，打开 Persona 查看。",
-  "registration_required": "这台设备的通知登记已失效。打开 Persona 的「设置 › 通知」查看原因。"
+  "registration_required": "这台设备的通知登记已失效。打开 Persona 的「设置 › 通知」查看原因。",
+  "sealed_fallback": "有新消息"
 }

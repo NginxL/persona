@@ -77,7 +77,8 @@ func TestStopReportingStopsItsTasks(t *testing.T) {
 		t.Fatalf("interrupted %q", got)
 	}
 	agentTurn(s, f, proto.StatusDone, "停在一半", 0)
-	time.Sleep(10 * quietNoticeDelay)
+	// Force the delayed quiet-notice path: after /stop it has no pending notice to send.
+	s.sendQuietNotice(onlyTodo(s).ID)
 	if n := f.sentTo("lark1"); n != 0 {
 		t.Fatalf("the stopped conversation got %d notice(s)", n)
 	}
@@ -160,6 +161,54 @@ func TestStopReportingDropsQueuedNotices(t *testing.T) {
 	}
 	if q, _ := s.queuedRelays(); len(q["lark1"]) != 0 {
 		t.Fatalf("still queued: %q", q["lark1"])
+	}
+}
+
+// A supervision signal already gathered when /stop arrives is dropped with the reporting conversation's notices;
+// it must not surface in main after the digest timer fires (#3308, #5732).
+func TestStopReportingDropsPendingSupervision(t *testing.T) {
+	s, f := reportingWithTask(t)
+	todo := onlyTodo(s)
+	s.signal(superviseSignal{Todo: todo.ID, Kind: sigUnjudged, Key: "before-stop", Detail: "ready"})
+	if w := serve(s, "POST", "/api/v1/assistant/conversations/lark1/stop", ""); w.Code != 200 {
+		t.Fatalf("%d %s", w.Code, w.Body)
+	}
+	waitFor(t, "the digest timer after stop", func() bool {
+		s.supervise.mu.Lock()
+		defer s.supervise.mu.Unlock()
+		return s.supervise.timer == nil
+	})
+	// The timer clears its handle before checking the now-empty pending list. Wait for that callback to finish too.
+	s.supervise.dedupMu.Lock()
+	s.supervise.dedupMu.Unlock()
+	if got := f.notices(); len(got) != 0 {
+		t.Fatalf("pending supervision reached main after stop: %q", got)
+	}
+	s.supervise.mu.Lock()
+	_, pending := s.supervise.pending[todo.ID+"|"+sigUnjudged]
+	s.supervise.mu.Unlock()
+	if pending {
+		t.Fatal("the stopped task's signal is still pending")
+	}
+}
+
+// The relay queue survives a manager restart even though supervise.queued does not. /stop must still remove the old
+// persisted supervision message for the stopped reporter's task (#5732).
+func TestStopReportingDropsSupervisionQueuedBeforeRestart(t *testing.T) {
+	s, _ := reportingWithTask(t)
+	todo := onlyTodo(s)
+	if s.queueRelay("conv1", relayMsg{From: superviseTool, Tool: superviseTool, Text: "📋 督办 " + todo.ID, At: time.Now().UTC()}) == 0 {
+		t.Fatal("could not queue the legacy supervision message")
+	}
+	// A restart loses this in-memory index, but not the persisted relay queue above.
+	s.supervise.mu.Lock()
+	s.supervise.queued = nil
+	s.supervise.mu.Unlock()
+	if w := serve(s, "POST", "/api/v1/assistant/conversations/lark1/stop", ""); w.Code != 200 {
+		t.Fatalf("%d %s", w.Code, w.Body)
+	}
+	if q, _ := s.queuedRelays(); len(q["conv1"]) != 0 {
+		t.Fatalf("the stopped task's pre-restart supervision is still queued: %q", q["conv1"])
 	}
 }
 

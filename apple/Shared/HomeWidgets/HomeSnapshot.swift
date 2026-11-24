@@ -28,6 +28,8 @@ nonisolated struct HomeSnapshot: Codable, Hashable, Sendable {
     var machines: [Machine] = []
     var recording: Recording?
     var health: Health?
+    var intake: Intake?
+    var activity: Activity?
     var inbox: Inbox?
 
     /// After this long without a write the widgets show the time of the data and the persona offline (gray): numbers
@@ -236,10 +238,54 @@ nonisolated struct HomeSnapshot: Codable, Hashable, Sendable {
         var stepsAverage: Int?
         /// Hours asleep last night.
         var sleepHours: Double?
+        /// The previous seven days with sleep data, excluding today.
+        var sleepAverage: Double?
+        /// The hub day boundary for the new four-cell widget. The existing Health widget ignores it.
+        var dayEnds: Double?
         var restingHeartRate: Int?
         var activeEnergy: Int?
         /// Steps a day for the last 7 days, today last.
         var week: [Int] = []
+    }
+
+    /// Hub-owned day buckets. Optional at the top level so version 1 snapshots remain readable.
+    nonisolated struct Intake: Codable, Hashable, Sendable {
+        var supported: Bool
+        /// An opaque app-side hub scope; never a credential. Older snapshots omit it.
+        var scope: String?
+        var day: String = ""
+        var zone: String = "UTC"
+        var nextDay: Double = 0
+        var water = Portion(today: 0, goal: 2000)
+        var protein = Portion(today: 0, goal: 60)
+        var days: [IntakeDay] = []
+    }
+
+    nonisolated struct Portion: Codable, Hashable, Sendable {
+        var today: Double
+        var goal: Double
+    }
+
+    nonisolated struct IntakeDay: Codable, Hashable, Sendable {
+        var date: String
+        var water: Double
+        var protein: Double
+    }
+
+    /// Activity values, never rendered as rings in a widget. Missing goals mean missing rows, not zero goals.
+    nonisolated struct Activity: Codable, Hashable, Sendable {
+        nonisolated enum MoveMode: String, Codable, Sendable { case energy, time }
+        var date: Double
+        var dayEnds: Double?
+        var moveMode: MoveMode = .energy
+        var move: Double = 0
+        var moveGoal: Double = 0
+        var exercise: Double = 0
+        var exerciseGoal: Double?
+        var stand: Double = 0
+        var standGoal: Double?
+        var isPaused = false
+        var needsAccess = false
     }
 
     // MARK: Inbox

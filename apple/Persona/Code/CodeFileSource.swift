@@ -1,7 +1,5 @@
 import SwiftUI
-#if canImport(UIKit)
 import UIKit
-#endif
 
 /// How each kind of token looks: `Theme.Syntax` colors (and the diff colors), bold headings and strong text,
 /// italic emphasis, in the code font.
@@ -9,13 +7,8 @@ import UIKit
     static let font = CodeMetrics.font
     private static let bold = UIFont.monospacedSystemFont(ofSize: font.pointSize, weight: .bold)
     private static let italic: UIFont = {
-        #if os(iOS) || os(visionOS)
         guard let d = font.fontDescriptor.withSymbolicTraits(.traitItalic) else { return font }
         return UIFont(descriptor: d, size: font.pointSize)
-        #else
-        // AppKit's descriptor always comes back; the font from it may not.
-        return UIFont(descriptor: font.fontDescriptor.withSymbolicTraits(.italic), size: font.pointSize) ?? font
-        #endif
     }()
 
     static let plain: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: UIColor.label]

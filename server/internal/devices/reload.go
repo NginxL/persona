@@ -2,9 +2,12 @@ package devices
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"time"
+
+	"github.com/nwverse/persona/server/internal/devicewire"
 
 	"github.com/nwverse/persona/server/internal/nodeproto"
 	"github.com/nwverse/persona/server/internal/rpc"
@@ -67,6 +70,18 @@ func (m *Machine) call(ctx context.Context, method string, params any, out any) 
 	return m.callWithSnapshot(ctx, method, params, out, nil)
 }
 
+func taskExecutionCall(method string, params any) bool {
+	if method == "assistant.directory" {
+		return true
+	}
+	if method != "assistant.send" {
+		return false
+	}
+	raw, _ := json.Marshal(params)
+	var fields map[string]json.RawMessage
+	return json.Unmarshal(raw, &fields) == nil && string(fields["task_execution"]) == "true"
+}
+
 // callWithSnapshot leaves a successful call's actual RPC attempt in snapshot, including after a wait or retry.
 func (m *Machine) callWithSnapshot(ctx context.Context, method string, params any, out any, snapshot *sessionSnapshot) (err error) {
 	start, tries := time.Now(), 0
@@ -75,6 +90,15 @@ func (m *Machine) callWithSnapshot(ctx context.Context, method string, params an
 	for {
 		tries++
 		err := m.callOnce(ctx, method, params, out, snapshot)
+		m.mu.Lock()
+		updateHandoff := m.updateHandoff
+		m.mu.Unlock()
+		if updateHandoff && restartingError(err) {
+			return err // an update handoff refuses new headless work until its deployment settles, not a short reconnect
+		}
+		if devicewire.TaskExecutionWaitEnabled(ctx) && taskExecutionCall(method, params) && restartingError(err) {
+			return err // the scheduler's longer compatibility bound owns this pre-delivery wait
+		}
 		notSent := errors.Is(err, errOffline) || errors.Is(err, rpc.ErrSuspended) || errors.Is(err, rpc.ErrClosed) && !errors.Is(err, rpc.ErrDropped)
 		if !restartingError(err) && !(notSent && m.expectedReload()) {
 			return err

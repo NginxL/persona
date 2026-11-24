@@ -169,12 +169,16 @@ func TestStartScreenHelperJoinsTheStreamAndEndsWithScreenSharing(t *testing.T) {
 		t.Fatalf("video streams bound to the pair = %d, want 1", bound)
 	}
 
+	n.screens.mu.Lock()
+	video := n.screens.byID["K"].video[0]
+	n.screens.mu.Unlock()
 	_ = tee.Close() // screen sharing ends: the video ends with it, and its slot is released once
 	select {
 	case <-streamClosed: // The stream pump has closed the helper connection again.
 	case <-time.After(2 * time.Second):
 		t.Fatal("the screen-sharing stream ended without closing the video stream")
 	}
+	_ = video.Close() // closing the same helper again must not release twice
 	if got := released.Load(); got != 1 {
 		t.Fatalf("slot released %d times, want 1", got)
 	}

@@ -14,6 +14,16 @@ nonisolated enum WatchFaceTokens {
     /// Behind the complication where the face shows a background (watchOS tints or drops it on others).
     static let background = Color.black
 
+    /// Intake complications mirror Theme.Icon and share the app's intake palette, including in single-color faces.
+    static let waterSymbol = "drop" // icon: Theme.Icon.water
+    static let proteinSymbol = "fork.knife" // icon: Theme.Icon.protein
+    static let intakeTitle = Font.system(.headline)
+    static let intakeCaption = Font.system(.caption2)
+    static let intakeSpacing: CGFloat = 2
+    static let intakeMinimumScale: CGFloat = 0.4
+    static let intakeLargestTypeSize = DynamicTypeSize.xxxLarge
+    static func intakeSymbol(_ name: String) -> Image { Image(systemName: name) }
+
     /// The Record complication (`MeetingRecordingComplication`, docs/apple/recording.md「Apple Watch」): the system's red
     /// of a recording, its symbol (`Theme.Icon.recording`, which the extension doesn't build) and the circular face's
     /// glyph size.

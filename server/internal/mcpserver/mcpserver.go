@@ -21,6 +21,7 @@ import (
 	"github.com/nwverse/persona/server/internal/nodeclient"
 
 	"github.com/nwverse/persona/server/internal/proto"
+	"github.com/nwverse/persona/server/internal/toolschema"
 )
 
 type request struct {
@@ -497,6 +498,9 @@ func listToolsOnce(ctx context.Context, previous toolSnapshot) (toolSnapshot, er
 		if len(schema) == 0 {
 			schema = json.RawMessage(`{"type":"object","properties":{}}`)
 		}
+		// Gemini (Agy) refuses every request of a session if one tool's schema has an empty string in an enum, so
+		// what it rejects leaves the schema here, whoever declared the tool (internal/toolschema).
+		schema = toolschema.Portable(schema)
 		if t.Name == clipboardSetTool && !isGuest() { // its file argument is read here (clipboard_file.go)
 			schema, description = withClipboardFile(schema, description)
 		}

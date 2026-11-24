@@ -1,10 +1,6 @@
 import Foundation
 import ImageIO
-#if canImport(UIKit)
 import UIKit
-#elseif canImport(AppKit)
-import AppKit
-#endif
 import PersonaWire
 
 /// The personas on this phone (docs/apple/persona.md「On the phone」): which one is chosen, what the hub offers, and the packages
@@ -837,11 +833,7 @@ final class PersonaFrames: Sendable {
         var total = 0.0
         for i in 0..<CGImageSourceGetCount(src) {
             guard let cg = CGImageSourceCreateImageAtIndex(src, i, opts) else { continue }
-            #if os(iOS) || os(visionOS)
             images.append(UIImage(cgImage: cg))
-            #else
-            images.append(NSImage(cgImage: cg, size: NSSize(width: cg.width, height: cg.height))) // AppKit's own init: callable off the main actor
-            #endif
             let props = CGImageSourceCopyPropertiesAtIndex(src, i, nil) as? [CFString: Any]
             let png = props?[kCGImagePropertyPNGDictionary] as? [CFString: Any]
             let delay = (png?[kCGImagePropertyAPNGUnclampedDelayTime] as? Double) ?? (png?[kCGImagePropertyAPNGDelayTime] as? Double) ?? 0

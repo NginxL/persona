@@ -26,9 +26,11 @@ import (
 //
 //   - Codex app-server can return the limits together with the account ID. The node sends only a digest of that ID.
 //     When the app-server cannot supply windows, read the newest rollout's token_count event without an account ID.
-//   - Claude Code hands the limits to a status line command (the rate_limits field of its JSON input) and keeps them
-//     nowhere else; the API that has them needs the OAuth token, so it is skipped too. The way in is opt-in: a
-//     status line wrapper drops the JSON into <node dir>/usage/claude*.json, which is read here.
+//   - Claude Code hands the limits to a status line command (the rate_limits field of its JSON input), and in
+//     stream-json to the process that runs it (a rate_limit_event after each reply, usagewindows_claudestream.go,
+//     read for the node's own Claude assistant conversations). It keeps them nowhere else; the API that has them
+//     needs the OAuth token, so it is skipped too. For interactive sessions the way in is opt-in: a status line
+//     wrapper drops the JSON into <node dir>/usage/claude*.json, which is read here.
 //
 // The node polls every usageWindowsEvery, keeps the last sample of every source (a source that goes quiet keeps its
 // number for three days), and answers usage.windows from that. hub.json machines[].usage_windows false turns it off.

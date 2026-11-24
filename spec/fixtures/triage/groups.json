@@ -213,7 +213,7 @@
               "a"
             ]
           ],
-          "just_done": [
+          "done": [
             [
               "b"
             ]
@@ -287,7 +287,7 @@
     },
     {
       "name": "failed_start_superseded_by_finished_work",
-      "description": "没开起来的那条，同一行里已经有真正做完的（同一计划）：跟着去「刚完成」，不算开着，排在做完的那条后面；同一行里只有别的没开起来的：照旧等你重试。",
+      "description": "没开起来的那条，同一行里已经有真正做完的（同一计划）：立即归入已完成，不算开着，排在做完的那条后面；同一行里只有别的没开起来的：照旧等你重试。",
       "source": [
         "docs/assistant/todo-status-sop.md \"Decision table\"",
         "web/src/lib/todo-triage.ts supersededFailedStarts"
@@ -372,7 +372,7 @@
               "f3"
             ]
           ],
-          "just_done": [
+          "done": [
             [
               "done1",
               "f1"
@@ -653,7 +653,7 @@
               "stale"
             ]
           ],
-          "just_done": [
+          "done": [
             [
               "accepted"
             ],
@@ -670,7 +670,7 @@
     },
     {
       "name": "unfinished_before_just_finished_and_seen_in_done",
-      "description": "未完成的排在「刚做完」前面：同一件事里没做完的那条领头；看过的（知道了，或打开过）直接进「已完成」，不算未完成。",
+      "description": "未完成的工作仍优先于已完成；显式关闭和看过的普通完成轮次都直接进「已完成」，不算未完成。",
       "source": [
         "docs/assistant/todo-status-sop.md \"Sections\"",
         "docs/assistant/todo-status-sop.md \"Seen\"",
@@ -778,14 +778,12 @@
               "fix"
             ]
           ],
-          "just_done": [
-            [
-              "logs"
-            ]
-          ],
           "done": [
             [
               "speed"
+            ],
+            [
+              "logs"
             ],
             [
               "notes"
@@ -797,6 +795,139 @@
         "finished": 3
       },
       "from_test": "web/src/lib/todo-triage.test.ts > unfinished to-dos lead a row and come before Just finished; seen ones are Done"
+    },
+    {
+      "name": "cancelled_does_not_supersede_failed_start",
+      "description": "取消不算真正完成，不让同一计划的启动失败卡看似已完成。",
+      "source": [
+        "docs/assistant/todo-status-sop.md \"Decision table\"",
+        "web/src/lib/todo-triage.ts supersededFailedStarts"
+      ],
+      "input": {
+        "now": "2026-11-10T12:00:00Z",
+        "sessions": [],
+        "todos": [
+          {
+            "id": "failed",
+            "title": "Deploy the panel",
+            "created_at": "2026-11-09T00:00:00.000Z",
+            "updated_at": "2026-11-10T11:00:00.000Z",
+            "done_at": "2026-11-10T11:00:00.000Z",
+            "start_error": "no launcher",
+            "agents": [],
+            "origin": "conv",
+            "plan_id": "p1"
+          },
+          {
+            "id": "cancelled-legacy",
+            "title": "Deploy the panel elsewhere",
+            "created_at": "2026-11-09T00:00:00.000Z",
+            "updated_at": "2026-11-10T10:00:00.000Z",
+            "done_at": "2026-11-10T10:00:00.000Z",
+            "done_by": "review",
+            "done_reason": "No longer needed",
+            "agents": [],
+            "origin": "conv",
+            "plan_id": "p1",
+            "supervision": {
+              "supervisor": "main",
+              "state": "cancelled",
+              "reviews": []
+            }
+          }
+        ],
+        "include_quiet": true
+      },
+      "expected": {
+        "sections": {
+          "waiting": [
+            [
+              "failed"
+            ]
+          ],
+          "cancelled": [
+            [
+              "cancelled-legacy"
+            ]
+          ]
+        },
+        "open": 1,
+        "shelved": 0,
+        "finished": 0,
+        "cancelled": 1
+      }
+    },
+    {
+      "name": "cancelled_has_its_own_row_and_count",
+      "description": "取消与打开、已完成分成三行，计数独立，不混入 finished。",
+      "source": [
+        "docs/assistant/todo-status-sop.md \"Related to-dos\"",
+        "web/src/lib/todo-triage.ts triageTodos"
+      ],
+      "input": {
+        "now": "2026-11-10T12:00:00Z",
+        "sessions": [],
+        "todos": [
+          {
+            "id": "open",
+            "title": "Same work",
+            "created_at": "2026-11-09T00:00:00.000Z",
+            "updated_at": "2026-11-10T11:00:00.000Z",
+            "done_at": null,
+            "agents": [],
+            "origin": "conv",
+            "plan_id": "p1"
+          },
+          {
+            "id": "completed",
+            "title": "Same work",
+            "created_at": "2026-11-09T00:00:00.000Z",
+            "updated_at": "2026-11-10T10:00:00.000Z",
+            "done_at": "2026-11-10T10:00:00.000Z",
+            "done_by": "review",
+            "agents": [],
+            "origin": "conv",
+            "plan_id": "p1"
+          },
+          {
+            "id": "cancelled",
+            "title": "Same work",
+            "created_at": "2026-11-09T00:00:00.000Z",
+            "updated_at": "2026-11-10T09:00:00.000Z",
+            "done_at": "2026-11-10T09:00:00.000Z",
+            "done_by": "review",
+            "cancelled_at": "2026-11-10T09:00:00.000Z",
+            "cancelled_reason": "Superseded by a different approach",
+            "agents": [],
+            "origin": "conv",
+            "plan_id": "p1"
+          }
+        ],
+        "include_quiet": true
+      },
+      "expected": {
+        "sections": {
+          "other": [
+            [
+              "open"
+            ]
+          ],
+          "done": [
+            [
+              "completed"
+            ]
+          ],
+          "cancelled": [
+            [
+              "cancelled"
+            ]
+          ]
+        },
+        "open": 1,
+        "shelved": 0,
+        "finished": 1,
+        "cancelled": 1
+      }
     },
     {
       "name": "concern_open_related_task",

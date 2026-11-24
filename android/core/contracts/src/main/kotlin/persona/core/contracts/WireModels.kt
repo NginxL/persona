@@ -383,6 +383,34 @@ data class Health(
 @Serializable(with = HeartbeatSerializer::class)
 data class Heartbeat(val interval: Int, @SerialName("pong_timeout") val pongTimeout: Int)
 
+/** The limits for one message's pictures, from hello or an images_over_limit refusal. Absent on older hubs. */
+@KeepGeneratedSerializer
+@Serializable(with = ImageLimitsSerializer::class)
+data class ImageLimits(
+    @SerialName("request_bytes") val requestBytes: Long = 32 * 1024 * 1024,
+    @SerialName("image_bytes") val imageBytes: Long = 3_750_000,
+    @SerialName("max_side") val maxSide: Int = 1600,
+    @SerialName("per_message") val perMessage: Int = 20,
+)
+
+/** The hub's default set and any per-Agent overrides, not a second definition of its default limits. */
+@KeepGeneratedSerializer
+@Serializable(with = ImageLimitsTableSerializer::class)
+data class ImageLimitsTable(
+    @SerialName("request_bytes") val requestBytes: Long = 32 * 1024 * 1024,
+    @SerialName("image_bytes") val imageBytes: Long = 3_750_000,
+    @SerialName("max_side") val maxSide: Int = 1600,
+    @SerialName("per_message") val perMessage: Int = 20,
+    val agents: Map<String, ImageLimits> = emptyMap(),
+) {
+    fun forAgent(agent: String): ImageLimits = agents[agent.ifEmpty { "claude" }]
+        ?: ImageLimits(requestBytes, imageBytes, maxSide, perMessage)
+}
+
+@KeepGeneratedSerializer
+@Serializable(with = ImageCountSerializer::class)
+data class ImageCount(val images: Int = 0)
+
 /** Keep refusal details flat and preserve absent delivery/retry information as null. */
 @KeepGeneratedSerializer
 @Serializable(with = ErrorBodySerializer::class)
@@ -395,6 +423,9 @@ data class ErrorBody(
     val field: String? = null, val message: String? = null,
     /** What the node said when the hub put [error] in the app's language (#5514); a structured detail reads as absent. */
     val detail: String? = null,
+    /** The limit the hub applied and how many pictures the message carried for an images_over_limit refusal. */
+    val limit: ImageLimits? = null,
+    val got: ImageCount? = null,
 )
 
 object MachineSystemSerializer : WireSerializer<MachineSystem>(MachineSystem.generatedSerializer())
@@ -436,6 +467,9 @@ object EndpointsResponseSerializer : WireSerializer<EndpointsResponse>(Endpoints
 object HealthSerializer : WireSerializer<Health>(Health.generatedSerializer())
 object HeartbeatSerializer : WireSerializer<Heartbeat>(Heartbeat.generatedSerializer())
 object ErrorBodySerializer : WireSerializer<ErrorBody>(ErrorBody.generatedSerializer())
+object ImageLimitsSerializer : WireSerializer<ImageLimits>(ImageLimits.generatedSerializer())
+object ImageLimitsTableSerializer : WireSerializer<ImageLimitsTable>(ImageLimitsTable.generatedSerializer())
+object ImageCountSerializer : WireSerializer<ImageCount>(ImageCount.generatedSerializer())
 
 /** Where a [Workflow] run stands; a status this app does not know reads as [Completed] (docs/protocol/protocol.md). */
 enum class WorkflowStatus { Running, Completed, Failed, Killed, Stalled }

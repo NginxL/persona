@@ -6,7 +6,7 @@
 import { t } from "../i18n";
 import { agentId, providerAgent } from "./agent-kind";
 import {
-  ALL_EFFORTS, defaultModel, effortChoices, effortRule, followedBinding, launcherAgent, modelName, nativeOmpStart, takesEffort, terminalOmp, typedModelOffered, type AgentModel, type LauncherModels, type PickerTier,
+  ALL_EFFORTS, defaultModel, effortChoices, effortRule, effortVariantBase, followedBinding, launcherAgent, modelName, nativeOmpStart, takesEffort, terminalOmp, typedModelOffered, type AgentModel, type LauncherModels, type PickerTier,
   type UnavailableLauncher,
 } from "./launcher-models";
 import { launcherBlock } from "./launcher-health";
@@ -219,7 +219,8 @@ export function newAgentPill(o: { launchers: Launcher[]; runs: string; list: Mod
   // the model picked, else what the launcher's Default row runs; with nothing to say once the list is in, its default
   // entry's name or "Default model"
   const selectable = terminalOmp(agent, l) ? typedModelOffered(agent, list, nativeOmp) : !list?.locked;
-  const named = selectable && choice.model ? modelTitle(list, choice.model) : defaultRuns(l, list, followed);
+  const picked = selectable ? choice.model : "";
+  const named = picked ? modelTitle(list, picked) : defaultRuns(l, list, followed);
   const fallback = nativeOmp && choice.launcher ? t("newagent.follow_launcher") : t("chat-modelpill.default_model");
   const model = !runs ? o.fallback : named || (list !== undefined ? (d ? modelName(d) : fallback) : undefined);
   const out: PillSetup & { loading: boolean; failed: boolean } = {
@@ -229,7 +230,9 @@ export function newAgentPill(o: { launchers: Launcher[]; runs: string; list: Mod
     failed: list === undefined && Boolean(e.error),
   };
   if (model) out.model = model;
-  const effort = takesEffort(agent, l) ? choice.effort || settingsEffort(agent, choice, followed, l) : "";
+  const native = agent === "agy" ? listed(list, picked || followed.model || d?.id || l?.model || "") : undefined;
+  const encodedEffort = native && effortVariantBase(native.id, native.default_effort) ? native.default_effort : undefined;
+  const effort = (takesEffort(agent, l) && (choice.effort || settingsEffort(agent, choice, followed, l))) || encodedEffort;
   if (effort) out.effort = effort;
   return out;
 }

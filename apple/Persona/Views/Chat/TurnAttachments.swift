@@ -1,7 +1,5 @@
 import SwiftUI
-#if canImport(UIKit)
 import UIKit
-#endif
 
 // What a turn made and looked at (#1543): the documents its answer names, as cards under the answer's words
 // (`DocumentCards`, part of `AssistantText`), and the images its work looked at, a strip of bare thumbnails between the
@@ -167,9 +165,6 @@ struct ViewedImagesRow: View, Equatable {
             .accessibilityLabel(again ? Text("Image didn't load. Tap to retry") : Text(caption))
             .accessibilityHint(again ? Text(verbatim: "") : Text("View full size"))
             .accessibilityIdentifier("viewed-image-\(index)")
-            #if os(macOS)
-            .help(caption)
-            #endif
             .contextMenu {
                 if let path = im.path {
                     Button { UIPasteboard.general.string = path } label: { Label("Copy Path", systemImage: Theme.Icon.copy) }

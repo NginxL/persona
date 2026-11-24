@@ -305,11 +305,18 @@ func (lw *laneWriter) stop(err error) {
 }
 
 // fillLocked makes the next write: the acknowledgement due, then frames in priority order while they fit in frameMax
-// (the first always does). finished is the lines whose last frame it holds.
+// (the first always does). Once the link's rate is known, credited frames in one write are also bounded by frameSize so
+// slow WebSocket transports do not coalesce several small bulk frames back into one 32 KiB message ahead of pings.
+// finished is the lines whose last frame it holds.
 func (lw *laneWriter) fillLocked(batch []byte, finished []*outLine, now time.Time) ([]byte, []*outLine) {
 	batch = lw.acksLocked(batch)
+	creditBudget := frameMax
+	if lw.win.rate > 0 {
+		creditBudget = frameHeader + lw.win.frameSize()
+	}
+	creditBytes := 0
 	for {
-		l, n, ok := lw.pickLocked(frameMax-len(batch), len(batch) == 0, now)
+		l, n, ok := lw.pickLocked(frameMax-len(batch), creditBudget-creditBytes, len(batch) == 0, now)
 		if !ok {
 			break
 		}
@@ -333,6 +340,7 @@ func (lw *laneWriter) fillLocked(batch []byte, finished []*outLine, now time.Tim
 		}
 		if l.credit {
 			lw.win.wrote(lw.seq, n, now, n == lw.most(l))
+			creditBytes += frameHeader + n
 		}
 		if fin {
 			q := &lw.lanes[l.lane]
@@ -345,11 +353,11 @@ func (lw *laneWriter) fillLocked(batch []byte, finished []*outLine, now time.Tim
 }
 
 // pickLocked is the next frame: its line, advanced to its turn, and its size; ok false when there is none, or when
-// the next one would not fit in room (and the batch is not empty: first). Within a lane, lines that fit in one frame
-// take turns with the lane's oldest long line; the other long lines wait until it is through, as they would on the
-// one writer: taking turns among them would finish every one of them only at the end, each later than its caller can
-// wait (concurrent file chunks, each a minute's worth on a slow link).
-func (lw *laneWriter) pickLocked(room int, first bool, now time.Time) (*outLine, int, bool) {
+// the next one would not fit in room (or creditRoom for credited frames, when the batch is not empty: first). Within a
+// lane, lines that fit in one frame take turns with the lane's oldest long line; the other long lines wait until it is
+// through, as they would on the one writer: taking turns among them would finish every one of them only at the end,
+// each later than its caller can wait (concurrent file chunks, each a minute's worth on a slow link).
+func (lw *laneWriter) pickLocked(room, creditRoom int, first bool, now time.Time) (*outLine, int, bool) {
 	order := [laneCount]Lane{LaneControl, LaneInteractive, LaneEvents, LaneBulk}
 	if lw.highFrames >= highFramesBeforeBulk {
 		order = [laneCount]Lane{LaneControl, LaneBulk, LaneInteractive, LaneEvents}
@@ -380,7 +388,7 @@ func (lw *laneWriter) pickLocked(room int, first bool, now time.Time) (*outLine,
 			if l.credit && !lw.win.canSend(n) {
 				continue // no credit for it; a line of the lane that needs none may go
 			}
-			if !first && frameHeader+n > room {
+			if !first && (frameHeader+n > room || l.credit && frameHeader+n > creditRoom) {
 				return nil, 0, false // the next frame in priority goes first in the next write
 			}
 			if !l.started {

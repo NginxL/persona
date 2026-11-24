@@ -26,10 +26,10 @@ var (
 	build   = ""
 )
 
-const usage = `usage:
+var usage = `usage:
 ` + nodecmd.LaunchUsage + `
 ` + nodecmd.NodeUsage + `
-` + nodecmd.Usage + `
+` + nodecmd.Usage() + `
 ` + nodecmd.SysmonUsage + `
   personad version [-v]     the version; -v adds the channel and build number`
 

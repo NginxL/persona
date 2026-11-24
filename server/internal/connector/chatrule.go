@@ -37,7 +37,7 @@ import (
 // ChatRuleFor says so with a reason.
 
 // githubConnector and githubComment are the GitHub connector's id and its action that comments on an issue or a pull
-// request (connector/github).
+// request (modules/github).
 const (
 	githubConnector = "github"
 	githubComment   = "github_comment"

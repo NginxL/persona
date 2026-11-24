@@ -156,14 +156,37 @@ class PersonaModelPanelTest {
         assertEquals(PillSetup("claude", "claude", "Opus 5.5", "high"), main.setup)
     }
 
+    @Test fun aSavedAliasSelectsTheFoldedRowWithoutADuplicatePick() {
+        val folded = AgentModel("claude-opus-5-5", "Opus 5.5", aliases = listOf("opus", "fable", "sonnet", "haiku"),
+            efforts = listOf("low", "high"))
+        val foldedList = LauncherModels("claude", listOf(folded, AgentModel("claude-sonnet-4-5", "Sonnet 4.5")))
+        val picked = chat.copy(modelPick = ModelPick("claude", "opus", "high"))
+        val page = of(picked, main = true)
+        val setup = PersonaModelPanel.setup(page, info)
+        val panel = PersonaModelPanel.panel(setup, info,
+            { name -> if (name == "claude") ModelList(read = true, list = foldedList) else read(name) }, typed = true)
+        assertEquals(PanelConfig("claude", "claude-opus-5-5", "high"), panel.state.current)
+        assertEquals(listOf("claude-opus-5-5", "claude-sonnet-4-5"), panel.providers.first().models?.map { it.id })
+        assertEquals(listOf("opus", "fable", "sonnet", "haiku"), panel.providers.first().models?.first()?.aliases)
+        val rows = ModelPanel.sections(panel.providers, panel.state, PanelView.All, "", PanelPrefs()).flatMap { it.rows }
+        assertEquals(1, rows.count { it.current })
+        assertEquals("claude-opus-5-5", rows.single { it.current }.model.id)
+        assertNull(PersonaModelPanel.pickOf(rows.single { it.current }.setup, foldedList, panel.state.current))
+        assertEquals("Opus 5.5", PersonaModelPanel.pill(page, setup, info, ModelList(read = true, list = foldedList)).setup.model)
+    }
+
     @Test fun sharedFixtureOffersTheSameEligibleChoicesForMainAndNewChats() {
         assertEquals(listOf("runtime", "codex-gw", "team-api"), sharedCandidates.map { it.name })
         val mainChat = chat.copy(launcher = "runtime", agent = "claude", model = null)
         for ((page, running) in listOf(of(null) to false, of(mainChat, main = true) to true)) {
             val setup = PersonaModelPanel.setup(page, sharedInfo)
             val panel = PersonaModelPanel.panel(setup, sharedInfo, ::read, typed = true, running = running)
-            assertEquals(sharedAssistantNames, panel.providers.filter { it.unavailable == null }.map { it.id })
-            assertEquals(PanelReason.Hub("Cannot run Assistant"), panel.providers.single { it.id == "codex-gw" }.unavailable)
+            val expected = if (running) sharedAssistantNames - "codex-gw" else sharedAssistantNames
+            assertEquals(expected, panel.providers.filter { it.unavailable == null }.map { it.id })
+            assertEquals(
+                if (running) PanelReason.OtherEngine("claude", "codex") else null,
+                panel.providers.single { it.id == "codex-gw" }.unavailable,
+            )
         }
     }
 

@@ -4,34 +4,51 @@ import SwiftUI
 /// a row, a group label and the search field.
 
 /// A sidebar row: a symbol, the label with an optional line under it (a chat's last message), the host's views at the
-/// end (a time, a state mark, a count); the current row keeps a fill.
+/// end (a time, a state mark, a count); the current row keeps a fill. A row under another (`indent`) is set in so its
+/// symbol stands where the row above's label starts.
 public struct BUISidebarRow<Trailing: View>: View {
     var symbol: String?
     var label: String
     var detail: String?
     var isActive: Bool
+    /// How many rows deep it is set in.
+    var indent: Int
     var action: () -> Void
     var trailing: Trailing
     @Environment(\.buiTheme) private var theme
 
-    public init(_ label: String, symbol: String? = nil, detail: String? = nil, isActive: Bool = false,
+    /// The symbol's square and the gap after it, at the type scale: where the label starts, and one step of `indent`.
+    private static func symbolSide(_ scale: CGFloat) -> CGFloat { 20 * scale }
+    private static var gap: CGFloat { 8 } // a generic type has no static stored properties
+
+    public init(_ label: String, symbol: String? = nil, detail: String? = nil, isActive: Bool = false, indent: Int = 0,
                 action: @escaping () -> Void, @ViewBuilder trailing: () -> Trailing) {
         self.label = label
         self.symbol = symbol
         self.detail = detail
         self.isActive = isActive
+        self.indent = indent
         self.action = action
         self.trailing = trailing()
     }
 
     public var body: some View {
+        if indent > 0 {
+            // The symbol's column and the gap after it, as the row draws them below.
+            row.padding(.leading, CGFloat(indent) * (Self.symbolSide(theme.typeScale) + Self.gap))
+        } else {
+            row
+        }
+    }
+
+    private var row: some View {
         Button(action: action) {
-            HStack(spacing: 8) {
+            HStack(spacing: Self.gap) {
                 if let symbol {
                     Image(systemName: symbol)
                         .font(.system(size: 15 * theme.typeScale * 0.9, weight: .medium))
                         .foregroundStyle(isActive ? theme.colors.ink : theme.colors.ink2)
-                        .frame(width: 20 * theme.typeScale, height: 20 * theme.typeScale)
+                        .frame(width: Self.symbolSide(theme.typeScale), height: Self.symbolSide(theme.typeScale))
                 }
                 VStack(alignment: .leading, spacing: 2) {
                     Text(label)

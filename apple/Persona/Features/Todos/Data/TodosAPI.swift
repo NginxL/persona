@@ -106,11 +106,20 @@ nonisolated extension APIClient {
         _ = try await request("DELETE", "/api/v1/todos/\(Self.todoPath(id))", opID: opID)
     }
 
-    /// `POST /api/v1/todos`: a new to-do with its title and notes, named by the hub.
-    func createTodo(title: String, notes: String?, opID: UUID) async throws -> TodoItem {
-        struct Body: Encodable { var title: String; var notes: String? }
+    /// `POST /api/v1/todos`: a new to-do with its title and notes, named by the hub. Made in a To-dos place, its due day
+    /// or moment and its project go in the same write (#10465), so a retry never leaves it outside the place.
+    func createTodo(title: String, notes: String?, dueAt: Date? = nil, dueDate: String? = nil, project: String? = nil,
+                    opID: UUID) async throws -> TodoItem {
+        struct Body: Encodable {
+            var title: String
+            var notes: String?
+            var dueAt: Date?
+            var dueDate: String?
+            var project: String?
+            enum CodingKeys: String, CodingKey { case title, notes, project, dueAt = "due_at", dueDate = "due_date" }
+        }
         let body = Body(title: title.trimmingCharacters(in: .whitespacesAndNewlines),
-                        notes: notes?.trimmingCharacters(in: .whitespacesAndNewlines))
+                        notes: notes?.trimmingCharacters(in: .whitespacesAndNewlines), dueAt: dueAt, dueDate: dueDate, project: project)
         let data = try await request("POST", "/api/v1/todos", body: body, opID: opID)
         return try JSON.decoder.decode(TodoAnswer.self, from: data).todo
     }

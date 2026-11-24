@@ -4,14 +4,15 @@
 // views/session/ReviewPanel.tsx.
 import { api, enc } from "./api";
 import { codeQuote, type DiffScope } from "./comments";
-import { hunkRows, type Hunk, type Thread } from "./code-view";
+import type { Hunk, Thread } from "./code-view";
+import { hunkRows } from "./hunk-rows";
 import { withQuoteBlock, type DraftQuote } from "./drafts";
 import type { UIItem } from "./extension-ui";
 import { uuid } from "./format";
 import { useSyncExternalStore } from "react";
 
-/** The hub feature that says it has git/review. */
-export const REVIEW_FEATURE = "git_review";
+/** The hub feature that says it has git/review: lib/types.ts, so the chat reads it without loading this module. */
+export { REVIEW_FEATURE } from "./types";
 
 export type ReviewScope = "uncommitted" | "branch" | "commit";
 

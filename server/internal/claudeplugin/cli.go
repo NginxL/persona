@@ -2,6 +2,7 @@ package claudeplugin
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -10,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"time"
 
@@ -27,7 +29,8 @@ const commandTimeout = 2 * time.Minute
 // with no input, and with the environment commandEnv makes for dir.
 func ExecRunner(workDir string) Runner {
 	return func(ctx context.Context, exe, dir string, args ...string) ([]byte, error) {
-		ctx, cancel := context.WithTimeout(ctx, commandTimeout)
+		parent := ctx
+		ctx, cancel := context.WithTimeout(parent, commandTimeout)
 		defer cancel()
 		cmd := exec.CommandContext(ctx, exe, args...)
 		cmd.Dir = workDir
@@ -36,6 +39,9 @@ func ExecRunner(workDir string) Runner {
 		cmd.Stdout, cmd.Stderr = &stdout, &stderr
 		hideWindow(cmd)
 		err := cmd.Run()
+		if parent.Err() != nil {
+			return stdout.Bytes(), fmt.Errorf("claude %s: %w", strings.Join(args, " "), parent.Err())
+		}
 		if ctx.Err() != nil {
 			return stdout.Bytes(), fmt.Errorf("claude %s: timed out after %s", strings.Join(args, " "), commandTimeout)
 		}
@@ -147,14 +153,29 @@ type cli struct {
 	dir string
 }
 
+func pluginSubcommand(args []string) string {
+	rest := args
+	if len(rest) > 0 && rest[0] == "plugin" {
+		rest = rest[1:]
+	}
+	if len(rest) >= 2 && rest[0] == "marketplace" {
+		return "marketplace " + rest[1]
+	}
+	if len(rest) >= 1 {
+		return rest[0]
+	}
+	return "command"
+}
+
 // do runs a --json command. A failure the CLI reports as "already in the goal state" is success; one saying the
 // plugin or marketplace is not there is errNotFound. An older CLI that does not know --json gets one retry without it.
 func (c cli) do(ctx context.Context, args ...string) error {
-	out, err := c.run(ctx, c.exe, c.dir, append(args, "--json")...)
+	out, err := c.run(ctx, c.exe, c.dir, append(slices.Clip(args), "--json")...)
 	if unsupportedJSONFlag(err) {
 		_, err = c.run(ctx, c.exe, c.dir, args...)
 		return err
 	}
+	sub := pluginSubcommand(args)
 	r, ok := parseResult(out)
 	switch {
 	case ok && r.Outcome == "ok":
@@ -164,11 +185,11 @@ func (c cli) do(ctx context.Context, args ...string) error {
 	case ok && (r.FailureCode == "not_installed" || r.FailureCode == "not_configured"):
 		return errNotFound
 	case ok:
-		return fmt.Errorf("claude plugin %s: %s", args[0], firstLine(r.Message))
+		return fmt.Errorf("claude plugin %s: %s", sub, firstLine(r.Message))
 	case err != nil:
 		return err
 	}
-	return fmt.Errorf("claude plugin %s: no result", args[0])
+	return fmt.Errorf("claude plugin %s: no result", sub)
 }
 
 // list is the user-scope install of id, nil when there is none.
@@ -222,40 +243,49 @@ func Newer(a, b string) bool {
 		return true
 	}
 	for i := range max(len(pa), len(pb)) {
-		var x, y int
+		x, y := "0", "0"
 		if i < len(pa) {
 			x = pa[i]
 		}
 		if i < len(pb) {
 			y = pb[i]
 		}
-		if x != y {
-			return x > y
+		if c := compareDecimal(x, y); c != 0 {
+			return c > 0
 		}
 	}
 	return false
 }
 
-func versionParts(v string) []int {
+func compareDecimal(x, y string) int {
+	if len(x) != len(y) {
+		return cmp.Compare(len(x), len(y))
+	}
+	return cmp.Compare(x, y)
+}
+
+func versionParts(v string) []string {
 	v = versionRe.FindString(v)
 	if v == "" {
 		return nil
 	}
-	var out []int
+	var out []string
 	for _, part := range strings.Split(v, ".") {
-		n := 0
 		digits := 0
 		for _, r := range part {
 			if r < '0' || r > '9' {
 				break
 			}
-			n = n*10 + int(r-'0')
 			digits++
 		}
 		if digits == 0 {
 			break
 		}
-		out = append(out, n)
+		d := strings.TrimLeft(part[:digits], "0")
+		if d == "" {
+			d = "0"
+		}
+		out = append(out, d)
 		if digits < len(part) {
 			break
 		}

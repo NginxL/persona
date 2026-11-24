@@ -10,7 +10,6 @@ import (
 
 	"github.com/nwverse/persona/server/internal/db"
 	"github.com/nwverse/persona/server/internal/extwire"
-	"github.com/nwverse/persona/server/internal/mail"
 	"github.com/nwverse/persona/server/internal/rpc"
 )
 
@@ -34,14 +33,10 @@ func (m *mailRows) ReplaceMailAccounts(_ context.Context, rows []db.MailAccountR
 }
 
 // managerWithMail is a test manager with the real mail on its own data directory (its own secret.key).
-func managerWithMail(t *testing.T) (*Manager, *mail.Service) {
+func managerWithMail(t *testing.T) (*Manager, Mail) {
 	t.Helper()
 	h := newTestManager(t)
-	s, err := mail.New(h.cfg.dir, &mailRows{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { s.Close() })
+	s := openTestMail(t, h.cfg.dir, &mailRows{})
 	h.mail = s
 	return h, s
 }

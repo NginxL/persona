@@ -26,12 +26,8 @@ struct SentView: View {
     var body: some View {
         SettingsForm {
             if page.showsChips {
-                #if os(macOS)
-                chips
-                #else
                 Section { chips }
                     .listSectionSpacing(.compact)
-                #endif
             }
             content
         }
@@ -39,9 +35,6 @@ struct SentView: View {
         .detailTitle(String(localized: "Records sent as you"))
         .task { await page.load() }
         .refreshable { await page.load() }
-        #if os(macOS)
-        .macRefreshes { await page.load() } // ⌘R: no pull to refresh on the Mac
-        #endif
         .sheet(item: $detail) { item in
             SentDetailSheet(opened: item, page: page, openChat: openChat)
         }
@@ -369,20 +362,12 @@ private struct SentDetailSheet: View {
             #if os(iOS) || os(visionOS)
             .navigationBarTitleDisplayMode(.inline)
             #endif
-            #if os(macOS)
-            .macSheetDone { dismiss() }
-            #else
             .toolbar {
                 SheetClose(id: "sent.detail.close") { dismiss() }
             }
-            #endif
         }
-        #if os(macOS)
-        .macSheet()
-        #else
         .presentationDetents([.large])
         .presentationDragIndicator(.visible)
-        #endif
         .accessibilityIdentifier("sent.detail")
     }
 

@@ -26,7 +26,9 @@ type capacityAccount struct {
 // buildCapacitySnapshot derives the scheduler view from the gateway inventory and the merged sidebar windows.
 // Gateway accounts are counted from the inventory, which is authoritative for them; a sidebar account a gateway
 // saw (Sources non-empty) is therefore skipped, so the same account is never counted twice. Accounts only the
-// computers saw (Local, no gateway source) fill the rest. Pure: the clock is passed in and there is no I/O.
+// computers saw (Local, no gateway source) fill the rest. Prepaid balance rows (#11825) are skipped: their provider
+// has no rate-limit window and an amount of money is not the capacity a scheduler waits on. Pure: the clock is
+// passed in and there is no I/O.
 func buildCapacitySnapshot(inv proto.GatewayAccounts, usage []proto.UsageAccount, now time.Time) proto.CapacitySnapshot {
 	byProvider := map[string][]capacityAccount{}
 	add := func(provider string, a capacityAccount) {
@@ -57,6 +59,11 @@ func buildCapacitySnapshot(inv proto.GatewayAccounts, usage []proto.UsageAccount
 
 	for _, u := range usage {
 		if len(u.Sources) > 0 { // a gateway reports this one: counted from the inventory
+			continue
+		}
+		if isBalanceSample(u) {
+			// A prepaid balance is money, not rate-limit capacity: a genuine zero, a rejected key or a failed first
+			// read must not count as an available account and quiet a saturated provider (#11825).
 			continue
 		}
 		a := capacityAccount{stale: u.Stale, available: true}

@@ -1,0 +1,4 @@
+# Core packages that import a module anyway, as "<core package> <module package>" ("<core package> (test) <module
+# package>" for a test file; TestCoreImportsNoModule). The list
+# only shrinks: a stale line fails the test, and a new import is fixed by reaching the module through the kernel
+# (internal/assistant/kernel) instead. Empty: no core package imports a module.

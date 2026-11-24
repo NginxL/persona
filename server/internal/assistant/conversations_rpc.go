@@ -44,6 +44,27 @@ var slashCommandRe = lazyre.New(`^/[A-Za-z][\w:-]*(\s[^\n]*)?$`)
 // conversationsRequest answers assistant.conversations and assistant.messages; false for any other method.
 func (s *Service) conversationsRequest(ctx context.Context, method string, params json.RawMessage) (any, bool, error) {
 	switch method {
+	case assistantwire.MethodExtensionTrustForget: // an extension was removed (extension_trust.go)
+		var p assistantwire.ExtensionTrustForget
+		if err := strictParams(method, params, &p); err != nil {
+			return nil, true, err
+		}
+		return map[string]any{}, true, s.forgetExtensionTrust(ctx, p.Extension)
+	case assistantwire.MethodAssistantExtensionRead: // one of them for an extension the extension manager names
+		var e assistantwire.AssistantExtensionRead
+		if err := strictParams(method, params, &e); err != nil {
+			return nil, true, err
+		}
+		switch e.Method {
+		case assistantwire.MethodAssistantConversations, assistantwire.MethodAssistantMessages, assistantwire.MethodAssistantMemory:
+		default:
+			return nil, true, conversationsInvalid(method, "method must be an assistant read")
+		}
+		if len(e.Params) == 0 {
+			e.Params = json.RawMessage("{}")
+		}
+		out, _, err := s.conversationsRequest(s.withExtensionReader(ctx, e.Extension), e.Method, e.Params)
+		return out, true, err
 	case assistantwire.MethodAssistantConversations:
 		var p assistantwire.AssistantConversationsParams
 		if err := strictParams(method, params, &p); err != nil {
@@ -57,6 +78,17 @@ func (s *Service) conversationsRequest(ctx context.Context, method string, param
 			return nil, true, err
 		}
 		out, err := s.extensionMessages(ctx, p)
+		return out, true, err
+	case assistantwire.MethodAssistantEntriesList:
+		var p assistantwire.AssistantEntriesParams
+		if err := strictParams(method, params, &p); err != nil {
+			return nil, true, err
+		}
+		personal, err := s.extensionEntriesPersonal(ctx)
+		if err != nil {
+			return nil, true, err
+		}
+		out, err := s.listEntries(ctx, p, personal)
 		return out, true, err
 	case assistantwire.MethodAssistantMemory:
 		var p assistantwire.AssistantMemoryParams
@@ -99,7 +131,9 @@ func parseTimeParam(method, name, v string, required bool) (time.Time, error) {
 	return t, nil
 }
 
-// ownConversations are the assistant's conversations an extension may read: its own space's, no guest's.
+// ownConversations are the assistant's conversations the reading extension may read (extensionHidesConversation,
+// scene 6: by each conversation's categories and the extension's grant; a plain read, with no extension named, is a
+// third party's with none), no guest's.
 func (s *Service) ownConversations(ctx context.Context, archived bool) ([]proto.Session, string, error) {
 	here := s.settings(ctx)
 	if here.MachineID == "" {
@@ -111,7 +145,8 @@ func (s *Service) ownConversations(ctx context.Context, archived bool) ([]proto.
 	}
 	var out []proto.Session
 	for _, c := range all {
-		if !c.Assistant || c.IsDeleted() || spaceOf(c) != "" || c.Archived && !archived || s.isGuest(ctx, c.MachineID, c.SessionID) {
+		if !c.Assistant || c.IsDeleted() || c.Archived && !archived || s.isGuest(ctx, c.MachineID, c.SessionID) ||
+			s.extensionHidesConversation(ctx, c) {
 			continue
 		}
 		out = append(out, c)

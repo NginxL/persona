@@ -1,9 +1,7 @@
 import CoreText
 import PersonaKit
 import SwiftUI
-#if canImport(UIKit)
 import UIKit
-#endif
 
 /// What the terminal view shows: rows of cells (scrollback pages above, the live screen below) and the cursor.
 struct TerminalContent: Equatable {
@@ -21,7 +19,6 @@ struct TerminalContent: Equatable {
     }
 }
 
-#if os(iOS) || os(visionOS)
 /// The terminal tab's screen: every character drawn in its own cell (wide ones in two), so columns and Chinese line up
 /// whatever the font's own widths are. Wrapped, each row is folded at the view's width; unwrapped, rows keep the pane's
 /// width and the view scrolls sideways. Long press selects (Copy / Select All), a tap opens a link. With `onInput` it takes the
@@ -665,7 +662,6 @@ final class TerminalCanvas: UIView {
         host?.draw(in: ctx, visible: frame)
     }
 }
-#endif
 
 /// The terminal's typeface: JetBrains Mono (bundled, SIL OFL) or the system's SF Mono. Chinese and other scripts
 /// neither has come from the system's fallback, each drawn in its own cells.
@@ -757,13 +753,8 @@ struct CellMetrics {
 
     func font(_ s: TermStyle) -> UIFont {
         let f = s.bold ? bold : regular
-        #if os(iOS) || os(visionOS)
         guard s.italic, let d = f.fontDescriptor.withSymbolicTraits(.traitItalic) else { return f }
         return UIFont(descriptor: d, size: size)
-        #else
-        guard s.italic else { return f }
-        return NSFont(descriptor: f.fontDescriptor.withSymbolicTraits(.italic), size: size) ?? f
-        #endif
     }
 }
 
@@ -883,7 +874,6 @@ private extension CGFloat {
     }
 }
 
-#if os(iOS) || os(visionOS)
 /// One end of a text selection, as the system draws it: a thin bar the height of a line with a knob above (start) or
 /// below (end); a finger-sized area around it takes the drag.
 final class SelectionHandle: UIView {
@@ -929,4 +919,3 @@ final class SelectionHandle: UIView {
         }
     }
 }
-#endif

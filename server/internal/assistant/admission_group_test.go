@@ -215,6 +215,7 @@ func pastBounds(t *testing.T, s *Service, planID string, ago time.Duration) {
 func TestAdmissionQueueWaitsOnFullLauncherGroupPastTheBounds(t *testing.T) {
 	s, f, d := admissionHub(t)
 	p := fullPoolQueued(t, s, d)
+	checkPlacementGolden(t, p.Tasks[0].Placement, "v1 enforce busy ->  (assistant-tasks.admission_launcher_group_full) | busy assistant-tasks.admission_launcher_group_full")
 	pastBounds(t, s, p.ID, 3*admissionQueueMaxWait)
 	s.sweepAdmissionQueue(context.Background())
 	waitFor(t, "the over-bounds group wait to be retried and queued again", func() bool {

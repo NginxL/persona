@@ -1,7 +1,8 @@
 """Fixed time.Sleep calls in Go tests can stay or fall, never rise.
 
-Comments, string literals and a // sleep-ok: <reason> line do not count. The cases build
-throwaway trees; one case checks this checkout's committed baseline.
+Comments, string literals and a // sleep-ok: <reason> line do not count. Only a rise fails: a file
+under its baseline passes with a notice, and with a base a changed file is also held to its count at
+the merge base. The cases build throwaway trees; one case checks this checkout's committed baseline.
 """
 import json
 import os
@@ -135,17 +136,32 @@ class TreeTests(unittest.TestCase):
         code, out = self._run()
         self.assertEqual(0, code, out)
 
-    def test_over_and_under_name_the_file_and_under_points_at_update(self):
+    def test_over_fails_and_under_passes_with_a_notice_that_points_at_lowering(self):
         self.baseline({SERVER: 1})
         self.write(SERVER, source(2))
         code, err = self._run()
         self.assertEqual(1, code)
         self.assertIn("2 time.Sleep call(s), baseline 1", err)
+        self.write(SERVER, source(1))
+        code, out = self._run()
+        self.assertEqual(0, code, out)
+        self.assertNotIn("under the baseline", out)
         self.write(SERVER, source(0))
-        code, err = self._run()
-        self.assertEqual(1, code)
-        self.assertIn("0 time.Sleep call(s), baseline 1", err)
-        self.assertIn("python3 scripts/ci/sleep_ratchet.py --update", err)
+        code, out = self._run()
+        self.assertEqual(0, code, out)
+        self.assertIn("1 file(s) under the baseline", out)
+        self.assertIn("0 time.Sleep call(s), baseline 1", out)
+        self.assertIn("python3 scripts/ci/lower_baselines.py", out)
+        self.assertIn("python3 scripts/ci/sleep_ratchet.py --update", out)
+
+    def test_the_notice_names_ten_files_and_counts_the_rest(self):
+        files = ["server/internal/demo/f{0:02d}_test.go".format(n) for n in range(12)]
+        self.baseline({name: 1 for name in files})
+        code, out = self._run()
+        self.assertEqual(0, code, out)
+        self.assertIn("12 file(s) under the baseline", out)
+        self.assertEqual(10, out.count("0 time.Sleep call(s), baseline 1\n"))
+        self.assertIn("... and 2 more", out)
 
     def test_other_trees_are_ignored(self):
         self.baseline({})
@@ -211,7 +227,9 @@ class TreeTests(unittest.TestCase):
         return code, out.getvalue() + err.getvalue()
 
 
-class GitTests(unittest.TestCase):
+class GitCase(unittest.TestCase):
+    """A repository whose origin/main has SERVER with one sleep and the matching baseline."""
+
     def setUp(self):
         self.repo = Path(tempfile.mkdtemp(prefix="sleep-ratchet-git-"))
         self.addCleanup(self._cleanup)
@@ -241,17 +259,19 @@ class GitTests(unittest.TestCase):
     def git(self, *args):
         subprocess.run(["git", "-C", str(self.repo), *args], check=True, capture_output=True, timeout=30)
 
-    def _capture(self, args):
+    def _capture(self, args, root=None):
         from io import StringIO
         out, err = StringIO(), StringIO()
         stdout, stderr = sys.stdout, sys.stderr
         try:
             sys.stdout, sys.stderr = out, err
-            code = sleep_ratchet.main(["--root", str(self.repo), *args])
+            code = sleep_ratchet.main(["--root", str(root or self.repo), *args])
         finally:
             sys.stdout, sys.stderr = stdout, stderr
         return code, out.getvalue() + err.getvalue()
 
+
+class GitTests(GitCase):
     def test_a_clean_tree_passes_and_a_hand_raised_baseline_fails(self):
         code, out = self._capture([])
         self.assertEqual(0, code, out)
@@ -262,6 +282,37 @@ class GitTests(unittest.TestCase):
         self.assertEqual(1, code)
         self.assertIn("baseline raises", err)
         self.assertIn("baselines are never raised", err)
+
+    def test_a_moved_file_keeps_its_entry_but_may_not_rise(self):
+        moved = "server/internal/modules/demo/demo_test.go"
+        self.git("checkout", "-q", "-b", "move")
+        (self.repo / moved).parent.mkdir(parents=True)
+        self.git("mv", SERVER, moved)
+        self.write(sleep_ratchet.BASELINE_REL, sleep_ratchet.render({moved: 1}))
+        code, out = self._capture([])
+        self.assertEqual(0, code, out)  # uncommitted: against HEAD and the base
+        self.git("commit", "-q", "-am", "move")
+        code, out = self._capture([])
+        self.assertEqual(0, code, out)
+        # Moved and raised: still a raise.
+        self.write(moved, source(2))
+        self.write(sleep_ratchet.BASELINE_REL, sleep_ratchet.render({moved: 2}))
+        code, err = self._capture([])
+        self.assertEqual(1, code)
+        self.assertIn("baseline raises " + moved + " from 1 to 2", err)
+
+    def test_a_copy_is_no_move(self):
+        copy = "server/internal/other/demo_test.go"
+        self.write(copy, source(1))
+        self.git("add", copy)
+        self.write(sleep_ratchet.BASELINE_REL, sleep_ratchet.render({SERVER: 1, copy: 1}))
+        code, err = self._capture([])
+        self.assertEqual(1, code)
+        self.assertIn("baseline adds " + copy, err)
+
+    def test_carry_renames_keeps_an_existing_entry(self):
+        self.assertEqual({"a": 1, "b": 3}, sleep_ratchet.carry_renames({"a": 1, "b": 3}, {"b": "a"}))
+        self.assertEqual({"a": 1, "c": 1}, sleep_ratchet.carry_renames({"a": 1}, {"c": "a", "d": "x"}))
 
     def test_the_first_snapshot_is_allowed_when_the_base_has_no_baseline(self):
         # An older commit has the test and no baseline. The matching baseline on top of that
@@ -334,6 +385,32 @@ class GitTests(unittest.TestCase):
         self.assertEqual(1, err.count("baseline raises"))
         self.assertIn("HEAD and ", err)
 
+    def test_a_base_baseline_that_cannot_be_fetched_is_an_error_not_absence(self):
+        # CI's guards checkout is blobless (#12753): a branch that changed the baseline has the base's copy fetched
+        # on first read. A failed fetch must fail the check, not read as "no baseline at the base" and pass.
+        self.git("checkout", "-q", "-b", "raise")
+        self.write(SERVER, source(2))
+        self.write(sleep_ratchet.BASELINE_REL, sleep_ratchet.render({SERVER: 2}))
+        self.git("commit", "-q", "-am", "raise")
+        work = Path(tempfile.mkdtemp(prefix="sleep-ratchet-blobless-"))
+        self.addCleanup(subprocess.run, ["rm", "-rf", str(work)], check=True)
+        origin = work / "origin.git"
+        self.git("clone", "-q", "--bare", str(self.repo), str(origin))
+        subprocess.run(["git", "-C", str(origin), "symbolic-ref", "HEAD", "refs/heads/main"], check=True, timeout=30)
+        subprocess.run(["git", "-C", str(origin), "config", "uploadpack.allowFilter", "true"], check=True, timeout=30)
+        clone = work / "clone"
+        subprocess.run(["git", "clone", "-q", "--filter=blob:none", "--branch", "raise", origin.as_uri(), str(clone)],
+                       check=True, capture_output=True, timeout=60)
+        subprocess.run(["git", "-C", str(clone), "remote", "set-url", "origin", (work / "gone.git").as_uri()],
+                       check=True, timeout=30)
+        code, err = self._capture([], clone)
+        self.assertEqual(2, code, err)
+        self.assertIn("cannot read", err)
+        subprocess.run(["git", "-C", str(clone), "remote", "set-url", "origin", origin.as_uri()], check=True, timeout=30)
+        code, err = self._capture([], clone)
+        self.assertEqual(1, code, err)
+        self.assertIn("baseline raises", err)
+
     def test_a_git_timeout_is_a_one_line_error(self):
         real = subprocess.run
 
@@ -347,6 +424,95 @@ class GitTests(unittest.TestCase):
         self.assertEqual(2, code, err)
         self.assertIn("timed out", err)
         self.assertNotIn("Traceback", err)
+
+
+class MergeBaseTests(GitCase):
+    """With a given base, a file the change touches is held to the lower of its baseline and its merge-base count."""
+
+    def lower_on_main(self):
+        # main takes the sleep out and leaves the baseline at 1: allowed now, and the room a change may not refill.
+        self.write(SERVER, source(0))
+        self.git("commit", "-q", "-am", "drop the sleep")
+        self.git("update-ref", "refs/remotes/origin/main", "HEAD")
+        self.git("checkout", "-q", "-b", "change")
+
+    def head(self):
+        return subprocess.check_output(["git", "-C", str(self.repo), "rev-parse", "HEAD"], text=True,
+                                       timeout=30).strip()
+
+    def test_main_under_its_baseline_passes(self):
+        self.lower_on_main()
+        code, out = self._capture(["--base", "origin/main"])
+        self.assertEqual(0, code, out)
+        self.assertIn("1 file(s) under the baseline", out)
+
+    def test_a_change_cannot_add_back_into_room_under_the_baseline(self):
+        self.lower_on_main()
+        base = self.head()
+        self.write(SERVER, source(1))
+        code, err = self._capture(["--base", "origin/main"])
+        self.assertEqual(1, code, err)
+        self.assertIn(sleep_ratchet.rise_message(SERVER, 1, 0, base[:12], 1), err)
+        os.environ["CI_BASE_SHA"] = base  # hosted CI's way of giving the same base
+        code, err = self._capture([])
+        self.assertEqual(1, code, err)
+        self.git("add", "-A")
+        self.git("commit", "-q", "-m", "a sleep back")
+        code, err = self._capture([])
+        self.assertEqual(1, code, err)
+        self.assertIn("at the merge base", err)
+
+    def test_the_default_branch_alone_is_no_base(self):
+        # Main verification's checkout: HEAD is the commit just merged, and origin/main still names its parent,
+        # because the verifier pins HEAD by SHA. merge-pr.sh let the re-add in (changed_ratchets.py), so main must
+        # not fail it either: without --base or CI_BASE_SHA only the baseline holds.
+        self.lower_on_main()
+        self.write(SERVER, source(1))
+        self.git("commit", "-q", "-am", "a sleep back")
+        code, out = self._capture([])
+        self.assertEqual(0, code, out)
+        self.assertNotIn("at the merge base", out)
+        os.environ["CI_BASE_SHA"] = "HEAD"  # hosted CI on main: the base is HEAD itself
+        code, out = self._capture([])
+        self.assertEqual(0, code, out)
+        os.environ["CI_BASE_SHA"] = "origin/main"  # a base given on purpose still holds the change
+        code, err = self._capture([])
+        self.assertEqual(1, code, err)
+
+    def test_without_a_base_only_the_baseline_holds(self):
+        self.lower_on_main()
+        self.write(SERVER, source(1))
+        self.git("update-ref", "-d", "refs/remotes/origin/HEAD")
+        self.git("update-ref", "-d", "refs/remotes/origin/main")
+        code, out = self._capture([])
+        self.assertEqual(0, code, out)
+        self.write(SERVER, source(2))
+        code, err = self._capture([])
+        self.assertEqual(1, code, err)
+        self.assertIn("2 time.Sleep call(s), baseline 1", err)
+
+    def test_a_file_the_change_does_not_touch_keeps_its_room(self):
+        # The merge base itself is under the baseline and the change leaves the file alone: nothing rose.
+        self.lower_on_main()
+        self.write("server/internal/demo/other_test.go", "package demo\n")
+        code, out = self._capture(["--base", "origin/main"])
+        self.assertEqual(0, code, out)
+
+    def test_a_count_that_falls_on_the_branch_passes(self):
+        self.write(SERVER, source(3))
+        self.write(sleep_ratchet.BASELINE_REL, sleep_ratchet.render({SERVER: 3}))
+        self.git("commit", "-q", "-am", "three")
+        self.git("update-ref", "refs/remotes/origin/main", "HEAD")
+        self.git("checkout", "-q", "-b", "change")
+        self.write(SERVER, source(2))
+        code, out = self._capture(["--base", "origin/main"])
+        self.assertEqual(0, code, out)
+        self.assertIn("2 time.Sleep call(s), baseline 3", out)
+
+    def test_an_explicit_base_that_does_not_resolve_is_an_error(self):
+        code, err = self._capture(["--base", "no-such-ref"])
+        self.assertEqual(2, code, err)
+        self.assertIn("does not resolve", err)
 
 
 class RepoTests(unittest.TestCase):

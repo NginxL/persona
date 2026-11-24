@@ -87,6 +87,8 @@ nonisolated enum ServerEvent: Sendable {
     /// The direction tree changed on the hub (#4352): a to-do, an Agent's session, a direction or its name. No payload:
     /// the clients read `GET /api/v1/assistant/directions/tree` again, and on every (re)connect.
     case directions
+    /// Intake changed; values and notes are read through the health route, never broadcast.
+    case healthIntake
     case assistantFeed(FeedItem)
     case assistantView(ExtensionAssistantView)
     case assistantViewAction(conversation: String, action: ExtensionViewAction)
@@ -107,6 +109,9 @@ nonisolated enum ServerEvent: Sendable {
     /// An urgent call moved on (docs/assistant/urgent-call.md): a phone still ringing for one answered or settled
     /// elsewhere stops.
     case urgentCall(id: String, state: String)
+    /// How a send stands at the hub (`message_send_state`, `todo_send_state`): only passed on while this socket's hello
+    /// vouches for its kind (`LiveConnection.receiptTrust`).
+    case sendReceipt(SendReceipt)
     case error(SessionKey?, String)
 
     private struct EventType: Decodable { var type: String }
@@ -246,9 +251,13 @@ nonisolated enum ServerEvent: Sendable {
         guard let e = try? JSON.decoder.decode(Envelope.self, from: data) else { return nil }
         let key = e.machineID.flatMap { m in e.sessionID.map { SessionKey(machineID: m, sessionID: $0) } }
         switch e.type {
+        // The receipt markers are read on their own, so no other event's keys can break the envelope over them.
         case "hello": return .hello(HubHello(features: e.features ?? [], hubID: e.hubID, hubName: e.hubName, mesh: e.mesh?.hubs,
                                              channel: e.channel, build: e.build, protocolVersion: e.protocolVersion,
-                                             minAppBuild: e.minAppBuild, publicURL: e.publicURL.flatMap { URL(string: $0) }))
+                                             minAppBuild: e.minAppBuild, publicURL: e.publicURL.flatMap { URL(string: $0) },
+                                             sendReceipts: SendReceiptTrust.decode(hello: data),
+                                             imageLimits: ImageLimitsTable.decode(hello: data)))
+        case SendReceipt.messageType, SendReceipt.todoType: return SendReceipt.decode(type: e.type, data).map { .sendReceipt($0) }
         case "hub_update": return e.update.map { .hubUpdate($0) }
         case "extension_operation", "plugin_operation": return e.operation.map { .extensionOperation($0, manager: e.manager?.string) }
         case "extension_auth": return e.extensionID.map { .extensionAuth(extension: $0, e.auth?.value, manager: e.manager?.string) }
@@ -310,6 +319,8 @@ nonisolated enum ServerEvent: Sendable {
             return .look(id: e.id, effective: e.effective)
         case "managers": return .managers
         case "directions": return .directions
+        // The app refreshes the home totals and any open reserved intake page for this hub.
+        case "health_intake": return .healthIntake
         case "assistant_feed": return e.item.map { .assistantFeed($0) }
         case "assistant_view":
             guard let view = e.view, !view.id.isEmpty, view.version > 0,
@@ -381,8 +392,9 @@ nonisolated extension ServerEvent {
         case .error(let key, let message): return .error(key.map(k), message)
         case .sessionsDelta(let machine, let upsert, let remove):
             return .sessionsDelta(machineID: machine, upsert: upsert.map { var s = $0; s.group = group; return s }, remove: remove)
+        case .sendReceipt(let receipt): var receipt = receipt; receipt.key.group = group; return .sendReceipt(receipt)
         case .sessionsList, .hello, .interactionResolved, .interactionReanswered, .toolCall, .revs, .lark, .messaging, .agents, .inbox, .fleet, .hubUpdate, .desktops, .todos,
-             .personas, .look, .managers, .directions, .assistantFeed, .assistantView, .assistantViewAction, .assistantViewBlock, .taskPlan, .pluginBadge,
+             .personas, .look, .managers, .directions, .healthIntake, .assistantFeed, .assistantView, .assistantViewAction, .assistantViewBlock, .taskPlan, .pluginBadge,
              .extensionInvalidate, .fsChanged, .extensionOperation, .extensionAuth, .meetingLive, .urgentCall, .savedPrompts, .starredMessages: return self
         }
     }
@@ -498,6 +510,12 @@ final class LiveConnection {
     @ObservationIgnored private(set) var resumed = false
     /// Only this connection's authenticated hello may enable canonical outbound contracts.
     private(set) var personaContracts = false
+    /// The send receipts this connection's authenticated hello vouches for (docs/protocol/protocol.md "Message feedback
+    /// (#5258)"): none until it comes, and none again as soon as the socket drops, another opens or the credential
+    /// changes. A receipt of a kind it does not vouch for is dropped here, before `onEvent`. Observed, so what offers
+    /// to check a send's receipt follows the current socket; written only when it changes (`trust`), since every
+    /// attempt clears it.
+    private(set) var receiptTrust = SendReceiptTrust.untrusted
     /// Where the app is in the hub's numbered broadcasts: kept across reconnects, cleared with another hub.
     @ObservationIgnored private(set) var cursor = EventCursor()
     /// iOS/Mac list clients opt in; watch/extension consumers retain their existing full-list contract.
@@ -580,6 +598,7 @@ final class LiveConnection {
 
     func disconnect() {
         personaContracts = false
+        trust(.untrusted)
         generation += 1
         cancelRoute()
         task?.cancel(with: .goingAway, reason: nil)
@@ -665,6 +684,7 @@ final class LiveConnection {
     private func open() {
         guard let config, !suspended else { return }
         personaContracts = false
+        trust(.untrusted)
         generation += 1
         cancelRoute()
         attemptBegan = Date()
@@ -708,7 +728,8 @@ final class LiveConnection {
         if config != given { self.config = config }
         var comps = URLComponents(url: config.url.appending(path: "/api/v1/ws"), resolvingAgainstBaseURL: false)!
         comps.scheme = config.url.scheme == "https" ? "wss" : "ws"
-        comps.queryItems = Self.queryItems(cursor, sessionList: usesSessionList, extensionStream: usesExtensionUIStream, sessionLive: true)
+        comps.queryItems = Self.queryItems(cursor, sessionList: usesSessionList, extensionStream: usesExtensionUIStream, sessionLive: true,
+                                           todoReceipts: Self.asksTodoReceipts(RequestClientMetadata.current))
         var req = URLRequest(url: HubTransport.resolve(comps.url!, hub: config.url))
         config.authorize(&req)
         req.setValue(LanguageStore.shared.launched, forHTTPHeaderField: "Accept-Language")
@@ -730,9 +751,12 @@ final class LiveConnection {
     /// The socket URL's query: session lists as deltas (an older hub ignores the question and sends whole lists), the
     /// extensions' install steps (`extension_operation`, #3307), the managers' roster changes (`managers`,
     /// docs/assistant/managers.md), Persona Link entries in the `desktops` event (`desktops_link`, `DesktopDevice`),
-    /// Claude's live status (`session_live`), and where to resume the broadcasts from once a hello gave a stream.
-    static func queryItems(_ cursor: EventCursor, sessionList: Bool = false, extensionStream: Bool = false, sessionLive: Bool = false) -> [URLQueryItem] {
-        [URLQueryItem(name: "features", value: (extensionStream ? "extension_ui_stream_v1," : "") + (sessionLive ? "session_live," : "") + (sessionList ? "sessions_list," + SessionListChanges.feature + "," : "") + "sessions_delta,extension_operations,managers,desktops_link," + HubNaming.feature)] + cursor.queryItems
+    /// Claude's live status (`session_live`), a to-do write's receipts (`todo_send_state`, also in `client_hello`: here
+    /// the hub knows it from the upgrade on, so a write it takes before the hello's answer still says Processing), and
+    /// where to resume the broadcasts from once a hello gave a stream.
+    static func queryItems(_ cursor: EventCursor, sessionList: Bool = false, extensionStream: Bool = false, sessionLive: Bool = false,
+                           todoReceipts: Bool = false) -> [URLQueryItem] {
+        [URLQueryItem(name: "features", value: (extensionStream ? "extension_ui_stream_v1," : "") + (sessionLive ? "session_live," : "") + (sessionList ? "sessions_list," + SessionListChanges.feature + "," : "") + (todoReceipts ? SendReceipt.todoFeature + "," : "") + "sessions_delta,extension_operations,managers,desktops_link," + HubNaming.feature)] + cursor.queryItems
     }
 
     private func heartbeat(_ t: URLSessionWebSocketTask, _ gen: Int) {
@@ -814,7 +838,7 @@ final class LiveConnection {
                     let first = self.state != .connected
                     if first { self.endDrop() }
                     if meta.type != "extension_ui_stream" { self.note(meta) } // private sessions have no broadcast cursor
-                    if case .hello(let hello)? = event { self.personaContracts = hello.features.contains(HubNaming.feature) }
+                    if case .hello(let hello)? = event { self.heard(hello) }
                     if first {
                         DevProbe.socket(.connected)
                         if let on = self.config { self.onAttempt?(on, .answers, self.attemptBegan) }
@@ -826,12 +850,13 @@ final class LiveConnection {
                         self.onConnected?()
                     }
                     self.extensionStreamFrame(data, event: event)
-                    if let event { self.onEvent?(event) }
+                    if let event, self.passes(event) { self.onEvent?(event) }
                     self.receive(t, gen)
                 case .failure(let err):
                     DevProbe.socket(.dropped)
                     let attempt = self.state != .connected // not a drop: this attempt never connected
                     self.personaContracts = false
+                    self.trust(.untrusted)
                     let planned = self.restartNotice || (!self.closedQuiet && t.closeCode == .goingAway)
                     self.dropped(restart: planned)
                     // The handshake's answer: 401 is the hub refusing this credential, not the hub being away.
@@ -876,7 +901,7 @@ final class LiveConnection {
             let first = self.state != .connected
             if first { self.endDrop() }
             if meta.type != "extension_ui_stream" { self.note(meta) }
-            if case .hello(let hello)? = event { self.personaContracts = hello.features.contains(HubNaming.feature) }
+            if case .hello(let hello)? = event { self.heard(hello) }
             if first {
                 self.state = .connected
                 self.sayHello()
@@ -884,15 +909,32 @@ final class LiveConnection {
             }
             self.lastHeard = .now
             self.extensionStreamFrame(data, event: event)
-            if let event { self.onEvent?(event) }
+            if let event, self.passes(event) { self.onEvent?(event) }
         }, dropped: { [weak self] in
             guard let self, gen == self.generation else { return }
             self.personaContracts = false
+            self.trust(.untrusted)
             self.dropped(restart: self.restartNotice)
             self.state = .failed(String(localized: "Connection lost"))
             self.stalled = false
             self.scheduleReconnect(gen)
         })
+    }
+
+    /// This socket's authenticated hello: what it may send under the canonical contracts, and which receipts to trust.
+    private func heard(_ hello: HubHello) {
+        personaContracts = hello.features.contains(HubNaming.feature)
+        trust(hello.sendReceipts)
+    }
+
+    private func trust(_ new: SendReceiptTrust) {
+        if receiptTrust != new { receiptTrust = new }
+    }
+
+    /// Whether an event goes on to `onEvent`: a send receipt only while this socket's hello vouches for its kind.
+    private func passes(_ event: ServerEvent) -> Bool {
+        guard case .sendReceipt(let receipt) = event else { return true }
+        return receiptTrust.admits(receipt)
     }
 
     /// What a message says about the connection: the broadcast stream's place, whether this hello resumed it, a
@@ -991,14 +1033,21 @@ final class LiveConnection {
     nonisolated static let larkViaMessagingFeature = "lark_via_messaging"
 
     /// `elicitation` (MCP forms and links, `ElicitationForm`) from the iOS app alone: the frozen Mac app and visionOS
-    /// don't declare it, so the hub hands those cards to the terminal when they are the only apps open.
+    /// don't declare it, so the hub hands those cards to the terminal when they are the only apps open. The iOS app
+    /// alone also asks for `todo_send_state` (`SendReceipt.todoFeature`, on the socket's URL too), since only its to-do
+    /// page writes to a to-do with an op id.
     /// `persona_card_ring` (```persona-card rings, `PersonaCard.swift`) from the apps that build the chat (iOS, Mac,
     /// visionOS), not the watch or the extensions: a client without it gets each ring as a stacked bar (the hub's
     /// card_compat.go), which every build before the ring draws.
     nonisolated static func helloFeatures(_ client: RequestClientMetadata) -> [String] {
         let iOSApp = RequestClientMetadata.Platform.iOS.rawValue + "-" + RequestClientMetadata.Surface.app.rawValue
         let chatApps = [RequestClientMetadata.Platform.iOS, .macOS, .visionOS].map { $0.rawValue + "-" + RequestClientMetadata.Surface.app.rawValue }
-        return [HubNaming.feature] + (client.platform == iOSApp ? ["elicitation", UndeliveredMessage.agentHoldFeature] : []) + (chatApps.contains(client.platform) ? [cardRingFeature, "closeout.markdown.v1"] : [])
+        return [HubNaming.feature] + (client.platform == iOSApp ? ["elicitation", UndeliveredMessage.agentHoldFeature, SendReceipt.todoFeature] : []) + (chatApps.contains(client.platform) ? [cardRingFeature, "closeout.markdown.v1"] : [])
+    }
+
+    /// Whether this app asks for `todo_send_state` (`helloFeatures`), which the socket's URL then says as well.
+    nonisolated static func asksTodoReceipts(_ client: RequestClientMetadata) -> Bool {
+        helloFeatures(client).contains(SendReceipt.todoFeature)
     }
 
     /// The client_hello feature that says this app draws ```persona-card rings (#3068).

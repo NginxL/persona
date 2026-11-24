@@ -23,6 +23,7 @@ import org.junit.runner.RunWith
 import org.robolectric.annotation.Config
 import persona.core.contracts.api.ConnectionState
 import persona.core.contracts.api.InboxActionsTransport
+import persona.core.inbox.*
 
 @OptIn(ExperimentalCoroutinesApi::class)
 @RunWith(AndroidJUnit4::class)

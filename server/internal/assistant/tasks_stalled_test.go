@@ -210,6 +210,51 @@ func TestTaskStalledContinuationResumesOriginalSession(t *testing.T) {
 	}
 }
 
+// The timed-out continuation path must apply the same permanent-turn refusal as an ordinary cut-off turn. Neither a
+// provider-specific wire kind nor reliance on recognizing the raw sealed-compaction text may permit a resume.
+func TestTaskStalledInvalidConversationRejectsManualContinue(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		text string
+		kind string
+		code string
+	}{
+		{"wire unrecoverable with unrecognized text", "provider-specific terminal context failure", proto.TurnErrorUnrecoverable, ""},
+		{"wire compaction-sealed code with unrecognized text", "provider-specific terminal context failure", "", proto.TurnErrorCompactionSealed},
+		{"raw sealed compaction marker", sealedCompaction, proto.TurnErrorTransient, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s, f, todo, agent, base := stalledTaskFixture(t, 0)
+			ctx := context.Background()
+			s.superviseWatch(ctx, base)
+			s.superviseWatch(ctx, base.Add(time.Hour))
+			if got := todoNow(s, todo.ID); got.Supervision == nil || got.Supervision.state(got) != reviewTimedOut {
+				t.Fatalf("setup did not produce a timed-out task: %+v", got.Supervision)
+			}
+
+			stopped := agent
+			stopped.Status, stopped.State = proto.StatusOffline, proto.StateIdle
+			stopped.Capabilities = &proto.SessionCapabilities{Read: true, Terminal: true, StopCause: proto.StopUser}
+			stopped.ReadOnlyReason = "stopped"
+			stopped.TurnError, stopped.TurnErrorKind, stopped.TurnErrorCode = tc.text, tc.kind, tc.code
+			f.setSessions("box", stopped)
+			resumingNode(f)
+			startsBefore, sendsBefore := len(startCalls(f)), sessionSends(f)
+			_, err := s.retryTask(ctx, todo.ID)
+
+			if starts := startCalls(f)[startsBefore:]; len(starts) != 0 {
+				t.Errorf("manual Continue resumed the invalid conversation with %s: %v", DeviceSessionStart, starts)
+			}
+			if sends := sessionSends(f) - sendsBefore; sends != 0 {
+				t.Errorf("manual Continue sent %d ordinary Continue messages to the invalid conversation", sends)
+			}
+			if err == nil {
+				t.Error("manual Continue did not refuse the invalid conversation")
+			}
+		})
+	}
+}
+
 // A successful stop produces one timeout entry through the ordinary supervision digest, never one per watch pass.
 func TestTaskStalledTimeoutNotifiesSupervisorOnce(t *testing.T) {
 	s, f, todo, _, base := stalledTaskFixture(t, 0)

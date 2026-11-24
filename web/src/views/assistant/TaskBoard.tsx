@@ -29,6 +29,7 @@ const BOARD_TITLE: Record<BoardSectionKey, string> = {
   unread: stateName("unread"),
   stopped: stateName("follow_up"),
   done: stateName("done"),
+  cancelled: t("lib-todos.review_cancelled"),
   failed: stateName("failed"),
 };
 

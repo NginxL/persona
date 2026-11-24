@@ -1,19 +1,37 @@
 package persona.android.di
 
+import androidx.test.core.app.ApplicationProvider
+import java.security.Security
+import persona.android.PersonaApp
 import persona.core.contracts.*
 import persona.core.contracts.api.*
+import persona.core.data.HubCredentials
+import persona.core.data.HubDataStore
+import persona.core.data.StoredScope
+import persona.core.data.addPairedHub
+import persona.core.hub.HeartbeatPolicy
 import persona.core.hub.HubError
 import persona.core.hub.HubFailure
 import persona.feature.agents.AgentsDraftSource
 import persona.feature.agents.AgentsOperationsBindings
 import persona.feature.agents.AgentsWiringState
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonObject
 import org.junit.Assert.*
 import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
 
 /** Hub groups in the app layer (docs/android/android.md "Multiple hubs"): ids between a group and the merged lists, and routing. */
 class GroupRoutingTest {
@@ -86,6 +104,26 @@ class GroupRoutingTest {
             assertNotEquals(source.sendReceipts.value.single().session, wrapped.sendReceipts.value.single().session)
             receipts.value = emptyList()
             assertTrue(wrapped.sendReceipts.value.isEmpty())
+        } finally { scope.coroutineContext[kotlinx.coroutines.Job]?.cancel() }
+    }
+
+    @Test fun assistantOutsideTargetsUseTheirGroupsMergedMachineIds() = runBlocking<Unit> {
+        val snapshot = AssistantSnapshot(
+            directionTree = DirectionTree(listOf(Direction("dir-tree", external = ExternalDirection("work", "tree-agent")))),
+            externalDirections = mapOf("dir-fallback" to ExternalDirection("work", "fallback-agent")),
+        )
+        val source = object : AssistantConversations {
+            override val assistant = MutableStateFlow(snapshot)
+            override val pinned = MutableStateFlow(emptySet<SessionKey>())
+            override suspend fun refresh() = Unit
+            override suspend fun startConversation() = SessionKey("work", "main")
+        }
+        val scope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.Unconfined)
+        try {
+            val translated = source.inGroup(other, scope).assistant.value
+            assertEquals(SessionKey("work~g0a1b2c3d", "tree-agent"), translated.directionTree?.direction("dir-tree")?.external?.target)
+            assertEquals(SessionKey("work~g0a1b2c3d", "fallback-agent"), translated.externalDirections["dir-fallback"]?.target)
+            assertEquals(listOf("dir-tree"), translated.directionTree?.ids)
         } finally { scope.coroutineContext[kotlinx.coroutines.Job]?.cancel() }
     }
 
@@ -191,6 +229,32 @@ class GroupRoutingTest {
         wrapped.retryUndelivered(merged, "message")
         wrapped.deleteUndelivered(merged, "message")
         assertEquals(listOf("retry macbook/conversation message", "delete macbook/conversation message"), calls)
+    }
+
+    @Test fun continuingAGroupedStartUsesRawIdsAndNamespacesTheReturnedRow() = runBlocking<Unit> {
+        var asked: Session? = null
+        var answer: String? = null
+        val rawReturned = Session("macbook", "kept-session", title = "Kept tab", status = "idle", starting = true)
+        val source = object : ChatActions {
+            override suspend fun isMuted(session: Session) = false
+            override suspend fun execute(session: Session, action: ChatAction) = ChatActionResult.Done
+            override suspend fun verify(session: Session, action: ChatAction) = ChatActionResult.Done
+            override suspend fun continueStart(session: Session, choice: String): Session {
+                asked = session
+                answer = choice
+                return rawReturned
+            }
+        }
+        val merged = Session("macbook~g0a1b2c3d", "failed-session", title = "Failed start",
+            status = "offline", startError = "Question", startErrorCode = "shell_waiting")
+
+        val returned = source.inGroup(other).continueStart(merged, "y")
+
+        assertEquals(merged.copy(machineId = "macbook"), asked)
+        assertEquals("y", answer)
+        assertEquals(SessionKey("macbook~g0a1b2c3d", "kept-session"), returned.key)
+        assertEquals(rawReturned.copy(machineId = "macbook~g0a1b2c3d"), returned)
+        assertSame(source, source.inGroup(primary))
     }
 
 
@@ -545,4 +609,122 @@ class GroupRoutingTest {
         val alone = mutableMapOf("work" to other.fleet(FleetState(phase = "needsYou", needsYou = 1, items = listOf(FleetItem("macbook/s1")))))
         assertEquals(FleetState(), alone.retainFleets(listOf("home"), "home"))
     }
+}
+
+/** The production grouped MessageSender over two real durable outboxes, each with a synthetic offline hub. */
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [35], application = PersonaApp::class, shadows = [ShadowConnectionRuntimePersonaApp::class])
+class GroupStartRetryRoutingTest {
+    private val app: PersonaApp = ApplicationProvider.getApplicationContext()
+
+    @Test fun retryRefusedRoutesByGroupAndStripsOnlyTheMachineNamespace() = runBlocking {
+        Security.removeProvider("AndroidKeyStore")
+        Security.addProvider(FakeAndroidKeyStoreProvider())
+        val parent = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+        val homeTransport = RefusingStartTransport()
+        val workTransport = RefusingStartTransport()
+        val transports = mapOf("home-hub" to homeTransport, "work-hub" to workTransport)
+        val store = HubDataStore(app, parent) { scope, _ -> checkNotNull(transports[scope.hubId]) }
+        val runtime = ConnectionRuntime(app)
+        val openedGroups = mutableListOf<GroupRuntime>()
+        try {
+            val homeScope = store.storeHub(credentials("home-hub"))
+            store.change { document ->
+                document.addPairedHub(StoredScope.of(homeScope), null, 1) { "g00000001" }
+            }
+            val workScope = store.storeHub(credentials("work-hub"))
+            store.change { document ->
+                document.addPairedHub(StoredScope.of(workScope), null, 2) { "g0a1b2c3d" }
+            }
+            val registry = store.registry()
+            val homeData = store.openGroup(homeScope, homeScope)
+            val workData = store.openGroup(workScope, workScope)
+            val settings = GroupConnectionSettings(
+                "test", JsonPrimitive(1), buildJsonObject { }, HeartbeatPolicy(), 1_000,
+            )
+            val homeGroup = GroupRuntime(checkNotNull(registry.group("g00000001")), null, app, settings, runtime).also {
+                routingSetField(it, "data", homeData)
+                openedGroups += it
+            }
+            val workGroup = GroupRuntime(checkNotNull(registry.group("g0a1b2c3d")), "g0a1b2c3d", app, settings, runtime).also {
+                routingSetField(it, "data", workData)
+                openedGroups += it
+            }
+            routingField<MutableStateFlow<List<GroupRuntime>>>(runtime, "mutableGroups").value = listOf(homeGroup, workGroup)
+
+            val homeKey = SessionKey("home-machine", "shared-session")
+            val workRawKey = SessionKey("work-machine", "shared-session")
+            val workMergedKey = SessionKey("work-machine~g0a1b2c3d", "shared-session")
+            homeData.messages.send(homeKey, "Home message", "home-refusal")
+            workData.messages.send(workRawKey, "Work message", "work-refusal")
+            awaitDelivery(homeData.messages, "home-refusal", DeliveryState.Refused)
+            awaitDelivery(workData.messages, "work-refusal", DeliveryState.Refused)
+            assertEquals(listOf(homeKey), homeTransport.requests.map { it.session })
+            assertEquals(listOf(workRawKey), workTransport.requests.map { it.session })
+            // Keep requeued rows durable and observable instead of immediately sending them again.
+            homeTransport.readyToSend.value = false
+            workTransport.readyToSend.value = false
+
+            assertEquals(0, runtime.messages.retryRefused(workMergedKey, "dialog_open"))
+            assertEquals(0, runtime.messages.retryRefused(SessionKey("work-machine~gffffffff", "shared-session"), "shell_waiting"))
+            assertEquals(1, runtime.messages.retryRefused(workMergedKey, "shell_waiting"))
+            awaitRequeued(workData.messages, "work-refusal")
+            assertEquals(DeliveryState.Refused, homeData.messages.outbox.value.single().state)
+
+            assertEquals(1, runtime.messages.retryRefused(homeKey, "shell_waiting"))
+            awaitRequeued(homeData.messages, "home-refusal")
+            assertEquals("No offline requeue reaches the network", 1, homeTransport.requests.size)
+            assertEquals("No offline requeue reaches the network", 1, workTransport.requests.size)
+        } finally {
+            openedGroups.forEach { it.close() }
+            val _ = runCatching { store.close() }
+            val _ = runCatching { runtime.dataStore.close() }
+            parent.cancel()
+            Security.removeProvider("AndroidKeyStore")
+            app.scope.cancel()
+        }
+    }
+
+    private fun credentials(hubId: String) = HubCredentials(
+        "https://$hubId.invalid", hubId, null, emptyList(), "synthetic-token-$hubId",
+    )
+}
+
+private class RefusingStartTransport : MessageTransport {
+    override val readyToSend = MutableStateFlow(true)
+    override val supportsClientOps = false
+    val requests = mutableListOf<MessageRequest>()
+
+    override suspend fun send(request: MessageRequest): MessageTransportResult {
+        requests += request
+        return MessageTransportResult.HubError(
+            code = "shell_waiting", delivered = "none", error = "Synthetic terminal question", retryable = false,
+        )
+    }
+}
+
+private suspend fun awaitDelivery(sender: MessageSender, clientMessageId: String, state: DeliveryState) {
+    withTimeout(5_000) {
+        sender.outbox.first { entries ->
+            entries.any { it.clientMessageId == clientMessageId && it.state == state }
+        }
+    }
+}
+
+private suspend fun awaitRequeued(sender: MessageSender, clientMessageId: String) {
+    withTimeout(5_000) {
+        sender.outbox.first { entries ->
+            entries.any {
+                it.clientMessageId == clientMessageId && it.state in setOf(DeliveryState.Queued, DeliveryState.WaitingForNetwork)
+            }
+        }
+    }
+}
+
+@Suppress("UNCHECKED_CAST")
+private fun <T> routingField(target: Any, name: String): T =
+    target.javaClass.getDeclaredField(name).apply { isAccessible = true }.get(target) as T
+
+private fun routingSetField(target: Any, name: String, value: Any?) {
+    target.javaClass.getDeclaredField(name).apply { isAccessible = true }.set(target, value)
 }

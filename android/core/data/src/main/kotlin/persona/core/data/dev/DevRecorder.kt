@@ -236,11 +236,11 @@ class DevRecorder(
     fun error(report: ExtensionErrorReport) {
         val generation = synchronized(lock) { if (!state.on) return; state.generation }
         val write = Runnable {
-            runCatching {
+            val _ = runCatching {
                 if (isCurrent(generation)) store.appendError(report, clock())
             }
         }
-        if (report.kind == "crash") runCatching { writer.submit(write).get() }
+        if (report.kind == "crash") { val _ = runCatching { writer.submit(write).get() } }
         else writer.execute(write)
     }
 
@@ -273,7 +273,7 @@ class DevRecorder(
         val (batch, generation) = accepted
         val now = clock()
         writer.execute {
-            runCatching {
+            val _ = runCatching {
                 if (isCurrent(generation)) store.appendEvents(batch, now)
             }
         }

@@ -50,7 +50,7 @@ export function shownMember(members: readonly Session[], last: string | undefine
 /** Shows `worker` in its lead's Team panel (a pill picked on the strip), opening the panel if it is not. */
 export function showWorker(mid: string, lead: string, worker: string) {
   picked.set(leadKey(mid, lead), worker);
-  openPanel({ kind: "team", mid, sid: lead, worker });
+  openPanel({ kind: "team", mid, sid: lead, worker }, teamPanelOf(getPanel(), mid, lead) ? { replace: true } : { push: false });
 }
 
 // ── what was decided for a lead's panel in this browser: cindy's per-task record of the right sidebar's collapsed state ──
@@ -185,7 +185,7 @@ export function useTeamReveal(mid: string, sid: string, session: Session | undef
       if (arriving && shown && !open) return;
       recordTeam(mid, sid, "open");
       if (!open || asked && (open.worker !== asked.worker || open.at !== asked.at)) {
-        openPanel({ kind: "team", mid, sid, worker: asked?.worker, at: asked?.at });
+        openPanel({ kind: "team", mid, sid, worker: asked?.worker, at: asked?.at }, { push: false });
       }
     });
     // the panel's own state is decided once per arrival and count: a later resize or panel change does not reopen it

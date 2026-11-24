@@ -36,6 +36,7 @@ import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
+import persona.core.contracts.ExternalDirection
 import persona.core.contracts.Session
 import persona.core.contracts.SessionKey
 import persona.core.contracts.api.AssistantManagement
@@ -125,6 +126,8 @@ internal fun AssistantFullSearch(
     hubKey: String,
     words: ConversationWords,
     names: Map<String, String> = emptyMap(),
+    /** Presentation-only outside directions; they never enter the manager's conversation search. */
+    externalDirections: Map<String, ExternalDirection> = emptyMap(),
     backgroundId: String? = null,
     activeTag: String? = null,
     mainKey: SessionKey? = null,
@@ -138,7 +141,7 @@ internal fun AssistantFullSearch(
     agentMachines: Map<String, String> = emptyMap(),
     pinnedAgents: Set<String> = emptySet(),
     agentsFirst: Boolean = false,
-    onOpenAgent: (SessionKey) -> Unit = {},
+    onOpenAgent: ((SessionKey) -> Unit)? = null,
 ) {
     var query by rememberSaveable { mutableStateOf(initialQuery) }
     var agentScope by remember(agentsFirst) { mutableStateOf(agentsFirst) }
@@ -172,13 +175,13 @@ internal fun AssistantFullSearch(
         if (focusedOnce || !windowFocused) return@LaunchedEffect
         focusedOnce = true
         withFrameNanos { }
-        runCatching { focus.requestFocus() }
+        val _ = runCatching { focus.requestFocus() }
         keyboard?.show()
     }
     LaunchedEffect(Unit) {
         withFrameNanos { }
         if (!focusedOnce) {
-            runCatching { focus.requestFocus() }
+            val _ = runCatching { focus.requestFocus() }
             keyboard?.show()
         }
     }
@@ -212,7 +215,7 @@ internal fun AssistantFullSearch(
                     item { JSectionHeader(stringResource(if (query.isBlank()) R.string.assistant_recent else R.string.assistant_sidebar_search_agents)) }
                     items(agentRows, key = { it.key.path }) { session ->
                         JRow(session.displayTitle, subtitle = agentMachines[session.machineId],
-                            leadingIcon = PersonaIcons.agentChat, onClick = { onOpenAgent(session.key) })
+                            leadingIcon = PersonaIcons.agentChat, onClick = onOpenAgent?.let { open -> { open(session.key) } })
                     }
                     if (agentRows.isEmpty() && query.isNotBlank()) item {
                         JEmptyState(stringResource(R.string.assistant_sidebar_search_no_agents),
@@ -229,14 +232,21 @@ internal fun AssistantFullSearch(
                     }
                     items(rows, key = { it.session.key.path }) { row ->
                         val isMain = row.session.key == mainKey
+                        val external = externalDirections[row.session.sessionId]
+                        val target = external?.target
+                        val open: (() -> Unit)? = when {
+                            external == null -> {{
+                                row.hit?.let { MessageJumps.request(row.session.machineId, row.session.sessionId, it.itemId) }
+                                onOpen(row.session.key)
+                            }}
+                            target != null && onOpenAgent != null -> {{ onOpenAgent(target) }}
+                            else -> null
+                        }
                         FullSearchRow(
                             row = row,
                             title = if (isMain) mainTitle else names[row.session.sessionId] ?: row.session.conversationTitle(words),
                             isMain = isMain,
-                            onOpen = {
-                                row.hit?.let { MessageJumps.request(row.session.machineId, row.session.sessionId, it.itemId) }
-                                onOpen(row.session.key)
-                            },
+                            onOpen = open,
                         )
                     }
                     if (rows.isEmpty() && query.isNotBlank()) item {
@@ -271,7 +281,7 @@ internal fun AssistantFullSearch(
 }
 
 @Composable
-private fun FullSearchRow(row: FoundChat, title: String, isMain: Boolean, onOpen: () -> Unit) {
+private fun FullSearchRow(row: FoundChat, title: String, isMain: Boolean, onOpen: (() -> Unit)?) {
     val said = row.hit?.let(::markedSnippet)
     val preview = row.session.lastText?.replace("\n", " ")?.takeIf { it.isNotBlank() }
     androidx.compose.foundation.layout.Column {

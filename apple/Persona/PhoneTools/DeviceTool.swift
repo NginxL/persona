@@ -1,8 +1,6 @@
 import Foundation
 import Network
-#if canImport(UIKit)
 import UIKit
-#endif
 import PersonaWire
 
 /// `phone_device_info`: model, OS, battery, storage, network, locale, the app's version.
@@ -17,7 +15,10 @@ enum DeviceTool {
                     charging state, low power mode, free and total storage in bytes, current network \
                     type (wifi/cellular/wired/offline), timezone and locale, and the Persona app's version, \
                     build number and build channel (debug/release). Cheap and safe to call when you need \
-                    context about the device.
+                    context about the device. \
+                    Also "build" (what this app was built from: commit, dirty, branch, built_at, builder, xcode, \
+                    swift, configuration, bundle_id; Debug builds have them all, Release builds the commit) and \
+                    "runtime" (hub_host, hub_version, hub_connection, launched_at); any field may be missing.
                     """,
                     inputSchema: Schema.object([:])
                 ),
@@ -52,6 +53,7 @@ enum DeviceTool {
         let storage = Self.storage()
         let app = AppVersion.current
         let network = await NetworkProbe.currentType()
+        let debug = await AppDebugInfo.current(AppModel.shared)
 
         return Output.json(Output.object([
             ("model", .string(deviceModel())),
@@ -72,7 +74,15 @@ enum DeviceTool {
             ("app_version", .string(app.version)),
             ("app_build", .string(app.build)),
             ("app_channel", .string(app.channel)),
+            ("build", Self.json(debug.build)),
+            ("runtime", Self.json(debug.runtime)),
         ]))
+    }
+
+    /// A part of `AppDebugInfo` as the tool returns it: the same encoding as About's Copy All (#12926).
+    static func json(_ value: some Encodable) -> JSONValue? {
+        guard let data = try? AppDebugInfo.encoder(pretty: false).encode(value) else { return nil }
+        return try? JSONDecoder().decode(JSONValue.self, from: data)
     }
 
     /// `uname` gives the hardware identifier (e.g. iPhone17,1) which Claude

@@ -14,10 +14,11 @@ var (
 	// referenceLineRe matches a line opened by a related-work/background marker; every link on such a line is a
 	// reference. The (?m) flags anchor ^/$ to line boundaries rather than the whole report.
 	referenceLineRe = lazyre.New(`(?im)^\s*(?:[-*]\s*)?(?:related\s+(?:work|prs?|pull\s+requests?)|background|see\s+also|references?)\b`) // i18n-ignore: matches Agent report prose
-	// referenceClauseRe matches an in-sentence disclaimer that a named PR is related work, background or not this
-	// task's delivery. Only links inside the same sentence carry the marker, so a delivery PR in the next sentence
-	// keeps its role.
-	referenceClauseRe = lazyre.New(`(?i)(?:related\s+work|background(?:\s+work)?|not\s+this\s+(?:task|research|work)'?s?\s+delivery|not\s+(?:our|my)\s+delivery|rather\s+than\s+(?:this|our|my)\s+delivery)`) // i18n-ignore: matches Agent report prose
+	// referenceClauseRe matches an in-sentence disclaimer that a named PR is related work, explicitly framed as
+	// background or not this task's delivery. A bare "background" is deliberately not enough: ordinary delivery
+	// prose ("fixed the background sync worker in <PR>") must keep the delivery role. Only links inside the same
+	// sentence carry the marker, so a delivery PR in the next sentence keeps its role.
+	referenceClauseRe = lazyre.New(`(?i)(?:related\s+work|background(?:\s+work)?\s*:|(?:as|for|is)\s+background(?:\s+work)?\b|not\s+this\s+(?:task|research|work)'?s?\s+delivery|not\s+(?:our|my)\s+delivery|rather\s+than\s+(?:this|our|my)\s+delivery)`) // i18n-ignore: matches Agent report prose
 	citationBlockRe   = lazyre.New(`(?s)<oai-mem-citation>.*?</oai-mem-citation>`)
 )
 

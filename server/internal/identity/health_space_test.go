@@ -61,3 +61,32 @@ func TestCardCwd(t *testing.T) {
 		}
 	}
 }
+
+// A track's directory (#13104): one a manager named, of any path, and by default one in a tracks directory
+// (tracks/<slug>, tracks-<id>/<slug>), with any folder inside; a name in the tracks directory that is no slug is not.
+func TestTrackDirs(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("PERSONA_HOME", "")
+	root := filepath.Join(home, ".persona")
+	t.Cleanup(func() { SetTrackDirs("test", nil) })
+	for path, want := range map[string]string{
+		filepath.Join(root, "tracks", "qa-plain"):                 "qa-plain",
+		filepath.Join(root, "tracks", "qa-plain", "notes"):        "qa-plain",
+		filepath.Join(root, "tracks-m-0a1b", "qa-other", "inbox"): "qa-other",
+		filepath.Join(root, "tracks", "Not-A-Slug"):               "",
+		filepath.Join(root, "kept", "finance"):                    "",
+		filepath.Join(root, "health", "reports"):                  SpaceHealth,
+	} {
+		if got := SpaceAt(path); got != want {
+			t.Errorf("SpaceAt(%s) = %q, want %q", path, got, want)
+		}
+	}
+	SetTrackDirs("test", map[string]string{filepath.Join(root, "kept", "finance"): "qa-finance"})
+	if got := SpaceAt(filepath.Join(root, "kept", "finance", "x")); got != "qa-finance" {
+		t.Errorf("a named track's folder = %q", got)
+	}
+	if got := SpaceOf(filepath.Join(root, "kept", "finance", "x")); got != "" {
+		t.Errorf("SpaceOf is exact: %q", got)
+	}
+}

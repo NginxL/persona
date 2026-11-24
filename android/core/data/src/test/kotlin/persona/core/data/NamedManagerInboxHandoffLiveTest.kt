@@ -27,7 +27,7 @@ import persona.core.contracts.JsonCodec
 import persona.core.contracts.SessionKey
 import persona.core.contracts.api.MessageTransportResult
 import persona.core.hub.HubConnectionConfig
-import persona.feature.inbox.InboxHandOffRequest
+import persona.core.inbox.InboxHandOffRequest
 
 /** Opt-in against the two real managers started by the live handoff fixture. */
 @RunWith(RobolectricTestRunner::class)

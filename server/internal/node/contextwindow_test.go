@@ -30,6 +30,13 @@ func TestContextWindowOf(t *testing.T) {
 		{"a routed 200k Claude model", "passthrough/claude-opus-4-6", 0, 61_000, 200_000},
 		{"a routed Claude model over 200k", "passthrough/claude-sonnet-4-6", 0, 340_000, 1_000_000},
 		{"a vendor path that is not Claude", "meta/llama-3", 0, 5_000, 0},
+		{"Gemini text model", "gemini-2.5-pro", 0, 5_000, 1_048_576},
+		{"Antigravity Flash with effort", "gemini-3.8-flash-medium", 0, 5_000, 1_048_576},
+		{"routed Gemini with effort", "route/google/Gemini-4-Neon-XHigh", 0, 5_000, 1_048_576},
+		{"orchestrator", "gemini-pro-orchestrator-argon", 0, 5_000, 1_048_576},
+		{"GPT-OSS uses its own limit", "openai/gpt-oss-120b-medium", 0, 250_000, 131_072},
+		{"an unknown Gemini variant", "gemini-3.8-flash-custom-high", 0, 250_000, 0},
+		{"a route name is not a model", "gemini-4-neon/unknown", 0, 5_000, 0},
 		{"synthetic is unknown", "<synthetic>", 0, 5_000, 0},
 		{"empty is unknown", "", 0, 5_000, 0},
 	} {
@@ -260,7 +267,8 @@ func TestLookupProviderModelAndLauncherWindow(t *testing.T) {
 		{"200k catalog entry promotes to 1M when usage exceeds 200k and MaxContext is unset", &catalog, "claude-sonnet-4-6", 0, 340_000, nil, 1_000_000},
 		{"200k catalog entry promotes to 1M on explicit [1m] suffix when MaxContext is unset", &catalog, "claude-sonnet-4-6[1m]", 0, 50_000, nil, 1_000_000},
 		{"fallback session model matches catalog when transcript echoed an opaque endpoint id", &catalog, "ep-opaque-id", 0, 90_000, []string{"route-a/gemini-4-carbon"}, 1_000_000},
-		{"undeclared gateway model stays 0", &undeclared, "route-a/gemini-4-carbon", 0, 90_000, nil, 0},
+		{"undeclared Gemini model uses its built-in window", &undeclared, "route-a/gemini-4-carbon", 0, 90_000, nil, 1_048_576},
+		{"undeclared gateway model stays 0", &undeclared, "route-a/custom", 0, 90_000, nil, 0},
 		{"undeclared Claude model keeps built-in window", &undeclared, "claude-opus-4-6", 0, 61_000, nil, 200_000},
 		{"undeclared native 1M Claude model keeps 1M", &undeclared, "claude-opus-5-5", 0, 61_000, nil, 1_000_000},
 		{"bracketed placeholder stays 0 on bare catalog", &catalog, "<synthetic>", 0, 5_000, nil, 0},
@@ -320,10 +328,10 @@ func TestTerminalSessionManagedLauncherContextWindow(t *testing.T) {
 	for _, s := range before {
 		byID[s.SessionID] = s
 	}
-	if s := byID[liveID]; s.ContextWindow != 0 || s.Model != echoed {
+	if s := byID[liveID]; s.ContextWindow != 1_048_576 || s.Model != echoed {
 		t.Fatalf("before catalog: live %+v", s)
 	}
-	if s := byID[offlineID]; s.ContextWindow != 0 || s.Model != echoed {
+	if s := byID[offlineID]; s.ContextWindow != 1_048_576 || s.Model != echoed {
 		t.Fatalf("before catalog: offline %+v", s)
 	}
 

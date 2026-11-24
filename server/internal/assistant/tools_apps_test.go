@@ -297,7 +297,8 @@ func TestInteractionAnswerAnswersAQuestion(t *testing.T) {
 	}
 }
 
-// Only questions may be answered for the user; an approval is theirs alone.
+// Only questions may be answered for the user; an approval not handed to this conversation as its task's supervisor is
+// theirs alone.
 func TestInteractionAnswerRefusesApprovals(t *testing.T) {
 	for _, ix := range []proto.Interaction{
 		{Kind: proto.IxPermission, ToolName: "Bash", Summary: "rm -rf"},

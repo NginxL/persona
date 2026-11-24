@@ -1,6 +1,14 @@
 import BeautifulUI
 import SwiftUI
 
+struct ReadinessChoice: Identifiable {
+    var id: String
+    var title: String
+    var busy = false
+    var disabled = false
+    var action: () -> Void
+}
+
 /// What the main conversation still needs, or why a start or a send was refused (docs/assistant/onboarding.md 4.4, 5.2): one card
 /// over the composer — a title, one sentence, one button for what to do, and under Details the original text (the hub's
 /// `detail`, the request id) for a failure. Later (`dismiss`) when the checklist may be put off. In the BeautifulUI
@@ -11,6 +19,8 @@ struct ReadinessCard: View {
         case caution
         /// A refusal or a step that broke.
         case danger
+        /// A question waiting for an answer, not a failure of its own.
+        case neutral
     }
 
     var title: String
@@ -26,6 +36,10 @@ struct ReadinessCard: View {
     var details: [String] = []
     var busy = false
     var dismiss: (() -> Void)?
+    /// Startup questions use several equal choices; empty keeps every existing card's layout unchanged.
+    var choices: [ReadinessChoice] = []
+    var symbol: String? = nil
+    var failure: String? = nil
     @State private var open = false
     @Environment(\.chatPin) private var pin
     /// What the chat's pin knows the Details button by (this view's, kept while it is drawn).
@@ -35,7 +49,14 @@ struct ReadinessCard: View {
         if AppStyle.current.usesBeautifulUI { beautiful } else { plain }
     }
 
-    private var color: Color { tone == .danger ? Theme.danger : Theme.caution }
+    private var color: Color {
+        switch tone {
+        case .danger: Theme.danger
+        case .caution: Theme.caution
+        case .neutral: .secondary
+        }
+    }
+    private var mark: String { symbol ?? (tone == .danger ? Theme.Icon.errorFilled : Theme.Icon.error) }
 
     /// The buttons and Details side by side, each on one line (docs/design/DESIGN_SYSTEM.md 1.2 rule 3).
     private func buttonRow(spacing: CGFloat) -> HStackLayout { HStackLayout(spacing: spacing) }
@@ -43,7 +64,7 @@ struct ReadinessCard: View {
     private var plain: some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
             HStack(alignment: .firstTextBaseline, spacing: Theme.Space.s) {
-                ThemedIcon(tone == .danger ? Theme.Icon.errorFilled : Theme.Icon.error)
+                ThemedIcon(mark)
                     .font(Theme.Font.labelStrong)
                     .foregroundStyle(color)
                 VStack(alignment: .leading, spacing: Theme.Space.xs) {
@@ -51,6 +72,10 @@ struct ReadinessCard: View {
                         .fixedSize(horizontal: false, vertical: true)
                     if let detail, !detail.isEmpty {
                         Text(detail).font(Theme.Font.secondary).foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    if let failure, !failure.isEmpty {
+                        Text(failure).font(Theme.Font.secondary).foregroundStyle(Theme.danger)
                             .fixedSize(horizontal: false, vertical: true)
                     }
                 }
@@ -78,30 +103,60 @@ struct ReadinessCard: View {
     }
 
     @ViewBuilder private var buttons: some View {
-        let hasAny = action != nil || alt != nil || !details.isEmpty || busy
-        let row = buttonRow(spacing: Theme.Space.m)
-        if hasAny {
-            row {
-                if busy { ProgressView().controlSize(.small) }
-                if let actionTitle, let action {
+        if !choices.isEmpty {
+            choiceButtons
+        } else {
+            let hasAny = action != nil || alt != nil || !details.isEmpty || busy
+            let row = buttonRow(spacing: Theme.Space.m)
+            if hasAny {
+                row {
+                    if busy { ProgressView().controlSize(.small) }
+                    if let actionTitle, let action {
+                        Button {
+                            Haptics.tap()
+                            action()
+                        } label: {
+                            Text(actionTitle).font(Theme.Font.secondaryStrong).lineLimit(1).minimumScaleFactor(0.8)
+                        }
+                        .themedButton(prominent: true)
+                        .disabled(busy)
+                    }
+                    if let altTitle, let alt {
+                        Button(action: alt) {
+                            Text(altTitle).font(Theme.Font.secondaryStrong).lineLimit(1).minimumScaleFactor(0.8)
+                        }
+                        .buttonStyle(.borderless)
+                        .foregroundStyle(Theme.accent)
+                    }
+                    Spacer(minLength: 0)
+                    if !details.isEmpty { detailsToggle }
+                }
+            }
+        }
+    }
+
+    private var choiceButtons: some View {
+        VStack(alignment: .leading, spacing: Theme.Space.s) {
+            StackingButtonRow(spacing: Theme.Space.s) {
+                ForEach(choices) { choice in
                     Button {
                         Haptics.tap()
-                        action()
+                        choice.action()
                     } label: {
-                        Text(actionTitle).font(Theme.Font.secondaryStrong).lineLimit(1).minimumScaleFactor(0.8)
+                        Text(choice.title).font(Theme.Font.secondaryStrong).buttonLabelLine()
+                            .opacity(choice.busy ? 0 : 1)
+                            .overlay { if choice.busy { ProgressView().controlSize(.small) } }
                     }
-                    .themedButton(prominent: true)
-                    .disabled(busy)
+                    .themedButton()
+                    .disabled(choice.disabled)
+                    .accessibilityIdentifier("readiness-choice-\(choice.id)")
                 }
-                if let altTitle, let alt {
-                    Button(action: alt) {
-                        Text(altTitle).font(Theme.Font.secondaryStrong).lineLimit(1).minimumScaleFactor(0.8)
-                    }
-                    .buttonStyle(.borderless)
-                    .foregroundStyle(Theme.accent)
+            }
+            if !details.isEmpty {
+                HStack {
+                    Spacer(minLength: 0)
+                    detailsToggle
                 }
-                Spacer(minLength: 0)
-                if !details.isEmpty { detailsToggle }
             }
         }
     }
@@ -137,7 +192,7 @@ struct ReadinessCard: View {
         BUIListSection {
             VStack(alignment: .leading, spacing: Theme.Space.s) {
                 BUIListRow(title, detail: detail, detailLines: 4) {
-                    IconTile(tone == .danger ? Theme.Icon.errorFilled : Theme.Icon.error, tint: color)
+                    IconTile(mark, tint: color)
                 } trailing: {
                     if busy { BUISpinner() }
                     if let dismiss {
@@ -145,24 +200,32 @@ struct ReadinessCard: View {
                             .buttonStyle(.plain)
                     }
                 }
-                let row = buttonRow(spacing: Theme.Space.s)
-                if action != nil || alt != nil || !details.isEmpty {
-                    row {
-                        if let actionTitle, let action {
-                            Button {
-                                Haptics.tap()
-                                action()
-                            } label: {
-                                BUIPill(actionTitle, tone: .accent)
+                if let failure, !failure.isEmpty {
+                    Text(failure).font(Theme.Font.secondary).foregroundStyle(Theme.danger)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                if !choices.isEmpty {
+                    choiceButtons
+                } else {
+                    let row = buttonRow(spacing: Theme.Space.s)
+                    if action != nil || alt != nil || !details.isEmpty {
+                        row {
+                            if let actionTitle, let action {
+                                Button {
+                                    Haptics.tap()
+                                    action()
+                                } label: {
+                                    BUIPill(actionTitle, tone: .accent)
+                                }
+                                .buttonStyle(.plain)
+                                .disabled(busy)
                             }
-                            .buttonStyle(.plain)
-                            .disabled(busy)
+                            if let altTitle, let alt {
+                                Button(action: alt) { BUIPill(altTitle, tone: .outline) }.buttonStyle(.plain)
+                            }
+                            Spacer(minLength: 0)
+                            if !details.isEmpty { detailsToggle }
                         }
-                        if let altTitle, let alt {
-                            Button(action: alt) { BUIPill(altTitle, tone: .outline) }.buttonStyle(.plain)
-                        }
-                        Spacer(minLength: 0)
-                        if !details.isEmpty { detailsToggle }
                     }
                 }
                 if open { detailsBlock }

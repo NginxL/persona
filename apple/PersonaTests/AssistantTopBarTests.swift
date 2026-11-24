@@ -33,6 +33,25 @@ struct AssistantTopBarTests {
         #expect(ModelID.feature == "typed_models")
     }
 
+    @Test func foldedAliasesSelectTheCanonicalRowInsteadOfOtherModel() throws {
+        let options = try JSON.decoder.decode([AgentModelOption].self, from: Data(#"""
+            [{"id":"default","name":"Default","default":true},
+             {"id":"claude-opus-5-5","name":"Opus 5.5","aliases":["opus","sonnet"]},
+             {"id":"kiro/claude-opus-5-5","name":"Opus 5.5 (kiro)"}]
+            """#.utf8))
+        #expect(options[1].aliases == ["opus", "sonnet"])
+        #expect(assistantModelOption("sonnet", in: options)?.id == "claude-opus-5-5")
+        #expect(assistantModelOption("kiro/claude-opus-5-5", in: options)?.id == "kiro/claude-opus-5-5")
+        #expect(assistantModelOption("unknown", in: options) == nil)
+        #expect(assistantModelOption(nil, in: options) == nil)
+        #expect(options[2].aliases == nil, "an older hub needs no alias field")
+
+        let collision = try JSON.decoder.decode([AgentModelOption].self, from: Data(#"""
+            [{"id":"claude-opus-5-5","aliases":["sonnet"]},{"id":"sonnet"}]
+            """#.utf8))
+        #expect(assistantModelOption("sonnet", in: collision)?.id == "sonnet", "an exact ID beats another row's alias")
+    }
+
     @Test func copyInfoHasWhatAnotherAgentNeeds() {
         let t = AssistantCopyText.info(title: "早报", isMain: false, sessionID: "abc-123", machine: "Server", machineID: "server",
                                        cwd: "/home/me/.persona/assistant", launcher: "claude", model: "Opus")
@@ -177,7 +196,7 @@ struct AssistantTopBarTests {
         let all = [try s("main"), try s("mine"), try s("lead-b"), try s("lead-a")]
         let main = all[0].key
         let picked = AssistantSidebarGroups.directions(all, leaders: ["lead-a", "gone", "main", "lead-b"], main: main)
-        #expect(picked.map(\.sessionID) == ["lead-a", "lead-b"])
+        #expect(picked.map(\.id) == ["lead-a", "lead-b"])
         #expect(AssistantSidebarGroups.directions(all, leaders: [], main: main).isEmpty)
     }
 

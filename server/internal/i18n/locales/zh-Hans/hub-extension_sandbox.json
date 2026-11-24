@@ -1,6 +1,6 @@
 {
-  "unavailable": "没有沙箱：{why}",
   "not_applicable": "只有装在 hub 上、由 hub 运行程序的扩展才有沙箱",
   "no_database": "这个 hub 没有数据库",
-  "owner_only": "扩展的沙箱只能在 hub 机器上（personad extension sandbox …）或 hub 的管理界面里改"
+  "owner_only": "扩展的沙箱只能在 hub 机器上（personad extension sandbox …）或 hub 的管理界面里改",
+  "start_blocked": "扩展无法启动，因为沙箱不可用：{why}"
 }

@@ -22,6 +22,8 @@ type Store interface {
 	Setting(ctx context.Context, key string, out any) (bool, error)
 	PutSetting(ctx context.Context, key string, v any) error
 
+	PutPlacement(context.Context, db.PlacementRow) error
+
 	// The plans the assistant handed the user (task_plan).
 	CreateTaskPlan(ctx context.Context, p db.TaskPlanRow) error
 	TaskPlan(ctx context.Context, id string) (*db.TaskPlanRow, error) // db.ErrTaskPlanNotFound

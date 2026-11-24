@@ -26,6 +26,8 @@ type taskNode struct {
 	starts []map[string]any
 	sends  []map[string]any
 	n      int
+	// nextID: when non-empty, the next session.start uses this id before returning to s1, s2…
+	nextID string
 	// failStart: session.start answers this error instead of a session.
 	failStart error
 	// gate: when set, session.start waits for it to close (a start that takes a while).
@@ -67,6 +69,9 @@ func connectTaskNode(t *testing.T, h *Hub, id string) *taskNode {
 			}
 			tn.n++
 			sid := "s" + string(rune('0'+tn.n))
+			if tn.nextID != "" {
+				sid, tn.nextID = tn.nextID, ""
+			}
 			return map[string]any{"session": proto.Session{SessionID: sid, Cwd: p["cwd"].(string), Agent: "claude"}}, nil
 		case "session.send":
 			tn.sends = append(tn.sends, p)
@@ -576,8 +581,18 @@ func TestTaskPlanWaitsForTheUser(t *testing.T) {
 	r.Header.Set("Authorization", "Bearer "+h.cfg.Token)
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, r)
-	if w.Code != http.StatusConflict {
-		t.Fatalf("dismiss after start: %d", w.Code)
+	if w.Code != http.StatusOK {
+		t.Fatalf("dismiss after start: %d %s", w.Code, w.Body)
+	}
+	var dismissed struct{ Plan *assistant.TaskPlan }
+	if err := json.Unmarshal(w.Body.Bytes(), &dismissed); err != nil {
+		t.Fatal(err)
+	}
+	if dismissed.Plan == nil || dismissed.Plan.ID != id || dismissed.Plan.State != "started" {
+		t.Fatalf("dismiss after start must return the started plan: %+v", dismissed.Plan)
+	}
+	if p := loadPlan(h, id); p.State != "started" {
+		t.Fatalf("dismiss changed the started plan: %+v", p)
 	}
 }
 

@@ -46,5 +46,13 @@
   "continue_label": "（「{title}」）",
   "continue_placeholder_to": "次に {agent} に何をしてもらいますか？",
   "continue_failed_plain": "送信できませんでした。チャットを開いて理由を確認してください。",
+  "outbox_reason_unknown": "理由は報告されていません",
+  "outbox_failed": "メッセージを送信できませんでした：{reason}。再試行するか削除してください。",
+  "outbox_uncertain": "配信結果は不明です：{reason}。再試行前に元の送信を確認してください。",
+  "not_sent": "未送信",
+  "computer_setup_detail": "エージェントがこのコンピューターを使用できるように、セットアップを完了してください。",
+  "computer_offline_detail": "コンピューターを利用できません：{reason}。セットアップを開いて再接続してください。",
+  "setup_needed": "セットアップが必要",
+  "open_setup": "セットアップを開く",
   "arrange": "概要を整理"
 }

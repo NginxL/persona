@@ -249,7 +249,7 @@ class NativeStreamCoverageTest {
         val stepper = """{"type":"row","key":"stepper","title":"Temperature","control":{"kind":"stepper","name":"temperature","value":0,"min":0,"max":10,"step":0.5,"action":{"id":"step"}}}"""
         show(snapshot("$slider,$stepper")); mount()
         assertEquals(JsonPrimitive(0), session.state.value.tree!!.nodes.getValue("slider").getValue("control").jsonObject["value"])
-        rule.onNodeWithContentDescription("Brightness").performSemanticsAction(androidx.compose.ui.semantics.SemanticsActions.SetProgress) { it(5f) }
+        rule.onNodeWithContentDescription("Brightness").performSemanticsAction(androidx.compose.ui.semantics.SemanticsActions.SetProgress) { val _ = it(5f) }
         val slide = last("slider", "slide", "change")
         assertEquals("5.0", slide.interaction.value.jsonObject.getValue("brightness").jsonPrimitive.content)
         rule.onNodeWithContentDescription("Increase Temperature").performClick()
@@ -562,7 +562,7 @@ class NativeStreamCoverageTest {
         rule.setContent { PersonaTheme(style = AppStyle.Board, reduceMotion = true) { if (mounted) NativeExtensionStreamPage(adapter, "Page", {}) } }
         val horizontal = SemanticsMatcher.keyIsDefined(androidx.compose.ui.semantics.SemanticsProperties.HorizontalScrollAxisRange)
         rule.onAllNodes(horizontal).assertCountEquals(5)
-        repeat(5) { i -> rule.onAllNodes(horizontal)[i].performSemanticsAction(androidx.compose.ui.semantics.SemanticsActions.ScrollBy) { it(100f, 0f) } }
+        repeat(5) { i -> rule.onAllNodes(horizontal)[i].performSemanticsAction(androidx.compose.ui.semantics.SemanticsActions.ScrollBy) { val _ = it(100f, 0f) } }
         rule.waitForIdle()
         fun anchors() = rule.onAllNodes(horizontal).fetchSemanticsNodes().map { it.config[androidx.compose.ui.semantics.SemanticsProperties.HorizontalScrollAxisRange].value() }
         val before = anchors()
@@ -588,7 +588,7 @@ class NativeStreamCoverageTest {
     @Test fun confirmedSliderCancelRestoresItsOriginalValueAndConfirmationPreservesLaterTyping() {
         val slider = """{"type":"row","key":"slider","title":"Brightness","control":{"kind":"slider","name":"brightness","value":0,"min":0,"max":10,"step":1,"action":{"id":"slide","confirm":"Change brightness?"}}}"""
         show(snapshot(slider)); mount()
-        fun set(value: Float) = rule.onNodeWithContentDescription("Brightness").performSemanticsAction(androidx.compose.ui.semantics.SemanticsActions.SetProgress) { it(value) }
+        fun set(value: Float) = rule.onNodeWithContentDescription("Brightness").performSemanticsAction(androidx.compose.ui.semantics.SemanticsActions.SetProgress) { val _ = it(value) }
         fun current() = rule.onNodeWithContentDescription("Brightness").fetchSemanticsNode().config[androidx.compose.ui.semantics.SemanticsProperties.ProgressBarRangeInfo].current
         set(5f); rule.onNodeWithText("Cancel").performClick()
         assertEquals(0f, current()); assertTrue(session.state.value.drafts.isEmpty())

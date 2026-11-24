@@ -80,10 +80,6 @@ final class MessageCardStateUITests: XCTestCase {
         let app = XCUIApplication()
         let pair = "persona://pair?url=" + hub.addingPercentEncoding(withAllowedCharacters: .alphanumerics)! + "&token=mock"
         app.launchArguments = ["-pairURL", pair, "-tab", "assistant", "-dev.openChat", "", "-openAssistant", main]
-        #if os(macOS)
-        app.launchArguments += ["-macAppearance", ProcessInfo.processInfo.environment["PERSONA_SHOTS_APPEARANCE"] ?? "light",
-                                "-macWindowSize", "1280x820"]
-        #endif
         app.launchPinned()
         #if os(iOS)
         let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
@@ -95,11 +91,7 @@ final class MessageCardStateUITests: XCTestCase {
 
     @MainActor private func reveal(_ element: XCUIElement, in tray: XCUIElement) {
         for _ in 0..<4 where !element.isHittable {
-            #if os(macOS)
-            tray.scroll(byDeltaX: 0, deltaY: -250)
-            #else
             tray.swipeUp()
-            #endif
         }
     }
 

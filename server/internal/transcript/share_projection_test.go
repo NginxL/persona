@@ -131,6 +131,49 @@ func TestShareCodexCompleteEventsAndFrontier(t *testing.T) {
 	}
 }
 
+func TestShareCodexMcpTextOnly(t *testing.T) {
+	data := []byte(`{"type":"event_msg","payload":{"type":"task_started","turn_id":"turn"}}
+{"type":"event_msg","payload":{"type":"item_completed","item":{"type":"McpToolCall","id":"mcp","server":"example","tool":"lookup","arguments":{},"result":{"content":[{"type":"text","text":"Synthetic result"},{"type":"image","data":"SyntheticImageBytes","mimeType":"image/png"}],"rawPayload":"SyntheticRawPayload"}}}}
+{"type":"event_msg","payload":{"type":"item_completed","item":{"type":"AgentMessage","id":"answer","content":[{"type":"text","text":"Done"}]}}}
+{"type":"event_msg","payload":{"type":"task_complete","turn_id":"turn"}}
+`)
+	out, err := ProjectShareBytes(context.Background(), data, "synthetic-source", "synthetic-incarnation", nil)
+	if err != nil || !out.Complete || len(out.Messages) != 1 {
+		t.Fatalf("share projection: %+v %v", out, err)
+	}
+	work := out.Messages[0].Message.Execution
+	if len(work) != 1 || len(work[0].Results) != 1 || work[0].Results[0].Text != "Synthetic result" {
+		t.Fatalf("MCP text export: %+v", work)
+	}
+	encoded, err := json.Marshal(out.Messages)
+	if err != nil || strings.Contains(string(encoded), "SyntheticImageBytes") || strings.Contains(string(encoded), "SyntheticRawPayload") {
+		t.Fatalf("image or raw payload exported: %s %v", encoded, err)
+	}
+}
+
+func TestShareCodexRejectsWrongResultTypes(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		item string
+	}{
+		{"MCP string", `{"type":"McpToolCall","id":"mcp","result":"opaque"}`},
+		{"MCP wrong shape", `{"type":"McpToolCall","id":"mcp","result":{"content":"bad"}}`},
+		{"generated string", `{"type":"Extension","kind":"image_gen.generation","id":"generated","savedPath":"/home/example/picture.png","result":"<base64>"}`},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			data := []byte(`{"type":"event_msg","payload":{"type":"task_started","turn_id":"turn"}}
+{"type":"event_msg","payload":{"type":"item_completed","item":` + test.item + `}}
+{"type":"event_msg","payload":{"type":"item_completed","item":{"type":"AgentMessage","id":"answer","content":[{"type":"text","text":"Done"}]}}}
+{"type":"event_msg","payload":{"type":"task_complete","turn_id":"turn"}}
+`)
+			out, err := ProjectShareBytes(context.Background(), data, "synthetic-source", "synthetic-incarnation", nil)
+			if err != nil || out.Complete || out.Reason != "source_incomplete" || len(out.Messages) != 0 {
+				t.Fatalf("malformed rollout published: %+v %v", out, err)
+			}
+		})
+	}
+}
+
 func TestSharePendingCompletionRetainsFirstSeen(t *testing.T) {
 	ctx := context.Background()
 	pending := []byte(`{"type":"assistant","uuid":"pending","message":{"role":"assistant","content":[{"type":"text","text":"Pending result"}]}}

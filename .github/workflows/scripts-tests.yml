@@ -21,10 +21,13 @@ jobs:
       CI_PYTHON_SHARD_INDEX: ${{ matrix.shard }}
       CI_PYTHON_SHARD_COUNT: '2'
     steps:
+      # Full history so a branch dispatch can merge-base origin/main (#11489); file contents only at the tip
+      # (blob:none), with the few base files a suite reads fetched on demand from the public repository.
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
           fetch-depth: 0
+          filter: blob:none
       - uses: actions/setup-go@v5
         with:
           go-version-file: server/go.mod

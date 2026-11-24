@@ -29,6 +29,7 @@ import persona.core.designsystem.LocalAppFeedback
 import persona.core.designsystem.PersonaTheme
 import persona.core.domain.inbox.InboxItem
 import persona.core.navigation.Navigator
+import persona.core.inbox.*
 
 /**
  * The state line of the event page after the display package's `now` words joined it (review additions): one row carrying

@@ -18,6 +18,7 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
+import persona.core.inbox.*
 
 /**
  * What "AI draft" / "AI revise" asks the hub for (the old app's wording): the user's request, then "Revise this version: <current draft>"
@@ -99,7 +100,7 @@ internal fun InboxDraftSheet(
             if (agent?.machineId != null && agent.sessionId != null) {
                 JButton(stringResource(R.string.inbox_reply_view_process), {
                     onDismiss()
-                    navigator?.navigate(inboxConversationRoute(agent.machineId, agent.sessionId, record.item.id))
+                    navigator?.navigate(inboxConversationRoute(agent.machineId!!, agent.sessionId!!, record.item.id))
                 },
                     kind = JButtonKind.Secondary, size = JButtonSize.Small, icon = PhIcons.ListChecks)
             }

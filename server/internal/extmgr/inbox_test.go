@@ -17,9 +17,9 @@ import (
 	"github.com/nwverse/persona/server/internal/ai"
 	"github.com/nwverse/persona/server/internal/assistantwire"
 	"github.com/nwverse/persona/server/internal/connector"
-	"github.com/nwverse/persona/server/internal/connector/github"
+	"github.com/nwverse/persona/server/internal/githubwire"
 	"github.com/nwverse/persona/server/internal/i18n"
-	"github.com/nwverse/persona/server/internal/mail"
+	"github.com/nwverse/persona/server/internal/mailwire"
 	"github.com/nwverse/persona/server/internal/proto"
 	"github.com/nwverse/persona/server/internal/rpc"
 )
@@ -212,22 +212,22 @@ func sourceIn(r assistantwire.InboxRound, id string) (assistantwire.InboxSource,
 type inboxMail struct {
 	inboxOnlyMail
 	mu    sync.Mutex
-	msgs  []mail.MailSummary
-	full  map[uint32]*mail.MailMessage
-	sent  []mail.SendRequest
+	msgs  []mailwire.MailSummary
+	full  map[uint32]*mailwire.MailMessage
+	sent  []mailwire.SendRequest
 	lists atomic.Int32
 }
 
 func (*inboxMail) Tools() []proto.Tool   { return nil } // registering the mail connector lists them
 func (*inboxMail) Handler() http.Handler { return http.NotFoundHandler() }
-func (*inboxMail) ListAccounts() ([]mail.MailAccount, error) {
-	return []mail.MailAccount{{ID: "acc1", Email: "me@example.com"}}, nil
+func (*inboxMail) ListAccounts() ([]mailwire.MailAccount, error) {
+	return []mailwire.MailAccount{{ID: "acc1", Email: "me@example.com"}}, nil
 }
-func (m *inboxMail) ListMessages(context.Context, mail.ListOptions) (*mail.ListResult, error) {
+func (m *inboxMail) ListMessages(context.Context, mailwire.ListOptions) (*mailwire.ListResult, error) {
 	m.lists.Add(1)
-	return &mail.ListResult{Messages: m.msgs}, nil
+	return &mailwire.ListResult{Messages: m.msgs}, nil
 }
-func (m *inboxMail) GetMessage(_ context.Context, _ string, uid uint32, _ string) (*mail.MailMessage, error) {
+func (m *inboxMail) GetMessage(_ context.Context, _ string, uid uint32, _ string) (*mailwire.MailMessage, error) {
 	if f := m.full[uid]; f != nil {
 		return f, nil
 	}
@@ -242,7 +242,7 @@ func (m *inboxMail) SeenFlags(_ context.Context, _, _ string, uids []uint32) (ma
 	}
 	return out, nil
 }
-func (m *inboxMail) Send(_ context.Context, r mail.SendRequest) error {
+func (m *inboxMail) Send(_ context.Context, r mailwire.SendRequest) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.sent = append(m.sent, r)
@@ -255,8 +255,8 @@ func (m *inboxMail) Send(_ context.Context, r mail.SendRequest) error {
 // round. The round goes to the manager, which answers before the next one.
 func TestInboxRoundReadsTheSources(t *testing.T) {
 	h := newTestManager(t)
-	m := &inboxMail{msgs: []mail.MailSummary{{UID: 9, Mailbox: "INBOX", Subject: "示例周报", From: mail.Address{Name: "李四", Email: "li@example.com"},
-		To: []mail.Address{{Email: "me@example.com"}}, Date: time.Now().UTC().Format(time.RFC3339), Snippet: "这周"}}}
+	m := &inboxMail{msgs: []mailwire.MailSummary{{UID: 9, Mailbox: "INBOX", Subject: "示例周报", From: mailwire.Address{Name: "李四", Email: "li@example.com"},
+		To: []mailwire.Address{{Email: "me@example.com"}}, Date: time.Now().UTC().Format(time.RFC3339), Snippet: "这周"}}}
 	h.mail = m
 	h.connectors = connector.NewRegistry(nil)
 	h.registerConnectors()
@@ -325,7 +325,7 @@ func TestInboxKeepsWhatWasReadForTheManager(t *testing.T) {
 	h := newTestManager(t)
 	now := time.Now()
 	mailAt := now.UTC().Format(time.RFC3339)
-	m := &inboxMail{msgs: []mail.MailSummary{{UID: 1, Mailbox: "INBOX", Subject: "第一封", Date: mailAt}}}
+	m := &inboxMail{msgs: []mailwire.MailSummary{{UID: 1, Mailbox: "INBOX", Subject: "第一封", Date: mailAt}}}
 	h.mail = m
 	h.connectors = connector.NewRegistry(nil)
 	h.registerConnectors()
@@ -341,7 +341,7 @@ func TestInboxKeepsWhatWasReadForTheManager(t *testing.T) {
 	c.mu.Lock()
 	c.things = []connector.InboxThing{second}
 	c.mu.Unlock()
-	m.msgs = []mail.MailSummary{{UID: 2, Mailbox: "INBOX", Subject: "第二封", Date: mailAt}}
+	m.msgs = []mailwire.MailSummary{{UID: 2, Mailbox: "INBOX", Subject: "第二封", Date: mailAt}}
 	if err := h.collectInbox(context.Background(), roundFull); !errors.Is(err, errAssistantOffline) {
 		t.Fatal(err)
 	}
@@ -384,7 +384,7 @@ func TestInboxMakesUpAMissedRoundOnceOneIsTaken(t *testing.T) {
 	inboxDebounce = 20 * time.Millisecond
 	t.Cleanup(func() { inboxDebounce = debounce })
 	h := newTestManager(t)
-	m := &inboxMail{msgs: []mail.MailSummary{{UID: 1, Mailbox: "INBOX", Subject: "示例", Date: time.Now().UTC().Format(time.RFC3339)}}}
+	m := &inboxMail{msgs: []mailwire.MailSummary{{UID: 1, Mailbox: "INBOX", Subject: "示例", Date: time.Now().UTC().Format(time.RFC3339)}}}
 	h.mail = m
 	h.connectors = connector.NewRegistry(nil)
 	h.registerConnectors()
@@ -482,14 +482,20 @@ func TestMergeRoundsBounds(t *testing.T) {
 func TestInboxSourcesAnswerTheManager(t *testing.T) {
 	h := newTestManager(t)
 	ctx := context.Background()
-	m := &inboxMail{full: map[uint32]*mail.MailMessage{9: {MailSummary: mail.MailSummary{Subject: "季度汇报", MessageID: "<m9@example.com>",
-		From: mail.Address{Name: "HR", Email: "hr@example.com"}, Date: "2026-10-27T03:00:00Z"}, HTML: "<p>请周五前提交</p>"}}}
+	// The mail's text is the mail module's (its HTML read as text).
+	m := &inboxMail{inboxOnlyMail: inboxOnlyMail{testMail(t)}, full: map[uint32]*mailwire.MailMessage{9: {MailSummary: mailwire.MailSummary{Subject: "季度汇报", MessageID: "<m9@example.com>",
+		From: mailwire.Address{Name: "HR", Email: "hr@example.com"}, Date: "2026-10-27T03:00:00Z"}, HTML: "<p>请周五前提交</p>"}}}
 	h.mail = m
 	h.connectors = connector.NewRegistry(nil)
 	g := &groupingConnector{}
 	_ = h.addConnector(g)
 	h.cfg.Inbox.Rules = "  示例规则  "
 	h.cfg.Inbox.Agent = InboxAgentConfig{Enabled: true, Concurrency: 2}
+	h.cfg.Inbox.ReplyPolicy = InboxReplyPolicyConfig{
+		Enabled:    true,
+		Revision:   "rp-1",
+		Categories: map[string]string{"routine_reply": assistantwire.ReplyRouteOwnerDraft},
+	}
 	h.cfg.Lark.Account = 3
 	app := func(app, method string, params any) (json.RawMessage, error) {
 		raw, _ := json.Marshal(params)
@@ -537,7 +543,7 @@ func TestInboxSourcesAnswerTheManager(t *testing.T) {
 	}
 	// Which mails of an item off the page are still there, read or not (#5993): 9 unread, 10 read, 11 gone; more than
 	// one lookup may ask about is refused rather than read in part (that would look like mail gone).
-	m.full[10] = &mail.MailMessage{MailSummary: mail.MailSummary{Seen: true}}
+	m.full[10] = &mailwire.MailMessage{MailSummary: mailwire.MailSummary{Seen: true}}
 	if out, err := inbox(assistantwire.InboxMailFlagsMethod, assistantwire.InboxMailFlagsAsk{AccountID: "acc1", Mailbox: "INBOX", UIDs: []uint32{9, 10, 11}}); err != nil ||
 		string(out) != `{"seen":[10],"unseen":[9]}` {
 		t.Fatalf("mail flags: %s %v", out, err)
@@ -555,6 +561,7 @@ func TestInboxSourcesAnswerTheManager(t *testing.T) {
 	var cfg assistantwire.InboxConfig
 	out, err = inbox(assistantwire.InboxConfigMethod, map[string]any{})
 	if err != nil || json.Unmarshal(out, &cfg) != nil || cfg.Rules != "示例规则" || !cfg.Agent.Enabled || cfg.Agent.Concurrency != 2 || cfg.LarkAccount != 3 ||
+		!cfg.ReplyPolicy.Enabled || cfg.ReplyPolicy.Revision != "rp-1" || cfg.ReplyPolicy.Categories["routine_reply"] != assistantwire.ReplyRouteOwnerDraft ||
 		!slices.Contains(cfg.Extensions, "examplechat") {
 		t.Fatalf("the settings: %s %v", out, err)
 	}
@@ -701,7 +708,7 @@ func TestUIItemAsksTheManager(t *testing.T) {
 }
 
 func TestInboxMailReply(t *testing.T) {
-	orig := &mail.MailMessage{MailSummary: mail.MailSummary{Subject: "周报", MessageID: "<m2@x>", From: mail.Address{Name: "HR", Email: "hr@x"},
+	orig := &mailwire.MailMessage{MailSummary: mailwire.MailSummary{Subject: "周报", MessageID: "<m2@x>", From: mailwire.Address{Name: "HR", Email: "hr@x"},
 		Date: "2026-10-27T03:00:00Z"}, Text: "请确认\n谢谢", References: []string{"<m1@x>"}}
 	r := mailReply(i18n.Default, "a1", orig, "收到")
 	if r.Subject != "Re: 周报" || r.InReplyTo != "<m2@x>" || r.References != "<m1@x> <m2@x>" || len(r.To) != 1 || r.To[0].Email != "hr@x" {
@@ -710,7 +717,7 @@ func TestInboxMailReply(t *testing.T) {
 	if !strings.HasPrefix(r.Text, "收到\n\n") || !strings.Contains(r.Text, "> 请确认\n> 谢谢") {
 		t.Fatalf("body = %q", r.Text)
 	}
-	if mailReply(i18n.Default, "a1", &mail.MailMessage{MailSummary: mail.MailSummary{Subject: "RE: x"}}, "y").Subject != "RE: x" {
+	if mailReply(i18n.Default, "a1", &mailwire.MailMessage{MailSummary: mailwire.MailSummary{Subject: "RE: x"}}, "y").Subject != "RE: x" {
 		t.Fatal("kept an existing Re:")
 	}
 }
@@ -718,13 +725,14 @@ func TestInboxMailReply(t *testing.T) {
 // The in-process AppInbox call preserves an expected mail-service failure for the assistant's HTTP response.
 func TestInboxMailBodyPreservesUnknownAccount(t *testing.T) {
 	h := newTestManager(t)
-	h.mail = &mail.Service{} // No accounts: the lookup fails before any connection is attempted.
+	h.mail = testMail(t) // No accounts: the lookup fails before any connection is attempted.
 	_, handled, err := h.AppCall(context.Background(), assistantwire.AppCall{
 		AppID: assistantwire.AppInbox, Method: assistantwire.InboxMailBody,
 		Params: json.RawMessage(`{"account_id":"none","uid":1,"mailbox":"INBOX","readable":true}`),
 	})
-	var unknown *mail.UnknownAccountError
-	if !handled || !errors.As(err, &unknown) || unknown.Account != "none" {
+	var unknown interface{ Code() string }
+	if !handled || !errors.As(err, &unknown) || unknown.Code() != "mail_account_unknown" ||
+		err.Error() != i18n.T(i18n.En, "mail-errors.account_unknown", i18n.Args{"account": "none"}) {
 		t.Fatalf("mail body: handled=%v, error=%T %v; want UnknownAccountError naming none", handled, err, err)
 	}
 }
@@ -733,11 +741,11 @@ func TestInboxMailBodyPreservesUnknownAccount(t *testing.T) {
 // (the manager's locale writer reaches apierr through the mail handler's own response recorder).
 func TestMailRouteUnknownAccountLocalized(t *testing.T) {
 	h := newTestManager(t)
-	h.mail = &mail.Service{} // No accounts: the lookup fails before any connection is attempted.
+	h.mail = testMail(t) // No accounts: the lookup fails before any connection is attempted.
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/mail/messages/none/1", nil)
 	req.Header.Set("Accept-Language", string(i18n.Ja))
 	code, body := callReq(t, h.routes(), req, h.cfg.Token)
-	want := (&mail.UnknownAccountError{Account: "none"}).Text(i18n.Ja)
+	want := i18n.T(i18n.Ja, "mail-errors.account_unknown", i18n.Args{"account": "none"})
 	if code != http.StatusNotFound || body["code"] != "mail_account_unknown" || body["error"] != want {
 		t.Fatalf("%d %v; want 404 mail_account_unknown %q", code, body, want)
 	}
@@ -752,25 +760,26 @@ func TestAIConfigOver(t *testing.T) {
 }
 
 // newGitHubForTest is the GitHub connector with repositories its options still mute (as before they moved).
-func newGitHubForTest(t *testing.T, muted []string) *github.Connector {
+func newGitHubForTest(t *testing.T, muted []string) githubwire.Connector {
 	t.Helper()
-	return github.New(github.Config{Inbox: github.InboxOptions{MutedRepos: muted}}, "Mac", nil)
+	return newTestGitHub(t, githubwire.Config{Inbox: githubwire.InboxOptions{MutedRepos: muted}}, "Mac", nil)
 }
 
 // replyMail records what it was asked to send.
 type replyMail struct {
 	Mail
-	sent []mail.SendRequest
+	sent []mailwire.SendRequest
 }
 
-func (*replyMail) GetMessage(_ context.Context, account string, uid uint32, mailbox string) (*mail.MailMessage, error) {
-	return &mail.MailMessage{MailSummary: mail.MailSummary{AccountID: account, UID: uid, Mailbox: mailbox, Subject: "季度汇报",
-		MessageID: "<m9@example.com>", From: mail.Address{Email: "sender@example.com"}}, Text: "请周五前提交"}, nil
+func (*replyMail) GetMessage(_ context.Context, account string, uid uint32, mailbox string) (*mailwire.MailMessage, error) {
+	return &mailwire.MailMessage{MailSummary: mailwire.MailSummary{AccountID: account, UID: uid, Mailbox: mailbox, Subject: "季度汇报",
+		MessageID: "<m9@example.com>", From: mailwire.Address{Email: "sender@example.com"}}, Text: "请周五前提交"}, nil
 }
 
-func (m *replyMail) Send(_ context.Context, r mail.SendRequest) error {
+func (m *replyMail) Send(_ context.Context, r mailwire.SendRequest) error {
 	m.sent = append(m.sent, r)
 	return nil
 }
 
-func (*replyMail) Tools() []proto.Tool { return (*mail.Service)(nil).Tools() }
+// newReplyMail is a replyMail with the mail module's tools.
+func newReplyMail(t *testing.T) *replyMail { return &replyMail{Mail: testMail(t)} }

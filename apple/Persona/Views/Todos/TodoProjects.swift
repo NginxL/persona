@@ -50,7 +50,7 @@ nonisolated enum TodoProjectLogic {
     static func sections(_ todos: [TodoItem], projects: [TodoProject]) -> [TodoProjectSection] {
         var bySlug: [String: [TodoItem]] = [:]
         var order: [String] = []
-        for t in todos {
+        for t in todos where !t.isCancelled {
             let slug = t.project ?? ""
             if bySlug[slug] == nil, !slug.isEmpty { order.append(slug) }
             bySlug[slug, default: []].append(t)

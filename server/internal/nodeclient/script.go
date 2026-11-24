@@ -10,8 +10,9 @@ import (
 	"unicode/utf8"
 )
 
-// `personad ask` and `personad notify` (internal/scriptcli) reach the phone through the node's socket like the hook
-// does (docs/integrations/script-cli.md): an ask is a "ask" request, a notification a "notify" one (node/scriptcli.go serves both).
+// `personad ask`, `personad notify` and the direction write commands (internal/scriptcli) reach the manager through
+// the node's socket like the hook does (docs/integrations/script-cli.md). Ask and notify use the "ask" and "notify"
+// kinds; direction creation and progress use "direction.create" and "direction.progress".
 
 // Ask results (AskReply.Status).
 const (
@@ -137,6 +138,83 @@ func NotifyNode(ctx context.Context, dial Dialer, nr NotifyRequest, pane string)
 	var rep NotifyReply
 	if err := json.Unmarshal(line, &rep); err != nil {
 		return NotifyReply{}, fmt.Errorf("bad answer from the Persona node: %w", err)
+	}
+	return rep, nil
+}
+
+// The node.sock kinds and statuses of the two direction writes. Neither write is resumable: a caller that did not get
+// a reply must not send it again automatically.
+const (
+	DirectionCreateKind   = "direction.create"
+	DirectionProgressKind = "direction.progress"
+
+	DirectionOK          = "ok"
+	DirectionInvalid     = "invalid"
+	DirectionFailed      = "failed"
+	DirectionUnavailable = "unavailable"
+)
+
+// DirectionCreateRequest is `personad create-direction`'s input. MachineID and SessionID explicitly place an existing
+// session under the new direction; the caller never infers them from its directory, pane or transcripts.
+type DirectionCreateRequest struct {
+	Name      string `json:"name"`
+	Project   string `json:"project"`
+	MachineID string `json:"machine_id,omitempty"`
+	SessionID string `json:"session_id,omitempty"`
+}
+
+// DirectionProgressRequest is `personad write-progress`'s input. The three text fields always travel, including as
+// empty strings: each write replaces the whole text summary rather than patching only the flags the caller supplied.
+type DirectionProgressRequest struct {
+	ID       string   `json:"id"`
+	Reached  string   `json:"reached"`
+	Doing    string   `json:"doing"`
+	NeedsYou string   `json:"needs_you"`
+	Links    []string `json:"links,omitempty"`
+}
+
+// DirectionReply is the node's answer to either direction write. Leader stays as JSON so this thin client does not
+// import the manager's leader contract; a successful reply always carries an object.
+type DirectionReply struct {
+	Status string          `json:"status"`
+	Leader json.RawMessage `json:"leader,omitempty"`
+	Error  string          `json:"error,omitempty"`
+}
+
+// CreateDirectionNode makes one direction.create request. It never retries, including after a transport failure.
+func CreateDirectionNode(ctx context.Context, dial Dialer, req DirectionCreateRequest) (DirectionReply, error) {
+	return directionNode(ctx, dial, DirectionCreateKind, req)
+}
+
+// WriteDirectionProgressNode makes one direction.progress request. It never retries, including after a transport
+// failure, because the manager may already have taken the first write.
+func WriteDirectionProgressNode(ctx context.Context, dial Dialer, req DirectionProgressRequest) (DirectionReply, error) {
+	return directionNode(ctx, dial, DirectionProgressKind, req)
+}
+
+func directionNode(ctx context.Context, dial Dialer, kind string, input any) (DirectionReply, error) {
+	in, _ := json.Marshal(input)
+	line, err := dial(ctx, Request{Kind: kind, Input: in})
+	if err != nil {
+		return DirectionReply{}, err
+	}
+	var rep DirectionReply
+	if err := json.Unmarshal(line, &rep); err != nil {
+		return DirectionReply{}, fmt.Errorf("bad answer from the Persona node: %w", err)
+	}
+	if rep.Status == "" && rep.Error != "" {
+		// An old node answers an unknown kind with only {"error":"unknown kind"}.
+		rep.Status = DirectionUnavailable
+	}
+	switch rep.Status {
+	case DirectionOK:
+		var leader map[string]json.RawMessage
+		if len(rep.Leader) == 0 || json.Unmarshal(rep.Leader, &leader) != nil || leader == nil {
+			return DirectionReply{}, errors.New("bad answer from the Persona node: an ok reply has no leader object")
+		}
+	case DirectionInvalid, DirectionFailed, DirectionUnavailable:
+	default:
+		return DirectionReply{}, fmt.Errorf("bad answer from the Persona node: unknown status %q", rep.Status)
 	}
 	return rep, nil
 }

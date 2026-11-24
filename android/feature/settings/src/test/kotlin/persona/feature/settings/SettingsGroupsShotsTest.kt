@@ -42,6 +42,7 @@ import persona.core.contracts.ServerEvent
 import persona.core.contracts.Session
 import persona.core.contracts.api.*
 import persona.core.designsystem.AppStyle
+import persona.core.designsystem.InterfaceFontScaleCap
 import persona.core.designsystem.LocalAssistantWaiting
 import persona.core.designsystem.LocalManagerRoster
 import persona.core.designsystem.PersonaTheme
@@ -128,13 +129,15 @@ class SettingsGroupsShotsTest {
                      page: String = "settings") {
         val services = services()
         rule.setContent {
-            PersonaTheme(darkTheme = dark(), reduceMotion = true, style = style()) {
-                val density = LocalDensity.current
-                val fontScale = androidx.compose.ui.platform.LocalConfiguration.current.fontScale
-                CompositionLocalProvider(LocalManagerRoster provides roster, LocalAssistantWaiting provides mapOf("m-3fa21c" to 3),
-                    LocalDensity provides Density(density.density, fontScale)) {
-                    Box(Modifier.testTag("shot").fillMaxSize().background(PersonaTheme.palette.background)) {
-                        SettingsScreen(services, initialPage = page, onNavigate = {})
+            val density = LocalDensity.current
+            val fontScale = androidx.compose.ui.platform.LocalConfiguration.current.fontScale
+            // The app supplies the system density outside the theme; an inner override would bypass its interface cap.
+            CompositionLocalProvider(LocalDensity provides Density(density.density, fontScale)) {
+                PersonaTheme(darkTheme = dark(), reduceMotion = true, style = style()) {
+                    CompositionLocalProvider(LocalManagerRoster provides roster, LocalAssistantWaiting provides mapOf("m-3fa21c" to 3)) {
+                        Box(Modifier.testTag("shot").fillMaxSize().background(PersonaTheme.palette.background)) {
+                            SettingsScreen(services, initialPage = page, onNavigate = {})
+                        }
                     }
                 }
             }
@@ -308,7 +311,12 @@ class SettingsGroupsShotsTest {
     }
 
     @Config(qualifiers = "zh-w400dp-h4000dp-xhdpi", fontScale = 2f) // tall enough for the whole page at 200 %
-    @Test fun atTheLargestTextSize() {
+    @Test fun atTheLargestTextSize() = textSizeMatrix("large")
+
+    @Config(qualifiers = "zh-w400dp-h4000dp-xhdpi", fontScale = InterfaceFontScaleCap)
+    @Test fun atTheInterfaceTextCap() = textSizeMatrix("cap")
+
+    private fun textSizeMatrix(size: String) {
         var style by mutableStateOf(AppStyle.Glass)
         var dark by mutableStateOf(false)
         AssistantManagerChoice.choose("hub", null, "assistant")
@@ -317,9 +325,9 @@ class SettingsGroupsShotsTest {
         for (s in AppStyle.entries) for (d in listOf(false, true)) {
             style = s; dark = d
             rule.onNode(hasSetTextAction()).performTextClearance()
-            capture("settings-${s.key}-${if (d) "dark" else "light"}-large")
+            capture("settings-${s.key}-${if (d) "dark" else "light"}-$size")
             rule.onNode(hasSetTextAction()).performTextInput("Codex")
-            capture("settings-search-${s.key}-${if (d) "dark" else "light"}-large")
+            capture("settings-search-${s.key}-${if (d) "dark" else "light"}-$size")
         }
     }
 }

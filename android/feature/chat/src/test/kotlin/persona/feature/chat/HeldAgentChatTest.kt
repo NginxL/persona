@@ -133,7 +133,7 @@ class HeldAgentChatTest {
             rule.onNodeWithText("2 images").assertIsDisplayed()
             val hint = rule.onNodeWithText("Studio Mac is offline. Sends when it’s back.", useUnmergedTree = true)
             val layouts = mutableListOf<TextLayoutResult>()
-            hint.performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(layouts) }
+            hint.performSemanticsAction(SemanticsActions.GetTextLayoutResult) { val _ = it(layouts) }
             val textLayout = layouts.single()
             val last = textLayout.lineCount - 1
             if (textLayout.isLineEllipsized(last) || textLayout.getLineEnd(last, visibleEnd = true) != textLayout.layoutInput.text.length)

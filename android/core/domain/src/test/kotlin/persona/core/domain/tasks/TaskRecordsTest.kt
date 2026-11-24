@@ -1,15 +1,21 @@
 package persona.core.domain.tasks
 
+import java.time.Instant
+import java.time.ZoneOffset
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import org.junit.Assert.assertEquals
 import org.junit.Test
+import persona.core.contracts.AssistantTaskCard
 import persona.core.contracts.FeedItem
+import persona.core.contracts.Item
 import persona.core.contracts.JsonCodec
 import persona.core.contracts.PlanTask
 import persona.core.contracts.TaskPlan
 import persona.core.contracts.Todo
 import persona.core.domain.lines.ChatLine
+import persona.core.domain.lines.LineItem
+import persona.core.domain.lines.chatLines
 
 /**
  * #4339 C13: on Glass the conversation draws the hub's task records as iOS's `FeedLine` does, message cards included; only
@@ -126,5 +132,131 @@ class TaskRecordsTest {
         assertEquals("Ready again", decoded.field("text"))
         // a kind this build doesn't know still reads as unknown
         assertEquals("unknown", JsonCodec.decodeFromString(FeedItem.serializer(), """{"id":"x","kind":"later_kind"}""").kind)
+    }
+
+    @Test fun earliestClipsOlderTaskCardsBriefsAndDayLinesWhileKeepingBackgroundAndTraysIntact() {
+        val day1Plan = TaskPlan("p1", "main", listOf(PlanTask("Old cleanup", todoId = "t1")), "started", "2026-11-10T09:05:00Z")
+        val day1Open = TaskPlan("p1-open", "main", listOf(PlanTask("Old unstarted plan")), "open", "2026-11-10T09:10:00Z")
+        val day2Plan = TaskPlan("p2", "main", listOf(PlanTask("Middle task", todoId = "t2")), "started", "2026-11-11T14:05:00Z")
+        val day3Plan = TaskPlan("p3", "main", listOf(PlanTask("Current task", todoId = "t3")), "started", "2026-11-12T13:05:00Z")
+        val day3Open = TaskPlan("p3-open", "main", listOf(PlanTask("Pending confirmation")), "open", "2026-11-12T13:10:00Z")
+        val untimedOpen = TaskPlan("p-untimed", "main", listOf(PlanTask("Untimed open plan")), "open", createdAt = null)
+        val allPlans = listOf(day1Plan, day1Open, day2Plan, day3Plan, day3Open, untimedOpen).associateBy { it.id }
+        val allTodos = listOf(
+            Todo("t1", "Old cleanup", origin = "main", planId = "p1", createdAt = "2026-11-10T09:05:00Z"),
+            Todo("t2", "Middle task", origin = "main", planId = "p2", createdAt = "2026-11-11T14:05:00Z"),
+            Todo("t3", "Current task", origin = "main", planId = "p3", createdAt = "2026-11-12T13:05:00Z"),
+        )
+        val multiDayFeed = listOf(
+            FeedItem("day1-today", "main", "2026-11-10T08:00:00Z", "today"),
+            FeedItem("day1-plan", "main", "2026-11-10T09:05:00Z", "plan", "p1"),
+            FeedItem("day1-open-feed", "main", "2026-11-10T09:10:00Z", "plan", "p1-open"),
+            FeedItem("day2-brief", "main", "2026-11-11T08:00:00Z", "brief"),
+            FeedItem("day2-plan", "main", "2026-11-11T14:05:00Z", "plan", "p2"),
+            FeedItem("day3-today", "main", "2026-11-12T08:00:00Z", "today"),
+            FeedItem("day3-plan", "main", "2026-11-12T13:05:00Z", "plan", "p3"),
+            FeedItem("day3-open-feed", "main", "2026-11-12T13:10:00Z", "plan", "p3-open"),
+            FeedItem("untimed-open-feed", "main", at = null, kind = "plan", ref = "p-untimed"),
+        )
+        val day3Transcript = chatLines(listOf(
+            LineItem(Item("u3", 30, ts = "2026-11-12T13:00:00Z", role = "user", kind = "text", text = "Latest ask")),
+            LineItem(Item("a3", 31, ts = "2026-11-12T13:01:00Z", role = "assistant", kind = "text", text = "Started")),
+        )).lines
+
+        // Page 1 (hasOlder = true): only Day 3 >= 13:00 and untimed open plan show; older days and 08:00 today card wait.
+        val page1Glass = AssistantTaskCards.lines(
+            day3Transcript, multiDayFeed, allPlans, allTodos,
+            inline = true, earliest = Instant.parse("2026-11-12T13:00:00Z"), zone = ZoneOffset.UTC,
+        )
+        assertEquals(listOf("day-2026-11-12"), page1Glass.map { it.id }.filter { it.startsWith("day-") })
+        assertEquals(listOf("untimed-open-feed", "day3-open-feed"), feedIds(page1Glass))
+        assertEquals(listOf(listOf("Current task")), hints(page1Glass).map { hint -> hint.tasks.map { it.title } })
+
+        // Brief/Board (inline = false): older dispatched task cards and briefs are also clipped.
+        val page1Brief = AssistantTaskCards.lines(
+            day3Transcript, multiDayFeed, allPlans, allTodos,
+            inline = false, earliest = Instant.parse("2026-11-12T13:00:00Z"), zone = ZoneOffset.UTC,
+        )
+        assertEquals(listOf("day-2026-11-12"), page1Brief.map { it.id }.filter { it.startsWith("day-") })
+        assertEquals(emptyList<String>(), feedIds(page1Brief))
+        assertEquals(listOf(listOf("Current task")), hints(page1Brief).map { hint -> hint.tasks.map { it.title } })
+
+        // Background records and merged cards for trays still keep the full raw feed history.
+        assertEquals(
+            listOf("day1-plan", "day1-open-feed", "day2-plan", "day3-plan", "day3-open-feed", "untimed-open-feed"),
+            AssistantTaskCards.backgroundFeed(multiDayFeed, inline = true).map { it.id },
+        )
+        assertEquals(listOf("p-untimed", "p1", "p1-open", "p2", "p3", "p3-open"),
+            AssistantTaskCards.merge(multiDayFeed, allPlans, allTodos).mapNotNull { it.identity.planId })
+
+        // Page 2 (loadOlder prepends Day 2 14:00): Day 2 task card and Day 3 08:00 today card reappear chronologically.
+        val day2And3Transcript = chatLines(listOf(
+            LineItem(Item("u2", 20, ts = "2026-11-11T14:00:00Z", role = "user", kind = "text", text = "Yesterday ask")),
+            LineItem(Item("a2", 21, ts = "2026-11-11T14:01:00Z", role = "assistant", kind = "text", text = "On it")),
+            LineItem(Item("u3", 30, ts = "2026-11-12T13:00:00Z", role = "user", kind = "text", text = "Latest ask")),
+            LineItem(Item("a3", 31, ts = "2026-11-12T13:01:00Z", role = "assistant", kind = "text", text = "Started")),
+        )).lines
+        val page2Glass = AssistantTaskCards.lines(
+            day2And3Transcript, multiDayFeed, allPlans, allTodos,
+            inline = true, earliest = Instant.parse("2026-11-11T14:00:00Z"), zone = ZoneOffset.UTC,
+        )
+        assertEquals(listOf("day-2026-11-11", "day-2026-11-12"), page2Glass.map { it.id }.filter { it.startsWith("day-") })
+        assertEquals(
+            listOf("feed-untimed-open-feed", "u2", "a2", "dispatch-p2", "feed-day3-today", "u3", "a3", "dispatch-p3", "feed-day3-open-feed"),
+            page2Glass.map { it.id }.filterNot { it.startsWith("day-") },
+        )
+
+        // Complete history (hasOlder = false / earliest = null): Day 1, Day 2, and Day 3 all appear in order.
+        val completeGlass = AssistantTaskCards.lines(
+            day2And3Transcript, multiDayFeed, allPlans, allTodos,
+            inline = true, earliest = null, zone = ZoneOffset.UTC,
+        )
+        assertEquals(
+            listOf("day-2026-11-10", "day-2026-11-11", "day-2026-11-12"),
+            completeGlass.map { it.id }.filter { it.startsWith("day-") },
+        )
+        assertEquals(
+            listOf("Old cleanup", "Middle task", "Current task"),
+            hints(completeGlass).flatMap { hint -> hint.tasks.map { it.title } },
+        )
+        assertEquals(
+            listOf("untimed-open-feed", "day1-today", "day1-open-feed", "day2-brief", "day3-today", "day3-open-feed"),
+            feedIds(completeGlass),
+        )
+    }
+
+    @Test fun earliestClipsSparseProjectedTaskCardUsingPlanTimestampAndKeepsUntimedCard() {
+        val oldPlan = TaskPlan("old", "main", listOf(PlanTask("Sparse old task", todoId = "t-old")), "started", "2026-11-10T09:00:00Z")
+        val oldTodo = Todo("t-old", "Sparse old task", origin = "main", planId = "old")
+        val sparseOld = AssistantTaskCard("plan:old:0", "t-old", "old", 0, at = null, state = "accepted")
+        val untimedTodo = Todo("t-untimed", "Untimed active task", origin = "main")
+        val untimedProjected = AssistantTaskCard("todo:t-untimed", "t-untimed", at = null, state = "working")
+
+        val clipped = AssistantTaskCards.lines(
+            emptyList(),
+            emptyList(),
+            mapOf(oldPlan.id to oldPlan),
+            listOf(oldTodo, untimedTodo),
+            projected = listOf(sparseOld, untimedProjected),
+            inline = true,
+            earliest = Instant.parse("2026-11-12T13:00:00Z"),
+            zone = ZoneOffset.UTC,
+        )
+        assertEquals(listOf(listOf("Untimed active task")), hints(clipped).map { hint -> hint.tasks.map { it.title } })
+
+        val full = AssistantTaskCards.lines(
+            emptyList(),
+            emptyList(),
+            mapOf(oldPlan.id to oldPlan),
+            listOf(oldTodo, untimedTodo),
+            projected = listOf(sparseOld, untimedProjected),
+            inline = true,
+            earliest = null,
+            zone = ZoneOffset.UTC,
+        )
+        assertEquals(
+            listOf("Untimed active task", "Sparse old task"),
+            hints(full).flatMap { hint -> hint.tasks.map { it.title } },
+        )
     }
 }

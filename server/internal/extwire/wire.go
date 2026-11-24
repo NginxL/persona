@@ -274,6 +274,12 @@ const (
 	// once what the token has open through it (the calls and WebSockets on the relay streams to the manager), as for a
 	// revoked device.
 	HubTokenRevoked = "extensions.token_revoked"
+	// HubMachinesPairLink: {extension, request} → wire.MachinesPairLinkResult: creates a pending link computer (or
+	// re-issues a pairing code for an existing pending one) and returns a one-time persona://link?... URL.
+	HubMachinesPairLink = "machines.pair_link"
+	// HubMachinesStatus: {extension, request} → wire.MachinesStatusResult: returns the current connection and
+	// confirmation status of a computer.
+	HubMachinesStatus = "machines.status"
 )
 
 // MethodAccept: {id} → {}: the hub holds a request for the manager (a relayed route): it dials the relay with the id.

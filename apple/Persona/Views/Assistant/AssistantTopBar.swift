@@ -1,6 +1,12 @@
 import SwiftUI
 import PersonaWire
 
+/// The listed row for a saved pick: exact IDs before the hub's folded aliases, without adding an "Other Model" row.
+nonisolated func assistantModelOption(_ id: String?, in models: [AgentModelOption]) -> AgentModelOption? {
+    guard let id else { return nil }
+    return models.first { $0.id == id } ?? models.first { ($0.aliases ?? []).contains(id) }
+}
+
 /// The Persona tab's top bar (docs/apple/ios.md「Persona top bar and sidebar」), floating over the conversation with a fog under it
 /// instead of a solid bar: Chat History (the sidebar) on the left, Persona's face and name in the middle, New Chat on the right.
 /// The face opens a menu: Knowledge, Details (the profile), the copy items (the working directory, a block of facts to
@@ -34,6 +40,8 @@ struct AssistantTopBar: View {
     var openKnowledge: () -> Void
     var openProfile: () -> Void
     @State private var showInfo = false
+    @State private var showDefaultPermissions = false
+    @State private var showBackgroundActivity = false
     @State private var showLink = false
     @State private var launchers: [Launcher] = []
     /// Each launcher's /model list, fetched when the bar appears (the menu's model submenus).
@@ -42,17 +50,9 @@ struct AssistantTopBar: View {
     @State private var hint: String?
     /// The launcher whose "Other Model…" is open (#1644): a model ID typed by hand for the next message.
     @State private var typingFor: String?
-    #if os(macOS)
-    @Environment(\.macTitleRowLeading) private var titleRowLeading
-    #endif
 
     /// The bar's height below the status bar: what the conversation leaves free at its top so nothing hides under it.
-    /// On the Mac, the title bar's row (`macBar`).
-    #if os(macOS)
-    static let height: CGFloat = Theme.Size.macToolbarHeight
-    #else
     static let height: CGFloat = 70
-    #endif
     /// How far below the bar the fog fades out.
     static let fade: CGFloat = 44
     /// How far below the safe area's top the fog stays solid: just past the round buttons and the switch, so a line of
@@ -82,22 +82,23 @@ struct AssistantTopBar: View {
             // Session Info is a sheet, like the Agents chat's (SessionInfoSheet).
             .sheet(isPresented: Binding(get: { showInfo && key != nil }, set: { showInfo = $0 })) {
                 if let key {
-                    #if os(macOS)
-                    // A window sheet: SessionInfoSheet has no stack or Done of its own on the Mac (it is the chat's inspector there).
-                    NavigationStack {
-                        SessionInfoSheet(key: key, session: session, assistant: true)
-                            .navigationTitle("Session Info")
-                            .macSheetDone { showInfo = false }
-                    }
-                    .macSheet()
-                    #else
                     SessionInfoSheet(key: key, session: session, assistant: true)
                         .presentationDetents([.medium, .large])
                         .presentationDragIndicator(.visible)
-                    #endif
                 }
             }
-            .onChange(of: key) { showInfo = false }
+            .onChange(of: key) { showInfo = false; showDefaultPermissions = false; showBackgroundActivity = false }
+            // A direction's permission sheet lives on the bar, not on a menu row that disappears as the menu closes.
+            .sheet(isPresented: $showDefaultPermissions) {
+                NavigationStack {
+                    DefaultPermissionsView()
+                        .pageToolbar { SheetClose { showDefaultPermissions = false } }
+                }
+            }
+            .sheet(isPresented: Binding(get: { showBackgroundActivity && key == model.assistantMain },
+                                        set: { showBackgroundActivity = $0 })) {
+                if let key { BackgroundActivitySheet(key: key) }
+            }
             // "Other Model…" (#1644): an ID typed by hand for the next message; the IDs typed before can be forgotten
             // there, so the submenus are read again when it closes.
             .sheet(isPresented: Binding(get: { typingFor != nil && key != nil }, set: { if !$0 { typingFor = nil } }),
@@ -121,9 +122,7 @@ struct AssistantTopBar: View {
     }
 
     @ViewBuilder private var bar: some View {
-        #if os(macOS)
-        if shell != nil { shellBar } else if AppStyle.current.usesBeautifulUI { classicBar } else { macBar }
-        #elseif os(iOS)
+        #if os(iOS)
         if shell != nil { shellBar } else if drawerTitle { drawerRow } else { classicBar }
         #else
         if shell != nil { shellBar } else { classicBar }
@@ -167,58 +166,6 @@ struct AssistantTopBar: View {
         .frame(height: Self.height, alignment: .top)
         .barScreenshotBanner(name: ownName)
         .background(alignment: .top) { BarFog(solid: Self.fogSolid, fade: Self.fade) }
-    }
-    #endif
-
-    #if os(macOS)
-    /// The Mac's (#2113): the title bar's row of the conversation's column, as the Agents chat's (`macTitleRow`):
-    /// Chat History, the name (its menu: Knowledge, Details, the copies, the launcher, Interrupt), and New Chat (⇧⌘N) at the end,
-    /// instead of the phone's face over a pill in the middle.
-    private var macBar: some View {
-        let link = model.connection.shown
-        return HStack(spacing: Theme.Space.s) {
-            MacTitleRowButton(String(localized: "Chat History [Shell Components 60636b]"), symbol: sidebarIsColumn ? Theme.Icon.sidebar : Theme.Icon.sidebarMenu, action: openSidebar)
-                .accessibilityIdentifier("assistant-sidebar-button")
-            Menu { menuItems(link) } label: {
-                HStack(spacing: Theme.Space.xs) {
-                    VStack(alignment: .leading, spacing: 0) {
-                        Text(name).font(Theme.Font.heading).foregroundStyle(Theme.macLabel).lineLimit(1)
-                        Group {
-                            if let hint {
-                                Label(hint, systemImage: Theme.Icon.successFilled).foregroundStyle(Theme.positive)
-                            } else if link != .online {
-                                ConnectionLabel(phase: link, compact: true)
-                            }
-                        }
-                        .font(Theme.Font.caption)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                    }
-                    ThemedIcon(Theme.Icon.expand).font(Theme.Font.labelStrong).foregroundStyle(.tertiary)
-                }
-                .contentShape(.rect)
-            }
-            .menuStyle(.button)
-            .buttonStyle(.plain)
-            .fixedSize()
-            .help("Knowledge, details, copy directory and chat info")
-            .accessibilityLabel(link != .online ? String(localized: "\(name), \(ConnectionLabel.text(link, hubRestarting: model.hubUpdate?.restarting == true))") : name)
-            .accessibilityIdentifier("persona-avatar")
-            .connectionDetails($showLink)
-            .layoutPriority(-1)
-            Spacer(minLength: Theme.Space.s)
-            MacTitleRowButton(String(localized: "New Chat (⇧⌘N)"), symbol: Theme.Icon.compose, action: newConversation)
-                .disabled(key == nil)
-                .accessibilityIdentifier("assistant-new")
-        }
-        .padding(.horizontal, Theme.Space.l)
-        // In the title bar's row, past the traffic lights when the bar is at the window's edge (#830).
-        .padding(.leading, max(0, titleRowLeading - Theme.Space.l))
-        .frame(height: Self.height)
-        .frame(maxWidth: .infinity)
-        .background(alignment: .top) { BarFog(solid: Self.height - Theme.Space.sm, fade: Self.fade) }
-        .animation(Theme.Motion.standard, value: hint)
-        .task(id: hint) { await clearHint() }
     }
     #endif
 
@@ -311,11 +258,6 @@ struct AssistantTopBar: View {
             }
         }
         .padding(.horizontal, Theme.Space.l)
-        #if os(macOS)
-        // In the title bar's row, past the traffic lights when the bar is at the window's edge (#830); the fog under
-        // it stays the whole width.
-        .padding(.leading, max(0, titleRowLeading - Theme.Space.l))
-        #endif
         .padding(.top, Self.topInset)
         .frame(height: Self.height, alignment: .top)
         .barScreenshotBanner(name: ownName)
@@ -483,7 +425,8 @@ struct AssistantTopBar: View {
 
     /// One model of a launcher's submenu, checked when it is the next message's.
     private func modelButton(_ launcherName: String, _ m: AgentModelOption) -> some View {
-        let chosen = launcherName == launcher && pickedModel == modelID(m)
+        let listed = assistantModelOption(pickedModel, in: modelOptions[launcherName] ?? [])
+        let chosen = launcherName == launcher && (pickedModel == nil ? modelID(m) == nil : listed?.id == m.id)
         return Button { pick(launcherName, model: m.isDefault == true ? nil : m.id) } label: {
             if chosen { Label(m.title, systemImage: Theme.Icon.done) } else { Text(m.title) }
         }
@@ -493,12 +436,12 @@ struct AssistantTopBar: View {
     /// every launcher's models.
     private var launcherMenuID: [String] {
         [launcher, pickedModel ?? "", model.hubFeatures.contains(ModelID.feature) ? ModelID.feature : ""]
-            + launchers.flatMap { l in [l.name] + (modelOptions[l.name] ?? []).map(\.id) }
+            + launchers.flatMap { l in [l.name] + (modelOptions[l.name] ?? []).flatMap { [$0.id] + ($0.aliases ?? []) } }
     }
 
     /// The next message's model when it is one typed for `launcherName` that its list doesn't have: the field starts with it.
     private func typedPick(_ launcherName: String) -> String {
-        guard launcherName == launcher, let p = pickedModel, !(modelOptions[launcherName] ?? []).contains(where: { $0.id == p }) else { return "" }
+        guard launcherName == launcher, let p = pickedModel, assistantModelOption(p, in: modelOptions[launcherName] ?? []) == nil else { return "" }
         return p
     }
 
@@ -559,6 +502,8 @@ struct AssistantTopBar: View {
     @ViewBuilder private func menuItems(_ link: ConnectionStatus.Phase) -> some View {
         // Only this conversation's things: the hub is picked in the sidebar's assistant switcher, with its assistants (#12594).
         Section(menuTitle) {
+            // A leader conversation's first item: the page of everything under its direction (#11516).
+            DirectionPageMenuItem(key: key, showsPermissions: $showDefaultPermissions)
             // The Agent SDK could not run here (#2455): it says so, and why.
             if session?.runtimeFallback?.isEmpty == false,
                let r = AssistantRuntime.status(runtime: session?.runtime, fallback: session?.runtimeFallback) {
@@ -570,7 +515,13 @@ struct AssistantTopBar: View {
             }
             Button(action: openKnowledge) { Label("Knowledge", systemImage: Theme.Icon.knowledge) }
             Button(action: openProfile) { Label("Details [Assistant Top Bar 1932da]", systemImage: Theme.Icon.person) }
-            ScreenMenu() // a Mac's live screen, whether or not the model is operating it (#1343)
+            if key != nil, key == model.assistantMain {
+                Button { showBackgroundActivity = true } label: {
+                    Label("Background activity", systemImage: Theme.Icon.recent)
+                }
+                .accessibilityIdentifier("background-activity-menu")
+            }
+            ModuleViews(place: .chatMenu) // a Mac's live screen, whether or not the model is operating it (#1343)
             if let main = model.assistantMain, key != main {
                 Button {
                     withAnimation(Theme.Motion.standard) { model.assistantCurrent = main }
@@ -613,7 +564,7 @@ struct AssistantTopBar: View {
                                 }
                                 if Self.offersTypedModel(l, features: model.hubFeatures) {
                                     let picked = l.name == launcher ? pickedModel : nil
-                                    let other = picked.flatMap { p in (modelOptions[l.name] ?? []).contains { $0.id == p } ? nil : p }
+                                    let other = picked.flatMap { p in assistantModelOption(p, in: modelOptions[l.name] ?? []) == nil ? p : nil }
                                     Section {
                                         Button { typingFor = l.name } label: {
                                             // A typed pick that isn't listed (yet) is checked here, by its ID.

@@ -115,7 +115,12 @@ func TestAssistantOverTheBus(t *testing.T) {
 	})
 
 	// A task plan: the tool's card reaches the app (ws.broadcast), the app starts it (relayed), its agent starts on box.
-	if r := mcp("task_plan", json.RawMessage(planArgs(false))); r.IsError {
+	// The main conversation's own plan starts at once unless a task is the owner's to start (decision rights): this one
+	// says it takes an irreversible step, so it waits on its card.
+	var planIn map[string]any
+	_ = json.Unmarshal(planArgs(false), &planIn)
+	planIn["tasks"].([]any)[0].(map[string]any)["owner_step"] = "irreversible"
+	if r := mcp("task_plan", planIn); r.IsError {
 		t.Fatalf("task_plan: %+v", r)
 	}
 	plan := app.wait(t, "the plan card", func(m map[string]any) bool { return m["type"] == "task_plan" })

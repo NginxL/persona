@@ -105,21 +105,29 @@ internal fun rememberChatPageRequests(key: SessionKey, chrome: ChatChromeBinding
     val sideFold = persona.core.domain.sort.SideFold.FEATURE in features
     val sidePage = sideFold && (sessionList.firstOrNull { it.key == key } ?: chrome.lookupRows.firstOrNull { it.key == key })
         ?.isFoldedSide == true
-    val requests = chatPageCards(taps.shown(allRequests), key, taskKeys, sideFold, sidePage)
-        .sortedBy { if (it.id == chrome.requestId) 0 else 1 }
+    val requests = remember(allRequests, taps, key, taskKeys, sideFold, sidePage, chrome.requestId) {
+        chatPageCards(taps.shown(allRequests), key, taskKeys, sideFold, sidePage)
+            .sortedBy { if (it.id == chrome.requestId) 0 else 1 }
+    }
     // The cards above the composer, as iOS's footer has them. An Agent's chat: the stack holds every card it waits on.
     // Persona's conversation: the oldest question of its tasks is a card of its own above the Needs you / In progress
     // entries (iOS TaskQuestions), under its task's name with "N more"; the stack below them holds the conversation's own
     // cards alone (#4883), so its "N pending" counts only them (DESIGN_SYSTEM.md 4.8, #4339 C10).
     val assistantChat = renderStyle == ChatRenderStyle.Assistant
-    val taskAsk = if (!assistantChat) null else taskQuestion(requests, taskKeys) { card ->
-        val raw = GroupKeys.rawKey(card.sessionKey)
-        taskTodos.firstOrNull { todo -> todo.activeAgents.any { it.key == raw } }?.title?.takeIf(String::isNotBlank)
-            ?: card.taskTitle?.takeIf(String::isNotBlank) ?: card.sessionTitle?.takeIf(String::isNotBlank)
-            ?: sessionList.firstOrNull { it.key == card.sessionKey }?.displayTitle
+    val taskAsk = remember(assistantChat, requests, taskKeys, taskTodos, sessionList) {
+        if (!assistantChat) null else taskQuestion(requests, taskKeys) { card ->
+            val raw = GroupKeys.rawKey(card.sessionKey)
+            taskTodos.firstOrNull { todo -> todo.activeAgents.any { it.key == raw } }?.title?.takeIf(String::isNotBlank)
+                ?: card.taskTitle?.takeIf(String::isNotBlank) ?: card.sessionTitle?.takeIf(String::isNotBlank)
+                ?: sessionList.firstOrNull { it.key == card.sessionKey }?.displayTitle
+        }
     }
-    val stackCards = if (assistantChat) requests.filter { it.homeKey == key } else requests
-    val messages = chatBubbles(allMessages, key, snapshot.items)
+    val stackCards = remember(assistantChat, requests, key) {
+        if (assistantChat) requests.filter { it.homeKey == key } else requests
+    }
+    val messages = remember(allMessages, key, snapshot.items) {
+        chatBubbles(allMessages, key, snapshot.items)
+    }
     val composerDeliveriesState = (composerService?.deliveries ?: remember {
         kotlinx.coroutines.flow.MutableStateFlow(emptyMap<String, ComposerDelivery>())
     }).collectAsStateWithLifecycle()
@@ -362,15 +370,16 @@ internal fun rememberChatPageLines(key: SessionKey, renderStyle: ChatRenderStyle
     val modelChanges = PersonaTheme.style == AppStyle.Glass
     val childPlaces = remember(key) { persona.core.domain.lines.ChildSessionPlaces() }
     val places = remember(children) { childPlaces.places(children) }
-    val lines = remember(assistantPresentation, search.selected, jumpItem, feed, tasks, taskPlans, taskTodos, taskCardProjection, renderStyle, inlineRecords, nestedSubagents, viewedStrips, modelChanges, places, snapshot.hasOlder, openWork, modeChanges, modeChangesUntil) {
+    val earliest = remember(snapshot.hasOlder, snapshot.items) { loadedEarliest(snapshot.items, snapshot.hasOlder) }
+    val lines = remember(assistantPresentation, search.selected, jumpItem, feed, tasks, taskPlans, taskTodos, taskCardProjection, renderStyle, inlineRecords, nestedSubagents, viewedStrips, modelChanges, places, snapshot.hasOlder, earliest, openWork, modeChanges, modeChangesUntil) {
         searchVisibleLines(assistantPresentation.foreground, search.selected?.itemId ?: jumpItem)
             .let {
                 when {
                     tasks == null -> it
                     renderStyle.compactToolSummary -> persona.core.domain.tasks.AssistantTaskCards.lines(it, feed, taskPlans,
-                        taskTodos, taskCardProjection[key.sessionId].orEmpty(), inline = inlineRecords)
+                        taskTodos, taskCardProjection[key.sessionId].orEmpty(), inline = inlineRecords, earliest = earliest)
                     else -> persona.core.domain.tasks.AssistantLines.lines(it,
-                        persona.core.domain.tasks.SentToAgents.shown(feed))
+                        persona.core.domain.tasks.SentToAgents.shown(feed), earliest = earliest)
                 }
             }.let { persona.core.domain.lines.Subagents.withNested(it, nestedSubagents) }
             .let { persona.core.domain.lines.ChildSessionCards.lines(it, places, !snapshot.hasOlder, openWork) }
@@ -380,14 +389,22 @@ internal fun rememberChatPageLines(key: SessionKey, renderStyle: ChatRenderStyle
             .let { if (renderStyle == ChatRenderStyle.Agent) persona.core.domain.lines.EngineChanges.mark(it) else it }
             .let {
                 if (renderStyle == ChatRenderStyle.Assistant) it else persona.core.domain.lines.ModeChanges.merge(it, modeChanges,
-                    earliest = if (snapshot.hasOlder) snapshot.items.firstNotNullOfOrNull { item ->
-                        persona.core.contracts.parseTime(item.ts)
-                    } ?: java.time.Instant.MAX else null,
+                    earliest = earliest,
                     until = modeChangesUntil)
             }.asReversed()
     }
     return ChatPageLines(jumpItemState, assistantPresentation, subagentCards, lines)
 }
+
+/**
+ * When the oldest loaded transcript item happened while older pages remain unloaded (web `loadedFrom`,
+ * `ModeChanges` `earliest`): holds back older feed items, task cards and mode changes until those pages load.
+ * Returns [java.time.Instant.MAX] when [hasOlder] is true but no loaded item carries a timestamp yet, so older
+ * history never floods an empty or untimed partial page.
+ */
+internal fun loadedEarliest(items: List<Item>, hasOlder: Boolean): java.time.Instant? =
+    if (!hasOlder) null
+    else items.firstNotNullOfOrNull { item -> persona.core.contracts.parseTime(item.ts) } ?: java.time.Instant.MAX
 
 /** What [rememberChatPageLines] hands back to ChatPage: plain values, and the state objects ChatPage reads and writes. */
 internal class ChatPageLines(
@@ -426,12 +443,13 @@ internal fun rememberChatPageSubagents(
     key: SessionKey, chrome: ChatChromeBindings, readOnly: Boolean, session: Session?,
     openBackground: ((BackgroundDestination) -> Unit)?,
 ): ChatPageSubagents {
-    val subagentLinks = remember(session?.subagents, chrome.onOpenSession, readOnly, key.machineId) {
+    val subagentLinks = remember(session?.subagents, chrome.onOpenSubagent, chrome.onOpenSession, readOnly, key.machineId) {
         val listed = session?.subagents.orEmpty()
+        val opener = chrome.onOpenSubagent ?: chrome.onOpenSession
         if (listed.isEmpty()) null
         else ChatSubagents(listed.filter { !it.toolUseId.isNullOrBlank() && it.sessionId.isNotBlank() }
             .associate { it.toolUseId!! to SessionKey(key.machineId, it.sessionId) },
-            chrome.onOpenSession?.takeIf { !readOnly }, listed.associateBy(persona.core.domain.lines.Subagents::callOf))
+            opener?.takeIf { !readOnly }, listed.associateBy(persona.core.domain.lines.Subagents::callOf))
     }
     val subagentFolds = remember(key) { SubagentFolds() }
     // A Workflow call draws its run's card (#3435): the session's runs by the call that launched them, their agents
@@ -682,7 +700,7 @@ internal fun rememberChatPageSession(key: SessionKey, chrome: ChatChromeBindings
     } ?: lastSession
     SideEffect { if (liveSession != null) lastSession = liveSession }
     val session = liveSession ?: readOnlySessionMetadata(key, historyReadOnly, historySession)
-    return ChatPageSession(child, workflowAgent, historyOnly, footer, readOnly, row, session, switch?.version ?: 0L, refreshDetail)
+    return ChatPageSession(child, workflowAgent, historyOnly, footer, readOnly, row, session, switch?.version ?: 0L, refreshDetail, ownerOffline != null)
 }
 
 /** What [rememberChatPageSession] hands back to ChatPage: plain values, and the detail reload action. */
@@ -696,6 +714,7 @@ internal class ChatPageSession(
     val session: Session?,
     val switchObservation: Long,
     val refreshDetail: suspend () -> Unit,
+    val managerOffline: Boolean = false,
 )
 
 /** ChatPage's launcher switch and closeout: the switch drawn here, the closeout card's detail (moved as is). */

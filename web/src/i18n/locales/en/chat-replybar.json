@@ -11,6 +11,7 @@
   "cache_line": "Cache breakdown: read {read} · write {write} · hit rate {rate}",
   "cache_line_no_rate": "Cache breakdown: read {read} · write {write}",
   "time_line": "Time {duration}",
+  "ttft_line": "First token {ttft}",
   "model_line": "Model: {model}",
   "models_one": "{count} model",
   "models_other": "{count} models",

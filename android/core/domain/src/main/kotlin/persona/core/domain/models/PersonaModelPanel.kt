@@ -58,6 +58,7 @@ object PersonaModelPanel {
 
     private fun panelModel(m: AgentModel, engine: String) = PanelModel(
         id = m.id, name = m.label, description = m.description?.takeIf(String::isNotBlank), resolved = m.resolved?.takeIf(String::isNotBlank),
+        aliases = m.aliases,
         efforts = m.efforts.ifEmpty { if (m.custom && engine == "claude") AgentModelPanel.CLAUDE_EFFORTS else emptyList() },
         defaultEffort = m.defaultEffort?.takeIf(String::isNotBlank), custom = m.custom, providerDefault = m.isDefault,
     )

@@ -19,10 +19,13 @@ import (
 	"github.com/nwverse/persona/sdk/go/wire"
 	"github.com/nwverse/persona/server/internal/assistantwire"
 	"github.com/nwverse/persona/server/internal/bus"
+	"github.com/nwverse/persona/server/internal/connector"
 	"github.com/nwverse/persona/server/internal/extension"
 	"github.com/nwverse/persona/server/internal/extension/uistream"
+	"github.com/nwverse/persona/server/internal/extmgr/mailport"
 	"github.com/nwverse/persona/server/internal/extwire"
 	"github.com/nwverse/persona/server/internal/i18n"
+	"github.com/nwverse/persona/server/internal/mailwire"
 	"github.com/nwverse/persona/server/internal/prompts"
 	"github.com/nwverse/persona/server/internal/proto"
 	"github.com/nwverse/persona/server/internal/rpc"
@@ -35,9 +38,11 @@ import (
 // Run starts the extensions, connectors and bots and runs their loops until ctx ends; then it stops the programs.
 func (h *Manager) Run(ctx context.Context) error {
 	h.ctx = ctx
-	if ms, ok := h.store.(mailStore); ok && NewMail != nil {
+	if ms, ok := h.store.(mailStore); ok && mailport.Factory() != nil {
 		var err error
-		if h.mail, err = NewMail(h.cfg.dir, h.secretKeyPath(), ms, h.cfg.Google, h.cfg.Microsoft); err != nil {
+		if h.mail, err = mailport.Factory()(mailwire.Config{DataDir: h.cfg.dir, SecretKey: h.secretKeyPath(), Store: ms,
+			GoogleClientID: h.cfg.Google.ClientID, GoogleProxy: h.cfg.Google.Proxy,
+			MicrosoftClientID: h.cfg.Microsoft.ClientID, MicrosoftRedirect: h.cfg.Microsoft.RedirectURI}); err != nil {
 			h.logf("mail disabled: %v", err)
 			h.mail = nil
 		}
@@ -236,6 +241,13 @@ func (w *localeWriter) Lang() i18n.Lang { return w.lang }
 // Unwrap preserves streaming and WebSocket access to the underlying writer.
 func (w *localeWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter }
 
+// relayIdleTimeout is longer than the hub's relayIdleFor (90 s) so the hub retires idle relay streams first.
+const relayIdleTimeout = 2 * time.Minute
+
+func (h *Manager) relayServer() *http.Server {
+	return &http.Server{Handler: h, ReadHeaderTimeout: 30 * time.Second, IdleTimeout: relayIdleTimeout}
+}
+
 // Accept is extwire.MethodAccept: the hub holds a request for the manager; it dials the relay with the id and serves
 // the request (and any after it on the same connection) there.
 func (h *Manager) Accept(ctx context.Context, id string) error {
@@ -264,7 +276,7 @@ func (h *Manager) Accept(ctx context.Context, id string) error {
 			// there, losing the answer's tail.
 			cancel()
 		}()
-		srv := &http.Server{Handler: h, ReadHeaderTimeout: 30 * time.Second}
+		srv := h.relayServer()
 		_ = srv.Serve(&oneConn{c: mine, done: make(chan struct{})})
 	}()
 	return nil
@@ -470,6 +482,11 @@ func (h *Manager) authorize(a extwire.Authorize) extwire.Authorized {
 		}
 	}
 	out.OK, out.Scope = e.opens(pattern, a.Path)
+	// Ledger grants are checked live, even for a credential issued before revocation.
+	if out.Scope == extwire.ScopeAssistantEntriesRead {
+		allowed, _ := h.EntriesReadAccess(e.extension)
+		out.OK = out.OK && allowed
+	}
 	return out
 }
 
@@ -699,7 +716,12 @@ func (h *Manager) AgentTools(ctx context.Context, assistant bool) (agents, assis
 		assistantOnly = append(assistantOnly, h.browserTools()...)
 		assistantOnly = append(assistantOnly, h.iphoneTools()...)
 		assistantOnly = append(assistantOnly, h.subscriptionTools()...)
+		if hp, _ := h.larkImageSource(); hp != nil && connector.StatusOf(ctx, h.connectors.Get(connector.Lark)).State == connector.StateOK {
+			assistantOnly = append(assistantOnly, mcpTool(larkImageTool))
+		}
 		assistantOnly = append(assistantOnly, h.connectors.ToolsFor(ctx, false)...)
+		// A memory extension's read tools reach the assistant's conversations around the hub's filter (memory_sources.go).
+		agents, assistantOnly = h.withoutMemoryReads(agents), h.withoutMemoryReads(assistantOnly)
 	}
 	for _, list := range [][]proto.Tool{agents, assistantOnly} {
 		for i, t := range list {
@@ -717,8 +739,12 @@ func (h *Manager) CallTool(ctx context.Context, machine, session, name string, a
 		return proto.ToolResult{}, false
 	}
 	switch {
+	case assistant && h.memoryWithheld(name): // memory_sources.go
+		return memoryWithheldResult(name), true
 	case h.connectors.Offers(name) && (assistant || h.connectors.ForAgents(name)):
 		return h.callConnector(ctx, asker{machine, session}, name, args), true
+	case assistant && name == larkImageTool:
+		return h.callLarkImage(ctx, args), true
 	case assistant && isComputerTool(name):
 		return h.callComputerTool(ctx, session, name, args), true
 	case assistant && isBrowserTool(name):
@@ -744,6 +770,9 @@ func (h *Manager) ToolAccess(name string) (known, readOnly bool) {
 		return true, h.connectors.ReadOnly(name)
 	}
 	switch {
+	case name == larkImageTool:
+		hp, _ := h.larkImageSource()
+		return hp != nil, hp != nil
 	case isComputerTool(name), isBrowserTool(name), isIPhoneTool(name):
 		return true, false
 	case isSubscriptionTool(name):

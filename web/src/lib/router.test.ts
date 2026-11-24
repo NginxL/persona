@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
+// the feature modules (the health page is one: docs/web/web.md "Modules")
+import { MODULES } from "../modules";
 import { parse, showsSession } from "./router";
+// the health module, when this run has it (the core-only lane, #13932, runs with no module)
+const HEALTH = MODULES.some((m) => m.id === "health");
 
 describe("showsSession", () => {
   it("knows an agent's chat by its own address and by its tab's (#3405)", () => {
@@ -41,8 +45,33 @@ describe("an address that is no page (web usability audit item 42)", () => {
   it("leaves every page's own address alone", () => {
     expect(parse("/")).toEqual({ name: "persona" });
     expect(parse("/overview")).toEqual({ name: "home" });
-    for (const path of ["/inbox", "/inbox/nope", "/kb", "/kb/x/y", "/todos", "/settings", "/machines", "/machines/nope", "/a", "/a/nope", "/agents", "/agents/archived", "/history", "/health", "/routines", "/messages", "/assistant", "/terminal", "/subscriptions", "/workspace-board", "/plugin/x/y", "/persona/new"]) {
+    for (const path of ["/inbox", "/inbox/nope", "/kb", "/kb/x/y", "/todos", "/settings", "/machines", "/machines/nope", "/a", "/a/nope", "/agents", "/agents/archived", "/history", ...(HEALTH ? ["/health"] : []), "/routines", "/messages", "/assistant", "/terminal", "/subscriptions", "/workspace-board", "/plugin/x/y", "/persona/new"]) {
       expect(parse(path).name, path).not.toBe("not-found");
     }
+  });
+});
+
+describe("the core's addresses (core/module-host.ts CORE_PATHS)", () => {
+  it("lists every first segment parse routes, so no module can take one", async () => {
+    const { readFileSync } = await import("node:fs");
+    const { CORE_PATHS } = await import("../core/module-host");
+    const source = readFileSync(new URL("./router.ts", import.meta.url), "utf8");
+    const parse = source.slice(source.indexOf("export function parse("), source.indexOf("export function routeAt("));
+    const segments = [...parse.matchAll(/p\[0\] === "([^"]+)"/g)].map((m) => m[1]!);
+    expect(segments.length).toBeGreaterThan(20);
+    expect(segments.filter((x) => !CORE_PATHS.has(x))).toEqual([]);
+    for (const x of ["persona", "j"]) expect(CORE_PATHS.has(x)).toBe(true); // assistantPath
+  });
+
+  it("lists nothing parse does not route, but what the hub serves beside the app", async () => {
+    const { readFileSync } = await import("node:fs");
+    const { CORE_PATHS } = await import("../core/module-host");
+    const source = readFileSync(new URL("./router.ts", import.meta.url), "utf8");
+    const parse = source.slice(source.indexOf("export function parse("), source.indexOf("export function routeAt("));
+    const segments = new Set([...parse.matchAll(/p\[0\] === "([^"]+)"/g)].map((m) => m[1]!));
+    // assistantPath's segments, and the hub's own addresses next to the app's (its API, sign-in, screen sharing, shared
+    // pages, the admin UI, static files)
+    const beside = new Set(["persona", "j", "api", "login", "screen", "share", "admin", "assets"]);
+    expect([...CORE_PATHS].filter((x) => !segments.has(x) && !beside.has(x))).toEqual([]);
   });
 });

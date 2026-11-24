@@ -18,6 +18,7 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 import persona.core.contracts.InboxEventFields
 import persona.core.domain.inbox.InboxItem
+import persona.core.inbox.*
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [35], qualifiers = "en")
@@ -48,8 +49,8 @@ class InboxPoliciesTest {
         assertEquals("2026-03-02T00:00:00Z", b.updatedAt)
         assertEquals(InboxPolicyTier.Action to InboxPolicyTwin.Never, c.tier to c.twin)
         assertEquals(InboxPolicyTier.None, d.tier)
-        assertEquals(listOf(R.string.inbox_policy_tier_action, R.string.inbox_policy_twin_never), c.summary)
-        assertEquals(listOf(R.string.inbox_policy_twin_first), b.summary)
+        assertEquals(listOf(persona.core.inbox.R.string.inbox_policy_tier_action, persona.core.inbox.R.string.inbox_policy_twin_never), c.summary)
+        assertEquals(listOf(persona.core.inbox.R.string.inbox_policy_twin_first), b.summary)
         assertEquals(InboxMuteOption("chat", "c1", "c1"), b.option)
         assertTrue(inboxPolicies(json("{}")).isEmpty())
         assertNull(inboxPolicy(json("""{"id":"","tag":"repo"}""")))

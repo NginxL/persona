@@ -1,0 +1,11 @@
+{
+  "push_title": "Quick capture",
+  "filed": "{title} → {track}",
+  "count_one": "{count} capture",
+  "count_other": "{count} captures",
+  "heading": "Quick capture",
+  "waiting_one": "{count} waiting to be sorted",
+  "waiting_other": "{count} waiting to be sorted",
+  "more_one": "and {count} more filed",
+  "more_other": "and {count} more filed"
+}

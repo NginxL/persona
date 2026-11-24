@@ -148,6 +148,13 @@ export function noteArchived(s: Session, archived: boolean) {
   knownChanged();
 }
 
+/** Whether mid/sid is archived as this page last saw it, outside React: the automatic reads of an open chat stop for
+ *  an archived session, which gets no new lines (#13677). Back in the lists, it is not archived any more. */
+export function archivedNow(mid: string, sid: string): boolean {
+  if (!known.has(keyOf(mid, sid))) return false;
+  return !getState().sessions[mid]?.some((x) => x.session_id === sid);
+}
+
 /** The archived session mid/sid as this page last saw it; undefined when it is not known to be archived. */
 export function useArchived(mid: string, sid: string): Session | undefined {
   useSyncExternalStore(

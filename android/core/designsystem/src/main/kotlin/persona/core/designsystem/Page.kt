@@ -346,23 +346,30 @@ internal fun ScrollEdge(
     val density = LocalDensity.current
     val full = with(density) { edgeHeight.toPx() }
     val soft = with(density) { style.fade.toPx() }.coerceAtMost(full)
-    fun wash(strength: Float): Brush {
-        val solid = Color.Black.copy(alpha = strength)
-        val stop = (full - soft) / full
-        return if (top) Brush.verticalGradient(0f to solid, stop to solid, 1f to Color.Transparent)
+    val blurOn = style.blur && state != null && PersonaTheme.glass != GlassLevel.Solid
+    val washStrength = if (blurOn) 0.5f else 0.92f
+    val mask = remember(top, full, soft, washStrength) {
+        val solid = Color.Black.copy(alpha = washStrength)
+        val stop = if (full > 0f) (full - soft) / full else 0f
+        if (top) Brush.verticalGradient(0f to solid, stop to solid, 1f to Color.Transparent)
         else Brush.verticalGradient(0f to Color.Transparent, (1f - stop) to solid, 1f to solid)
     }
-    if (style.blur && state != null && PersonaTheme.glass != GlassLevel.Solid) {
-        Box(strip.hazeBlur(HazeInput.Sources(state), style = HazeBlurStyle {
-            blurRadius(18.dp)
-            noiseFactor(0f)
-            progressive(
-                if (top) HazeProgressive.verticalGradient(startY = full - soft, startIntensity = 1f, endY = full, endIntensity = 0f)
-                else HazeProgressive.verticalGradient(startY = 0f, startIntensity = 0f, endY = soft, endIntensity = 1f),
-            )
-        })) { AmbientLight(light, Modifier.matchParentSize(), inWindow = true, mask = wash(0.5f)) }
+    if (blurOn) {
+        val blurStyle = remember(top, full, soft) {
+            HazeBlurStyle {
+                blurRadius(18.dp)
+                noiseFactor(0f)
+                progressive(
+                    if (top) HazeProgressive.verticalGradient(startY = full - soft, startIntensity = 1f, endY = full, endIntensity = 0f)
+                    else HazeProgressive.verticalGradient(startY = 0f, startIntensity = 0f, endY = soft, endIntensity = 1f),
+                )
+            }
+        }
+        Box(strip.hazeBlur(HazeInput.Sources(state), style = blurStyle)) {
+            AmbientLight(light, Modifier.matchParentSize(), inWindow = true, mask = mask)
+        }
     } else {
-        Box(strip) { AmbientLight(light, Modifier.matchParentSize(), inWindow = true, mask = wash(0.92f)) }
+        Box(strip) { AmbientLight(light, Modifier.matchParentSize(), inWindow = true, mask = mask) }
     }
 }
 
@@ -372,21 +379,24 @@ internal fun ScrollEdge(
  */
 @Composable
 fun JFullScreen(onDismiss: () -> Unit, content: @Composable () -> Unit) {
+    val densities = currentTextDensities()
     Dialog(onDismiss, DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
-        val view = LocalView.current
-        val dark = PersonaTheme.darkTheme
-        SideEffect {
-            (view.parent as? DialogWindowProvider)?.window?.let { window ->
-                window.setDimAmount(0f)
-                window.isNavigationBarContrastEnforced = false
-                WindowCompat.getInsetsController(window, view).run {
-                    isAppearanceLightStatusBars = !dark
-                    isAppearanceLightNavigationBars = !dark
+        RetainedTextDensity(densities) {
+            val view = LocalView.current
+            val dark = PersonaTheme.darkTheme
+            SideEffect {
+                (view.parent as? DialogWindowProvider)?.window?.let { window ->
+                    window.setDimAmount(0f)
+                    window.isNavigationBarContrastEnforced = false
+                    WindowCompat.getInsetsController(window, view).run {
+                        isAppearanceLightStatusBars = !dark
+                        isAppearanceLightNavigationBars = !dark
+                    }
                 }
             }
-        }
-        CompositionLocalProvider(LocalSplitDetail provides null) {
-            Box(Modifier.fillMaxSize().background(PersonaTheme.palette.background)) { content() }
+            CompositionLocalProvider(LocalSplitDetail provides null) {
+                Box(Modifier.fillMaxSize().background(PersonaTheme.palette.background)) { content() }
+            }
         }
     }
 }

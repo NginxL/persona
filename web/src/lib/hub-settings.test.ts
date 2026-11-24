@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { botStateText, botSummary, botTone, credentialsChanged, credentialsOf, credentialsUpdate, DEFAULT_FEATURES, domainChoice, featureEdit, livePairing, nudgeChoices, nudgeLabel, pairingLeft, withFeature, type FeishuBotStatus } from "./feishu-bot";
-import { updateFinished, updateStateTitle, updateWorking, type HubUpdateStatus } from "./hub-update";
-import { channelTitle, dockerSteps, DOCKER_COMMAND, latestWarning, recordTitle, recordTone, sourceBehindWarning, updateView } from "./hub-update-settings";
+import type { HubUpdateStatus } from "./hub-update";
+import { channelTitle, dockerSteps, DOCKER_COMMAND, latestWarning, recordTitle, recordTone, sourceBehindWarning, updateFinished, updateStateTitle, updateView, updateWorking } from "./hub-update-settings";
 
 const bot = (o: Partial<FeishuBotStatus> = {}): FeishuBotStatus => ({
   enabled: true, app_id: "cli_x", domain: "https://open.feishu.cn", has_secret: true, from_config: false,

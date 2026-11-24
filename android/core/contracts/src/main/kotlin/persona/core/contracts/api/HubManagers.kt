@@ -43,6 +43,12 @@ interface HubManagers {
     suspend fun delete(id: String)
 }
 
+/** A manager name the hub accepts: 1 to 40 characters once trimmed. */
+const val MANAGER_NAME_MAX = 40
+fun validManagerName(name: String): Boolean = name.trim().let {
+    it.isNotEmpty() && it.codePointCount(0, it.length) <= MANAGER_NAME_MAX
+}
+
 /** The hub has no `/api/v1/managers` (404): it predates the roster. */
 class ManagersUnsupported : Exception("This hub has no managers")
 

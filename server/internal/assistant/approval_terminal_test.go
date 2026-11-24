@@ -114,6 +114,64 @@ func TestPreparedSnapshotAfterOriginalWaitsSharesResult(t *testing.T) {
 	})
 }
 
+func TestPreparedSnapshotWithdrawalDoesNotCancelOriginal(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		ft := newFleetTestNoStore(t)
+		preparedTestConversation(ft)
+		id := "ix_snapshot_withdrawn"
+		ix := proto.Interaction{ID: id, MachineID: "mac", SessionID: "s1", Kind: proto.IxPermission,
+			ToolName: "persona_settings", Summary: "Change the example setting", ExpiresAt: time.Now().Add(time.Hour)}
+		var applies atomic.Int32
+		done := startPreparedInteraction(t, ft, ix, approvalops.Operation{Apply: func(context.Context, proto.Resolution) (string, error) {
+			applies.Add(1)
+			return "setting applied", nil
+		}})
+		synctest.Wait()
+
+		// A snapshot computed before registration can omit the card even when no
+		// newer sequence supersedes it. A snapshot that lists the card starts no
+		// waiter of its own (#13308: the original caller owns a prepared card), and
+		// withdrawing it must not cancel the original operation or its still-pending
+		// owner card.
+		ft.s.askOnPhone([]proto.Interaction{ix})
+		synctest.Wait()
+		ft.s.fleet.askMu.Lock()
+		waiter := ft.s.fleet.asked[id]
+		ft.s.fleet.askMu.Unlock()
+		if waiter != nil {
+			t.Fatal("the snapshot started a waiter for a prepared card its original caller owns")
+		}
+		ft.s.askOnPhone(nil)
+		synctest.Wait()
+
+		select {
+		case got := <-done:
+			t.Fatalf("snapshot withdrawal ended the original prepared call: %+v, %v", got.out, got.err)
+		default:
+		}
+		if _, ok := ft.s.pendingIx(id); !ok {
+			t.Fatal("snapshot withdrawal removed the still-unanswered owner card")
+		}
+		if got := applies.Load(); got != 0 {
+			t.Fatalf("snapshot withdrawal applied the operation %d times", got)
+		}
+
+		allow := true
+		if err := ft.s.resolve(id, proto.Resolution{Allow: &allow}); err != nil {
+			t.Fatalf("owner Allow after snapshot withdrawal: %v", err)
+		}
+		got := awaitPreparedTest(t, done)
+		if got.err != nil || got.out.Clarifying || got.out.Text != "setting applied" {
+			t.Fatalf("original prepared call after owner Allow = %+v, %v", got.out, got.err)
+		}
+		synctest.Wait()
+		if got := applies.Load(); got != 1 {
+			t.Fatalf("owner Allow applied %d times, want exactly one", got)
+		}
+		ft.waitPending(0)
+	})
+}
+
 func TestPreparedSnapshotWaiters150RoundsNeverHangOriginal(t *testing.T) {
 	const rounds = 150
 	for i := 0; i < rounds; i++ {
@@ -173,6 +231,47 @@ func TestPreparedSnapshotWaiters150RoundsNeverHangOriginal(t *testing.T) {
 				t.Fatalf("round %d applied %d times", i, applies.Load())
 			}
 		})
+	}
+}
+
+func TestUnansweredPreparedSnapshotsDoNotOwnItsLifecycle(t *testing.T) {
+	ft := newFleetTest(t)
+	preparedTestConversation(ft)
+	id := "ix_unanswered_snapshot_lifecycle"
+	var applies atomic.Int32
+	done := startPreparedTest(t, ft, id, "", func(context.Context, proto.Resolution) (string, error) {
+		applies.Add(1)
+		return "setting applied", nil
+	})
+	ix, ok := ft.s.pendingIx(id)
+	if !ok {
+		t.Fatal("the unanswered prepared card did not stay pending")
+	}
+	ft.s.askOnPhone([]proto.Interaction{ix})
+	ft.s.fleet.askMu.Lock()
+	waiter := ft.s.fleet.asked[id]
+	ft.s.fleet.askMu.Unlock()
+	if waiter != nil {
+		t.Fatal("an unanswered prepared card spawned another snapshot waiter")
+	}
+	ft.s.askOnPhone(nil)
+
+	if err := ft.s.clarify(context.Background(), id, "Why?", "owner-"+id, nil); err != nil {
+		t.Fatalf("the snapshot watcher cancelled the original prepared card: %v", err)
+	}
+	if got := awaitPreparedTest(t, done); got.err != nil || !got.out.Clarifying {
+		t.Fatalf("original prepared call = %+v, %v, want clarification", got.out, got.err)
+	}
+	allow := true
+	if err := ft.s.resolve(id, proto.Resolution{Allow: &allow}); err != nil {
+		t.Fatal(err)
+	}
+	if got := applies.Load(); got != 1 {
+		t.Fatalf("owner Allow applied %d times, want exactly once", got)
+	}
+	ft.waitPending(0)
+	if result := waitApprovalResult(t, ft, id); !strings.Contains(result, "setting applied") {
+		t.Fatalf("terminal result = %q, want the applied result", result)
 	}
 }
 

@@ -63,6 +63,11 @@ interface MessageSender : MessageSendReceiptSource {
      * the network) is tried at once.
      */
     suspend fun retry(clientMessageId: String): Boolean = false
+    /**
+     * After a confirmed start answer, requeue only this session's known-undelivered refusals with exactly [code].
+     * Uncertain deliveries are never included. Returns how many durable entries changed, in their existing queue order.
+     */
+    suspend fun retryRefused(session: SessionKey, code: String): Int = 0
     /** Drops a message whose delivery is unknown: off the list and the queue, never retried or reconciled. */
     suspend fun discard(clientMessageId: String): Boolean = false
     suspend fun confirm(clientMessageId: String, delivered: Boolean): Boolean = false

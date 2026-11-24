@@ -130,7 +130,7 @@ $body""")
         }
         fun layout(text: String): TextLayoutResult {
             val layouts = mutableListOf<TextLayoutResult>()
-            rule.onNodeWithText(text, substring = true).performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(layouts) }
+            rule.onNodeWithText(text, substring = true).performSemanticsAction(SemanticsActions.GetTextLayoutResult) { val _ = it(layouts) }
             return layouts.single()
         }
         org.junit.Assert.assertTrue(layout("Needle below preview").hasVisualOverflow)
@@ -207,7 +207,7 @@ A progress check restored from history."""),
         rule.onNodeWithText("Please summarize the results.").assertIsDisplayed()
         rule.onNodeWithText(expandLabel).assertIsDisplayed()
         val layouts = mutableListOf<TextLayoutResult>()
-        rule.onNodeWithText("END OF REPORT", substring = true).performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(layouts) }
+        rule.onNodeWithText("END OF REPORT", substring = true).performSemanticsAction(SemanticsActions.GetTextLayoutResult) { val _ = it(layouts) }
         org.junit.Assert.assertTrue("Long source starts folded", layouts.single().hasVisualOverflow)
         org.junit.Assert.assertTrue(layouts.single().lineCount <= ContentTokens.sourcePreviewLines)
         val images = mutableMapOf<AppStyle, Bitmap>()

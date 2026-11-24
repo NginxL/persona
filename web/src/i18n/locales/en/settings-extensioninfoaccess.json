@@ -1,0 +1,9 @@
+{
+  "title": "Personal information it may read",
+  "owner": "This is my own extension",
+  "owner_hint": "Lets it read everything, health and money included. Turn on only for an extension you trust like the app itself, such as your own memory extension.",
+  "owner_footer": "It reads all your information, personal matters included.",
+  "footer": "Turned off, it never sees that kind of personal information. Everything else it may read as before.",
+  "category": "Let it read {name}",
+  "save_failed": "Couldn't change what it may read: {error}"
+}

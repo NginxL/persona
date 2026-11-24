@@ -77,7 +77,7 @@ func (s *Service) answerKeptTab(ctx context.Context, m Device, t PlanTask, pane,
 		return false, errAnswerNotOffered
 	}
 	outdated := answerRefused{http.StatusConflict, proto.CodeNodeOutdated, i18n.Err("assistant-tasks.start_answer_node_outdated", i18n.Args{"machine": m.Name})}
-	if nodes, ok := s.devs.(nodeAnnouncer); ok && s.devs.Has(m.ID) && !nodes.NodeAnnounced(m.ID, nodeproto.StartAnswer) {
+	if nodes, ok := s.physicalDevices().(nodeAnnouncer); ok && s.devs.Has(m.ID) && !nodes.NodeAnnounced(m.ID, nodeproto.StartAnswer) {
 		return false, outdated
 	}
 	cctx, cancel := context.WithTimeout(ctx, startAnswerTimeout)

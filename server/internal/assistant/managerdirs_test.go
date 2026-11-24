@@ -39,7 +39,7 @@ func TestAManagersOwnDirectories(t *testing.T) {
 			t.Fatalf("%q: assistant directory %q", c.id, got)
 		}
 		d.DataDir = "/data"
-		if got := s.spaceCwd(d, SpaceHealth); got != "/data/"+c.health[len(".persona/"):] {
+		if got := s.spaceCwd(context.Background(), d, SpaceHealth); got != "/data/"+c.health[len(".persona/"):] {
 			t.Fatalf("%q: health directory under a data directory %q", c.id, got)
 		}
 	}

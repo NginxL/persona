@@ -2,7 +2,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from android_token_baseline import baseline_of, count, regressions, scan, wildcard_material3
+from android_token_baseline import baseline_of, count, lowerable, regressions, scan, wildcard_material3
 
 
 class TokenBaselineTest(unittest.TestCase):
@@ -49,6 +49,14 @@ class TokenBaselineTest(unittest.TestCase):
         current = {'files': {'a.kt': count('Color.Red')}}
         self.assertEqual(1, len(regressions(current, baseline)))
         self.assertEqual([], regressions({'files': {'a.kt': count('Tokens.Space.m')}}, baseline))
+
+    def test_a_count_under_the_baseline_passes_and_is_listed_for_lowering(self):
+        baseline = baseline_of({'version': 2, 'files': {'a.kt': count('1.dp 2.dp'), 'gone.kt': count('3.dp')}})
+        current = {'files': {'a.kt': count('1.dp')}}
+        self.assertEqual([], regressions(current, baseline))
+        self.assertEqual(['a.kt: 1 hard-coded dp, baseline 2', 'gone.kt: 0 hard-coded dp, baseline 1'],
+                         lowerable(current, baseline))
+        self.assertEqual([], lowerable({'files': {'a.kt': count('1.dp 2.dp'), 'gone.kt': count('3.dp')}}, baseline))
 
     def test_material3_components_count_in_pages_only(self):
         page = '''
@@ -99,6 +107,7 @@ class TokenBaselineTest(unittest.TestCase):
                 'android/feature/inbox/src/main/kotlin/i/Inbox.kt': 'val b = 3.dp',
                 'android/feature/inbox/src/test/kotlin/i/InboxTest.kt': 'val t = 4.dp',
                 'android/platform/notify/src/main/kotlin/n/Notify.kt': 'val c = Color.Blue',
+                'android/module/voice/src/main/kotlin/v/Voice.kt': 'val v = 6.dp',
                 'android/build-logic/src/main/kotlin/Plugin.kt': 'val p = 5.dp',
             }
             for name, text in files.items():
@@ -107,8 +116,9 @@ class TokenBaselineTest(unittest.TestCase):
             current, wildcards = scan(root)
         self.assertEqual({'android/app/src/main/java/a/App.kt', 'android/core/designsystem/src/main/kotlin/d/Parts.kt',
                           'android/core/hub/src/main/kotlin/h/Hub.kt', 'android/feature/inbox/src/main/kotlin/i/Inbox.kt',
-                          'android/platform/notify/src/main/kotlin/n/Notify.kt'}, set(current['files']))
-        self.assertEqual({'app', 'core/designsystem', 'core/hub', 'feature/inbox', 'platform/notify'}, set(current['modules']))
+                          'android/platform/notify/src/main/kotlin/n/Notify.kt', 'android/module/voice/src/main/kotlin/v/Voice.kt'},
+                         set(current['files']))
+        self.assertEqual({'app', 'core/designsystem', 'core/hub', 'feature/inbox', 'module/voice', 'platform/notify'}, set(current['modules']))
         self.assertEqual(1, current['modules']['core/designsystem']['color']['hardcoded'])  # the design system counts too
         self.assertEqual(['android/core/hub/src/main/kotlin/h/Hub.kt'], wildcards)  # the design system may use wildcards
 

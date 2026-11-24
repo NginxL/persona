@@ -362,20 +362,58 @@ export function setViewedHere(id: string, viewed: boolean) {
 
 export type BodyPart = { kind: "text"; text: string } | { kind: "suggestion"; lines: string[] };
 
-const SUGGESTION = /^```suggestion[^\S\n]*\n([\s\S]*?)^```[^\S\n]*$/gm;
+const SUGGESTION_OPEN = /^ {0,3}(`{3,})suggestion[ \t]*$/;
+const SUGGESTION_CLOSE = /^ {0,3}(`{3,})[ \t]*$/;
+const FENCE_OPEN = /^ {0,3}(`{3,}|~{3,})(.*)$/;
+const FENCE_CLOSE = /^ {0,3}(`{3,}|~{3,})[ \t]*$/;
 
 /** A comment's body cut at its ```suggestion blocks: the text around them, and each block's lines. */
 export function splitSuggestions(body: string): BodyPart[] {
   const out: BodyPart[] = [];
-  let at = 0;
-  for (const m of body.matchAll(SUGGESTION)) {
-    const before = body.slice(at, m.index);
-    if (before.trim()) out.push({ kind: "text", text: before });
-    const text = m[1].replace(/\n$/, "");
-    out.push({ kind: "suggestion", lines: text ? text.split("\n") : [] });
-    at = m.index! + m[0].length;
+  let textStart = 0;
+  let outerFence: { ch: string; len: number } | null = null;
+  let sugg: { len: number; openStart: number; lines: string[] } | null = null;
+
+  let pos = 0;
+  while (pos < body.length) {
+    const nl = body.indexOf("\n", pos);
+    const lineEnd = nl === -1 ? body.length : nl + 1;
+    const contentEnd = nl === -1 ? body.length : nl;
+    const rawEnd = contentEnd > pos && body[contentEnd - 1] === "\r" ? contentEnd - 1 : contentEnd;
+    const raw = body.slice(pos, rawEnd);
+
+    if (sugg !== null) {
+      const close = SUGGESTION_CLOSE.exec(raw);
+      if (close && close[1].length >= sugg.len) {
+        const before = body.slice(textStart, sugg.openStart);
+        if (before.trim()) out.push({ kind: "text", text: before });
+        out.push({ kind: "suggestion", lines: sugg.lines });
+        textStart = rawEnd;
+        sugg = null;
+      } else {
+        sugg.lines.push(raw);
+      }
+    } else if (outerFence !== null) {
+      const close = FENCE_CLOSE.exec(raw);
+      if (close && close[1][0] === outerFence.ch && close[1].length >= outerFence.len) {
+        outerFence = null;
+      }
+    } else {
+      const openSugg = nl !== -1 ? SUGGESTION_OPEN.exec(raw) : null;
+      if (openSugg) {
+        sugg = { len: openSugg[1].length, openStart: pos, lines: [] };
+      } else {
+        const openFence = FENCE_OPEN.exec(raw);
+        if (openFence && !(openFence[1][0] === "`" && openFence[2].includes("`"))) {
+          outerFence = { ch: openFence[1][0], len: openFence[1].length };
+        }
+      }
+    }
+
+    pos = lineEnd;
   }
-  const rest = body.slice(at);
+
+  const rest = body.slice(textStart);
   if (rest.trim() || !out.length) out.push({ kind: "text", text: rest });
   return out;
 }

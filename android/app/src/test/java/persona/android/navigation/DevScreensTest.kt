@@ -10,7 +10,7 @@ import persona.core.navigation.ChatRoute
 import persona.core.navigation.ConversationKind
 import persona.core.navigation.InboxRoute
 import persona.core.navigation.InteractionRoute
-import persona.feature.knowledge.KnowledgeRoute
+import persona.core.navigation.KnowledgeRoute
 import persona.core.navigation.SettingsPage
 import persona.core.navigation.SettingsPageRoute
 import persona.core.navigation.TerminalRoute

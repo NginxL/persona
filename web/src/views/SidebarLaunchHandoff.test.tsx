@@ -119,6 +119,8 @@ describe("Sidebar launch handoff (#12380)", () => {
     expect(todoNoneRow()).toMatch(/10 个 Agent完成未看$/);
 
     // Phase 2: POST /sessions returns an idle session while POST /messages is still in flight -> no duplicate in todo:none, no 11 Done unread flash.
+    // Delivery loads its module on intent; wait until the real request has installed its resolver before completing it.
+    await act(async () => vi.waitFor(() => expect(resolveCreate).toBeTypeOf("function")));
     await act(async () => { resolveCreate(json({ session: created })); });
     await flush();
     expect(getState().launches[launchId].phase).toBe("sending");
@@ -126,6 +128,7 @@ describe("Sidebar launch handoff (#12380)", () => {
     expect(todoNoneRow()).toMatch(/10 个 Agent完成未看$/);
 
     // Phase 3: POST /messages succeeds -> phase becomes ready while hub has not yet pushed working (and even if a transient unread arrives with no reply).
+    await act(async () => vi.waitFor(() => expect(resolveSend).toBeTypeOf("function")));
     await act(async () => { resolveSend(json({ ok: true })); });
     await flush();
     expect(getState().launches[launchId].phase).toBe("ready");

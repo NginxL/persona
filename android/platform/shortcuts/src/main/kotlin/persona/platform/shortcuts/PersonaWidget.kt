@@ -152,7 +152,7 @@ class PersonaWidget : GlanceAppWidget() {
     companion object {
         /** Redraws every placed widget (cheap when none is placed). */
         suspend fun refresh(context: Context) {
-            runCatching { PersonaWidget().updateAll(context.applicationContext) }
+            val _ = runCatching { PersonaWidget().updateAll(context.applicationContext) }
         }
     }
 }

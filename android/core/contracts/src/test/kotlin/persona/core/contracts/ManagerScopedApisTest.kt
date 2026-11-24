@@ -39,15 +39,15 @@ class ManagerScopedApisTest {
         assertEquals(null, currentCoroutineContext()[RequestManager])
         recorder(AgentTriage::class.java, seen).forManager("m-2").let { runCatching { it.switches() } }
         recorder(ConnectorsManagement::class.java, seen).forManager("m-2").let { api ->
-            runCatching { api.connectors() }
-            runCatching { api.mailAccounts() }
-            runCatching { api.larkStatus() }
-            runCatching { api.deleteMailAccount("a") }
-            runCatching { api.gitHubAuth() }
-            runCatching { api.setGitHubAuth(null) }
+            val _ = runCatching { api.connectors() }
+            val _ = runCatching { api.mailAccounts() }
+            val _ = runCatching { api.larkStatus() }
+            val _ = runCatching { api.deleteMailAccount("a") }
+            val _ = runCatching { api.gitHubAuth() }
+            val _ = runCatching { api.setGitHubAuth(null) }
             runCatching { api.setGitHubInboxOptions(GitHubInboxOptions()) }
         }
-        recorder(ChannelManagement::class.java, seen).forManager("m-2").let { api -> runCatching { api.channels() }; runCatching { api.unbind("c") } }
+        recorder(ChannelManagement::class.java, seen).forManager("m-2").let { api -> val _ = runCatching { api.channels() }; runCatching { api.unbind("c") } }
         recorder(FeishuBotSettings::class.java, seen).forManager("m-2").let { runCatching { it.status() } }
         recorder(HubSent::class.java, seen).forManager("m-2").let { runCatching { it.page() } }
         assertEquals(listOf("switches", "connectors", "mailAccounts", "larkStatus", "deleteMailAccount", "gitHubAuth", "setGitHubAuth", "setGitHubInboxOptions", "channels", "unbind", "status", "page"),

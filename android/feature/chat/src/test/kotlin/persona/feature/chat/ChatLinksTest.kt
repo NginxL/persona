@@ -26,12 +26,12 @@ class ChatLinksTest {
 
     /** A whole native document goes as iOS and web send it: the whole-document marker iOS's quote row keys on. */
     @Test fun aWholeDocumentPickCarriesTheWholeMarker() {
-        val doc = persona.feature.inbox.LarkNativeLink.Document("https://example.feishu.cn/docx/a")
+        val doc = persona.core.inbox.LarkNativeLink.Document("https://example.feishu.cn/docx/a")
         val text = requireNotNull(ChatLinkContext.whole(doc, ""))
         val xml = ChatLinkContext(title = "排期", url = doc.url, text = text).xml()
         assertTrue(xml, xml.contains("\n（整篇）\n</persona-context>"))
         assertEquals("（整篇）", ChatLinkContext.parse(xml).first.single().text)
-        val post = persona.feature.inbox.LarkNativeLink.MomentsPost("p1")
+        val post = persona.core.inbox.LarkNativeLink.MomentsPost("p1")
         assertNull(ChatLinkContext.whole(post, null))
         assertEquals("帖子正文", ChatLinkContext.whole(post, "帖子正文"))
         assertNull(ChatLinkContext.whole(null, "x"))

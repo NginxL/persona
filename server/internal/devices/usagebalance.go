@@ -20,13 +20,20 @@ import (
 const (
 	usageBalancePoll      = 5 * time.Minute  // how often the launchers are asked
 	usageBalanceTick      = 15 * time.Second // how often the loop checks whether they are due
-	usageBalanceFetchMost = 20 * time.Second // one whole read, launchers one after another
+	usageBalanceFetchMost = 20 * time.Second // one whole read across all launchers
 )
 
 // balanceState is what is known of one launcher.
 type balanceState struct {
 	account proto.UsageAccount // the last sample; its Balance is nil before the first successful read
 	errCode string             // why the last attempt failed; "" when it worked
+	// credential is the non-secret digest of the last resolved key (UsageAccount.BalanceCredential). A different one
+	// means the launcher's key was replaced or rotated: the kept amount belongs to another account.
+	credential string
+	// sealedCredential is the non-secret digest of the launcher's sealed key material
+	// (UsageAccount.BalanceSealedCredential). Kept separate from credential so a temporary open/resolution failure of
+	// unchanged sealed material retains the last known amount marked stale, while a replaced seal clears it.
+	sealedCredential string
 }
 
 // usageBalances polls the launchers' balances and holds their last samples.
@@ -112,8 +119,46 @@ func (b *usageBalances) applyLocked(samples []proto.UsageAccount, now time.Time)
 		seen[a.Ref] = true
 		st := b.state[a.Ref]
 		if st == nil {
+			if a.BalanceSkipped {
+				// Never fabricate a row for a launcher that has not had a full attempt yet.
+				continue
+			}
 			st = &balanceState{}
 			b.state[a.Ref] = st
+		}
+		// A key the user replaced or rotated is another credential: the amount kept from the old one is not this
+		// credential's last known balance, so a failed or skipped read after the change must not keep showing it.
+		// Resolved-key and sealed-material identities are tracked separately:
+		//   - when a key resolved, compare resolved-key digests (catches secret-reference rotation even when sealed
+		//     bytes stay constant, and tolerates re-sealing the same key with a fresh nonce);
+		//   - when no key resolved, compare sealed-material digests (retains the last amount across a temporary
+		//     open/resolution failure of unchanged sealed material, while clearing it if the seal itself changed).
+		changed := false
+		switch {
+		case a.BalanceCredential != "":
+			if st.credential != "" && a.BalanceCredential != st.credential {
+				changed = true
+			}
+		case a.BalanceSealedCredential != "":
+			if st.sealedCredential != "" && a.BalanceSealedCredential != st.sealedCredential {
+				changed = true
+			}
+		}
+		if changed {
+			st.account.Balance, st.account.SampledAt, st.account.Stale, st.account.StaleAt, st.account.Problem = nil, time.Time{}, false, nil, ""
+			st.errCode = ""
+			st.credential = ""
+		}
+		if a.BalanceCredential != "" {
+			st.credential = a.BalanceCredential
+		}
+		if a.BalanceSealedCredential != "" {
+			st.sealedCredential = a.BalanceSealedCredential
+		}
+		if a.BalanceSkipped {
+			// The poll's overall deadline ended before this launcher got a full attempt: keep whatever compatible
+			// state it had without marking it unreachable or treating it as removed.
+			continue
 		}
 		switch {
 		case a.Balance != nil:

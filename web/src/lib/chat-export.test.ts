@@ -259,4 +259,24 @@ describe("content keeps its internal newlines", () => {
     const markdown = transcriptMarkdown(items, fixture.meta, { work: true, words, time: utc });
     expect(markdown).toContain(fenced(result));
   });
+
+  it("treats image items with tool_use_id as tool output instead of user messages", () => {
+    const items: Item[] = [
+      { id: "u1", seq: 1, role: "user", kind: "text", ts: "2026-11-14T10:01:00Z", text: "Capture the page" },
+      { id: "c1", seq: 2, role: "assistant", kind: "tool_use", ts: "2026-11-14T10:02:00Z", tool_name: "Screenshot", tool_use_id: "t1", tool_input: { url: "https://example.com" } },
+      { id: "r1", seq: 3, role: "user", kind: "tool_result", ts: "2026-11-14T10:03:00Z", tool_use_id: "t1", text: "Captured" },
+      { id: "i1", seq: 4, role: "user", kind: "image", ts: "2026-11-14T10:03:00Z", tool_use_id: "t1", image: { mime: "image/png", lazy: true } },
+      { id: "i0", seq: 5, role: "user", kind: "image", ts: "2026-11-14T10:04:00Z", tool_use_id: "orphan", image: { mime: "image/png", lazy: true } },
+      { id: "a1", seq: 6, role: "assistant", kind: "text", ts: "2026-11-14T10:05:00Z", text: "Looks good." },
+    ];
+
+    const withoutWork = transcriptMarkdown(items, fixture.meta, { work: false, words, time: utc });
+    expect(withoutWork).not.toContain("_[Image]_");
+    expect(withoutWork.match(/^## You/gm)).toHaveLength(1);
+
+    const withWork = transcriptMarkdown(items, fixture.meta, { work: true, words, time: utc });
+    expect(withWork.match(/^## You/gm)).toHaveLength(1);
+    expect(withWork).toContain("**Result**\n\n```\nCaptured\n```\n\n_[Image]_\n\n</details>");
+    expect(withWork).toContain("<details>\n<summary>Result</summary>\n\n**Result**\n\n_[Image]_\n\n</details>");
+  });
 });

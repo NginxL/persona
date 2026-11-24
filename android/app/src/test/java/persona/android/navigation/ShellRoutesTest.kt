@@ -8,9 +8,9 @@ import persona.core.domain.inbox.InboxItem
 import persona.core.navigation.*
 import persona.feature.inbox.InboxEventRoute
 import persona.feature.inbox.InboxItemPages
-import persona.feature.inbox.InboxDocRef
-import persona.feature.inbox.InboxMomentRef
-import persona.feature.inbox.InboxRecord
+import persona.core.inbox.InboxDocRef
+import persona.core.inbox.InboxMomentRef
+import persona.core.inbox.InboxRecord
 import persona.feature.inbox.LarkMomentRoute
 import persona.feature.inbox.LarkRoute
 import org.junit.Assert.assertEquals

@@ -79,5 +79,7 @@
   "temporary_session": "一時セッション",
   "runs": "実行回数",
   "runs_hint": "このタスクを {count} 回、それぞれの worktree で起動して結果を比べます。",
-  "start_runs": "{count} 回起動"
+  "start_runs": "{count} 回起動",
+  "desktop_unavailable": "このコンピューターでは {app} デスクトップのランチャーを利用できません。別のランチャーを選んでください。",
+  "desktop_project_detached": "元のデスクトッププロジェクトは選択されていません。"
 }

@@ -2,6 +2,7 @@ package node
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -278,6 +279,110 @@ func TestInboxClaudeReadOnlyMCPAndSuggestionSkipPermission(t *testing.T) {
 	}
 }
 
+// A current manager attests the AI twin's own saved mode separately from the caller-controlled permission_mode.
+// The dedicated field is the only one a new node may honor: an older manager's ordinary bypass still gets default.
+func TestInboxStartUsesAttestedOwnPermissionMode(t *testing.T) {
+	f := cliTestBash(t)
+	raw, err := nodeCall(t, f.n, "assistant.send", map[string]any{
+		"text": "Investigate", "cwd": t.TempDir(), "launcher": "claude", "origin": originInbox, "origin_known": true,
+		"permission_mode": proto.ModeDefault, "inbox_permission_mode": proto.ModeBypass,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var started struct {
+		SessionID string `json:"session_id"`
+	}
+	if err := json.Unmarshal(raw, &started); err != nil || started.SessionID == "" {
+		t.Fatalf("start result=%s err=%v", raw, err)
+	}
+	f.idle(t, started.SessionID)
+	if st, _ := f.n.state.get(started.SessionID); st.AppMode != proto.ModeBypass || st.Origin != originInbox || !st.OriginKnown {
+		t.Fatalf("started mode=%q origin=%q known=%t, want attested Inbox bypass", st.AppMode, st.Origin, st.OriginKnown)
+	}
+	if argv := f.file("cli-argv"); !strings.Contains(argv, "--permission-mode "+proto.ModeBypass) {
+		t.Fatal("attested AI-twin bypass did not reach the real CLI start arguments")
+	}
+
+	// Changing the setting does not replace a live process. It takes effect on its next stopped-process resume.
+	running := f.proc(started.SessionID)
+	if running == nil {
+		t.Fatal("the started Inbox process is not available for the live-mode control")
+	}
+	if _, err := nodeCall(t, f.n, "assistant.send", map[string]any{
+		"session_id": started.SessionID, "text": "Keep running", "origin": originInbox, "origin_known": true,
+		"inbox_permission_mode": proto.ModeDefault,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	f.idle(t, started.SessionID)
+	if f.proc(started.SessionID) != running {
+		t.Fatal("a permission setting change replaced a live Inbox process")
+	}
+	if mode, _ := f.n.modesOf(started.SessionID); mode != proto.ModeBypass {
+		t.Fatalf("live process mode=%q, want its original bypass", mode)
+	}
+	f.n.stopAssistantProcess(started.SessionID)
+	if _, err := f.n.assistantSend(context.Background(), started.SessionID, "", "", "Resume with the new setting", nil, "", "",
+		modelExecution{Origin: originInbox, OriginKnown: true, InboxPermissionMode: proto.ModeDefault}); err != nil {
+		t.Fatal(err)
+	}
+	f.idle(t, started.SessionID)
+	if st, _ := f.n.state.get(started.SessionID); st.AppMode != proto.ModeDefault {
+		t.Fatalf("stopped process resumed in %q, want the newly saved default", st.AppMode)
+	}
+}
+
+// A live default process must ignore the generic caller mode whether an older manager omits the dedicated field or a
+// current manager explicitly keeps default. The generic bypass must neither replace the process nor become its next mode.
+func TestInboxLiveProcessIgnoresGenericCallerMode(t *testing.T) {
+	for _, tc := range []struct {
+		name, own string
+	}{
+		{name: "older manager omits dedicated mode"},
+		{name: "current manager keeps default", own: proto.ModeDefault},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := cliTestBash(t)
+			raw, err := nodeCall(t, f.n, "assistant.send", map[string]any{
+				"text": "Start default", "cwd": t.TempDir(), "launcher": "claude", "origin": originInbox, "origin_known": true,
+				"permission_mode": proto.ModeDefault, "inbox_permission_mode": proto.ModeDefault,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			var started struct {
+				SessionID string `json:"session_id"`
+			}
+			if err := json.Unmarshal(raw, &started); err != nil || started.SessionID == "" {
+				t.Fatalf("start result=%s err=%v", raw, err)
+			}
+			f.idle(t, started.SessionID)
+			running := f.proc(started.SessionID)
+			if running == nil {
+				t.Fatal("default Inbox process is not live")
+			}
+			params := map[string]any{
+				"session_id": started.SessionID, "text": "Caller tries to elevate", "origin": originInbox, "origin_known": true,
+				"permission_mode": proto.ModeBypass,
+			}
+			if tc.own != "" {
+				params["inbox_permission_mode"] = tc.own
+			}
+			if _, err := nodeCall(t, f.n, "assistant.send", params); err != nil {
+				t.Fatal(err)
+			}
+			f.idle(t, started.SessionID)
+			if f.proc(started.SessionID) != running {
+				t.Fatal("generic caller bypass replaced the live default Inbox process")
+			}
+			if mode, _ := f.n.modesOf(started.SessionID); mode != proto.ModeDefault {
+				t.Fatalf("live Inbox mode=%q after generic caller bypass, want default", mode)
+			}
+		})
+	}
+}
+
 // The same launch contract covers built-in tools: the Inbox-only bare Read completes, while network, shell and file
 // mutations still reach the permission prompt. The fake CLI records prompts rather than contacting a hub.
 func TestInboxClaudeBuiltInReadAndMutationPermissionReplay(t *testing.T) {
@@ -338,6 +443,43 @@ func inboxResumeTranscript(t *testing.T, n *Node, id string) {
 		t.Fatal(err)
 	}
 	n.setPath(id, path)
+}
+
+// A stopped handling chat applies the current AI-twin setting when its next message resumes it. Plan and unknown
+// values remain default because Plan rejects the required MCP tools; the ordinary caller mode cannot elevate either.
+func TestInboxSessionSendUsesOnlyAttestedOwnPermissionMode(t *testing.T) {
+	for _, tc := range []struct {
+		name, id, own, caller, want string
+	}{
+		{name: "own bypass resumes bypass", id: "11111111-1111-4111-8111-111111111121", own: proto.ModeBypass, caller: proto.ModeDefault, want: proto.ModeBypass},
+		{name: "plan stays default", id: "11111111-1111-4111-8111-111111111122", own: proto.ModePlan, caller: proto.ModeBypass, want: proto.ModeDefault},
+		{name: "unknown stays default", id: "11111111-1111-4111-8111-111111111123", own: "invalid", caller: proto.ModeBypass, want: proto.ModeDefault},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := cliTestBash(t)
+			cwd := filepath.Join(t.TempDir(), ".persona", "assistant")
+			if err := os.MkdirAll(cwd, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			f.n.state.put(tc.id, sessionState{Launcher: "claude", Cwd: cwd, AppMode: proto.ModeDefault})
+			inboxResumeTranscript(t, f.n, tc.id)
+			if _, err := nodeCall(t, f.n, "session.send", map[string]any{
+				"session_id": tc.id, "text": "Continue", "origin": originInbox, "origin_known": true,
+				"permission_mode": tc.caller, "inbox_permission_mode": tc.own,
+			}); err != nil {
+				t.Fatal(err)
+			}
+			f.idle(t, tc.id)
+			st, _ := f.n.state.get(tc.id)
+			argv := f.file("cli-argv")
+			if st.AppMode != tc.want {
+				t.Fatalf("resumed mode=%q, want %q; argv=%s", st.AppMode, tc.want, argv)
+			}
+			if hasBypass := strings.Contains(argv, "--permission-mode "+proto.ModeBypass); hasBypass != (tc.want == proto.ModeBypass) {
+				t.Fatalf("resumed argv bypass=%t, want %t; argv=%s", hasBypass, tc.want == proto.ModeBypass, argv)
+			}
+		})
+	}
 }
 
 // session.send is the continuation RPC used by Inbox deliverNotes. Its attested origin must reach assistantSend even

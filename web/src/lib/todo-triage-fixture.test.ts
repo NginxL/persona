@@ -27,7 +27,7 @@ describe("the To-dos SOP's shared cases (spec/fixtures/triage)", () => {
       const r = triageTodos(c.input.todos as unknown as Todo[], lookup, Date.parse(c.input.now), new Map(), { quiet: c.input.include_quiet });
       const want = c.expected.sections as Record<string, string[][]>;
       for (const s of TRIAGE_SECTIONS) expect(r.sections[s].map((g) => g.members.map((m) => m.id))).toEqual(s === "parked" ? [...(want.pr ?? []), ...(want.parked ?? [])] : want[s] ?? []);
-      expect([r.open, r.shelved, r.finished]).toEqual([c.expected.open, c.expected.shelved, c.expected.finished]);
+      expect([r.open, r.shelved, r.finished, r.cancelled]).toEqual([c.expected.open, c.expected.shelved, c.expected.finished, (c.expected as { cancelled?: number }).cancelled ?? 0]);
     });
   }
 

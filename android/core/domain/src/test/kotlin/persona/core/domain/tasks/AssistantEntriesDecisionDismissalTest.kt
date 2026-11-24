@@ -28,6 +28,14 @@ class AssistantEntriesDecisionDismissalTest {
 
     private val dismissed = todo("""{"review_at":"$at","dismissal_id":"dismiss-demo"}""")
 
+    private fun acceptedDecision(outcome: String, decisionReview: String?) = JsonCodec.decodeFromString(Todo.serializer(), """
+        {"id":"task","title":"Example rollout","origin":"main","created_at":"$at","updated_at":"$at",
+         "agents":[{"machine_id":"box","session_id":"worker","linked_at":"$at"}],
+         "supervision":{"supervisor":"main","state":"accepted","reviews":[{"at":"$at","verdict":"accepted"}]},
+         "ask":{"outcome":"$outcome","verdict":"Choose the rollout route.","asked_at":"$at"}
+         ${decisionReview?.let { ""","decision_review":$it""" } ?: ""}}
+    """.trimIndent())
+
     private fun run(todo: Todo, session: Session = idle, interactions: List<Interaction> = emptyList()) =
         assistantEntries("main", "main", listOf(todo), listOf(session), interactions, emptyList(), emptyList(),
             Instant.parse(at).toEpochMilli())
@@ -42,6 +50,18 @@ class AssistantEntriesDecisionDismissalTest {
     @Test fun waitsOnTheOwnerUntilDismissed() {
         assertEquals(listOf("task:task"), run(todo(null)).needsYou.map { it.key })
         assertEquals(listOf("task:task"), run(todo("""{"review_at":"$at"}""")).needsYou.map { it.key })
+    }
+
+    @Test fun acceptedDecisionLeavesNeedsYouOnlyWhenDismissed() {
+        for (outcome in listOf("decide", "cannot")) {
+            val open = acceptedDecision(outcome, null)
+            assertEquals("open $outcome", listOf("task:task"), run(open).needsYou.map { it.key })
+            val current = acceptedDecision(outcome, """{"review_at":"$at","dismissal_id":"dismiss-current-round"}""")
+            assertTrue(current.decisionDismissed())
+            val got = run(current)
+            assertTrue("dismissed $outcome needs you", got.needsYou.isEmpty())
+            assertTrue("dismissed $outcome in progress", got.running.isEmpty())
+        }
     }
 
     @Test fun hidesASameRoundDismissalAndDoesNotCountItInProgress() {

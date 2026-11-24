@@ -1,4 +1,3 @@
-#if os(iOS) || os(visionOS)
 import Foundation
 import os
 #if os(iOS)
@@ -386,4 +385,3 @@ nonisolated final class RecordingDayIntake: Sendable {
         queue.asyncAfter(deadline: .now() + ackDelay) { [weak self] in self?.flushAcks() }
     }
 }
-#endif

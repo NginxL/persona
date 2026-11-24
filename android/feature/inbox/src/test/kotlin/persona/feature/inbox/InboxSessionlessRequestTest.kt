@@ -20,6 +20,7 @@ import persona.core.navigation.AppTab
 import persona.core.navigation.ChatRoute
 import persona.core.navigation.Navigator
 import persona.core.navigation.RequestRef
+import persona.core.inbox.*
 
 /**
  * A request card outside any session (`personad ask` in a plain terminal, #5610) opens that card on Agents, as its

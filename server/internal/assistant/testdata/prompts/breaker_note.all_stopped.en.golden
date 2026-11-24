@@ -1,0 +1,1 @@
+The background supervisor made no progress on the all_stopped signal for 2 rounds in a row (repeated_noop). The circuit breaker paused its retries and this is handed to the main conversation.

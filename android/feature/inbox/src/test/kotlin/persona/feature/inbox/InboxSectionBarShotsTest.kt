@@ -54,6 +54,7 @@ import persona.core.domain.inbox.InboxInteraction
 import persona.core.domain.inbox.InboxItem
 import persona.core.navigation.AppTab
 import persona.core.navigation.Navigator
+import persona.core.inbox.*
 
 /**
  * The whole Inbox page under its section bar (#9053) with dozens of rows per section, as a person sees it: each style on

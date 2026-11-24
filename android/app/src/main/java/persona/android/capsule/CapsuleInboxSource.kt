@@ -16,6 +16,7 @@ import persona.core.contracts.api.InboxDoneTarget
 import persona.feature.inbox.*
 import persona.platform.capsule.*
 import persona.core.contracts.SessionKey
+import persona.core.inbox.*
 
 /** A projection of the app-owned inbox; it never substitutes task completion for a read receipt. */
 @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)

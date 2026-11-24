@@ -31,7 +31,7 @@ internal class ChatLiveItems(
         val lastItemId: String?,
     ) {
         /** A lazy, immutable overlay: later revisions cannot change what an in-flight consumer reads. */
-        val items: List<Item> by lazy(LazyThreadSafetyMode.NONE) {
+        val items: List<Item> by lazy {
             if (values.isEmpty()) base else LiveItemList(base, values)
         }
 

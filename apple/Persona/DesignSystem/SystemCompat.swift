@@ -16,6 +16,11 @@ extension View {
         if #available(iOS 26.0, *) { listRowInsets(.vertical, length) } else { self }
     }
 
+    /// A list row's leading and trailing insets only; iOS 18 can only set all four, so its rows keep the list's own.
+    @ViewBuilder func listRowHorizontalInsets(_ length: CGFloat?) -> some View {
+        if #available(iOS 26.0, *) { listRowInsets(.horizontal, length) } else { self }
+    }
+
     /// Hides the soft edge iOS 26 draws where content scrolls under a bar; iOS 18 draws none.
     @ViewBuilder func scrollEdgeEffectHiddenWhenSupported(_ hidden: Bool = true, for edges: Edge.Set = .all) -> some View {
         if #available(iOS 26.0, *) { scrollEdgeEffectHidden(hidden, for: edges) } else { self }

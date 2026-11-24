@@ -4,6 +4,7 @@ import android.content.res.Resources
 import persona.core.contracts.Session
 import persona.core.contracts.SessionKey
 import persona.core.designsystem.AppFeedback
+import persona.core.designsystem.CopyAction
 import persona.core.designsystem.FeedbackNotice
 import persona.core.designsystem.JToastState
 
@@ -43,10 +44,10 @@ internal fun assistantHistoryNotice(
         toast.show(FeedbackNotice(message, style = persona.core.designsystem.FeedbackStyle.Success))
 }
 
-internal fun copyAssistantSessionId(key: SessionKey, resources: Resources, copy: (String, String?) -> Boolean) {
+internal fun copyAssistantSessionId(key: SessionKey, resources: Resources, copy: CopyAction) {
     copy(key.sessionId, resources.getString(R.string.assistant_copied_session_id))
 }
 
-internal fun copyAssistantDiagnostics(session: Session, resources: Resources, copy: (String, String?) -> Boolean) {
+internal fun copyAssistantDiagnostics(session: Session, resources: Resources, copy: CopyAction) {
     copy(conversationDiagnostics(session), resources.getString(R.string.assistant_diagnostics_copied))
 }

@@ -350,3 +350,30 @@ type SubscriptionKind struct {
 }
 
 func RenderSubscriptionKind(k SubscriptionKind) string { return render("inbox/kinds/subscription", k) }
+
+// InboxReplyPolicy is the system prompt for classifying an Inbox item or reply text into a configured category
+// (inbox/reply_policy). The server maps the returned category to a route; the model never chooses a route.
+type InboxReplyPolicy struct {
+	Language   string   // Native language name; empty preserves the legacy Chinese output.
+	Owner      string   // "" is the Chinese "you"
+	Categories []string // sorted allowed category names from server policy
+	Rules      string   // optional extra classification guidance, trimmed
+}
+
+func RenderInboxReplyPolicy(p InboxReplyPolicy) string { return render("inbox/reply_policy", p) }
+
+// InboxReplyPolicyInput is the Inbox item (and optional proposed/final reply text) passed to the reply-policy
+// classifier (inbox/reply_policy_input).
+type InboxReplyPolicyInput struct {
+	Language  string // Native language name; empty preserves the legacy Chinese output.
+	Title     string
+	Sender    string
+	Source    string
+	Kind      string
+	Context   string
+	ReplyText string // non-empty when checking a proposed suggestion or final text before send
+}
+
+func RenderInboxReplyPolicyInput(in InboxReplyPolicyInput) string {
+	return render("inbox/reply_policy_input", in)
+}

@@ -1,9 +1,5 @@
 import SwiftUI
-#if canImport(UIKit)
 import UIKit
-#elseif canImport(AppKit)
-import AppKit
-#endif
 
 /// How a style draws SF Symbols (docs/apple/icons.md): the weight, whether filled symbols stay filled, and a few symbols
 /// swapped for the one closer to the style's own glyphs. Pages never read this: they draw through `ThemedIcon`,
@@ -67,11 +63,7 @@ private nonisolated enum SymbolCheck {
         lock.lock()
         defer { lock.unlock() }
         if let k = known[name] { return k }
-        #if canImport(UIKit)
         let k = UIImage(systemName: name) != nil
-        #else
-        let k = NSImage(systemSymbolName: name, accessibilityDescription: nil) != nil
-        #endif
         known[name] = k
         return k
     }

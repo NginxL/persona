@@ -1,7 +1,5 @@
 import SwiftUI
-#if canImport(UIKit)
 import UIKit
-#endif
 
 /// The image editor, over the picture on black as Photos edits: Box (the tool it opens on, as it always has) and Pen in
 /// six inks and three widths, Crop (free or a fixed shape, turn left, reset), and Undo / Redo over all of it. The source

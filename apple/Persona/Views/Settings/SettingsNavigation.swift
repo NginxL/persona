@@ -31,14 +31,47 @@ extension AppModel {
     }
 }
 
+/// One place in Settings: what search finds (its name and aliases) and, for the rows Settings' lists draw, where and when
+/// (#13395, `SettingsCatalog.core` / `advanced`).
 struct SettingsEntry: Identifiable {
     enum Group: String, CaseIterable { case assistant, device, hub }
+    /// Where Settings draws the entry: on its home, on Settings › Advanced, or only inside another page. Search finds
+    /// every entry, whatever its tier.
+    enum Tier { case core, advanced, nested }
+    /// When its row shows. Search lists the entry either way and opens the page, which says what it needs.
+    enum Shown {
+        case always
+        /// While the hub reports the feature.
+        case hubFeature(String)
+        /// While the hub has the extension manager.
+        case extensionManager
+        /// With a hub paired: not in demo mode.
+        case pairedHub
+    }
     let id: String
     let title: String
     let symbol: String
     let group: Group
     let page: SettingsPage
     let aliases: String
+    var shown: Shown = .always
+    /// The row's accessibility identifier, which UI tests find it by; nil: `settings-<id>`.
+    var row: String? = nil
+
+    var rowID: String { row ?? "settings-" + id }
+
+    var tier: Tier {
+        SettingsCatalog.core.contains(id) ? .core : SettingsCatalog.advanced.contains(id) ? .advanced : .nested
+    }
+
+    @MainActor func shows(in model: AppModel) -> Bool {
+        switch shown {
+        case .always: true
+        case .hubFeature(let feature): model.hubFeatures.contains(feature)
+        case .extensionManager: model.hubFeatures.hasExtensionFeature("manager")
+        case .pairedHub: !model.isDemo
+        }
+    }
 
     func matches(_ query: String) -> Bool {
         let words = query.split(whereSeparator: \.isWhitespace)
@@ -48,7 +81,11 @@ struct SettingsEntry: Identifiable {
 }
 
 enum SettingsCatalog {
-    static let entries: [SettingsEntry] = {
+    /// Every entry: the core's, then the active modules' (`ModuleSlot.settings`, Live Screen).
+    @MainActor static var entries: [SettingsEntry] { coreEntries + Modules.registry.settingsEntries.map(\.info) }
+
+    /// The core's own entries.
+    private static let coreEntries: [SettingsEntry] = {
         var rows: [SettingsEntry] = [
             .init(id: "models", title: String(localized: "Models"), symbol: Theme.Icon.model, group: .assistant, page: .models,
                   aliases: String(localized: "settings.search.models")),
@@ -57,11 +94,12 @@ enum SettingsCatalog {
             .init(id: "channels", title: String(localized: "Channels"), symbol: Theme.Icon.channels, group: .assistant, page: .channels,
                   aliases: String(localized: "settings.search.channels")),
             .init(id: "connectors", title: String(localized: "Connectors"), symbol: Theme.Icon.connectors, group: .assistant, page: .connectors,
-                  aliases: String(localized: "settings.search.connectors")),
+                  aliases: String(localized: "settings.search.connectors"), row: "settings.connectors"),
             .init(id: "inbox-sources", title: String(localized: "Inbox Sources"), symbol: Theme.Icon.subscriptions, group: .assistant,
-                  page: .inboxSources, aliases: String(localized: "settings.search.inbox_sources")),
+                  page: .inboxSources, aliases: String(localized: "settings.search.inbox_sources"),
+                  shown: .hubFeature(SubscriptionsUI.sourcesFeature)),
             .init(id: "plugins", title: String(localized: "Extensions"), symbol: Theme.Icon.plugins, group: .assistant, page: .plugins,
-                  aliases: String(localized: "settings.search.extensions")),
+                  aliases: String(localized: "settings.search.extensions"), shown: .extensionManager),
             .init(id: "agents", title: String(localized: "Agent"), symbol: Theme.Icon.options, group: .assistant, page: .agents,
                   aliases: String(localized: "settings.search.agents")),
             .init(id: "appearance", title: String(localized: "Appearance & Display"), symbol: Theme.Icon.style, group: .device, page: .appearance,
@@ -77,15 +115,15 @@ enum SettingsCatalog {
             .init(id: "about", title: String(localized: "About"), symbol: Theme.Icon.info, group: .device, page: .about,
                   aliases: String(localized: "settings.search.about")),
             .init(id: "hubs", title: String(localized: "Hub Connection"), symbol: Theme.Icon.hubGroup, group: .hub, page: .hubs,
-                  aliases: String(localized: "settings.search.hubs")),
+                  aliases: String(localized: "settings.search.hubs"), shown: .pairedHub, row: "settings.hubs"),
             .init(id: "hub", title: String(localized: "Hub Version"), symbol: Theme.Icon.server, group: .hub, page: .hub,
-                  aliases: String(localized: "settings.search.version")),
+                  aliases: String(localized: "settings.search.version"), shown: .pairedHub, row: "settings.hub"),
             .init(id: "managers", title: String(localized: "Assistants"), symbol: Theme.Icon.managers, group: .hub, page: .managers,
-                  aliases: String(localized: "settings.search.assistants")),
+                  aliases: String(localized: "settings.search.assistants"), shown: .pairedHub, row: "settings.managers"),
             .init(id: "persona", title: String(localized: "Avatar"), symbol: Theme.Icon.avatar, group: .hub, page: .persona,
                   aliases: String(localized: "settings.search.avatar")),
             .init(id: "devices", title: String(localized: "Devices & Pairing"), symbol: Theme.Icon.credentials, group: .hub, page: .pairing,
-                  aliases: String(localized: "settings.search.devices")),
+                  aliases: String(localized: "settings.search.devices"), row: "settings-pairing"),
             .init(id: "triage", title: String(localized: "Session Triage"), symbol: Theme.Icon.triage, group: .assistant, page: .triage,
                   aliases: String(localized: "settings.search.triage")),
             .init(id: "standing-authorizations", title: String(localized: "Standing Authorizations"), symbol: Theme.Icon.standingAuthorization,
@@ -103,32 +141,51 @@ enum SettingsCatalog {
             .init(id: "style", title: String(localized: "Interface Style"), symbol: Theme.Icon.style, group: .device, page: .style,
                   aliases: String(localized: "settings.search.style"))
         ]
-        #if os(iOS) || os(visionOS)
         rows.append(.init(id: "colorScheme", title: String(localized: "Light & Dark"), symbol: Theme.Icon.colorScheme, group: .device, page: .colorScheme,
                           aliases: String(localized: "settings.search.scheme")))
-        #endif
         #if os(iOS)
         rows += [
             .init(id: "knowledgeSelection", title: String(localized: "Knowledge Selection"), symbol: Theme.Icon.knowledge, group: .assistant, page: .knowledgeSelection,
-                  aliases: String(localized: "settings.search.knowledge")),
+                  aliases: String(localized: "settings.search.knowledge"), row: "settings-knowledge-selection"),
             .init(id: "meetings", title: String(localized: "Meetings"), symbol: Theme.Icon.meeting, group: .assistant, page: .meetings,
                   aliases: String(localized: "settings.search.meetings")),
-            .init(id: "live-screen", title: String(localized: "Live Screen"), symbol: Theme.Icon.screen, group: .device, page: .liveScreen,
-                  aliases: String(localized: "settings.search.live_screen")),
             .init(id: "layout", title: String(localized: "Agents List Layout"), symbol: Theme.Icon.listView, group: .device, page: .layout,
                   aliases: String(localized: "settings.search.layout")),
             .init(id: "health", title: String(localized: "Health"), symbol: Theme.Icon.health, group: .device, page: .health,
                   aliases: String(localized: "settings.search.health")),
             .init(id: "phoneData", title: ConnectorText.device, symbol: Theme.Icon.thisDevice, group: .device, page: .phoneData,
-                  aliases: String(localized: "settings.search.phoneData"))
+                  aliases: String(localized: "settings.search.phoneData"), row: "settings-phone-data")
         ]
+        if AlarmsAccess.isSupported {
+            rows.append(.init(id: "alarms", title: String(localized: "Alarms and Timers"), symbol: Theme.Icon.alarmClock, group: .device,
+                              page: .alarms, aliases: String(localized: "settings.search.alarms")))
+        }
         #endif
         rows.append(.init(id: "computers", title: String(localized: "Machines"), symbol: Theme.Icon.machines, group: .assistant, page: .computers,
-                          aliases: String(localized: "settings.search.computers")))
+                          aliases: String(localized: "settings.search.computers"), row: "settings-machines"))
         return rows
     }()
 
-    static func search(_ query: String) -> [SettingsEntry] {
+    /// Settings home (#13395): at most `coreLimit` rows, in this order within each scope (`SettingsEntry.Group`), then
+    /// one Advanced row.
+    static let core = ["models", "assistant", "channels", "connectors", "inbox-sources", "plugins", "computers",
+                       "notifications", "about", "hubs"]
+    /// Settings › Advanced: every other row Settings home had, in the order it had them.
+    static let advanced = ["knowledgeSelection", "meetings", "agents",
+                           "appearance", "language", "live-screen", "translation", "storage", "health", "alarms", "phoneData",
+                           "hub", "managers", "persona", "devices"]
+    static let coreLimit = 10
+
+
+    /// The rows of one tier in one scope, as `model` shows them now: an entry this platform does not have (Health off
+    /// the iPhone) or whose condition is not met (`SettingsEntry.Shown`) is left out.
+    @MainActor static func rows(_ tier: SettingsEntry.Tier, in group: SettingsEntry.Group, _ model: AppModel) -> [SettingsEntry] {
+        let all = entries
+        return (tier == .core ? core : tier == .advanced ? advanced : []).compactMap { id in all.first { $0.id == id } }
+            .filter { $0.group == group && $0.shows(in: model) }
+    }
+
+    @MainActor static func search(_ query: String) -> [SettingsEntry] {
         guard !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return [] }
         return entries.filter { $0.matches(query) }
     }
@@ -136,7 +193,7 @@ enum SettingsCatalog {
 
 struct AppearanceSettingsPage: View {
     var body: some View {
-        SettingsForm { AppearanceSection(settingsHome: false) }
+        SettingsForm { AppearanceSection() }
             .themedGroupedPage()
             .detailTitle(String(localized: "Appearance & Display"))
     }
@@ -144,15 +201,37 @@ struct AppearanceSettingsPage: View {
 
 struct SettingsAboutPage: View {
     @State private var check: String?
+    #if DEBUG
+    /// `-openAbout debug` opens Diagnostics, `-openAbout debug-bottom` also scrolls to Debug Info's Copy All: for
+    /// screenshots of the Build row and the whole section (#12926).
+    private static let shot = UserDefaults.standard.string(forKey: "openAbout") ?? ""
+    @State private var diagnosticsOpen = shot.hasPrefix("debug")
+    #else
+    @State private var diagnosticsOpen = false
+    #endif
     private let version = "\(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "") (\(Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? ""))"
-    private let commit = Bundle.main.object(forInfoDictionaryKey: "PersonaCommit") as? String ?? String(localized: "Unknown [Session Modes 4d8c1c]")
+    /// `3518b00185 · 11-22 15:00`, `-dirty` after the hash when the tree had uncommitted changes (#12926, `BuildInfo`).
+    private let commit = BuildInfo.current.buildLabel(unknown: String(localized: "Unknown [Session Modes 4d8c1c]"))
 
     var body: some View {
+        ScrollViewReader { proxy in
+            form
+            #if DEBUG
+                .task {
+                    guard Self.shot == "debug-bottom" else { return }
+                    try? await Task.sleep(for: .seconds(1))
+                    proxy.scrollTo("settings-debug-info-copy", anchor: .bottom)
+                }
+            #endif
+        }
+    }
+
+    private var form: some View {
         SettingsForm {
             Section { LabeledContent("Version", value: version) }
             DevModeSection()
             Section {
-                DisclosureGroup("Diagnostics") {
+                DisclosureGroup("Diagnostics", isExpanded: $diagnosticsOpen) {
                     LabeledContent("Build") { Text(commit).font(Theme.Font.code).textSelection(.enabled) }
                     if let check {
                         VStack(alignment: .leading, spacing: Theme.Space.xs) {
@@ -164,9 +243,69 @@ struct SettingsAboutPage: View {
                 }
                 .accessibilityIdentifier("settings-diagnostics")
             }
+            #if DEBUG
+            DebugInfoSection()
+            #endif
         }
         .themedGroupedPage()
         .detailTitle(String(localized: "About"))
         .task { check = UserDefaults.standard.string(forKey: NewChatCheck.defaultsKey) }
     }
 }
+
+#if DEBUG
+/// A Debug build's About › Debug info (#12926): which build this is and what it talks to, with Copy All for pasting
+/// into an Agent. The rows and the copied JSON are the same `AppDebugInfo` that `phone_device_info` returns. Never in
+/// Release.
+private struct DebugInfoSection: View {
+    @Environment(AppModel.self) private var model
+    @State private var info: AppDebugInfo?
+
+    var body: some View {
+        Section {
+            if let info {
+                ForEach(info.rows(Self.labels)) { row in
+                    LabeledContent(row.label) {
+                        Text(row.value).font(Theme.Font.code).multilineTextAlignment(.trailing).textSelection(.enabled)
+                    }
+                }
+                Button { copy(info.json) } label: {
+                    Label(String(localized: "Copy All [Debug Info]"), systemImage: Theme.Icon.copy).lineLimit(1)
+                }
+                .accessibilityIdentifier("settings-debug-info-copy")
+                .id("settings-debug-info-copy")
+            } else {
+                ProgressView()
+            }
+        } header: {
+            Text("Debug Info [Settings About]")
+        }
+        .accessibilityIdentifier("settings-debug-info")
+        .task(id: model.live.state) { info = await AppDebugInfo.current(model) }
+    }
+
+    private func copy(_ text: String) {
+        UIPasteboard.general.string = text
+        Haptics.success()
+        model.toast = Toast(String(localized: "Debug info copied"), style: .success)
+    }
+
+    private static let labels = AppDebugInfo.Labels(
+        unknown: String(localized: "Unknown [Session Modes 4d8c1c]"),
+        version: String(localized: "Version"),
+        commit: String(localized: "Commit [Debug Info]"),
+        branch: String(localized: "Branch [Debug Info]"),
+        builtAt: String(localized: "Built At [Debug Info]"),
+        builder: String(localized: "Build Machine [Debug Info]"),
+        xcode: String(localized: "Xcode [Debug Info]"),
+        swift: String(localized: "Swift [Debug Info]"),
+        configuration: String(localized: "Configuration [Debug Info]"),
+        bundleID: String(localized: "Bundle ID [Debug Info]"),
+        hub: String(localized: "Hub [Debug Info]"),
+        hubVersion: String(localized: "Hub Version [Debug Info]"),
+        hubConnection: String(localized: "Hub Connection [Debug Info]"),
+        launchedAt: String(localized: "Launched At [Debug Info]"),
+        device: String(localized: "Device [Debug Info]"),
+        system: String(localized: "System [Debug Info]"))
+}
+#endif

@@ -17,7 +17,7 @@ import SwiftUI
         return chrome.height - min(max(chrome.collapse, 0), chrome.maxCollapse)
     }
     /// The two places of cards over the composer as shown: the conversation's own (`PendingCards`) and, in Persona's
-    /// conversation, its tasks' oldest question (`TaskQuestions`). 0 while one is not on screen. They share the room
+    /// conversation, its tasks' questions (`QuestionDock`, the pager that holds both in an assistant conversation, #12831). 0 while one is not on screen. They share the room
     /// the conversation leaves them (`cardsRoom`, #9392).
     var stackShown: CGFloat = 0
     var taskShown: CGFloat = 0
@@ -221,7 +221,7 @@ struct PendingCards: View {
         #endif
     }
 
-    /// A task's question shows over the entries in Persona's conversation (`TaskQuestions`): the two share the room, each
+    /// A task's question showed over the entries in Persona's conversation (now `QuestionDock`): the two share the room, each
     /// at most half of it, as Android's do (#9392). Before, the question had no cap at all and took the whole page.
     private var sharesRoom: Bool { room.taskShown > 0 }
 
@@ -298,7 +298,7 @@ struct PendingCards: View {
 /// Under a card the app can't answer (`PendingCards.Card.blocked`, #6868): why it is greyed, and where its session can be
 /// attached live, the ⋯ menu's Attach Live (joined, the app answers it). Before, the card only greyed out and said
 /// nothing. Worded like Android's `approvalBlockedReason` and the watch's `blockedReason`.
-private struct CardBlockedLine: View {
+struct CardBlockedLine: View {
     @Environment(AppModel.self) private var model
     var block: AnswerBlock
     var key: SessionKey

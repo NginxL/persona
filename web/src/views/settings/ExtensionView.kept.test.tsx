@@ -8,7 +8,11 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vite
 import type { UIView } from "../../lib/extension-ui";
 
 const gate = vi.hoisted(() => ({
-  ready: false, features: [] as string[], listeners: new Set<() => void>(), draws: [] as Array<(v: unknown) => void>,
+  ready: false,
+  features: [] as string[],
+  listeners: new Set<() => void>(),
+  hubListeners: new Map<string, Set<(m: Record<string, unknown>) => void>>(),
+  draws: [] as Array<(v: unknown) => void>,
 }));
 vi.mock("../../lib/store", async (original) => {
   const real = await original<typeof import("../../lib/store")>();
@@ -18,6 +22,12 @@ vi.mock("../../lib/store", async (original) => {
     useStore: <T,>(select: (s: ReturnType<typeof real.getState>) => T): T => select({ ...real.getState(), features: gate.features } as ReturnType<typeof real.getState>),
     appSocketReady: () => gate.ready,
     onAppSocket: (listener: () => void) => { gate.listeners.add(listener); return () => { gate.listeners.delete(listener); }; },
+    onHubEvent: (type: string, listener: (m: Record<string, unknown>) => void) => {
+      let set = gate.hubListeners.get(type);
+      if (!set) { set = new Set(); gate.hubListeners.set(type, set); }
+      set.add(listener);
+      return () => { set!.delete(listener); };
+    },
   };
 });
 vi.mock("../../lib/extension-ui", async (original) => ({
@@ -67,6 +77,7 @@ beforeEach(() => {
   gate.ready = false;
   gate.features = [];
   gate.listeners.clear();
+  gate.hubListeners.clear();
   gate.draws = [];
   resetManagerChoice();
   vi.stubGlobal("ResizeObserver", class { observe() {} unobserve() {} disconnect() {} });
@@ -174,6 +185,140 @@ describe("an extension page on reload", () => {
     await flush();
     expect(kept()).not.toBeNull();
     expect(onWide).toHaveBeenLastCalledWith(true);
+  });
+
+  it("keeps View-level tabs, filter, search, and split layout while refreshing so layout does not jump", async () => {
+    const board = (status: string): UIView => ({
+      title: "Fleet Board",
+      layout: "split",
+      tabs: {
+        name: "view",
+        value: "desk",
+        items: [
+          { value: "board", title: "Board" },
+          { value: "desk", title: "Desk", badge: "4" },
+        ],
+        action: { id: "switch-tab" },
+      },
+      search: { placeholder: "Search fleet", value: "alpha", action: { id: "search" } },
+      filter: {
+        name: "env",
+        title: "Environment",
+        value: "prod",
+        choices: [
+          { value: "all", title: "All envs" },
+          { value: "prod", title: "Production" },
+        ],
+        action: { id: "filter-env" },
+      },
+      sections: [
+        { pane: "side", title: "Clusters", items: [{ type: "row", title: "west-1" }] },
+        { title: "Status", items: [{ type: "text", text: status }] },
+      ],
+    });
+    keepView({ ...page, version: UI_VERSION, manager: "m-1" }, board("Cached status"));
+    const onWide = vi.fn();
+    await act(async () => root.render(<ExtensionUI extension="example-today" ui="today" bare remember onWide={onWide} />));
+    await flush();
+
+    // Cached view renders tabs, search, filter, split layout, and wide mode immediately while inert.
+    const cached = kept()!;
+    expect(cached).not.toBeNull();
+    expect(onWide).toHaveBeenLastCalledWith(true);
+    const tabs = [...cached.querySelectorAll<HTMLButtonElement>("[role=tab]")];
+    expect(tabs.map((b) => b.textContent)).toEqual(["Board", "Desk4"]);
+    expect(tabs[1].getAttribute("aria-selected")).toBe("true");
+    const search = cached.querySelector<HTMLInputElement>('input[type="search"]')!;
+    expect(search).not.toBeNull();
+    expect(search.value).toBe("alpha");
+    expect(search.placeholder).toBe("Search fleet");
+    const filter = cached.querySelector<HTMLSelectElement>("select")!;
+    expect(filter).not.toBeNull();
+    expect(filter.value).toBe("prod");
+    expect([...filter.options].map((o) => o.textContent)).toEqual(["All envs", "Production"]);
+    expect(cached.querySelector("aside")).not.toBeNull();
+    expect(cached.textContent).toContain("Cached status");
+
+    // Fresh render replaces the cached view in place with identical View-level controls.
+    act(() => setRosterDefault("m-1"));
+    await answer(board("Fresh status"));
+    expect(kept()).toBeNull();
+    expect(host.querySelectorAll("[role=tab]")).toHaveLength(2);
+    expect(host.querySelector<HTMLInputElement>('input[type="search"]')?.value).toBe("alpha");
+    expect(host.querySelector<HTMLSelectElement>("select")?.value).toBe("prod");
+    expect(host.querySelector("aside")).not.toBeNull();
+    expect(host.textContent).toContain("Fresh status");
+  });
+
+  it("keeps View-level tabs, filter, and search on a cached native view while waiting for the socket", async () => {
+    const nativeBoard: UIView = {
+      title: "Native Desk",
+      tabs: {
+        name: "tab",
+        value: "open",
+        items: [
+          { value: "open", title: "Open" },
+          { value: "closed", title: "Closed" },
+        ],
+        action: { id: "tab" },
+      },
+      search: { placeholder: "Find", value: "node", action: { id: "q" } },
+      filter: {
+        name: "region",
+        title: "Region",
+        value: "eu",
+        choices: [
+          { value: "us", title: "US" },
+          { value: "eu", title: "EU" },
+        ],
+        action: { id: "region" },
+      },
+      sections: [{ items: [{ type: "text", text: "Native cached item" }] }],
+    };
+    keepView({ ...page, version: 7, manager: "m-1" }, nativeBoard);
+    await mount();
+    const cached = kept()!;
+    expect(cached).not.toBeNull();
+    expect([...cached.querySelectorAll("[role=tab]")].map((el) => el.textContent)).toEqual(["Open", "Closed"]);
+    expect(cached.querySelector<HTMLInputElement>('input[type="search"]')?.value).toBe("node");
+    expect(cached.querySelector<HTMLSelectElement>("select")?.value).toBe("eu");
+  });
+
+  it("starts the HTTP render immediately on page open for a cached HTTP nav_page without waiting for hello, managers, or prefs", async () => {
+    Object.defineProperty(document, "visibilityState", { configurable: true, get: () => "visible" });
+    keepView({ ...page, version: UI_VERSION, manager: "m-1" }, view("Cached before refresh"));
+
+    // Neither hello, managers roster, nor device prefs has resolved yet.
+    await mount();
+    expect(gate.draws).toHaveLength(1);
+    expect(kept()?.textContent).toContain("Cached before refresh");
+
+    // Initial non-resumed hello arriving while the first render is already in flight must not duplicate the request.
+    await act(async () => {
+      gate.features = ["extension_ui_slots", "extension_ui_stream_v1"];
+      gate.ready = true;
+      gate.listeners.forEach((fn) => fn());
+      gate.hubListeners.get("hello")?.forEach((fn) => fn({ type: "hello", resumed: false }));
+    });
+    await flush();
+    expect(gate.draws).toHaveLength(1);
+
+    // Even if the render finishes before GET /managers resolves, the fresh view is cached once the default manager becomes known.
+    await answer(view("Fresh before managers"));
+    expect(kept()).toBeNull();
+    expect(host.textContent).toContain("Fresh before managers");
+    act(() => setRosterDefault("m-1"));
+    await flush();
+    expect(readKeptView(page, [UI_VERSION], "m-1")?.view.sections[0].items[0]).toMatchObject({ text: "Fresh before managers" });
+  });
+
+  it("starts the HTTP render immediately when revisiting a cached HTTP nav_page on a stream-capable hub", async () => {
+    keepView({ ...page, version: UI_VERSION, manager: "m-1" }, view("Cached on stream hub"));
+    await hello(["extension_ui_slots", "extension_ui_stream_v1"]);
+    await mount();
+    // Immediately dispatches renderUI without mounting NativeExtensionUI or waiting for GET /managers.
+    expect(gate.draws).toHaveLength(1);
+    expect(kept()?.textContent).toContain("Cached on stream hub");
   });
 });
 

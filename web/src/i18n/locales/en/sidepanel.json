@@ -5,6 +5,7 @@
   "resize_title": "Drag to resize",
   "files": "Files",
   "link": "Link",
+  "back": "Back",
   "close": "Close panel",
   "preview": "Preview",
   "review": "Review",
@@ -13,5 +14,6 @@
   "background": "Background tasks",
   "task": "Task",
   "agent": "Agent",
-  "sides": "Side sessions"
+  "sides": "Side sessions",
+  "subagent": "Subagent"
 }

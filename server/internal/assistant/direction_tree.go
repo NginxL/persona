@@ -68,6 +68,9 @@ type treeDirection struct {
 	ID        string             `json:"id"`
 	Name      string             `json:"name"`
 	Secretary bool               `json:"secretary,omitempty"`
+	External  bool               `json:"external,omitempty"`
+	MachineID string             `json:"machine_id,omitempty"`
+	SessionID string             `json:"session_id,omitempty"`
 	Counts    treeCounts         `json:"counts"`
 	Running   bool               `json:"running"` // sent false too, so a client tells a hub without it (it reads counts.working then)
 	Tasks     []treeTask         `json:"tasks"`
@@ -100,11 +103,12 @@ func (c *treeCounts) add(state string) {
 
 // treeTask is one open task of a direction.
 type treeTask struct {
-	ID     string      `json:"id"`
-	Title  string      `json:"title"`
-	State  string      `json:"state"`
-	Agents []treeAgent `json:"agents"`
-	last   time.Time   // its latest activity (the SOP's), for the order
+	ID          string           `json:"id"`
+	Title       string           `json:"title"`
+	State       string           `json:"state"`
+	Agents      []treeAgent      `json:"agents"`
+	Responsible *TodoResponsible `json:"responsible,omitempty"`
+	last        time.Time        // its latest activity (the SOP's), for the order
 }
 
 // treeAgent is one Agent of a task, or one under another Agent: State is the session's state as the apps get it on
@@ -322,6 +326,13 @@ func (s *Service) directionTree(ctx context.Context, now time.Time) directionTre
 func (s *Service) directionTreeWake(ctx context.Context, now time.Time) (directionTree, time.Time) {
 	tb, cfg, names := s.directionTreeParts(ctx, now)
 	out := tb.tree(names)
+	for i := range out.Directions {
+		if d := s.directionOf(out.Directions[i].ID); d != nil && d.Outside != nil {
+			out.Directions[i].External = true
+			out.Directions[i].MachineID = d.Outside.MachineID
+			out.Directions[i].SessionID = d.Outside.SessionID
+		}
+	}
 	groups, wake, err := tb.directionSessionGroups(ctx, cfg)
 	if err != nil {
 		// What places sessions could not be read for now: the sessions told last stay, rather than every direction
@@ -652,7 +663,8 @@ func (tb *treeBuild) tree(names map[string]string) directionTree {
 		g.Counts.add(state)
 		agents := tb.agents(t.ID, map[[2]string]bool{})
 		g.Running = g.Running || treeRunning(agents)
-		g.Tasks = append(g.Tasks, treeTask{ID: t.ID, Title: t.Title, State: state, Agents: agents, last: tb.placed[id].Last})
+		g.Tasks = append(g.Tasks, treeTask{ID: t.ID, Title: t.Title, State: state, Agents: agents,
+			Responsible: cloneResponsible(t.Responsible), last: tb.placed[id].Last})
 	}
 	for _, g := range append(slicesOf(groups, tb.leads), sec) {
 		slices.SortStableFunc(g.Tasks, func(a, b treeTask) int {

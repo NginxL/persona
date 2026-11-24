@@ -6,7 +6,7 @@ import { BASE } from "./base";
 import { stateOf } from "./format";
 import { MANAGER_HEADER, managerHeaderFor, onManagerChoice, shownManager } from "./manager-choice";
 import type { Item, Session } from "./types";
-import { sameMessage } from "./queue";
+import { sameMessage } from "./echo";
 
 interface FeedbackDeps {
   getSession(mid: string, sid: string): Session | undefined;
@@ -157,15 +157,15 @@ export function stopMessageFeedback(mid: string, sid: string) {
   for (const e of flights.values()) if (e.mid === mid && e.sid === sid && current(e) && (e.phase === "delivered" || e.echoed)) { e.settled = true; end(e); }
   publish();
 }
-export function messageFeedback(mid: string, sid: string, id?: string): SendFeedback | undefined {
+export function messageFeedback(mid: string, sid: string, id?: string, exclude?: ReadonlySet<string>): SendFeedback | undefined {
   const entries = id !== undefined ? [flights.get(key(mid, sid, id))] : flights.values();
   let feedback: SendFeedback | undefined;
   // Later nonempty feedback wins; keep "" when all matching flights have ended.
-  for (const e of entries) if (e && e.mid === mid && e.sid === sid && current(e)) feedback = e.feedback || feedback || "";
+  for (const e of entries) if (e && e.mid === mid && e.sid === sid && !exclude?.has(e.id) && current(e)) feedback = e.feedback || feedback || "";
   return feedback;
 }
-export function useMessageFeedback(mid: string, sid: string, id?: string) {
-  return useSyncExternalStore((f) => { listeners.add(f); return () => { listeners.delete(f); }; }, () => messageFeedback(mid, sid, id), () => undefined);
+export function useMessageFeedback(mid: string, sid: string, id?: string, exclude?: ReadonlySet<string>) {
+  return useSyncExternalStore((f) => { listeners.add(f); return () => { listeners.delete(f); }; }, () => messageFeedback(mid, sid, id, exclude), () => undefined);
 }
 export function observeMessageItems(mid: string, sid: string, items: Item[]) {
   const owner = scope();

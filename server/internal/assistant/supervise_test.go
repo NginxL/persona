@@ -32,6 +32,23 @@ func shortSupervise(t testing.TB, s *Service) {
 	})
 }
 
+// stopSupervisionTimers lets a test drive watch and delivery explicitly. Once
+// the run context is done, neither scheduling path can arm another digest.
+func stopSupervisionTimers(s *Service) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	s.running.Store(&ctx)
+	b := &s.supervise
+	b.digestMu.Lock()
+	defer b.digestMu.Unlock()
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.timer != nil {
+		b.timer.Stop()
+	}
+	b.timer, b.timerAt = nil, time.Time{}
+}
+
 // The first signal waits superviseGather; after a message, a signal waits superviseEvery (an urgent one
 // superviseUrgentEvery) from it.
 func TestDigestWait(t *testing.T) {
@@ -200,7 +217,7 @@ func TestSupervisedTaskRound(t *testing.T) {
 	agentTurn(s, f, proto.StatusDone, "两种走法：A 先灰度，B 直接全量。你选一个？", 0)
 	waitFor(t, "the message", func() bool { return len(f.notices()) == 1 })
 	n := f.notices()[0]
-	for _, want := range []string{"📋 督办", "Agent 停下了，但没做完（要用户决定：问用两种部署走法里的哪一种）", "验收标准：PR 合并到 master；浅色 / 深色截图贴进 PR",
+	for _, want := range []string{"📋 督办", "Agent 停下了，但没做完（要用户决定：问用两种部署走法里的哪一种；用户还没收到", "task_review needs_user", "验收标准：PR 合并到 master；浅色 / 深色截图贴进 PR",
 		"A 先灰度，B 直接全量", "signal=idle"} {
 		if !strings.Contains(n, want) {
 			t.Errorf("message lacks %q:\n%s", want, n)
@@ -363,12 +380,12 @@ func TestTaskHealth(t *testing.T) {
 		{Todo{Supervision: &Supervision{}}, []proto.Session{{State: proto.StateWorking, UpdatedAt: now}}, "正常"},
 		{Todo{Supervision: &Supervision{}}, []proto.Session{{State: proto.StateWorking, UpdatedAt: now.Add(-25 * time.Minute)}}, "卡住 25 分钟"},
 		{Todo{Supervision: &Supervision{}}, []proto.Session{{State: proto.StateNeedsYou, StateSince: now.Add(-5 * time.Minute)}}, "等回答 5 分钟"},
-		{Todo{Supervision: &Supervision{State: reviewPending}}, nil, "待验收"},
+		{Todo{Supervision: &Supervision{State: reviewPending}}, nil, "已交付·待看"},
 		{Todo{Supervision: &Supervision{State: reviewRework, Round: 2}}, []proto.Session{{State: proto.StateWorking, UpdatedAt: now}}, "返工第 2 轮"},
-		{Todo{Supervision: &Supervision{State: reviewNeedsUser}}, nil, "等你决定"},
+		{Todo{Supervision: &Supervision{State: reviewNeedsUser}}, nil, "等你处理"},
 		{Todo{Supervision: &Supervision{State: reviewAccepted}, DoneAt: &done}, nil, "已验收"},
 		{Todo{Supervision: &Supervision{State: reviewAccepted}}, nil, "正常"}, // reopened by the user
-		{Todo{Supervision: &Supervision{Waits: &OwnerWait{At: now}}}, nil, "停下等用户拍板，别直接验收"},
+		{Todo{Supervision: &Supervision{Waits: &OwnerWait{At: now}}}, nil, "Agent 停下说要用户拍板：先判断是不是用户的事，别直接验收"},
 	} {
 		if got, _ := taskHealth(c.todo, c.agents, now); got != c.want {
 			t.Errorf("%+v: %q, want %q", c.todo.Supervision, got, c.want)
@@ -491,7 +508,7 @@ func TestGoldenSupervise(t *testing.T) {
 	now := time.Date(2026, 11, 5, 10, 0, 0, 0, time.UTC)
 	golden(t, "assistant_snapshot.supervised", prompts.RenderSnapshot(prompts.Snapshot{Now: now, Zone: "UTC", Tasks: []prompts.SnapshotTask{
 		{ID: "todo_2", Title: "部署 hub", State: "停着", Health: "等你决定", DoneWhen: 1},
-		{ID: "todo_1", Title: "修登录崩溃", State: "做完了（用户还没看）", Health: "待验收", DoneWhen: 2},
+		{ID: "todo_1", Title: "修登录崩溃", State: "已交付·待看", Health: "已交付·待看", DoneWhen: 2},
 		{ID: "todo_3", Title: "跑 UI 测试", State: "在做", Health: "卡住 35 分钟"},
 		{ID: "todo_4", Title: "迁移数据库", State: "在做", Health: "正常", DoneWhen: 1,
 			Reported: &prompts.SnapshotReport{Kind: "progress", Step: 3, Steps: 5, Text: "在跑迁移脚本", Minutes: 4}},
@@ -500,4 +517,40 @@ func TestGoldenSupervise(t *testing.T) {
 		{ID: "todo_7", Title: "清理旧分支", State: "停着", Orphan: orphanClosed},
 		{ID: "todo_8", Title: "跑回归", State: "停着", Orphan: orphanOffline},
 	}}))
+}
+
+func TestStalledTimeExcludesParkedIntervals(t *testing.T) {
+	s, _, task := newSupervisedService(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+	firstPark := now.Add(-10 * time.Hour)
+	secondPark := now.Add(-5 * time.Hour)
+	_, _, err := s.updateSupervision(ctx, task.ID, func(v *Supervision) bool {
+		v.State, v.ExpectMinutes = reviewParked, 0
+		v.Reviews = []TaskReview{
+			{At: firstPark, Verdict: reviewParked, ParkEndedAt: secondPark.Add(-3 * time.Minute)},
+			{At: secondPark, Verdict: reviewParked},
+		}
+		return true
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	task, _ = s.todoNow(task.ID)
+	s.supervisedWorking(ctx, task)
+	task, _ = s.todoNow(task.ID)
+	v := task.Supervision
+	resumed := v.Reviews[1].ParkEndedAt
+	if resumed.IsZero() || v.parking() != nil {
+		t.Fatalf("did not track the end of the park: %+v", v)
+	}
+	// A later ledger edit must not move the recorded resume time.
+	v.UpdatedAt = resumed.Add(time.Hour)
+	c := proto.Session{MachineID: "box", SessionID: "s1", State: proto.StateWorking, UpdatedAt: firstPark.Add(-2 * time.Minute)}
+	if got := watchSignals(task, []proto.Session{c}, resumed.Add(5*time.Minute)); len(got) != 0 {
+		t.Fatalf("stalled after ten active minutes: %+v", got)
+	}
+	if got := watchSignals(task, []proto.Session{c}, resumed.Add(17*time.Minute)); len(got) != 1 || got[0].Kind != sigStalled || got[0].Minutes != 22 {
+		t.Fatalf("want 22 active minutes, got %+v", got)
+	}
 }

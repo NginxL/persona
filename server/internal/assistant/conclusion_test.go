@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/nwverse/persona/server/internal/botcard"
 	"github.com/nwverse/persona/server/internal/db"
-	"github.com/nwverse/persona/server/internal/feishubot"
 	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/proto"
 )
@@ -67,6 +67,11 @@ func conclusionServiceOn(t *testing.T, st Store, onlyConclusions bool) (s *Servi
 func reviewTask(t *testing.T, s *Service, todo string, args map[string]any) string {
 	t.Helper()
 	args["todo_id"] = todo
+	if args["verdict"] == reviewAccepted {
+		if _, supplied := args["checks"]; !supplied {
+			args["checks"] = completeReviewChecks(todoNow(s, todo))
+		}
+	}
 	asDecision(args)
 	raw, _ := json.Marshal(args)
 	res, err := s.runTool(context.Background(), "server", "conv1", "task_review", raw)
@@ -122,6 +127,7 @@ func cardsWith(posts []string, want string) (out []string) {
 // closing is not a line of the task report as well. The supervisor checked it, so the card says so and nothing waits
 // for the owner's "OK" (#3240).
 func TestSupervisedCannotBeDoneIsOneConclusionCard(t *testing.T) {
+	needsLarkLayer(t)
 	s, f, todo, posts, notes := conclusionService(t, false)
 	waitsForReview(t, s, f, todo.ID, "查了，对方接口不对外开放，直连做不了。文档 https://docs.example.com/api")
 	waitFor(t, "the turn's report", func() bool { return len(cardsWith(posts(), "这一轮做完")) == 1 }) // the switch is off: as before
@@ -184,6 +190,7 @@ func judgeConcluded(t *testing.T, s *Service, todo string) {
 
 // A conclusion with no link given takes the task's own: a web address in the review's evidence before the agent's chat.
 func TestConclusionFindsItsLink(t *testing.T) {
+	needsLarkLayer(t)
 	s, f, todo, posts, _ := conclusionService(t, false)
 	waitsForReview(t, s, f, todo.ID, "做完了")
 	reviewTask(t, s, todo.ID, map[string]any{"verdict": "accepted", "note": "做完了",
@@ -200,6 +207,7 @@ func TestConclusionFindsItsLink(t *testing.T) {
 // Deployed work keeps its "Please verify" card, now with the verdict line on top; the review that accepts the task then
 // sends no second card.
 func TestDeployedWorkKeepsPleaseVerifyWithTheVerdictOnTop(t *testing.T) {
+	needsLarkLayer(t)
 	s, f, todo, posts, _ := conclusionService(t, false)
 	s.ownerVerifiesAll = true
 	f.judge = `{"changed":"飞书机器人多了任务进展开关","link":"https://hub.example.com/settings?tab=feishu","how":"打开设置看开关"}`
@@ -237,6 +245,7 @@ func TestDeployedWorkKeepsPleaseVerifyWithTheVerdictOnTop(t *testing.T) {
 // that states none is refused and changes nothing, so the supervisor states one; with one, the card asks that, not
 // with the rework the agent was told.
 func TestReworkOverAsksTheOwnerHowToGoOn(t *testing.T) {
+	needsLarkLayer(t)
 	s, f, todo, posts, _ := conclusionService(t, false)
 	waitsForReview(t, s, f, todo.ID, "补了一部分")
 	if _, _, err := s.updateSupervision(context.Background(), todo.ID, func(v *Supervision) bool { v.Round = maxReworkRounds; return true }); err != nil {
@@ -270,6 +279,7 @@ func TestReworkOverAsksTheOwnerHowToGoOn(t *testing.T) {
 // "Needs your decision" carries the recommended option: "OK" takes it, which goes into the task's agent; the card is
 // over then.
 func TestDecisionCarriesTheRecommendationAndOKTakesIt(t *testing.T) {
+	needsLarkLayer(t)
 	s, f, todo, posts, notes := conclusionService(t, false)
 	waitsForReview(t, s, f, todo.ID, "两种走法：A 先灰度，B 直接全量。")
 	res := reviewTask(t, s, todo.ID, map[string]any{"verdict": "needs_user", "reason": "先灰度还是直接全量", "recommend": "先灰度 10%",
@@ -311,6 +321,7 @@ func TestDecisionCarriesTheRecommendationAndOKTakesIt(t *testing.T) {
 
 // With only_conclusions on, a task's turn ending (an intermediate state) is not pushed; its conclusion still is.
 func TestOnlyConclusionsPushesNoProgress(t *testing.T) {
+	needsLarkLayer(t)
 	s, f, todo, posts, _ := conclusionService(t, true)
 	waitsForReview(t, s, f, todo.ID, "查完了，可以做，方案见 https://docs.example.com/plan")
 	time.Sleep(6 * testReportDelay) // a report of the turn would be out by now
@@ -327,12 +338,13 @@ func TestOnlyConclusionsPushesNoProgress(t *testing.T) {
 
 // The web briefing, the briefing's Lark card and the board say the conclusion in the same words as its own card.
 func TestBriefingSaysTheSameVerdictAsTheCard(t *testing.T) {
+	needsLarkLayer(t)
 	s, f, todo, posts, _ := conclusionService(t, false)
 	ctx := context.Background()
 	waitsForReview(t, s, f, todo.ID, "查了，做不了")
 	judgeConcluded(t, s, todo.ID)
 	const verdict = "⛔ 做不了：对方接口不对外开放"
-	if len(cardsWith(posts(), feishubot.EscapeMarkdown(verdict))) != 1 {
+	if len(cardsWith(posts(), botcard.EscapeMarkdown(verdict))) != 1 {
 		t.Fatalf("the card does not say %q", verdict)
 	}
 	facts := s.briefFactsAt(ctx, time.Now(), "")
@@ -347,7 +359,7 @@ func TestBriefingSaysTheSameVerdictAsTheCard(t *testing.T) {
 		t.Fatalf("the brief's row %+v", row)
 	}
 	card, _, _ := s.briefCard(facts, "早报", "")
-	if js := card.JSON(); !strings.Contains(js, feishubot.EscapeMarkdown(verdict)) || !strings.Contains(js, "知道了") {
+	if js := card.JSON(); !strings.Contains(js, botcard.EscapeMarkdown(verdict)) || !strings.Contains(js, "知道了") {
 		t.Fatalf("the briefing card does not say it:\n%s", js)
 	}
 	var onBoard bool
@@ -362,6 +374,7 @@ func TestBriefingSaysTheSameVerdictAsTheCard(t *testing.T) {
 // A recommendation that cannot reach the task's agent is not taken: the button answers why (not "already handled"), the
 // reply is told it did not go, nothing is recorded as decided, and the next press takes it once the agent is reachable.
 func TestRecommendationThatCannotReachTheAgentIsNotTaken(t *testing.T) {
+	needsLarkLayer(t)
 	s, f, todo, _, notes := conclusionService(t, false)
 	ctx := context.Background()
 	waitsForReview(t, s, f, todo.ID, "两种走法：A 先灰度，B 直接全量。")
@@ -382,7 +395,7 @@ func TestRecommendationThatCannotReachTheAgentIsNotTaken(t *testing.T) {
 	}
 	// The Lark button: an error toast with the reason, saying nothing was taken (not "kept in the todo").
 	notTaken := i18n.T(s.botLang(ctx), "assistant-reports.accept_not_taken", i18n.Args{"error": "node down"})
-	press := &feishubot.CardAction{}
+	press := &botcard.CardAction{}
 	press.Action.Value = map[string]any{"a": "accept", "id": todo.ID}
 	if r := s.botCardAction(ctx, press, ""); r == nil || r.Toast == nil ||
 		r.Toast.Type != "error" || r.Toast.Content != notTaken {
@@ -479,7 +492,7 @@ func TestLateTaskDecisionDoesNotSendAfterCompletion(t *testing.T) {
 					t.Fatal("the old decision is still pending")
 				}
 				if !reopen {
-					s.taskWorking(context.Background(), "box", "s1")
+					s.taskWorking(context.Background(), "box", "s1", startRow{})
 					if got := todoNow(s, todo.ID); got.DoneAt == nil || got.DoneBy != "" {
 						t.Fatalf("late supervisor work changed the user's completion: %+v", got)
 					}
@@ -511,7 +524,7 @@ func TestCompletedTaskDirectMessageStillReachesAgent(t *testing.T) {
 		!strings.HasSuffix(prompt, "Check one more case") {
 		t.Fatalf("unknown stop was resumed or lost the user's message: %v", starts)
 	}
-	s.taskWorking(context.Background(), "box", "s1")
+	s.taskWorking(context.Background(), "box", "s1", startRow{})
 	if todoNow(s, todo.ID).DoneAt == nil {
 		t.Fatal("direct user input reopened a user-completed task")
 	}
@@ -631,6 +644,7 @@ func TestAcceptRouteNotTakenReadsInTheRequestLanguage(t *testing.T) {
 // its ask answered, and its supervisor told what to pass on. The hub does not resend it, so a later reply to the same
 // card finds it answered and nothing reaches the agent twice.
 func TestDecisionAnsweredInWordsStaysDecidedWhenTheSendFails(t *testing.T) {
+	needsLarkLayer(t)
 	s, f, todo, _, notes := conclusionService(t, false)
 	ctx := context.Background()
 	waitsForReview(t, s, f, todo.ID, "两种走法：A 先灰度，B 直接全量。")
@@ -667,5 +681,42 @@ func TestDecisionAnsweredInWordsStaysDecidedWhenTheSendFails(t *testing.T) {
 	s.acceptReply(ctx, "om_again", "直接全量吧", false, a.MessageID)
 	if n := len(sentToAgent(f)); n != sent {
 		t.Fatalf("%d sends after the failed one: the hub resent it", n-sent)
+	}
+}
+
+func TestFeishuConclusionQuestionGoesToSupervisorWithoutAnswering(t *testing.T) {
+	needsLarkLayer(t)
+	s, f, todo, _, _ := conclusionService(t, false)
+	ctx := t.Context()
+	waitsForReview(t, s, f, todo.ID, "Two options: start with ten percent or defer the rollout.")
+	reviewTask(t, s, todo.ID, map[string]any{"verdict": "needs_user", "reason": "Which rollout do you want?", "recommend": "Start with ten percent"})
+	a := askOf(s, todo.ID)
+	status, err := s.feishuStatus(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	before := len(sentToAgent(f))
+	var ev botcard.MessageEvent
+	ev.Message.ChatType, ev.Message.ParentID, ev.Message.MessageType = "p2p", a.MessageID, "text"
+	ev.Message.MessageID, ev.Message.Content = "om_background", `{"text":"能补充一下这个决定的背景吗"}`
+	s.feishuMessage(ev, status, "")
+	task := todoNow(s, todo.ID)
+	if got := askOf(s, todo.ID); got == nil || !got.AcceptedAt.IsZero() || task.Supervision.State != reviewNeedsUser ||
+		task.DoneAt != nil || len(sentToAgent(f)) != before {
+		t.Fatalf("the question changed the decision or sent to the Agent: ask=%+v task=%+v sends=%v", got, task.Supervision, sentToAgent(f))
+	}
+	text := sendOnceText(f)
+	if !strings.Contains(text, "能补充一下这个决定的背景吗") || !strings.Contains(text, todo.ID) {
+		t.Fatalf("question and task context did not reach supervisor: %q", text)
+	}
+	// The existing option still answers this exact card after the clarification.
+	ev.Message.MessageID, ev.Message.Content = "om_choice", `{"text":"B"}`
+	s.feishuMessage(ev, status, "")
+	if got := askOf(s, todo.ID); got == nil || got.AcceptedAt.IsZero() {
+		t.Fatalf("explicit option did not answer: %+v", got)
+	}
+	sends := sentToAgent(f)[before:]
+	if len(sends) != 1 || !strings.Contains(sends[0], "先不动") {
+		t.Fatalf("agent got %v, want just the selected option", sends)
 	}
 }

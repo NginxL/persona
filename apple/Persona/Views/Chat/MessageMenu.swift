@@ -1,8 +1,6 @@
 import SwiftUI
-#if canImport(UIKit)
 import UIKit
 import UIKit.UIGestureRecognizerSubclass
-#endif
 
 /// Message actions: long-press a message and it is lifted over the dimmed chat with the bar of Copy / Select Text / Quote /
 /// Forward (and Edit for your own messages) next to it, as Telegram does (#603, `MessageLift`). Tapping outside closes it.
@@ -77,7 +75,6 @@ final class MessageMenu {
                             agent: session?.agentLabel ?? "Claude", showsTerminalMark: session?.isTraex == true,
                             prefersLetterMark: AgentKind.prefersLetterMark(for: session))    }
 
-    #if os(iOS) || os(visionOS)
     func pressChanged(_ state: UIGestureRecognizer.State) {
         switch state {
         case .began: pressing = true
@@ -85,16 +82,6 @@ final class MessageMenu {
         default: break
         }
     }
-    #else
-    /// The watch's secondary click reports the same phases.
-    func pressChanged(_ state: PressPhase) {
-        switch state {
-        case .began: pressing = true
-        case .ended, .cancelled, .failed: pressing = false; pressEnded = .now
-        default: break
-        }
-    }
-    #endif
 
     /// A tap or a scroll on the list: ignored while the press that opened the bar is held or has just lifted.
     func dismiss() {
@@ -596,17 +583,11 @@ struct MessageActionBar: View {
             Haptics.success()
         }]
         // "Select Text", not "Select": next to Copy a bare Select reads as picking messages (WeChat's multi-select); the
-        // Japanese name keeps "text" too (#5019). On iOS it selects all of the lifted message's words where they are
-        // (#603); the Mac opens its window.
-        #if os(macOS)
-        all.append(Item(title: String(localized: "Select Text [Message Menu 4d8efc]"), symbol: Theme.Icon.select) {
-            menu.selecting = SelectableText(text: text, plain: isUser, msg: id, quotable: !pending)
-        })
-        #else
+        // Japanese name keeps "text" too (#5019). It selects all of the lifted message's words where they are
+        // (#603).
         all.append(Item(title: String(localized: "Select Text [Message Menu 4d8efc]"), symbol: Theme.Icon.select, closes: false) {
             menu.selectInPlace(at: nil)
         })
-        #endif
         if !pending {
             all.append(Item(title: String(localized: "Quote"), symbol: "quote.opening") { menu.quote?(text, id, isUser, nil) })
         }
@@ -717,36 +698,3 @@ struct MessageActionBar: View {
         .contentShape(.rect)
     }
 }
-
-#if os(macOS)
-/// The Mac's Select Text: the message in a text view where any part of it can be selected and copied. Copy All copies
-/// the message as Copy does; Quote, first in the selection's menu, quotes the picked words in the composer (`quote`,
-/// #4549). iOS selects the lifted message's words where they are instead (#603, `LiftSelection.swift`).
-struct SelectableTextSheet: View {
-    @Environment(\.dismiss) private var dismiss
-    var text: String
-    var plain = false
-    var quote: ((String) -> Void)? = nil
-
-    var body: some View {
-        NavigationStack {
-            SelectableTextView(text: text, plain: plain, quote: quote.map { quote in { picked in dismiss(); quote(picked) } })
-                .navigationTitle("Select Text [Message Menu 4d8efc]")
-                .navigationBarTitleDisplayMode(.inline)
-                .pageToolbar {
-                    ToolbarItem(placement: .cancellationAction) {
-                        Button { dismiss() } label: { Label("Done [Extension System Presentation c0b3fb]", systemImage: Theme.Icon.done) }
-                    }
-                    ToolbarItem(placement: .primaryAction) {
-                        Button {
-                            UIPasteboard.general.string = text
-                            Haptics.success()
-                            dismiss()
-                        } label: { Label("Copy All [Message Menu 911a2b]", systemImage: Theme.Icon.copy).labelStyle(.titleAndIcon).lineLimit(1) }
-                    }
-                }
-        }
-        .presentationDetents([.medium, .large])
-    }
-}
-#endif

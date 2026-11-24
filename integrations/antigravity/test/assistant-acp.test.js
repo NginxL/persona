@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict'
 import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { delimiter, join } from 'node:path'
 import { test } from 'node:test'
+import { setTimeout as delay } from 'node:timers/promises'
 import { fileURLToPath } from 'node:url'
 import { startFakeNode, until } from '../../runtime-sdk/testing/fake-node.js'
 import { toAgyId } from '../lib/map.js'
@@ -160,6 +161,19 @@ test('an unexpected Assistant worker exit clears just its PID; the next send res
   assert.throws(() => process.kill(restarted, 0), { code: 'ESRCH' })
 })
 
+// An Assistant that supervises Agents in this companion hears from them when their turns end: its worker stays warm
+// while one runs, and the idle timeout counts from the end of the last (#13471).
+test('an Agent turn running in this companion keeps idle Assistant workers warm', async (t) => {
+  const { pids, start, call, assistantDir } = await fixture(t, { assistantAcpIdleMs: 350, promptInactivityMs: 0 })
+  const agent = await start({ prompt: 'hold' })
+  const assistant = await start({ cwd: assistantDir })
+  const worker = await until('assistant worker reported', () => pids()[assistant])
+  await delay(1500)
+  assert.equal(pids()[assistant], worker, 'the idle Assistant worker was retired while an Agent turn ran')
+  assert.equal((await call('interrupt', agent)).settled, true)
+  await until('assistant worker retired after the Agent turn', () => !pids()[assistant], 5000)
+})
+
 test('a send during idle retirement waits for the old worker to exit before starting a replacement', async (t) => {
   const { pids, start, call, calls, request } = await fixture(t, {
     agyArgs: ['--ignore-term'], assistantAcpIdleMs: 350,
@@ -174,4 +188,42 @@ test('a send during idle retirement waits for the old worker to exit before star
   assert.notEqual(resumed.worker, oldPID)
   assert.deepEqual(calls().filter((entry) => entry.started).map((entry) => entry.started), [oldPID, resumed.worker])
   process.kill(resumed.worker, 'SIGKILL')
+})
+
+test('the generic Assistant environment reaches only its dedicated worker and each replacement', async (t) => {
+  const { pids, start, call, calls, assistantDir } = await fixture(t, { assistantAcpIdleMs: 250, promptInactivityMs: 0 })
+  const bin = join(assistantDir, 'fake-extension-bin')
+  mkdirSync(bin, { recursive: true })
+  writeFileSync(join(bin, 'fake-extension-cli'), '#!/bin/sh\nprintf fake\n', { mode: 0o700 })
+  const environment = (handle) => ({
+    PATH: `${bin}${delimiter}${process.env.PATH || ''}`,
+    EXAMPLE_EXTENSION_CREDENTIAL: handle,
+    EXAMPLE_EXTENSION_ACCOUNT: '2',
+  })
+  const latestWorker = () => calls().filter((entry) => entry.started).at(-1)
+  const assertEnvironment = (handle) => {
+    const started = latestWorker()
+    assert.equal(started.fakeExtensionCredential, handle)
+    assert.equal(started.fakeExtensionAccount, '2')
+    assert.equal(started.path, environment(handle).PATH)
+  }
+
+  const assistant = await start({ assistant: true, env: environment('fake-credential-handle') })
+  assertEnvironment('fake-credential-handle')
+  await start({ env: environment('must-not-reach-an-agent') })
+  assert.equal(latestWorker().fakeExtensionCredential, null)
+  assert.notEqual(latestWorker().path, environment('must-not-reach-an-agent').PATH)
+
+  await until('first Assistant worker retired', () => !pids()[assistant])
+  await call('send', assistant, { text: 'resume', env: environment('fake-credential-handle-2') })
+  assertEnvironment('fake-credential-handle-2')
+
+  process.kill(pids()[assistant], 'SIGKILL')
+  await until('crashed Assistant worker cleared', () => !pids()[assistant])
+  await call('send', assistant, { text: 'restart', env: environment('fake-credential-handle-3') })
+  assertEnvironment('fake-credential-handle-3')
+
+  await until('second Assistant worker retired', () => !pids()[assistant])
+  await call('modes', assistant, { model: 'test-model', env: environment('fake-credential-handle-4') })
+  assertEnvironment('fake-credential-handle-4')
 })

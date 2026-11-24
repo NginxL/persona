@@ -540,9 +540,6 @@ struct UserBubbleBody: View {
                      link: ink.link)
                 .font(Theme.Font.body).lineHeight(.body).foregroundStyle(ink.words)
                 .selectableInLift(text, as: .plain(ink.words)) // #603
-                #if os(macOS)
-                .textSelection(.enabled) // drag to select and ⌘C, as on the web (#2542)
-                #endif
         }
     }
 

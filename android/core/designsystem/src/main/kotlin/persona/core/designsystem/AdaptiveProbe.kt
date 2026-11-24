@@ -224,7 +224,7 @@ object AdaptiveProbe {
         target.parentFile?.mkdirs()
         val snapshot = AdaptiveProbeSnapshot(ADAPTIVE_PROBE_VERSION, session, Process.myPid(), now(), pages.toMap())
         val atomic = AtomicFile(target)
-        runCatching {
+        val _ = runCatching {
             val output = atomic.startWrite()
             try {
                 output.write(JsonCodec.encodeToString(snapshot).toByteArray(Charsets.UTF_8))

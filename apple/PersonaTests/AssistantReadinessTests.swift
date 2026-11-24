@@ -51,6 +51,7 @@ struct AssistantReadinessTests {
         #expect(r2.blockingStep?.id == "wifi")
         #expect(!AssistantReadiness.knows(action: "fix_wifi") && ReadinessRoute.title("fix_wifi") == nil)
         #expect(AssistantReadiness.knows(action: "connect_model") && ReadinessRoute.title("connect_model") != nil)
+        #expect(AssistantReadiness.knows(action: "pick_model") && ReadinessRoute.title("pick_model") != nil)
     }
 
     @Test func whatHoldsTheSendButton() {
@@ -182,7 +183,7 @@ struct AssistantReadinessTests {
         let hub = FakeHub()
         hub.on("GET", "/api/v1/assistant/readiness", json: Self.notLoggedIn)
         _ = try await hub.client.assistantReadiness(probe: true)
-        #expect(hub.sent("GET", "/api/v1/assistant/readiness").last?.timeout == 130)
+        #expect(hub.sent("GET", "/api/v1/assistant/readiness").last?.timeout == 202)
         _ = try await hub.client.assistantReadiness()
         #expect(hub.sent("GET", "/api/v1/assistant/readiness").last?.timeout == 30)
     }
@@ -315,13 +316,55 @@ struct AssistantReadinessTests {
         // The CLI's own sign-in, which the Claude desktop app's does not give, in every language (#9366).
         #expect(TurnErrorFix(code: "not_logged_in")?.detail.contains("claude auth login") == true)
         #expect(TurnErrorFix(code: "auth_failed")?.action == "edit_provider")
-        #expect(TurnErrorFix(code: "model_route")?.action == "connect_model")
+        #expect(TurnErrorFix(code: "model_route")?.action == "pick_model")
+        #expect(TurnErrorFix(code: "model_route", launcher: "gateway")?.action == "pick_model")
+        #expect(TurnErrorFix(code: "tool_search_unsupported")?.action == "retry")
+        #expect(TurnErrorFix(code: "tool_search_unsupported", launcher: "gateway")?.action == "retry")
         #expect(TurnErrorFix(code: "rate_limited") == nil && TurnErrorFix(code: nil) == nil)
+
+        // Older hubs did not code this refusal; an unrelated bad request must keep its ordinary card.
+        #expect(TurnErrorFix.toolSearch(raw: "API Error: 400 ToolSearch is not supported on this endpoint", status: 400)?.action == "retry")
+        #expect(TurnErrorFix.toolSearch(raw: "API Error: 400 ToolSearch is not supported on this endpoint", status: nil)?.action == "retry")
+        #expect(TurnErrorFix.toolSearch(raw: "400 tools.3.defer_loading: Extra inputs are not permitted", status: nil)?.action == "retry")
+        #expect(TurnErrorFix.toolSearch(raw: "request is not representable on this edge: defer_loading", status: nil)?.action == "retry")
+        #expect(TurnErrorFix.toolSearch(raw: "API Error: 400 ToolSearch is not supported", status: 500) == nil)
+        #expect(TurnErrorFix.toolSearch(raw: "  API Error: 400 ToolSearch is not supported", status: nil)?.action == "retry")
+        #expect(TurnErrorFix.toolSearch(raw: "  400 tools.3.defer_loading: Extra inputs are not permitted", status: nil)?.action == "retry")
+        #expect(TurnErrorFix.toolSearch(raw: "API Error: 4000 ToolSearch is not supported", status: nil) == nil)
+        #expect(TurnErrorFix.toolSearch(raw: "API Error: 400 invalid temperature", status: 400) == nil)
+
+        let modelStep = AssistantReadiness.Step(id: "model", state: "problem", code: "model_route", action: .init(id: "connect_model"))
+        #expect(modelStep.clientAction == "pick_model")
+        let retryStep = AssistantReadiness.Step(id: "model", state: "problem", code: "model_route", action: .init(id: "test_assistant"),
+                                                altActions: [.init(id: "connect_model")])
+        #expect(retryStep.clientAction == "test_assistant" && retryStep.clientAltAction == "pick_model")
+        let signInStep = AssistantReadiness.Step(id: "model", state: "problem", code: "not_logged_in", action: .init(id: "connect_model"))
+        #expect(signInStep.clientAction == "connect_model")
+
         let s = try JSON.decoder.decode(Session.self, from: Data(#"""
         {"machine_id":"mbp","session_id":"s1","title":"","cwd":"","status":"idle","started_by_persona":true,"assistant":true,
          "turn_error":"Not logged in · Please run /login","turn_error_kind":"model","turn_error_code":"not_logged_in"}
         """#.utf8))
         #expect(s.turnErrorCode == "not_logged_in" && s.turnErrorKind == "model" && s.turnError?.hasPrefix("Not logged in") == true)
+    }
+
+    @Test func aReplacementModelPickPromotesTheTryAndTheSendGateUsesTheSameAction() {
+        let step = AssistantReadiness.Step(id: "model", state: "problem", code: "model_route",
+                                          action: .init(id: "connect_model"), altActions: [.init(id: "test_assistant")])
+        let readiness = AssistantReadiness(mode: "setup", next: "model", steps: [step])
+        let old = ModelPick(launcher: "claude", model: "old")
+        let replacement = ModelPick(launcher: "claude", model: "new")
+        let model = AssistantReadinessModel()
+        model.reset(readiness, modelPick: old)
+        #expect(model.actions(step, currentPick: old) == ["pick_model", "test_assistant"])
+        #expect(ReadinessRoute.sendTitle(step, action: model.actions(step, currentPick: old).first)
+                == String(localized: "Fix it"))
+        #expect(model.actions(step, currentPick: replacement) == ["test_assistant", "pick_model"])
+        #expect(ReadinessRoute.sendTitle(step, action: model.actions(step, currentPick: replacement).first)
+                == String(localized: "Try a message"))
+        let rows = OnboardingChecklistModel.rows(readiness, promoteTry: true)
+        #expect(rows.first(where: { $0.id == "model" })?.action == "test_assistant")
+        #expect(rows.first(where: { $0.id == "model" })?.alt == "pick_model")
     }
 }
 

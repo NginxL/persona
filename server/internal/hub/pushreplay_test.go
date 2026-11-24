@@ -14,7 +14,7 @@ import (
 	"github.com/nwverse/persona/server/internal/proto"
 )
 
-// recorded is one message an app got from a real hub (cmd/pushrec).
+// recorded is one message an app got from a real hub (scripts/pushrec).
 type recorded struct {
 	at      time.Time
 	raw     []byte
@@ -57,14 +57,14 @@ func readRecording(t *testing.T, path string) []recorded {
 	return out
 }
 
-// TestPushReplay replays what an app got from a real hub, recorded with cmd/pushrec, through this hub's push logic,
+// TestPushReplay replays what an app got from a real hub, recorded with scripts/pushrec, through this hub's push logic,
 // and reports per minute: the messages and bytes an open app receives, and the Live Activity pushes a phone gets
 // while the app is closed, as recorded (the hub before) and as this code sends them (docs/operations/testing.md "Push replay").
 // The recording holds real sessions and stays on the machine it was made on: PERSONA_PUSH_RECORDING is its path.
 func TestPushReplay(t *testing.T) {
 	path := os.Getenv("PERSONA_PUSH_RECORDING")
 	if path == "" {
-		t.Skip("PERSONA_PUSH_RECORDING: a recording made with cmd/pushrec")
+		t.Skip("PERSONA_PUSH_RECORDING: a recording made with scripts/pushrec")
 	}
 	recs := readRecording(t, path)
 	if len(recs) < 10 {

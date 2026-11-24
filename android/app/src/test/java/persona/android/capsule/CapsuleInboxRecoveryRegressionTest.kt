@@ -27,6 +27,8 @@ import persona.core.contracts.api.HubPreferencesSnapshot
 import persona.core.domain.inbox.InboxItem
 import persona.feature.agents.AgentsPreferences
 import persona.feature.inbox.*
+import persona.core.inbox.*
+import persona.feature.inbox.InboxRepository
 
 /** A selected inbox conversation can disappear while the capsule has no message observer. */
 @OptIn(ExperimentalCoroutinesApi::class)

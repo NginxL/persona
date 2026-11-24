@@ -16,6 +16,14 @@ type TodoEventThread struct {
 	Title    string `json:"title"`
 }
 
+// TodoEventResponsible is the external responsible party on a to-do, as extensions are told of it (#12712).
+type TodoEventResponsible struct {
+	Kind      string `json:"kind"`
+	Name      string `json:"name"`
+	MachineID string `json:"machine_id,omitempty"`
+	SessionID string `json:"session_id,omitempty"`
+}
+
 // The kinds of change a TodoChangedEvent says.
 const (
 	TodoCreated = "created"
@@ -23,21 +31,23 @@ const (
 	TodoDeleted = "deleted"
 )
 
-// TodoChangedEvent: a todo was created, deleted, or its title, whether it is done, its supervisor or the thread it is
-// bound to changed. Thread is the binding after the change (the last one it had, for a deleted todo); nil when it has none.
-// Done is true while the todo is done (closed, or it failed to start) and left out otherwise. Supervisor is the
-// conversation that supervises it (the main conversation or a leader, #3484): it changes too when the task is moved to
-// another; left out for a todo nobody supervises. Kind is "concern" for something the owner raised in the main
-// conversation (#3561), which is done only once its outcome was reported to them (a decision of source reported); left
-// out for a to-do or a task. It never changes.
+// TodoChangedEvent: a todo was created, deleted, or its title, whether it is done, its supervisor, the thread it is
+// bound to, or its external responsible party changed. Thread is the binding after the change (the last one it had,
+// for a deleted todo); nil when it has none. Done is true while the todo is done (closed, or it failed to start) and
+// left out otherwise. Supervisor is the conversation that supervises it (the main conversation or a leader, #3484):
+// it changes too when the task is moved to another; left out for a todo nobody supervises. Kind is "concern" for
+// something the owner raised in the main conversation (#3561), which is done only once its outcome was reported to
+// them (a decision of source reported); left out for a to-do or a task. It never changes. Responsible is the external
+// responsible party when set (#12712); nil when none is set.
 type TodoChangedEvent struct {
-	ID         string           `json:"id"`
-	Title      string           `json:"title"`
-	Thread     *TodoEventThread `json:"thread,omitempty"`
-	Done       bool             `json:"done,omitempty"`
-	Supervisor string           `json:"supervisor,omitempty"`
-	Kind       string           `json:"kind,omitempty"`
-	What       string           `json:"what"`
+	ID          string                `json:"id"`
+	Title       string                `json:"title"`
+	Thread      *TodoEventThread      `json:"thread,omitempty"`
+	Done        bool                  `json:"done,omitempty"`
+	Supervisor  string                `json:"supervisor,omitempty"`
+	Kind        string                `json:"kind,omitempty"`
+	Responsible *TodoEventResponsible `json:"responsible,omitempty"`
+	What        string                `json:"what"`
 }
 
 // MergeTodoChanged is what a queue that still holds old for a todo keeps when cur, a later change of the same todo,

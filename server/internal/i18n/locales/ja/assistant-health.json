@@ -1,5 +1,9 @@
 {
   "notice_title": "ヘルスケア",
   "notice_body": "ヘルスケアスペースに新着があります。Personaを開いて確認してください",
-  "outbound": "ヘルスケアスペースの内容を外に渡します（渡した先の記録はヘルスケアスペースと一緒には削除されません）：\n\n{what}"
+  "outbound": "ヘルスケアスペースの内容を外に渡します（渡した先の記録はヘルスケアスペースと一緒には削除されません）：\n\n{what}",
+  "sensitive_notice_title": "Persona",
+  "sensitive_notice_body": "新着があります。Personaを開いて確認してください",
+  "sensitive_outbound": "個人的な内容（健康、お金、人間関係、気持ち、証明書や法律関係）を含むかもしれない内容を、この会話の外に渡します（渡した先の記録は残ります）：\n\n{what}",
+  "node_no_track_spaces": "このスペースを使うには、{machine} の Persona Link を更新してください。何も書き込んでいません。"
 }

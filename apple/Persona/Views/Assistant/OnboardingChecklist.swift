@@ -29,7 +29,7 @@ final class OnboardingChecklistModel {
     ]
 
     /// The rows for a readiness. A state this app does not know looks like a step still to do (docs/assistant/onboarding.md 5).
-    static func rows(_ r: AssistantReadiness?) -> [Row] {
+    static func rows(_ r: AssistantReadiness?, promoteTry: Bool = false) -> [Row] {
         steps.map { s in
             guard let step = r?.step(s.id) else { return Row(id: s.id, name: s.name, look: .unknown) }
             let look: Row.Look = switch step.state {
@@ -39,10 +39,10 @@ final class OnboardingChecklistModel {
             case "problem": .problem
             default: .todo
             }
-            let known = { (id: String?) in AssistantReadiness.knows(action: id) ? id : nil }
+            let actions = step.clientActions(promoteTry: promoteTry && step.code == "model_route")
             return Row(id: s.id, name: s.name, look: look, title: step.title, detail: step.detail,
-                       action: look == .done ? nil : known(step.action?.id),
-                       alt: look == .done ? nil : known(step.altActions?.first?.id),
+                       action: look == .done ? nil : actions.first,
+                       alt: look == .done ? nil : actions.dropFirst().first,
                        launcher: step.launcher, machine: step.machine)
         }
     }
@@ -76,6 +76,8 @@ struct OnboardingChecklistView: View {
     private var readiness: AssistantReadiness? { store.current }
 
     var body: some View {
+        let pick = model.assistantMain.flatMap { model.session($0) }?.modelPick
+        let promote = readiness?.cardStep.map { store.actions($0, currentPick: pick) != $0.clientActions() } ?? false
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: Theme.Space.l) {
@@ -87,7 +89,7 @@ struct OnboardingChecklistView: View {
                     }
                     .padding(.top, Theme.Space.l)
                     VStack(spacing: Theme.Space.s) {
-                        ForEach(OnboardingChecklistModel.rows(readiness)) { row in
+                        ForEach(OnboardingChecklistModel.rows(readiness, promoteTry: promote)) { row in
                             let ownsProbe = store.probeStep == row.id
                             ChecklistRow(row: row, busy: ownsProbe && store.probing,
                                          probe: ownsProbe ? store.probe : nil,
@@ -150,7 +152,7 @@ struct OnboardingChecklistView: View {
 
     private func run(_ action: String, row: OnboardingChecklistModel.Row) {
         if action == "test_assistant" {
-            Task { await store.refresh(api: model.api, probe: true, probeStep: row.id) }
+            Task { await store.refresh(api: model.api, probe: true, probeStep: row.id, modelPick: model.assistantMain.flatMap { model.session($0) }?.modelPick) }
             return
         }
         let machine = row.machine.flatMap { id in model.machines.first { $0.id == id }?.name } ?? readiness?.machine?.name

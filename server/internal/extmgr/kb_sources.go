@@ -11,9 +11,9 @@ import (
 
 	"github.com/nwverse/persona/server/internal/assistantwire"
 	"github.com/nwverse/persona/server/internal/connector"
-	"github.com/nwverse/persona/server/internal/connector/imessage"
 	"github.com/nwverse/persona/server/internal/connectorwire"
 	"github.com/nwverse/persona/server/internal/i18n"
+	"github.com/nwverse/persona/server/internal/imessagewire"
 	"github.com/nwverse/persona/server/internal/kb"
 	"github.com/nwverse/persona/server/internal/kbwire"
 )
@@ -76,7 +76,7 @@ func (h *Manager) kbSourcesCall(ctx context.Context, p assistantwire.AppCall) (j
 		var arch connector.Archive
 		if arch, err = h.kbArchive(ctx, a.ID); err == nil {
 			var res assistantwire.ChangesResult
-			if a.ID == imessage.ID {
+			if a.ID == imessagewire.ID {
 				if a.FenceVersion != assistantwire.ArchiveFenceV1 {
 					return nil, true, errors.New("iMessage archive requires commit fencing")
 				}
@@ -157,7 +157,7 @@ func (h *Manager) kbArchives(ctx context.Context) assistantwire.Archives {
 		_, anchors := connector.As[connector.HistoryAnchors](c)
 		src := assistantwire.ArchiveSource{ID: c.ID(), PollMS: c.Manifest().Poll.Milliseconds(),
 			Sources: h.archiveSources(c), Media: media, History: history, HistoryAnchors: history && anchors}
-		if c.ID() == imessage.ID {
+		if c.ID() == imessagewire.ID {
 			src.FenceVersion = assistantwire.ArchiveFenceV1
 		}
 		out.Archives = append(out.Archives, src)

@@ -25,6 +25,8 @@ vi.mock("../lib/api", async (orig) => ({
   ...(await orig<typeof import("../lib/api")>()),
   api: (path: string, init?: unknown) => api(path, init),
 }));
+const navigate = vi.hoisted(() => vi.fn());
+vi.mock("../lib/router", async (orig) => ({ ...(await orig<typeof import("../lib/router")>()), navigate }));
 const toast = vi.fn();
 vi.mock("../ui/atoms", async (orig) => ({ ...(await orig<typeof import("../ui/atoms")>()), toast: (...a: unknown[]) => toast(...a) }));
 const launched: Record<string, unknown>[] = [];
@@ -64,6 +66,7 @@ beforeEach(() => {
   api.mockReset();
   api.mockImplementation(async (path: string) => (path.endsWith("/launchers") ? { launchers: [] } : {}));
   toast.mockReset();
+  navigate.mockReset();
   launched.length = 0;
   seed({ todos: [open, done], todosLoaded: true, machines: [{ id: "m1", name: "示例电脑", online: true }], sessions: {} });
   host = document.createElement("div");
@@ -106,5 +109,21 @@ describe("交给 Agent 与待办是否完成", () => {
     expect(launched[0]).toMatchObject({ machineId: "m1", todoId: "t1" });
     expect(toast.mock.calls.filter((c) => c[1] === "ok")).toEqual([]);
     expect(document.querySelector("[role=dialog]")).toBeNull();
+  });
+
+  it("日历里的接手链接保留视图、模式和日期", async () => {
+    const brief = { id: "brief1", created_at: open.created_at, started_by: "assistant", goal: "整理发布清单" };
+    const lineage = [
+      { todo_id: "old", title: "旧方案", started: open.created_at, superseded_by: "new" },
+      { todo_id: "new", title: "新方案", started: open.created_at, continues: "old", current: true },
+    ];
+    const old = { ...open, id: "old", title: "旧方案", brief, lineage };
+    const newer = { ...open, id: "new", title: "新方案", brief, lineage };
+    seed({ todos: [old, newer], todosLoaded: true });
+    await act(async () => root.render(<TodosView selectedId="old" view="calendar" mode="week" date="2026-11-12" />));
+    await act(async () => { await import("./assistant/TaskBrief"); });
+    await flush();
+    await click(document.querySelector('[data-open-todo="new"]'));
+    expect(navigate).toHaveBeenCalledWith({ name: "todos", view: "calendar", mode: "week", date: "2026-11-12", id: "new" });
   });
 });

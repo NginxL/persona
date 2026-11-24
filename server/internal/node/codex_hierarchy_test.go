@@ -3,9 +3,12 @@ package node
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
+	"syscall"
 	"testing"
 
 	"github.com/nwverse/persona/server/internal/proto"
@@ -45,13 +48,18 @@ func TestCodexProjectRootRealWorktrees(t *testing.T) {
 	if got := codexProjectRoot(other, cache); got == codexProjectRoot(repo, cache) {
 		t.Fatal("same basename merged independent repositories")
 	}
-	alias := filepath.Join(base, "alias")
-	if err := os.Symlink(repo, alias); err != nil {
-		t.Fatal(err)
-	}
-	if codexProjectRoot(alias, cache) != realPath(repo) {
-		t.Fatal("symlink did not resolve")
-	}
+	t.Run("symlink", func(t *testing.T) {
+		alias := filepath.Join(base, "alias")
+		if err := os.Symlink(repo, alias); err != nil {
+			if runtime.GOOS == "windows" && errors.Is(err, syscall.Errno(1314)) {
+				t.Skip("Windows symlink creation requires Developer Mode or the symlink privilege")
+			}
+			t.Fatal(err)
+		}
+		if codexProjectRoot(alias, cache) != realPath(repo) {
+			t.Fatal("symlink did not resolve")
+		}
+	})
 }
 
 func TestCodexHistoricalHierarchyWithoutDesktop(t *testing.T) {
@@ -168,7 +176,7 @@ func TestCodexHierarchyCycleTerminates(t *testing.T) {
 	}
 }
 
-func TestCodexDesktopDuplicateProjectIDsUseDirectory(t *testing.T) {
+func TestCodexDesktopProjectsSharingDirectoryKeepTheirAssignments(t *testing.T) {
 	n := &Node{}
 	home := t.TempDir()
 	root := t.TempDir()
@@ -192,7 +200,8 @@ func TestCodexDesktopDuplicateProjectIDsUseDirectory(t *testing.T) {
 	cache := map[string]string{}
 	n.decorateCodexSession(&a, codexSource{home: home, thread: "a", path: path}, home, cache)
 	n.decorateCodexSession(&b, codexSource{home: home, thread: "b", path: path}, home, cache)
-	if a.SpaceID != b.SpaceID || a.RepoRoot != realPath(root) {
+	if a.SpaceID != codexDesktopProjectID(home, "p1") || b.SpaceID != codexDesktopProjectID(home, "p2") ||
+		a.RepoRoot != realPath(root) || b.RepoRoot != a.RepoRoot || a.SpaceName != "One" || b.SpaceName != "Two" {
 		t.Fatalf("duplicate projects: %+v %+v", a, b)
 	}
 }
@@ -301,14 +310,13 @@ func TestCodexAppChatInNoProjectIsUnderCodexChats(t *testing.T) {
 			t.Fatalf("%s placed in %q %q, want under Codex chats", s.SessionID, s.SpaceID, s.SpaceName)
 		}
 	}
-	if s := place("assigned", assignedPath, filepath.Join(root, "x")); s.SpaceID != "codex-project:"+realPath(root) {
+	if s := place("assigned", assignedPath, filepath.Join(root, "x")); s.SpaceID != codexDesktopProjectID(home, "p1") {
 		t.Fatalf("the chat in a project is placed in %q", s.SpaceID)
 	}
 }
 
-// A chat in a project of the App is under the App's name for the project whose folder is the repository's root — a
-// project the user renamed, a ChatGPT project in its g-p-<id> folder — and under the folder's name when no project
-// names that folder. One folder has one name whichever chat asks. No database or git involved.
+// An explicitly assigned chat uses its project's name even when another project has the same folder. Unnamed
+// projects use the directory name. No database or git involved.
 func TestCodexAppProjectsGoByTheAppsNames(t *testing.T) {
 	n := &Node{}
 	home := t.TempDir()
@@ -339,12 +347,12 @@ func TestCodexAppProjectsGoByTheAppsNames(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(home, ".codex-global-state.json"), raw, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	for _, c := range []struct{ thread, cwd, want string }{
-		{"renamed", renamed, "Website"},
-		{"chatgpt", chatgpt, "GenImageX"},
-		{"first", shared, "Alpha"},
-		{"second", filepath.Join(shared, "sub"), "Alpha"},
-		{"loose", unnamed, "unnamed"},
+	for _, c := range []struct{ thread, project, cwd, want string }{
+		{"renamed", "p1", renamed, "Website"},
+		{"chatgpt", "p2", chatgpt, "GenImageX"},
+		{"first", "p3", shared, "Beta"},
+		{"second", "p4", filepath.Join(shared, "sub"), "Alpha"},
+		{"loose", "p5", unnamed, "unnamed"},
 	} {
 		path := filepath.Join(home, c.thread+".jsonl")
 		if err := os.WriteFile(path, []byte(`{"type":"session_meta","payload":{"originator":"Codex Desktop","source":"vscode"}}`+"\n"), 0o600); err != nil {
@@ -352,19 +360,14 @@ func TestCodexAppProjectsGoByTheAppsNames(t *testing.T) {
 		}
 		s := proto.Session{SessionID: c.thread, Cwd: c.cwd, Capabilities: &proto.SessionCapabilities{}}
 		n.decorateCodexSession(&s, codexSource{home: home, thread: c.thread, path: path}, home, map[string]string{})
-		root := realPath(c.cwd)
-		if c.thread == "second" {
-			root = realPath(shared)
-		}
-		if s.SpaceID != "codex-project:"+root || s.SpaceName != c.want {
+		if s.SpaceID != codexDesktopProjectID(home, c.project) || s.SpaceName != c.want {
 			t.Errorf("%s placed in %q %q, want %q", c.thread, s.SpaceID, s.SpaceName, c.want)
 		}
 	}
 }
 
-// A chat's project is numbered by where the App's sidebar lists it (space_index, from 1 down project-order): the first
-// place of an id the order repeats, ids of no project skipped over, a folder of two projects at the first of them. A
-// project the order does not list (a ChatGPT project) and a chat in no project have none. A subagent takes its chat's.
+// A chat's project is numbered in the combined catalog order: saved sidebar order first, duplicate and missing IDs
+// removed, then saved projects absent from that order. An unassigned chat has no index; a subagent takes its chat's.
 func TestCodexAppProjectsAreNumberedInTheAppsOrder(t *testing.T) {
 	n := &Node{}
 	home := t.TempDir()
@@ -403,7 +406,7 @@ func TestCodexAppProjectsAreNumberedInTheAppsOrder(t *testing.T) {
 		{"tools", tools, 1},
 		{"site", site, 2},
 		{"shared", shared, 4},
-		{"chatgpt", chatgpt, 0},
+		{"chatgpt", chatgpt, 5},
 		{"loose", dir("loose"), 0},
 	} {
 		path := filepath.Join(home, c.thread+".jsonl")

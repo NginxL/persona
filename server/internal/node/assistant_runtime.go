@@ -4,7 +4,7 @@ package node
 // the assistant capability runs the conversation, driven with the runtime protocol's own session calls. What is the
 // assistant's stays here, as for Claude and Codex: the conversation's state (launcher, directory), the live snapshot
 // each message starts with, the permission mode, the shared memory, and the gated skill commands Feishu goes through
-// (larkgate.go; their credentials never leave the node). Nothing in this file is any one runtime's.
+// (larkgate.go; Auth-held credentials never leave the node). Nothing in this file is any one runtime's.
 
 import (
 	"context"
@@ -63,9 +63,52 @@ func (n *Node) runtimeAssistant(id string) bool {
 	return runtimeSessionID(id) && n.isAssistantSession(id)
 }
 
+func (n *Node) strictRuntimeSession(id string, strict bool) bool {
+	if !strict {
+		return false
+	}
+	_, _, known := n.runtimes.belongs(id)
+	return known
+}
+
+// assistantRuntimeRoute classifies the resolved launcher and the existing conversation.
+func (n *Node) assistantRuntimeRoute(id, launcher string, strictRuntime bool) (*runtimeConn, bool) {
+	return n.assistantRuntime(launcher), n.runtimeAssistant(id) || strictRuntime
+}
+
 // runtimeSessionID: id is shaped like a runtime's conversation. Claude's and Codex's ids are uuids (validID); a
 // runtime's are its own (DSH: session-<uuid>).
 func runtimeSessionID(id string) bool { return id != "" && !validID(id) && runtimeIDRe.MatchString(id) }
+
+func (n *Node) runtimeAssistantCwd(id, cwd string, st sessionState) string {
+	if cwd != "" {
+		return cwd
+	}
+	if st.Cwd != "" {
+		return st.Cwd
+	}
+	if id != "" {
+		if row, _, ok := n.runtimes.rowOf(id); ok && row.Cwd != "" {
+			return row.Cwd
+		}
+	}
+	return identity.AssistantDir(n.home)
+}
+
+// assistantEnvForRuntime returns nil unless the local runtime explicitly accepts dedicated-worker environments.
+func (n *Node) assistantEnvForRuntime(h *runtimeConn, cwd string) map[string]string {
+	if h == nil || !h.assistantEnvironment() {
+		return nil
+	}
+	entries := n.assistantRuntimeEnv(cwd)
+	env := make(map[string]string, len(entries))
+	for _, entry := range entries {
+		if name, value, ok := strings.Cut(entry, "="); ok {
+			env[name] = value
+		}
+	}
+	return env
+}
 
 // assistantSendRuntime is assistantSend on a runtime (h, nil when it is not connected): a new conversation is started
 // there (session.start with assistant), then the message goes with the snapshot as its context unless public is true,
@@ -73,7 +116,7 @@ func runtimeSessionID(id string) bool { return id != "" && !validID(id) && runti
 // instructions only a runtime needs (memory, Feishu). Runtimes that advertise caps.supervision_policy receive manager-owned
 // supervision_instructions as an explicit protocol field on session.start and session.send; non-capable runtimes keep
 // the runtimePolicyDropped boundary (refusing supervision deliveries, dropping policy for owner messages).
-func (n *Node) assistantSendRuntime(ctx context.Context, h *runtimeConn, id, cwd, launcher, text string, images []proto.Image, mode string, public, strict bool, modelEffortPolicy ...string) (string, error) {
+func (n *Node) assistantSendRuntime(ctx context.Context, h *runtimeConn, id, cwd, launcher, text string, images []proto.Image, mode string, public, strict, modeExplicit bool, selected []assistantskills.Entry, modelEffortPolicy ...string) (string, error) {
 	hasInput := strings.TrimSpace(text) != "" || len(images) != 0
 	if id != "" && hasInput && n.runtimes.compacting(id) {
 		return "", runtimeCompactingRefusal(ctx)
@@ -89,12 +132,7 @@ func (n *Node) assistantSendRuntime(ctx context.Context, h *runtimeConn, id, cwd
 		policy = modelEffortPolicy[2]
 	}
 	st, known := n.state.get(id)
-	if cwd == "" {
-		cwd = st.Cwd
-	}
-	if cwd == "" {
-		cwd = identity.AssistantDir(n.home)
-	}
+	cwd = n.runtimeAssistantCwd(id, cwd, st)
 	if launcher == "" {
 		launcher = st.Launcher
 	}
@@ -129,7 +167,11 @@ func (n *Node) assistantSendRuntime(ctx context.Context, h *runtimeConn, id, cwd
 		n.assistantRuntimeSkills(cwd)
 	}
 	memDir := n.memoryForUse(cwd)
+	environment := n.assistantEnvForRuntime(h, cwd)
 	turn := map[string]any{"assistant": true, "memory_dir": memDir}
+	if environment != nil {
+		turn["env"] = environment
+	}
 	if pickedModel != "" {
 		turn["model"] = pickedModel
 	}
@@ -139,6 +181,9 @@ func (n *Node) assistantSendRuntime(ctx context.Context, h *runtimeConn, id, cwd
 	startedNew := id == ""
 	if startedNew {
 		startParams := map[string]any{"cwd": cwd, "assistant": true}
+		if environment != nil {
+			startParams["env"] = environment
+		}
 		if pickedModel != "" {
 			startParams["model"] = pickedModel
 		}
@@ -175,7 +220,7 @@ func (n *Node) assistantSendRuntime(ctx context.Context, h *runtimeConn, id, cwd
 		}
 		n.state.put(id, st)
 	}
-	n.persistModes(id, mode, pickedEffort)
+	n.persistModes(id, mode, pickedEffort, modeExplicit)
 	if !hasInput {
 		awaitList(n.notifySessionsSoon())
 		return id, nil
@@ -192,6 +237,14 @@ func (n *Node) assistantSendRuntime(ctx context.Context, h *runtimeConn, id, cwd
 		}
 		if st.AwaitingFirstMessage {
 			live = strings.TrimSpace(n.runtimeInstructions(cwd, memDir) + "\n" + live)
+		}
+	}
+	if len(selected) > 0 {
+		skillBlock := selectedSkillInstructions(selected)
+		if live != "" {
+			live = strings.TrimSpace(live + "\n" + skillBlock)
+		} else {
+			live = skillBlock
 		}
 	}
 	params := map[string]any{"session_id": id, "text": text, "images": images}
@@ -220,13 +273,23 @@ func (n *Node) assistantSendRuntime(ctx context.Context, h *runtimeConn, id, cwd
 	cctx, cancel := context.WithTimeout(ctx, runtimeCallTimeout)
 	defer cancel()
 	var said json.RawMessage
+	sentAt := time.Now()
+	if !command {
+		n.ttft.arm(id, sentAt, "")
+	}
 	if err := h.peer.Call(cctx, "session.send", params, &said); err != nil {
+		if !command && !maybeDelivered(err) {
+			n.ttft.disarm(id, sentAt)
+		}
 		if isRPCError(err) {
 			return "", n.localizeSupervisionRefusal(ctx, err)
 		}
 		return "", fmt.Errorf("%s: %w", h.label(), err)
 	}
 	if runtimeAnswerFlag(said, "queued") {
+		if !command {
+			n.ttft.disarm(id, sentAt)
+		}
 		markSendQueued(ctx)
 	}
 	if st.AwaitingFirstMessage || beforeSend != nil {

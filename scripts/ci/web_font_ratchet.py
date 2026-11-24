@@ -7,9 +7,17 @@ The committed counts (scripts/ci/web_font_baseline.json) may stay or go down, ne
 file with no entry starts at zero, so a new file cannot add one. Sizes come from the named
 roles in docs/design/task-cards.md section 4.1 (`text-xs`, `text-sm`, the `--chat-*` variables).
 
-A file under its baseline fails too: run --update, which rewrites the baseline downward and drops
-files that no longer have any. --update refuses to raise a count, and lets a file with no entry take only the sizes that left other files in the same change (a split or a move), and will not
-create a baseline (that would record what is already in the tree).
+Only a rise fails. Where a base is given (--base, else CI_BASE_SHA; scripts/ci/ratchet_base.py), a
+file the change touches is also held to its count at the merge base, so a change cannot add sizes
+back into room a lower count left under the baseline; an entry the merge base's baseline does not
+have yet (a moved file --update recorded) is held to the baseline. With neither, as on main, only
+the baseline holds.
+A file under its baseline passes with a notice: lowering the baseline is tidying anyone can do, with
+--update here or scripts/ci/lower_baselines.py for every count ratchet (docs/operations/testing.md,
+"Count ratchets"). --update rewrites the baseline downward and drops files that no longer have any.
+It refuses to raise a count, lets a file with no entry take only the sizes that left other files in
+the same change (a split or a move), and will not create a baseline (that would record what is
+already in the tree).
 """
 import argparse
 import json
@@ -17,6 +25,9 @@ import os
 from pathlib import Path
 import re
 import sys
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import ratchet_base  # noqa: E402
 
 
 def _source_root():
@@ -94,20 +105,53 @@ def parse_baseline(text, label):
 
 
 def violations(actual, baseline):
-    """Files over the baseline, then files under it. Missing on either side counts as zero."""
+    """Files over the baseline. Missing on either side counts as zero; a file under it passes (lowerable)."""
     found = []
-    for path in sorted(set(actual) | set(baseline)):
-        got = actual.get(path, 0)
+    for path in sorted(actual):
+        got = actual[path]
         allowed = baseline.get(path, 0)
         if got > allowed:
             found.append(
                 "{0}: {1} hard-coded px font size(s), baseline {2}; use a named size "
                 "(text-xs, text-sm, a --chat-* variable; docs/design/task-cards.md 4.1). "
                 "If the sizes moved here from another file, run --update: a new file may take what other files lost".format(path, got, allowed))
-        elif got < allowed:
+    return found
+
+
+def lowerable(actual, baseline):
+    """Notice lines for files under the baseline, which lowering it would tidy."""
+    return ["{0}: {1} hard-coded px font size(s), baseline {2}".format(path, actual.get(path, 0), allowed)
+            for path, allowed in sorted(baseline.items()) if actual.get(path, 0) < allowed]
+
+
+def covers(path):
+    """Whether scan counts the file: a source under web/src, tests and node_modules excluded."""
+    parts = path.split("/")
+    return (path.startswith(SOURCE + "/") and os.path.splitext(path)[1] in SUFFIXES and not is_test(parts[-1])
+            and "node_modules" not in parts)
+
+
+def base_violations(actual, baseline, merge_base):
+    """Files the change took above their merge-base count while the baseline still has room (ratchet_base.held)."""
+    if merge_base is None:
+        return []
+    paths = sorted(path for path in merge_base.changed()
+                   if covers(path) and 0 < actual.get(path, 0) <= baseline.get(path, 0))
+    if not paths:
+        return []  # nothing the change touches has room left to rise into
+    text = merge_base.texts([BASELINE_REL]).get(BASELINE_REL)
+    if text is None:
+        return []  # the base predates the baseline
+    entries = parse_baseline(text, merge_base.label + ":" + BASELINE_REL)
+    texts = merge_base.texts(paths)
+    found = []
+    for path in paths:
+        was = count_sizes(texts[path]) if path in texts else 0
+        if actual[path] > ratchet_base.held(path, baseline[path], entries, was):
             found.append(
-                "{0}: {1} hard-coded px font size(s), baseline {2}; "
-                "run python3 scripts/ci/web_font_ratchet.py --update to lower the baseline".format(path, got, allowed))
+                "{0}: {1} hard-coded px font size(s), {2} at the merge base {3} (baseline {4}); a count may not rise, "
+                "even where the baseline still has room; use a named size (text-xs, text-sm, a --chat-* variable; "
+                "docs/design/task-cards.md 4.1)".format(path, actual[path], was, merge_base.label, baseline[path]))
     return found
 
 
@@ -137,11 +181,19 @@ def plan_update(old, actual):
     return {path: count for path, count in actual.items() if count > 0}, []
 
 
-def check(root):
+def check(root, base=None, env=None, notes=None):
+    """Failure lines: files over the baseline, or above their merge-base count. notes receives the lowerable ones."""
     path = Path(root) / BASELINE_REL
     if not path.is_file():
         return ["web font ratchet: baseline missing ({0}); refusing to invent counts for existing sizes".format(BASELINE_REL)]
-    return violations(scan(root), parse_baseline(path.read_text(encoding="utf-8"), BASELINE_REL))
+    actual, baseline = scan(root), parse_baseline(path.read_text(encoding="utf-8"), BASELINE_REL)
+    if notes is not None:
+        notes.extend(lowerable(actual, baseline))
+    try:
+        merge_base = ratchet_base.resolve(root, base, env)
+        return violations(actual, baseline) + base_violations(actual, baseline, merge_base)
+    except ratchet_base.BaseError as error:
+        raise FontError("web font ratchet: " + str(error))
 
 
 def update(root):
@@ -163,6 +215,8 @@ def update(root):
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--root", default=str(ROOT), help="repository root (default: this checkout)")
+    parser.add_argument("--base", help="base ref for the merge-base limit (default: CI_BASE_SHA; with neither, "
+                                       "only the baseline holds)")
     parser.add_argument("--update", action="store_true", help="lower the baseline; refuses to raise or to add a file")
     parser.add_argument("--init", action="store_true", help="write the first baseline from the tree (only when none exists)")
     args = parser.parse_args(argv)
@@ -174,7 +228,8 @@ def main(argv=None):
             path.write_text(render(scan(args.root)), encoding="utf-8")
             print("web font ratchet: wrote the first baseline")
             return 0
-        problems = update(args.root) if args.update else check(args.root)
+        notes = []
+        problems = update(args.root) if args.update else check(args.root, args.base, notes=notes)
     except FontError as error:
         print(error, file=sys.stderr)
         return 2
@@ -182,8 +237,9 @@ def main(argv=None):
         print("\n".join(problems), file=sys.stderr)
         return 1
     if not args.update:
+        ratchet_base.print_notice("web font ratchet", notes, "python3 scripts/ci/web_font_ratchet.py --update")
         total = sum(parse_baseline((Path(args.root) / BASELINE_REL).read_text(encoding="utf-8"), BASELINE_REL).values())
-        print("web font ratchet: {0} hard-coded px font size(s), none above the baseline".format(total))
+        print("web font ratchet: {0} hard-coded px font size(s) in the baseline, none above it".format(total))
     return 0
 
 

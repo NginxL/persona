@@ -13,12 +13,15 @@ struct ConfirmationDialogRuleTests {
     }
 
     private static func sources() throws -> [(name: String, text: String)] {
+        // The app's own sources and its feature modules' (apple/Modules, docs/apple/ios.md "Modules").
         let root = apple.appending(path: "Persona")
         let sharedRule = apple.appending(path: "Persona/DesignSystem/WindowTextSize.swift")
-        let files = FileManager.default.enumerator(at: root, includingPropertiesForKeys: nil)?
-            .compactMap { $0 as? URL }
-            .filter { $0.pathExtension == "swift" && $0.path != sharedRule.path }
-            .sorted { $0.path < $1.path } ?? []
+        var files: [URL] = []
+        for dir in [root, apple.appending(path: "Modules")] {
+            let all = FileManager.default.enumerator(at: dir, includingPropertiesForKeys: nil)?.compactMap { $0 as? URL } ?? []
+            files += all.filter { $0.pathExtension == "swift" && $0.path != sharedRule.path }
+        }
+        files.sort { $0.path < $1.path }
         #expect(files.count > 50, "the app's view sources are not at \(root.path)")
         return try files.map {
             (String($0.path.dropFirst(apple.path.count + 1)), try String(contentsOf: $0, encoding: .utf8))

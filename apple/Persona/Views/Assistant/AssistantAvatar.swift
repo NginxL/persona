@@ -18,10 +18,6 @@ struct AssistantAvatar: View {
     var mouth: Double? = nil
     var eyesShut = false
 
-    #if os(macOS)
-    @Environment(\.tabIsActive) private var inFront
-    #endif
-
     private var held: Bool { still || reduceMotion }
     static let stillSchedule = VisiblePeriodicSchedule(interval: Theme.Motion.personaFrameInterval, paused: true)
     static func moves(state: PersonaState, still: Bool, reduceMotion: Bool, eligible: Bool) -> Bool {
@@ -35,14 +31,6 @@ struct AssistantAvatar: View {
         #if DEBUG || PERF_SIGNPOST
         let _ = PerfTrace.body("PersonaAvatar")
         #endif
-        #if os(macOS)
-        // Preserve the Mac's existing continuous-animation branch.
-        TimelineView(.animation(minimumInterval: Theme.Motion.personaFrameInterval, paused: !moving(eligible: inFront))) { tl in
-            face(at: tl.date, eligible: inFront)
-        }
-        .frame(width: size, height: size)
-        .accessibilityHidden(true)
-        #else
         VisibleWork { eligible in
             if moving(eligible: eligible) {
                 PersonaFaceMotion(face: face(at: Date(timeIntervalSinceReferenceDate: 0), eligible: eligible))
@@ -55,7 +43,6 @@ struct AssistantAvatar: View {
         }
         .frame(width: size, height: size)
         .accessibilityHidden(true)
-        #endif
     }
 
     private func face(at date: Date, eligible: Bool) -> PersonaFace {

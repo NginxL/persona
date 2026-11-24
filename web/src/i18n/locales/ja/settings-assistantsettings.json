@@ -137,6 +137,8 @@
   "close_ended_terminals_hint": "Persona が開始したエージェントが完了・キャンセル・自分で終了したら、そのターミナルのタブも閉じます。作業中のエージェントや自分で開いたターミナルは閉じません。会話は残り、あとで再開できます",
   "inbox_signals": "新着メッセージを進捗チェックに伝える",
   "inbox_signals_hint": "受信トレイの AI 分身が、ほかの人からの新着メッセージを Persona がフォローしているタスクに関連付けると、そのタスクを担当する会話が次の進捗チェックで知ります。AI 分身をオンにしておく必要があります。モデルの呼び出しが増えます",
+  "inbox_todo_forward": "PR/Issue イベントを紐づく To-Do の Agent に自動転送",
+  "inbox_todo_forward_hint": "既定ではオフ。未完了の To-Do に紐づく GitHub PR/Issue の正規 URL を含む受信トレイ項目を LLM なしで対応 Agent へ自動転送します。Agent が利用できない場合は監督会話へフォールバックします",
   "archive_closed": "閉じたセッションをアーカイブするまで",
   "archive_closed_hint": "閉じていて未完了のタスクがないセッションは、この日数だけ動きがないと一覧から外れ、アーカイブ済みに残ります。0 でオフ",
   "archive_closed_unit": "日",

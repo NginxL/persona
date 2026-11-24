@@ -11,11 +11,15 @@ import androidx.compose.runtime.snapshots.Snapshot
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.test.assertCountEquals
+import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performClick
 import androidx.compose.ui.unit.dp
 import kotlin.math.abs
 import androidx.datastore.core.DataStore
@@ -68,6 +72,100 @@ class ListTapScreenShotsTest {
     @Test fun pin() = shoot("pin", "Fix the login bug") {
         val row = model.page.value.list.groups.flatMap { it.rows }.first { it.session.sessionId == "working" }
         model.pin(row)
+    }
+
+    @Test fun codexSubtaskCollapseArmsBeforeRemovalSoChildrenFadeOut() {
+        val subtaskSessions = listOf(
+            Session(
+                sessionId = "root", machineId = "box", title = "Main Codex task",
+                sourceKind = "codex_history", sourceThreadId = "root",
+                cwd = "/code/app", repoRoot = "/code/app",
+                state = "working", status = "working", updatedAt = "2026-01-01T02:00:00Z",
+            ),
+            Session(
+                sessionId = "child1", machineId = "box", title = "Child subtask alpha",
+                sourceKind = "codex_history", sourceThreadId = "child1", parentThreadId = "root",
+                cwd = "/code/app", repoRoot = "/code/app",
+                state = "working", status = "working", updatedAt = "2026-01-01T01:30:00Z",
+            ),
+            Session(
+                sessionId = "child2", machineId = "box", title = "Child subtask beta",
+                sourceKind = "codex_history", sourceThreadId = "child2", parentThreadId = "root",
+                cwd = "/code/app", repoRoot = "/code/app",
+                state = "working", status = "working", updatedAt = "2026-01-01T01:00:00Z",
+            ),
+            Session(
+                sessionId = "after", machineId = "box", title = "Following task",
+                sourceKind = "codex_history", sourceThreadId = "after",
+                cwd = "/code/app", repoRoot = "/code/app",
+                state = "working", status = "working", updatedAt = "2026-01-01T00:00:00Z",
+            ),
+        )
+        model = newModel(subtaskSessions)
+        rule.setContent {
+            PersonaTheme(darkTheme = false, reduceMotion = false, style = AppStyle.Glass) {
+                CompositionLocalProvider(LocalHomeChrome provides HomeChrome(emptyList(), "Agents", onSelect = {}, leading = {})) {
+                    Box(Modifier.size(411.dp, 900.dp).testTag("shot")) {
+                        AgentsScreen(model, Nowhere, AgentsMetadata())
+                    }
+                }
+            }
+        }
+        rule.waitUntil(5_000) { model.page.value.loaded }
+        rule.runOnIdle { model.grouping(AgentGrouping.State) }
+        rule.waitForIdle()
+
+        // Expand Codex subtasks and wait for the child rows to settle.
+        rule.onNodeWithText("Subtasks (2)").performClick()
+        rule.waitForIdle()
+        val childNode = rule.onNodeWithText("Child subtask alpha").assertIsDisplayed()
+        val childBounds = childNode.getUnclippedBoundsInRoot()
+        val followingBefore = top("Following task")
+
+        // Freeze clock and collapse subtasks: AgentsScreen must arm 1 frame before mutating expandedTasks
+        // so exitFade attaches fadeOutSpec and populates the child row's GraphicsLayer before removal.
+        rule.mainClock.autoAdvance = false
+        rule.onNodeWithText("Subtasks (2)").performClick()
+        Snapshot.sendApplyNotifications()
+        rule.mainClock.advanceTimeByFrame()
+        // Child row is still composed on the armed frame; draw it (mirroring Choreographer's per-frame draw).
+        rule.onNodeWithText("Child subtask alpha").assertIsDisplayed()
+        rule.onNodeWithTag("shot").captureToImage()
+
+        // Next frame removes the child rows: semantics removes Child subtask alpha, while its GraphicsLayer
+        // is fading out (still drawing ink pixels in its slot) and Following task starts springing up.
+        rule.mainClock.advanceTimeByFrame()
+        rule.onAllNodesWithText("Child subtask alpha").assertCountEquals(0)
+        val midBitmap = rule.onNodeWithTag("shot").captureToImage().asAndroidBitmap()
+        val earlyInk = darkInkPixels(midBitmap, childBounds.top.value.toInt(), childBounds.bottom.value.toInt())
+
+        rule.mainClock.advanceTimeBy(700)
+        val endBitmap = rule.onNodeWithTag("shot").captureToImage().asAndroidBitmap()
+        val followingAfter = top("Following task")
+        val settledBounds = rule.onNodeWithText("Following task").getUnclippedBoundsInRoot()
+
+        assertTrue("expected fading child row ink pixels on removal frame ($earlyInk)", earlyInk > 12)
+        assertTrue("Following task did not move up after collapsing subtasks ($followingBefore -> $followingAfter)",
+            followingAfter < followingBefore - 20f)
+        // Below the settled Following task row, zero leftover ghost pixels should remain where the collapsed rows sat.
+        val belowSettledInk = darkInkPixels(endBitmap, (settledBounds.bottom.value + 16f).toInt(), (followingBefore + 40f).toInt())
+        assertTrue("ghost ink remained after subtask collapse ($belowSettledInk)", belowSettledInk <= 4)
+    }
+
+    private fun darkInkPixels(bitmap: Bitmap, topY: Int, bottomY: Int): Int {
+        val y0 = topY.coerceIn(0, bitmap.height)
+        val y1 = bottomY.coerceIn(y0, bitmap.height)
+        var count = 0
+        for (py in y0 until y1 step 2) {
+            for (px in 40 until (bitmap.width - 40).coerceAtLeast(40) step 2) {
+                val pixel = bitmap.getPixel(px, py)
+                if (android.graphics.Color.red(pixel) < 120 &&
+                    android.graphics.Color.green(pixel) < 120 &&
+                    android.graphics.Color.blue(pixel) < 120
+                ) count++
+            }
+        }
+        return count
     }
 
     private lateinit var model: AgentsViewModel
@@ -134,10 +232,10 @@ class ListTapScreenShotsTest {
 
     private fun top(text: String) = rule.onNodeWithText(text).getUnclippedBoundsInRoot().top.value
 
-    private fun newModel(): AgentsViewModel {
+    private fun newModel(sessionList: List<Session> = this@ListTapScreenShotsTest.sessions): AgentsViewModel {
         val pins = MutableStateFlow(AgentOperationPreferences())
         return AgentsViewModel(object : SessionsRepository {
-                override val sessions = MutableStateFlow(this@ListTapScreenShotsTest.sessions)
+                override val sessions = MutableStateFlow(sessionList)
                 override val machines = MutableStateFlow(listOf(Machine("box", "Example computer", online = true)))
                 override suspend fun refresh() = Unit
             }, object : InteractionCenter {

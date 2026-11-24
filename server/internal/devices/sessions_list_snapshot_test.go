@@ -476,7 +476,7 @@ func TestWaitNodeIdleResponseCannotOverwriteNewerNotification(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
-	if err := m.waitNodeIdle(ctx); err != nil {
+	if err := m.waitNodeIdle(ctx, time.Time{}); err != nil {
 		t.Fatalf("waitNodeIdle did not continue from the accepted idle state: %v", err)
 	}
 	got := m.sessionList()
@@ -492,7 +492,7 @@ func TestWaitNodeIdleResponseUpdatesCache(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	if err := m.waitNodeIdle(ctx); err != nil {
+	if err := m.waitNodeIdle(ctx, time.Time{}); err != nil {
 		t.Fatal(err)
 	}
 	got := m.sessionList()

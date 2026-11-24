@@ -5,6 +5,7 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.decodeFromJsonElement
 import kotlinx.serialization.json.jsonObject
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import persona.core.contracts.JsonCodec
@@ -29,5 +30,16 @@ class SpaceConversationsTest {
         val pushed = JsonCodec.decodeFromJsonElement<Session>(json("""{"machine_id": "mac", "session_id": "h", "space": "health"}"""))
         assertEquals("health", pushed.space)
         assertTrue(pushed.isHealth)
+    }
+
+    // A domain space's chats (#13500): the space's, never health chats, and kept off the assistant's own list.
+    @Test fun aDomainSpacesChatsAreThatSpacesNotHealths() {
+        val chats = spaceConversationsOf(json("""{"machine_id": "mac", "conversations": [{"session_id": "f", "assistant": true}]}"""), "qa-finance")
+        assertEquals("qa-finance", chats.single().space)
+        assertTrue(chats.single().isSpace)
+        assertFalse(chats.single().isHealth)
+        val pushed = JsonCodec.decodeFromJsonElement<Session>(json("""{"machine_id": "mac", "session_id": "p", "space": "qa-plain"}"""))
+        assertTrue(pushed.isSpace)
+        assertFalse(JsonCodec.decodeFromJsonElement<Session>(json("""{"machine_id": "mac", "session_id": "m"}""")).isSpace)
     }
 }

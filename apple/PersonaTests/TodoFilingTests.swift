@@ -43,9 +43,10 @@ struct TodoFilingTests {
         let rows = [
             TodoItem(id: "needs", title: "Failed start", doneAt: ago(1), updatedAt: ago(1), startError: "the computer is offline"),
             TodoItem(id: "work", title: "Working", updatedAt: ago(1), agents: [TodoItem.Agent(machineID: "m", sessionID: "s1")]),
-            TodoItem(id: "pr", title: "Pull request", updatedAt: ago(1), origin: "conv", prURL: "https://example.com/pr/1"),
+            TodoItem(id: "pr", title: "Pull request", updatedAt: ago(1), origin: "conv", prURL: "https://example.com/pr/1",
+                     prStatus: TodoPRStatus(url: "https://example.com/pr/1", checkedAt: ISO8601DateFormatter().string(from: now))),
             TodoItem(id: "rest", title: "Errand", createdAt: ago(1)),
-            TodoItem(id: "fresh", title: "Closed an hour ago", doneAt: ago(1)),
+            TodoItem(id: "fresh", title: "Closed an hour ago", doneAt: ago(1), kind: "concern"),
             TodoItem(id: "shelved", title: "Untouched task", createdAt: ago(72), updatedAt: ago(72), origin: "conv"),
             TodoItem(id: "old", title: "Closed days ago", doneAt: ago(72)),
             TodoItem(id: "unknown", title: "A newer section", createdAt: ago(1)),
@@ -70,6 +71,15 @@ struct TodoFilingTests {
         for legacy in TodoSection.allCases {
             #expect(TodoListSection.all.contains(TodoFiling.section(legacy: legacy).section))
         }
+    }
+
+    @Test func aCancelledRowUsesTheExistingV1DoneSection() {
+        let placed = TodoFiling.section(legacy: .cancelled)
+        #expect(placed.section == TodoListSection.done && !placed.inactive)
+        let row = TodoItem(id: "cancelled", title: "Cancelled", doneAt: ago(1), createdAt: ago(2), updatedAt: ago(1),
+                           doneBy: "cancelled", cancelledAt: ago(1), cancelledReason: "Not needed")
+        let filed = TodoFiling.file([row], views: [:], now: now)
+        #expect(filed.count == 1 && filed[0].section == TodoListSection.done && filed[0].closed)
     }
 
     /// A restore kept on the device, or the hub's own, counts as the row moving: an untouched task is not Inactive.

@@ -133,8 +133,9 @@ func (s *Service) toolInboxPost(ctx context.Context, machine, self string, args 
 	default:
 		return "", fmt.Errorf("tier %q: use \"action\" (needs the user) or \"fyi\" (worth knowing)", a.Tier)
 	}
-	if s.justMeNow(machine, self) || s.inHealth(ctx, self) {
-		// Like notify_user: a meeting's side turn and a health conversation put nothing where the lists can show it.
+	if pol := s.selfPolicy(ctx, self); s.justMeNow(machine, self) || pol.Redact || pol.HideFromExtensions {
+		// Like notify_user: a meeting's side turn and a conversation of a private space put nothing where the lists
+		// (and the extensions that read them) can show it.
 		return "", errors.New("this conversation can't be put into the Inbox")
 	}
 	if !s.inboxPostOn(ctx) {

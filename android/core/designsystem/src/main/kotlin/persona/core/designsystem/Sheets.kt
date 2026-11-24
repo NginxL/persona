@@ -97,6 +97,7 @@ fun JSheet(
     })
     val scope = androidx.compose.runtime.rememberCoroutineScope()
     val shortcutHelpOwner = androidx.compose.runtime.remember { Any() }
+    val densities = currentTextDensities()
     ModalBottomSheet(
         onDismissRequest = { if (canDismiss) onDismiss() }, modifier = modifier,
         sheetState = sheetState,
@@ -104,6 +105,8 @@ fun JSheet(
         scrimColor = if (clearScrim) palette.scrim.copy(alpha = 0f) else palette.scrim, tonalElevation = 0.dp,
         dragHandle = if (!showDragHandle) null else ({ Box(Modifier.padding(top = 10.dp.dense, bottom = 6.dp.dense).size(36.dp, 4.dp).clip(CircleShape).background(palette.ink3.copy(alpha = 0.5f))) }),
     ) {
+        RetainedTextDensity(densities) {
+        InterfaceContent {
         // Opaque over a scrim: glass inside the sheet must not sample (and show through) the page behind it.
         androidx.compose.runtime.CompositionLocalProvider(
             LocalReadingInset provides 0.dp,
@@ -125,6 +128,8 @@ fun JSheet(
                 Spacer(Modifier.height(12.dp.dense))
             }
             content()
+        }
+        }
         }
         }
     }
@@ -196,10 +201,13 @@ fun JMenu(
     content: (@Composable ColumnScope.() -> Unit)? = null,
 ) {
     val palette = PersonaTheme.palette
+    val densities = currentTextDensities()
     DropdownMenu(
         expanded, onDismiss, modifier, offset = offset, shape = PersonaTheme.shapes.controlShape,
         containerColor = palette.surfaceOpaque, tonalElevation = 0.dp, shadowElevation = 12.dp,
     ) {
+        RetainedTextDensity(densities) {
+        InterfaceContent {
         content?.let {
             it()
             if (actions.isNotEmpty()) HorizontalDivider(color = palette.line)
@@ -237,6 +245,8 @@ fun JMenu(
                 enabled = action.enabled, onClick = { onDismiss(); action.onClick() },
             )
         }
+        }
+        }
     }
 }
 
@@ -250,30 +260,45 @@ fun JDialog(
     dismiss: Pair<String, () -> Unit>? = stringResource(R.string.designsystem_cancel) to onDismiss,
     destructive: Boolean = false,
     confirmEnabled: Boolean = true,
+    confirmLoading: Boolean = false,
+    dismissEnabled: Boolean = !confirmLoading,
     content: (@Composable ColumnScope.() -> Unit)? = null,
 ) {
     val palette = PersonaTheme.palette
     val shortcutHelpOwner = androidx.compose.runtime.remember { Any() }
+    val densities = currentTextDensities()
+    val dismissRequest: () -> Unit = if (!dismissEnabled) ({}) else onDismiss
     androidx.compose.runtime.CompositionLocalProvider(
         LocalReadingInset provides 0.dp,
         LocalHardwareShortcutHelpOwner provides shortcutHelpOwner,
     ) {
     AlertDialog(
-        onDismissRequest = onDismiss, modifier = Modifier.hardwareShortcutDismiss(onDismiss, shortcutHelpOwner),
+        onDismissRequest = dismissRequest, modifier = Modifier.hardwareShortcutDismiss(dismissRequest, shortcutHelpOwner),
         containerColor = palette.surfaceOpaque, shape = PersonaTheme.shapes.panelShape, tonalElevation = 0.dp,
-        title = { Text(title, style = PersonaTheme.type.title, color = palette.ink) },
+        title = { RetainedTextDensity(densities) { InterfaceContent { Text(title, style = PersonaTheme.type.title, color = palette.ink) } } },
         text = if (text == null && content == null) null else ({
-            Column {
-                text?.let { Text(it, style = PersonaTheme.type.callout, color = palette.ink2) }
-                content?.let { Spacer(Modifier.height(if (text == null) 0.dp else 12.dp)); it() }
+            RetainedTextDensity(densities) {
+                InterfaceContent {
+                    Column {
+                        text?.let { Text(it, style = PersonaTheme.type.callout, color = palette.ink2) }
+                        content?.let { Spacer(Modifier.height(if (text == null) 0.dp else 12.dp)); it() }
+                    }
+                }
             }
         }),
         confirmButton = {
-            confirm?.let { (label, action) ->
-                JButton(label, action, kind = if (destructive) JButtonKind.Destructive else JButtonKind.Primary, size = JButtonSize.Medium, enabled = confirmEnabled)
+            RetainedTextDensity(densities) {
+                InterfaceContent {
+                    confirm?.let { (label, action) ->
+                        JButton(label, action, kind = if (destructive) JButtonKind.Destructive else JButtonKind.Primary,
+                            size = JButtonSize.Medium, enabled = confirmEnabled, loading = confirmLoading)
+                    }
+                }
             }
         },
-        dismissButton = dismiss?.let { (label, action) -> { JButton(label, action, kind = JButtonKind.Quiet, size = JButtonSize.Medium) } },
+        dismissButton = dismiss?.let { (label, action) -> {
+            RetainedTextDensity(densities) { InterfaceContent { JButton(label, action, kind = JButtonKind.Quiet, size = JButtonSize.Medium, enabled = dismissEnabled) } }
+        } },
     )
     HardwareShortcutHelp(shortcutHelpOwner)
     }

@@ -34,6 +34,7 @@
   "end_gone": "Conversation closed",
   "end_offline": "Computer offline",
   "end_recalled": "Recalled, this turn stopped",
+  "end_unrelated": "Ended: another request started",
   "tools_called_one": "{count} tool call",
   "tools_called_other": "{count} tool calls",
   "state_working": "Working",

@@ -50,5 +50,13 @@
   "continue_label": "(“{title}”)",
   "continue_placeholder_to": "What should {agent} do next?",
   "continue_failed_plain": "Not sent. Open the chat to see why.",
+  "outbox_reason_unknown": "No reason was reported",
+  "outbox_failed": "Message not sent: {reason}. Retry it or delete it.",
+  "outbox_uncertain": "Delivery is uncertain: {reason}. Check the original send before trying again.",
+  "not_sent": "Not sent",
+  "computer_setup_detail": "Finish computer setup so your agents can use it.",
+  "computer_offline_detail": "Computer unavailable: {reason}. Open its setup to reconnect it.",
+  "setup_needed": "Setup needed",
+  "open_setup": "Open setup",
   "arrange": "Arrange Overview"
 }

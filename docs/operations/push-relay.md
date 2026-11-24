@@ -11,6 +11,8 @@ hub ──(HPKE ciphertext + grant)──▶ relay ──(APNs key)──▶ APN
  └──────────── phone public key, relay grant (via the paired hub API) ◀┘
 ```
 
+A hub in [office network mode](network.md#office-network-mode) never uses the relay: it pushes with its own APNs key only, content-free, with the payload sealed as described here when the phone registered a push key.
+
 ## Who knows what
 
 | | Phone | hub | Relay |
@@ -132,7 +134,7 @@ Now every side says which way pushes take and, when none, why:
 
 - **App**: the relay registration does not follow redirects (URLSession turns a redirected POST into a GET, so an old relay address that answers 301 could never work). The App keeps the outcome of the last attempt:
   registered, the relay's status and its own words (`403 topic not served`), a redirect and where to (`301 https://<new address>`), a network error. It also notes notifications not allowed, APNs refusing to register, and a build without a relay.
-  A failure goes to the hub as `relay_error` in `POST /api/v1/devices`, which answers with the device's `push` way. **Settings › Notifications** shows "Background push: available (direct / via the relay) / unavailable", the reason and what to do.
+  A failed attempt goes to the hub as `relay_url` (the relay it tried) together with `relay_error` in `POST /api/v1/devices`, without a grant or push key; a build that never attempted a relay sends neither. The answer carries the device's `push` way. **Settings › Notifications** shows "Background push: available (direct / via the relay) / unavailable", the reason and what to do.
 - **hub**: `push` is `{"route":"direct|relay|none","reason"?,"detail"?,"failed_at"?}`:
 
   | route | reason | When |
@@ -140,11 +142,11 @@ Now every side says which way pushes take and, when none, why:
   | `none` | `no_token` | The device has no APNs token: notifications not allowed, or APNs refused it |
   | `direct` | | The hub has `apns.json` and the device a token |
   | `relay` | | No `apns.json`; the device reported relay, grant and push key |
-  | `none` | `relay_failed` | No `apns.json`; the phone's relay registration failed (`detail`: its words, kept in `devices.relay_error`) |
+  | `none` | `relay_failed` | No `apns.json`; the phone's relay registration failed (`detail`: the attempted relay's URL and words, kept in `devices.relay_url` / `devices.relay_error`; an older App that names no relay keeps the error-only detail) |
   | `none` | `no_relay` | No `apns.json`, and the phone names no relay (a build without one, or an App too old to say why) |
   | `direct` / `relay` | `push_failed` | The way is there, but the last push to the device's token did not go (`detail`: APNs' or the relay's answer, or the hub's own reason when it did not send the push: `seal: …` for a relay push it could not seal, `push of N bytes is over APNs' 4096-byte limit` for a direct push too long even shortened). In memory, until a push goes or the device registers a new token / relay. A Live Activity push goes to the activity's own token: its answer neither sets nor clears this |
 
-  `GET /api/v1/auth/tokens` adds `push` (credential id → the way of the device it registered last) for **Settings › Devices**; `GET /api/v1/devices/push` lists every device (`personad hub doctor` prints it under "推送").
+  `GET /api/v1/auth/tokens` adds `push` (credential id → the way of the device it registered last) for **Settings › Devices**; `GET /api/v1/devices/push` lists every device. `personad hub doctor` prints the routes under "推送" and, for an HTTP 4xx/5xx refusal with a named relay, adds a next step to check its health and served topics. A redirect or network failure still names the relay in its route detail but gets no refusal advice.
 - **App, later** (#1859): the way the registration answered is kept from launch or pairing, so a `push_failed` that came later (or went away) showed in Settings › Devices but not in Settings › Notifications. Settings › Notifications now reads `push[current]` from `GET /api/v1/auth/tokens` each time it opens and when the App comes back while it is open (`PushRegistrar.refreshRoute`): no entry for this credential means no push registration from it at that hub; a hub that sends no `push` leaves what is known. When that read or the registration's `POST /api/v1/devices` fails, the page says "Unknown · Couldn't check with the hub (…)" until the next read, instead of an older way as if current.
 
 ## Connections
@@ -235,6 +237,7 @@ your own APNs key. In that case it's simpler to put the key straight into your h
 
 ## Verification
 
+- `PersonaTests/PushRegistrarTests` and `server/internal/hub/push_route_test.go`: a refused registration sends the attempted URL and error without a grant; POST and GET name both, the doctor gives its localized health/topics next step, and successful, direct and no-relay routes stay unchanged.
 - `server/internal/relay`: grant sealing / tampering / topic, rate limits, the assembled APNs request (fake APNs), 410 passthrough.
 - `server/internal/hub`: without `apns.json`, ordinary notifications / interactions / completions / silent wakes / Live Activities all hit a fake relay, with no plaintext in the requests; with `apns.json`, it stays direct as before.
 - Ciphertext generated by `server/internal/pushcrypto` is decrypted by PersonaTests with CryptoKit (cross-language test vectors).

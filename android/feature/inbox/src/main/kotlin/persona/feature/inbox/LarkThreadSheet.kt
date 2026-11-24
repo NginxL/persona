@@ -14,6 +14,7 @@ import androidx.compose.ui.Modifier
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import persona.core.designsystem.*
 import kotlinx.coroutines.launch
+import persona.core.inbox.*
 
 @Composable
 internal fun LarkThreadSheet(root: LarkMessage, repository: InboxRepository, mentionFeed: String? = null, onDismiss: () -> Unit) {

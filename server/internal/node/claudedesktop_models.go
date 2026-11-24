@@ -109,11 +109,13 @@ func activeDesktopAppConfig(dirs []string) (cfg desktopAppConfig, fingerprint st
 }
 
 func desktopClaudeExecutable(home string) (string, error) {
-	if exe, err := claudeExecutable(); err == nil {
+	if exe, err := desktopClaudeCLI(); err == nil {
 		return exe, nil
 	}
-	if clis := claudeDesktopCLIsIn(runtime.GOOS, claudeDesktopDirs(home)); len(clis) > 0 {
-		return clis[0], nil
+	for _, cli := range claudeDesktopCLIsIn(runtime.GOOS, claudeDesktopDirs(home)) {
+		if _, _, err := desktopClaudeProgram(cli); err == nil {
+			return cli, nil
+		}
 	}
 	return "", fmt.Errorf("claude executable not found")
 }
@@ -296,10 +298,16 @@ func (n *Node) listDesktopCLIModels(ctx context.Context) ([]proto.AgentModel, er
 	}
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), launcherModelsTimeout)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, exe, "-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose", "--settings", ours)
+	program, prefix, err := desktopClaudeProgram(exe)
+	if err != nil {
+		return nil, err
+	}
+	argv := append(prefix, "-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose", "--settings", ours)
+	cmd := exec.CommandContext(ctx, program, argv...)
 	cmd.Dir = dir
 	cmd.Env = desktopSeedEnv(os.Environ())
 	killGroupOnCancel(cmd)
+	prepareDesktopChild(cmd)
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		return nil, err

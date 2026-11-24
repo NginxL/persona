@@ -84,6 +84,12 @@ struct PhoneToolsTests {
             "phone_health_write_sample",
             "phone_workouts_recent",
             "phone_workout_detail",
+            // Every Apple Health type sample by sample (#13740)
+            "phone_health_types",
+            "phone_health_samples",
+            "phone_health_sources",
+            "phone_health_request_access",
+            "phone_health_watch",
             "phone_photos_recent",
             "phone_photo_get",
             "phone_device_info",

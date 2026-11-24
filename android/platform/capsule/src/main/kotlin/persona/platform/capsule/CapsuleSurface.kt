@@ -297,17 +297,21 @@ fun CapsuleSurface(
                         content.recipient != null -> stringResource(R.string.capsule_reply_to, content.recipient)
                         else -> stringResource(if (selected?.state == CapsuleState.Working) R.string.capsule_placeholder_working else R.string.capsule_placeholder)
                     }
-                    BasicTextField(text, { value -> drafts[draftKey] = value; onDraftChange(content.selectedId, value) },
-                        Modifier.weight(1f).heightIn(max = CapsuleTokens.inputMaxHeight).focusRequester(inputFocus).testTag("capsule.input"),
-                        textStyle = type.callout.copy(color = palette.ink), cursorBrush = SolidColor(palette.accent),
-                        maxLines = 2, enabled = !pending, decorationBox = { field ->
-                            Box(Modifier.fillMaxWidth().clip(PersonaTheme.shapes.controlShape).background(palette.sunken)
-                                .border(CapsuleTokens.border, if (text.isNotEmpty()) palette.accent else palette.line, PersonaTheme.shapes.controlShape)
-                                .padding(CapsuleTokens.gap)) {
-                                if (text.isEmpty()) Text(placeholder, style = type.callout, color = palette.ink3, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                field()
-                            }
-                        })
+                    ReadingContent {
+                        BasicTextField(text, { value -> drafts[draftKey] = value; onDraftChange(content.selectedId, value) },
+                            Modifier.weight(1f).heightIn(max = CapsuleTokens.inputMaxHeight).focusRequester(inputFocus).testTag("capsule.input"),
+                            textStyle = type.callout.copy(color = palette.ink), cursorBrush = SolidColor(palette.accent),
+                            maxLines = 2, enabled = !pending, decorationBox = { field ->
+                                Box(Modifier.fillMaxWidth().clip(PersonaTheme.shapes.controlShape).background(palette.sunken)
+                                    .border(CapsuleTokens.border, if (text.isNotEmpty()) palette.accent else palette.line, PersonaTheme.shapes.controlShape)
+                                    .padding(CapsuleTokens.gap)) {
+                                    if (text.isEmpty()) InterfaceContent {
+                                        Text(placeholder, style = type.callout, color = palette.ink3, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                    }
+                                    field()
+                                }
+                            })
+                    }
                     CapsuleSendButton(stringResource(R.string.capsule_send), enabled = text.isNotBlank() && !pending) {
                         cancelNext()
                         val captured = CapsuleSendConfirmation(content.selectedId, draftKey, text, content.replyTargetId, content.recipient.orEmpty())
@@ -333,8 +337,9 @@ fun CapsuleSurface(
                 }
                 CapsuleMenu.Target -> content.replyTargets.forEach { target -> CapsuleControl(target.title, "capsule.target.${target.id}",
                     { closeOverlay(); run { onAction(content.selectedId, "target:${target.id}") } }, Modifier.fillMaxWidth()) }
-                CapsuleMenu.Context -> content.context?.let { Text(it, Modifier.testTag("capsule.context.body").padding(CapsuleTokens.gap), style = type.callout, color = palette.ink) }
-                    ?: Text(stringResource(R.string.capsule_loading), style = type.caption, color = palette.ink2)
+                CapsuleMenu.Context -> content.context?.let {
+                    ReadingContent { Text(it, Modifier.testTag("capsule.context.body").padding(CapsuleTokens.gap), style = type.callout, color = palette.ink) }
+                } ?: Text(stringResource(R.string.capsule_loading), style = type.caption, color = palette.ink2)
                 CapsuleMenu.More -> {
                     if (!content.listing) {
                         CapsuleControl(stringResource(if (content.canLoadOlder || content.context != null) R.string.capsule_context else R.string.capsule_open_chat),
@@ -358,7 +363,9 @@ fun CapsuleSurface(
         }
         confirmation?.let { captured -> CapsuleOverlay(stringResource(R.string.capsule_confirm_send), { confirmation = null }) {
             Text(stringResource(R.string.capsule_recipient, captured.recipient), style = type.label, color = palette.ink)
-            Text(captured.text, Modifier.padding(vertical = CapsuleTokens.gap).testTag("capsule.confirm.text"), style = type.callout, color = palette.ink)
+            ReadingContent {
+                Text(captured.text, Modifier.padding(vertical = CapsuleTokens.gap).testTag("capsule.confirm.text"), style = type.callout, color = palette.ink)
+            }
             CapsuleControl(stringResource(R.string.capsule_confirm_send), "capsule.confirm.send", { confirmation = null; send(captured) },
                 Modifier.fillMaxWidth(), enabled = !pending)
         } }

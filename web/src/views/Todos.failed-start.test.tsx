@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 // #3713: a to-do whose agent never started (the hub closes it, with its start error) waits on the owner in Needs you. Its
 // row reads open, not done, and says why in red; ticking it closes it for good (`done: true`, the hub clears the start
-// error). One whose work finished in a related to-do (the same plan) is history: Just finished, ticked, nothing asked.
+// error). One whose work finished in a related to-do (the same plan) is history: Done, ticked, nothing asked.
 // Its page agrees with its row (audit item 13): why it did not start, Retry (from its plan) or Hand to agent, which
 // reopens it only once handed over, and Complete closes it for good as the checkbox does; not Reopen. Its Retry is the
 // main chat's task card's (lib/feed retryTask): one on its way at a time from either, the reopened to-do shown at once.
@@ -108,10 +108,13 @@ describe("a to-do whose agent never started", () => {
     expect((patch?.[1] as { json?: unknown })?.json).toEqual({ done: true });
   });
 
-  it("goes with the work that finished in its row: Just finished, behind it, done", () => {
+  it("goes with the work that finished in its row, behind it and immediately Done", async () => {
     expect(section("waiting")?.querySelector("[data-id=gone]")).toBeNull();
+    const done = section("done")!;
+    expect(done.getAttribute("data-todos")).toBe("3");
+    await act(async () => done.querySelector("button")!.click());
     const r = row("done")!;
-    expect(section("just_done")?.contains(r)).toBe(true);
+    expect(done.contains(r)).toBe(true);
     expect(r.getAttribute("data-members")).toBe("2");
   });
 });

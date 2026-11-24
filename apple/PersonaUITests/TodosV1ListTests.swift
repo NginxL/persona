@@ -4,8 +4,8 @@ import XCTest
 /// Sidebar layout on an iPhone, whose drawer has both the To-dos row and the Pages heading that folds it.
 /// `-showTodosV1 YES` stands for the release; the list still needs a hub that lists `todo_view`.
 ///
-/// - `PERSONA_TODOS_HUB` (`MOCK_TODO_VIEW=1`): the drawer's To-dos row, the folded Pages heading, the bar's Needs you
-///   and the Needs you header say one N.
+/// - `PERSONA_TODOS_HUB` (`MOCK_TODO_VIEW=1`): the drawer's To-dos row, the folded Pages heading, the Needs you header and
+///   the guard line under a filter say one N; the foot toolbar's Filter, search and New To-Do.
 /// - `PERSONA_TODOS_LATE_HUB` (`MOCK_TODO_VIEW=late`): a hello that lists the view only after a reconnect never swaps the
 ///   page that is up, nor the one a to-do was pushed over; the next time To-dos opens, it is the V1 list.
 /// - `PERSONA_TODOS_FRAMES=1` with `PERSONA_SHOTS=<dir>` (and `PERSONA_TODOS_HUB`): the V1 frames this list draws, saved
@@ -44,11 +44,9 @@ final class TodosV1ListTests: XCTestCase {
                    withVelocity: .slow, thenHoldForDuration: 0.1)
     }
 
-    /// The rows of the list in sight under the bar, top first.
+    /// The rows of the list in sight under the navigation bar, top first.
     @MainActor private func rowsInSight() -> [XCUIElement] {
-        // iOS 26 pins the bar over the list; on iOS 18 it is the list's first row and scrolls away.
-        let bar = element("todos.bar.all")
-        let floor = max(bar.exists ? bar.frame.maxY : 0, app.navigationBars.firstMatch.frame.maxY)
+        let floor = app.navigationBars.firstMatch.frame.maxY
         let height = app.windows.firstMatch.frame.height
         return app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'todos.row.'"))
             .allElementsBoundByIndex.filter { $0.frame.midY > floor && $0.frame.midY < height }
@@ -77,13 +75,18 @@ final class TodosV1ListTests: XCTestCase {
     @MainActor func testOneNumberEverywhere() throws {
         guard let hub = env["PERSONA_TODOS_HUB"] else { throw XCTSkip("needs scripts/mock/mock_hub.py with MOCK_TODO_VIEW=1 (PERSONA_TODOS_HUB)") }
         launch(hub)
-        let bar = element("todos.bar.needs_you")
-        XCTAssertTrue(bar.waitForExistence(timeout: 60), "no V1 list:\n\(app.debugDescription)")
+        XCTAssertTrue(element("todos.v1").waitForExistence(timeout: 60), "no V1 list:\n\(app.debugDescription)")
         let header = element("todos.section.needs_you")
         XCTAssertTrue(header.waitForExistence(timeout: 20))
-        let n = try XCTUnwrap(number(bar.label), bar.label)
+        let n = try XCTUnwrap((header.value as? String).flatMap { Int($0) }, String(describing: header.value))
         XCTAssertGreaterThan(n, 0)
-        XCTAssertEqual(header.value as? String, String(n), "the Needs you header")
+        // A filter that leaves Needs you out says the same N on its guard line.
+        choose("in_progress")
+        let guardLine = element("todos.guard")
+        XCTAssertTrue(guardLine.waitForExistence(timeout: 10), "no guard line:\n\(app.debugDescription)")
+        XCTAssertEqual(number(guardLine.label), n, "the guard line: \(guardLine.label)")
+        element("todos.filter.clear").tap()
+        XCTAssertTrue(header.waitForExistence(timeout: 10))
 
         element("sidebar-drawer-button").tap()
         let row = element("sidebar-todos")
@@ -146,9 +149,10 @@ final class TodosV1ListTests: XCTestCase {
         XCTAssertTrue(element("todos.v1").waitForExistence(timeout: 20), "the V1 list the next time:\n\(app.debugDescription)")
     }
 
-    /// The calm rule: with only the owner's plain to-dos left, no bar and no section headers; Someday stays folded at the
-    /// end. The mock's other to-dos are deleted for it and put back after (`/mock/reset`).
-    @MainActor func testTheCalmListHasNoBar() throws {
+    /// The calm rule: with only the owner's plain to-dos left, no Filter and no section headers, search and New To-Do
+    /// still at the foot; Someday stays folded at the end. The mock's other to-dos are deleted for it and put back after
+    /// (`/mock/reset`).
+    @MainActor func testTheCalmListHasNoFilter() throws {
         guard let hub = env["PERSONA_TODOS_HUB"] else { throw XCTSkip("needs MOCK_TODO_VIEW=1 (PERSONA_TODOS_HUB)") }
         let base = try XCTUnwrap(URL(string: hub))
         let call = { (method: String, path: String) in try self.mock(base, method, path) }
@@ -163,8 +167,186 @@ final class TodosV1ListTests: XCTestCase {
         XCTAssertTrue(element("todos.v1").waitForExistence(timeout: 60), "no V1 list:\n\(app.debugDescription)")
         XCTAssertTrue(element("todos.row.t11").waitForExistence(timeout: 20))
         XCTAssertTrue(element("todos.fold.someday").exists, "Someday folded at the end")
-        XCTAssertFalse(element("todos.bar.all").exists, "a calm list draws no bar")
+        XCTAssertFalse(element("todos.filter").exists, "a calm list draws no Filter")
         XCTAssertFalse(element("todos.section.todo").exists, "nor section headers")
+        XCTAssertTrue(element("todos.new").exists, "New To-Do stays")
+        // ⋯ still sorts, and offers no grouping: a calm list has one card.
+        viewMenu().tap()
+        XCTAssertTrue(menuItem("todos.view.sort.suggested", at: 0).waitForExistence(timeout: 5), "no Sort By in ⋯:\n\(app.debugDescription)")
+        XCTAssertFalse(app.buttons.matching(identifier: "todos.view.byProject").firstMatch.exists, "no Group by Project while calm")
+        let menus = app.collectionViews.allElementsBoundByIndex.filter { $0.identifier != "todos.v1" }
+        if let menu = menus.last { XCTAssertEqual(menu.buttons.count, TodosV1ListTests.sorts.count, "the four sorts alone") }
+    }
+
+    /// ⋯'s sorts, in its order.
+    private static let sorts = ["suggested", "activity", "due", "priority"]
+
+    /// The rows are compact (DESIGN_SYSTEM 3.4 "To-dos list", the row): their one padding, 12 pt above and below, and
+    /// none of the cell's own, and their ticks 16 pt inside the card. The list reads a row's insets only from its outermost
+    /// view, and rows that set them inside their cell were 20 to 30 pt taller and, on iOS 18 and 27, 20 pt inside.
+    @MainActor func testTheRowsAreCompact() throws {
+        guard let hub = env["PERSONA_TODOS_HUB"] else { throw XCTSkip("needs MOCK_TODO_VIEW=1 (PERSONA_TODOS_HUB)") }
+        launch(hub, ["-todos.v1.byProject", "NO", "-todos.v1.sort", "suggested"], layout: "separate")
+        XCTAssertTrue(element("todos.v1").waitForExistence(timeout: 60), "no V1 list:\n\(app.debugDescription)")
+        // Two rows one under the other in Working: from the first's tick to the second's is the first's cell.
+        let first = element("todos.tick.t05"), second = element("todos.tick.t06"), words = element("todos.row.t05")
+        XCTAssertTrue(first.waitForExistence(timeout: 20) && second.exists && words.exists, "no Working rows:\n\(app.debugDescription)")
+        let cell = second.frame.minY - first.frame.minY
+        let padding = cell - words.frame.height
+        // 12 above and below, and the tick ring rising a little above the title's line; the system's own margins on top
+        // made it 59 pt.
+        XCTAssertLessThanOrEqual(padding, 2 * 12 + 8, "the row's one padding, nothing more: a \(cell)-pt cell for \(words.frame.height) pt of words")
+        // The tick under its heading's words, both 16 pt inside the card (iOS 26 and later: iOS 18 can set a heading's
+        // side insets only with all four, so its headings keep the system's).
+        if #available(iOS 26.0, *) {
+            let heading = element("todos.section.working")
+            XCTAssertTrue(heading.exists)
+            XCTAssertEqual(first.frame.minX, heading.frame.minX, accuracy: 1.5, "the tick under the heading's words")
+        }
+    }
+
+    /// A choice from the Filter's menu, by its identifier.
+    @MainActor private func choose(_ choice: String) {
+        // iOS 18 draws a choice that is on as "Filtered by: ‹choice›", which opens the same menu (its glyph is × there).
+        let named = element("todos.filter.value")
+        let filter = !element("todos.filter").exists && named.exists ? named : element("todos.filter")
+        XCTAssertTrue(filter.waitForExistence(timeout: 20), "no Filter:\n\(app.debugDescription)")
+        filter.tap()
+        let order = ["all", "needs_you", "in_progress", "todo", "done"]
+        let item = menuItem("todos.filter." + choice, at: order.firstIndex(of: choice) ?? 0)
+        XCTAssertTrue(item.waitForExistence(timeout: 5), "no \(choice) in the Filter's menu:\n\(app.debugDescription)")
+        item.tap()
+    }
+
+    /// An open menu's item by its identifier, else by its place: SwiftUI carries no identifier onto a menu's items on
+    /// iOS 26 and later, and these menus list their items in a fixed order (the Filter's `menuOrder(.fixed)`, ⋯'s
+    /// sorts then Group by Project).
+    @MainActor private func menuItem(_ id: String, at index: Int) -> XCUIElement {
+        let byID = app.buttons.matching(identifier: id).allElementsBoundByIndex.first(where: \.isHittable)
+        if let byID { return byID }
+        let menus = app.collectionViews.allElementsBoundByIndex.filter { $0.identifier != "todos.v1" }
+        guard let menu = menus.last else { return app.buttons[id] }
+        return menu.buttons.element(boundBy: index)
+    }
+
+    /// ⋯: the page's own menu, or on iOS 27 built with its SDK the bar's overflow menu, which carries no identifier of
+    /// ours: the navigation bar's trailing button.
+    @MainActor private func viewMenu() -> XCUIElement {
+        let ours = element("todos.view")
+        if ours.waitForExistence(timeout: 3) { return ours }
+        return app.navigationBars.firstMatch.buttons.allElementsBoundByIndex.last(where: \.isHittable) ?? ours
+    }
+
+    /// The search field, opened (on iOS 26 at the foot, folded to ⌕ while a filter is on; on iOS 18 under the title).
+    @MainActor private func searchField() -> XCUIElement {
+        let field = app.searchFields.firstMatch
+        if !(field.exists && field.isHittable) {
+            let button = app.buttons.matching(NSPredicate(format: "identifier == 'Search' OR label ==[c] 'search'")).allElementsBoundByIndex
+                .first(where: \.isHittable)
+            if let button { button.tap() } else { app.collectionViews.firstMatch.swipeDown(velocity: .slow) }
+        }
+        XCTAssertTrue(field.waitForExistence(timeout: 10), "no search field:\n\(app.debugDescription)")
+        return field
+    }
+
+    /// The foot toolbar: the Filter narrows the list and names its choice; a choice that leaves Needs you out says so on
+    /// a guard line, whose Show All is All again, as × is, the list back at its top; ⋯ holds Sort By (Suggested, Recently
+    /// Changed, Due Date, Priority), the one checked kept, and Group by Project, greyed under Needs You; the search keeps
+    /// the sections, sets the choice aside and ends with Search Chats, which opens the app's search over the chats with
+    /// the words; + opens New To-Do. Launched in English only because the system's search controls (its ⌕, Cancel and
+    /// ×) carry no identifier and are found by their words; what the test checks of ours is by identifier.
+    @MainActor func testTheFilterSearchAndNewToDo() throws {
+        guard let hub = env["PERSONA_TODOS_HUB"] else { throw XCTSkip("needs MOCK_TODO_VIEW=1 (PERSONA_TODOS_HUB)") }
+        // The arrangement as the list starts, whatever an earlier run left on the device.
+        launch(hub, ["-AppleLanguages", "(en)", "-AppleLocale", "en_US", "-todos.v1.byProject", "NO", "-todos.v1.sort", "suggested"],
+               layout: "separate")
+        XCTAssertTrue(element("todos.v1").waitForExistence(timeout: 60), "no V1 list:\n\(app.debugDescription)")
+        XCTAssertTrue(element("todos.section.needs_you").waitForExistence(timeout: 20))
+        let sorts = Self.sorts
+        let sort = { (id: String) in self.menuItem("todos.view.sort." + id, at: sorts.firstIndex(of: id) ?? 0) }
+        let byProject = { self.menuItem("todos.view.byProject", at: sorts.count) }
+        let project = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'todos.section.project:'")).firstMatch
+        // iOS 26 names the choice on the Filter itself; iOS 18 says "Filtered by: ‹choice›" between its glyph and +.
+        let atRest = element("todos.filter").value as? String
+        choose("in_progress")
+        XCTAssertTrue(element("todos.guard").waitForExistence(timeout: 10), "no guard line:\n\(app.debugDescription)")
+        XCTAssertFalse(element("todos.section.needs_you").exists, "Needs you is left out")
+        XCTAssertTrue(element("todos.section.working").exists)
+        let named = element("todos.filter").exists ? element("todos.filter") : element("todos.filter.value")
+        let value = named.value as? String
+        XCTAssertTrue(value?.isEmpty == false && value != atRest, "the Filter names its choice: \(value ?? "nil") at rest \(atRest ?? "nil")")
+        element("todos.guard").tap()
+        XCTAssertTrue(element("todos.section.needs_you").waitForExistence(timeout: 10), "Show All")
+        XCTAssertFalse(element("todos.guard").exists)
+        // A choice re-files the list from its top: down the list under In Progress, then × (All again, no guard line),
+        // and the first heading is in sight.
+        choose("in_progress")
+        XCTAssertTrue(element("todos.guard").waitForExistence(timeout: 10))
+        app.collectionViews.firstMatch.swipeUp(velocity: .slow)
+        sleep(1)
+        let clearAll = element("todos.filter.clear")
+        XCTAssertTrue(clearAll.waitForExistence(timeout: 5))
+        clearAll.tap()
+        let needsHeader = element("todos.section.needs_you")
+        XCTAssertTrue(needsHeader.waitForExistence(timeout: 10))
+        sleep(1)
+        XCTAssertTrue(needsHeader.frame.minY >= app.navigationBars.firstMatch.frame.maxY - 2
+                      && needsHeader.frame.maxY < app.windows.firstMatch.frame.height / 2,
+                      "a choice puts the list at its top: \(needsHeader.frame) under \(app.navigationBars.firstMatch.frame)")
+        choose("needs_you")
+        XCTAssertTrue(element("todos.row.t01").waitForExistence(timeout: 10))
+        XCTAssertFalse(element("todos.section.working").exists)
+        XCTAssertFalse(element("todos.guard").exists, "nothing that needs the owner is hidden")
+        // ⋯: the four sorts and Group by Project, greyed under Needs You; Due Date checked once chosen, then Suggested
+        // again (the sort is kept on the device).
+        viewMenu().tap()
+        XCTAssertTrue(sort("suggested").waitForExistence(timeout: 5), "no Sort By in ⋯:\n\(app.debugDescription)")
+        XCTAssertTrue(sort("activity").exists && sort("due").exists && sort("priority").exists)
+        XCTAssertTrue(byProject().exists && !byProject().isEnabled, "Group by Project greyed under Needs You")
+        sort("due").tap()
+        viewMenu().tap()
+        XCTAssertTrue(sort("due").waitForExistence(timeout: 5) && sort("due").isSelected, "Due Date checked")
+        sort("suggested").tap()
+        element("todos.filter.clear").tap()
+        // Group by Project under All: a heading per project, Needs you still first; then off again (kept on the device).
+        XCTAssertTrue(element("todos.section.working").waitForExistence(timeout: 10))
+        viewMenu().tap()
+        XCTAssertTrue(byProject().waitForExistence(timeout: 5) && byProject().isEnabled)
+        byProject().tap()
+        XCTAssertTrue(project.waitForExistence(timeout: 10), "a project's heading:\n\(app.debugDescription)")
+        XCTAssertTrue(element("todos.section.needs_you").exists && !element("todos.section.working").exists)
+        viewMenu().tap()
+        XCTAssertTrue(byProject().waitForExistence(timeout: 5))
+        byProject().tap()
+        XCTAssertTrue(element("todos.section.working").waitForExistence(timeout: 10), "the sections again")
+        // The search: the Kyoto trip by its title, under To Do; nothing else; then the widening row.
+        choose("todo")
+        let field = searchField()
+        field.tap()
+        field.typeText("Kyoto")
+        XCTAssertTrue(element("todos.row.t01").waitForExistence(timeout: 10), "a match outside the choice:\n\(app.debugDescription)")
+        XCTAssertFalse(element("todos.row.t05").exists, "a row that does not match")
+        XCTAssertFalse(element("todos.guard").exists, "the choice is set aside while searching")
+        XCTAssertTrue(element("todos.searchChats").waitForExistence(timeout: 5), "Search Chats for …")
+        // Search Chats: the app's search over Persona's chats, with the words, and no Agents scope on an everyday page.
+        element("todos.searchChats").tap()
+        let chats = element("full-search-field")
+        XCTAssertTrue(chats.waitForExistence(timeout: 10), "no full search:\n\(app.debugDescription)")
+        XCTAssertEqual(chats.value as? String, "Kyoto", "the words go with it")
+        XCTAssertFalse(element("full-search-scope").exists, "Persona's chats only")
+        element("full-search-close").tap()
+        XCTAssertTrue(chats.waitForNonExistence(timeout: 10))
+        XCTAssertTrue(element("todos.searchChats").waitForExistence(timeout: 10), "back on the list's search")
+        let cancel = app.buttons.matching(NSPredicate(format: "label ==[c] 'cancel' OR label ==[c] 'close'")).allElementsBoundByIndex
+            .first(where: \.isHittable)
+        try XCTUnwrap(cancel, "no way out of the search:\n\(app.debugDescription)").tap()
+        XCTAssertTrue(element("todos.guard").waitForExistence(timeout: 10), "the choice is back once the field is cleared")
+        element("todos.filter.clear").tap()
+        // New To-Do from the foot.
+        element("todos.new").tap()
+        XCTAssertTrue(element("todos.new.title").waitForExistence(timeout: 10), "no New To-Do sheet:\n\(app.debugDescription)")
+        element("sheet-close").tap()
+        XCTAssertTrue(element("todos.new.title").waitForNonExistence(timeout: 10))
     }
 
     /// The frames the list draws, for the review (no checks beyond reaching them).
@@ -183,56 +365,77 @@ final class TodosV1ListTests: XCTestCase {
         let wants = { (frame: String) in frames.isEmpty || frames.contains(frame.isEmpty ? "list" : frame) }
         let suffix = env["PERSONA_TODOS_SUFFIX"].map { "-" + $0 } ?? ""
         let shot = { (frame: String) in
-            sleep(2) // the bar's reveal and the rows' marks settle
+            sleep(2) // the menus' and the rows' marks settle
             let png = XCUIScreen.main.screenshot().pngRepresentation
             try? png.write(to: URL(fileURLWithPath: dir).appendingPathComponent("iphone-list\(frame)\(suffix)-\(scheme).png"))
         }
-        // The iPhone's own layout, as the frames draw it: ☰ on the list, the shell's drawer.
-        launch(hub, extra, layout: "separate")
-        // The list; a calm one has no bar.
-        XCTAssertTrue(element("todos.v1").waitForExistence(timeout: 60), "no V1 list:\n\(app.debugDescription)")
-        _ = element("todos.bar.all").waitForExistence(timeout: 10)
-        if wants("") { shot("") }
-        // A menu goes with a tap beside it, at the page's leading edge (it opens from the trailing one), then the page is
-        // there to tap again.
+        // Each from a fresh launch: the iPhone's own layout, as the frames draw it (☰ on the list, the shell's drawer).
+        // The arrangement is said at every launch, since the page keeps what a frame launched with (Group by Project, a
+        // sort) and the frames after it would draw it too.
+        let arranged = ["-todos.v1.byProject", "NO", "-todos.v1.sort", "suggested"]
+        let fresh = { (more: [String]) in
+            self.app?.terminate()
+            self.launch(hub, extra + (more.isEmpty ? arranged : more), layout: "separate")
+            if !self.element("todos.v1").waitForExistence(timeout: 60) { XCTFail("no V1 list:\n\(self.app.debugDescription)") }
+            _ = self.element("todos.new").waitForExistence(timeout: 10)
+            sleep(1)
+        }
+        // A menu goes with a tap beside it, at the page's leading edge.
         let away = {
-            self.app.coordinate(withNormalizedOffset: CGVector(dx: 0.04, dy: 0.6)).tap()
-            let bar = self.element("todos.bar.needs_you")
-            for _ in 0..<10 where !bar.isHittable { usleep(300_000) }
+            self.app.coordinate(withNormalizedOffset: CGVector(dx: 0.04, dy: 0.45)).tap()
+            sleep(1)
         }
-        if wants("~more") {
-            element("todos.more").tap()
-            shot("~more")
+        fresh([])
+        if wants("") { shot("") }
+        if wants("~filter-menu") {
+            element("todos.filter").tap()
+            shot("~filter-menu")
             away()
         }
-        if wants("~group") {
-            XCTAssertTrue(element("todos.grouping").waitForExistence(timeout: 10), "no grouping menu:\n\(app.debugDescription)")
-            element("todos.grouping").tap()
-            shot("~group")
+        if wants("~view") {
+            viewMenu().tap()
+            shot("~view")
             away()
         }
-        for (frame, id) in [("~filter-needs", "needs_you"), ("~filter-progress", "in_progress"), ("~filter-todo", "todo")] where wants(frame) {
-            element("todos.bar." + id).tap()
+        for (frame, id) in [("~filter-needs", "needs_you"), ("~filter-progress", "in_progress"), ("~filter-todo", "todo"),
+                            ("~filter-done", "done")] where wants(frame) {
+            choose(id)
             shot(frame)
         }
-        if wants("~done"), element("todos.bar.done").exists {
-            element("todos.bar.done").tap()
-            shot("~done")
+        // ⋯ under Needs You: Group by Project greyed, with why in its section's heading.
+        if wants("~view-needs") {
+            choose("needs_you")
+            viewMenu().tap()
+            shot("~view-needs")
+            away()
+            fresh([])
         }
-        if wants("~scrolled") {
-            element("todos.bar.all").tap()
+        // Group by Project and a sort other than Suggested, each kept on the device, as the list opens with it (the
+        // whole arrangement said, so a frame never draws the one before it).
+        for (frame, more) in [("~group-project", ["-todos.v1.byProject", "YES", "-todos.v1.sort", "suggested"]),
+                              ("~sorted-priority", ["-todos.v1.byProject", "NO", "-todos.v1.sort", "priority"]),
+                              ("~sorted-due", ["-todos.v1.byProject", "NO", "-todos.v1.sort", "due"])]
+        where wants(frame) {
+            fresh(more)
+            shot(frame)
+            fresh([])
+        }
+        if wants("~filter-progress-scrolled") {
+            choose("in_progress")
             app.collectionViews.firstMatch.swipeUp(velocity: .slow)
-            shot("~scrolled")
-            // The list's end: Just finished, the closed rows, Someday and Done today folded.
-            app.collectionViews.firstMatch.swipeUp(velocity: .fast)
-            app.collectionViews.firstMatch.swipeUp(velocity: .fast)
-            shot("~scrolled-end")
-            app.collectionViews.firstMatch.swipeDown(velocity: .fast)
-            app.collectionViews.firstMatch.swipeDown(velocity: .fast)
-            app.collectionViews.firstMatch.swipeDown(velocity: .fast)
+            shot("~filter-progress-scrolled") // the title's subtitle, once the guard line has gone (iOS 26 and later)
+        }
+        if wants("~filter-progress-menu") {
+            choose("in_progress")
+            element("todos.filter").tap()
+            shot("~filter-progress-menu")
+            away()
+        }
+        if wants("~scrolled") || wants("~end") || wants("~someday-open") || wants("~canwait-open") || wants("~drawer")
+            || wants("~search") || wants("~search-results") || wants("~search-empty") {
+            fresh([])
         }
         if wants("~canwait-open") {
-            element("todos.bar.all").tap()
             let fold = element("todos.fold.can_wait")
             if fold.waitForExistence(timeout: 5) {
                 fold.tap()
@@ -240,18 +443,55 @@ final class TodosV1ListTests: XCTestCase {
                 fold.tap()
             }
         }
+        if wants("~scrolled") {
+            app.collectionViews.firstMatch.swipeUp(velocity: .slow)
+            shot("~scrolled")
+        }
+        if wants("~end") || wants("~someday-open") {
+            // The list's end: Just finished, then Someday and Done today folded on the page after the last card.
+            app.collectionViews.firstMatch.swipeUp(velocity: .fast)
+            app.collectionViews.firstMatch.swipeUp(velocity: .fast)
+            app.collectionViews.firstMatch.swipeUp(velocity: .fast)
+            if wants("~end") { shot("~end") }
+            if wants("~someday-open"), element("todos.fold.someday").exists {
+                element("todos.fold.someday").tap()
+                app.collectionViews.firstMatch.swipeUp(velocity: .fast)
+                shot("~someday-open")
+                element("todos.fold.someday").tap()
+            }
+            for _ in 0..<4 { app.collectionViews.firstMatch.swipeDown(velocity: .fast) }
+        }
         if wants("~drawer") {
-            element("todos.bar.all").tap()
             element("shell-place-sidebar").tap()
             XCTAssertTrue(element("sidebar-todos").waitForExistence(timeout: 10))
             shot("~drawer")
+            app.coordinate(withNormalizedOffset: CGVector(dx: 0.95, dy: 0.5)).tap()
+            sleep(1)
         }
-        // The groupings, each as the list opens with it (kept on the device: `todos.v1.grouping`).
-        for (frame, grouping) in [("~group-project", "project"), ("~group-due", "due")] where wants(frame) {
-            app.terminate()
-            launch(hub, extra + ["-todos.v1.grouping", grouping], layout: "separate")
-            XCTAssertTrue(element("todos.v1").waitForExistence(timeout: 60), "no V1 list:\n\(app.debugDescription)")
-            _ = element("todos.bar.all").waitForExistence(timeout: 10)
+        if wants("~search") || wants("~search-results") || wants("~search-empty") {
+            let field = searchField()
+            field.tap()
+            if wants("~search") { shot("~search") }
+            field.typeText("Kyoto")
+            if wants("~search-results") { shot("~search-results") }
+            if wants("~search-empty") {
+                field.typeText(" ryokan booking form")
+                shot("~search-empty")
+            }
+        }
+        // The calm list, the mock's other to-dos deleted (put back after): one card with no heading, no Filter; then
+        // the card's only row, a one-line one, swiped.
+        for (frame, keep) in [("~calm", ["t11", "t12", "t14"]), ("~swiped-only", ["t11"])] where wants(frame) {
+            let base = try XCTUnwrap(URL(string: hub))
+            defer { _ = try? mock(base, "GET", "mock/reset") }
+            struct Rows: Decodable { struct Row: Decodable { var id: String }; var todos: [Row] }
+            for row in try JSONDecoder().decode(Rows.self, from: mock(base, "GET", "api/v1/todos")).todos
+            where !keep.contains(row.id) && !(keep.contains("t12") && row.id.hasPrefix("t12-")) {
+                _ = try mock(base, "DELETE", "api/v1/todos/" + row.id)
+            }
+            fresh([])
+            _ = element("todos.row.t11").waitForExistence(timeout: 20)
+            if frame == "~swiped-only" { revealSwipe("t11") }
             shot(frame)
         }
         // A choice with nothing under it: Needs You, the to-dos that need the owner deleted on the mock (put back after).
@@ -266,10 +506,8 @@ final class TodosV1ListTests: XCTestCase {
             where ["needs_you", "can_wait"].contains(row.view?.section ?? "") {
                 _ = try mock(base, "DELETE", "api/v1/todos/" + row.id)
             }
-            app.terminate()
-            launch(hub, extra, layout: "separate")
-            XCTAssertTrue(element("todos.bar.needs_you").waitForExistence(timeout: 60), "no bar:\n\(app.debugDescription)")
-            element("todos.bar.needs_you").tap()
+            fresh([])
+            choose("needs_you")
             shot("~filter-needs-empty")
         }
     }
@@ -309,10 +547,13 @@ final class TodosV1ListTests: XCTestCase {
     @MainActor func testTheListStaysWhereItRested() throws {
         guard let hub = env["PERSONA_TODOS_HUB"] else { throw XCTSkip("needs MOCK_TODO_VIEW=1 (PERSONA_TODOS_HUB)") }
         launch(hub, layout: "separate")
-        XCTAssertTrue(element("todos.bar.all").waitForExistence(timeout: 60), "no V1 list:\n\(app.debugDescription)")
+        XCTAssertTrue(element("todos.v1").waitForExistence(timeout: 60), "no V1 list:\n\(app.debugDescription)")
+        _ = element("todos.row.t01").waitForExistence(timeout: 20)
         sleep(1)
         let first = rowsInSight().first?.identifier
         let list = app.collectionViews.firstMatch
+        // Twice, which with the compact rows takes the list to its very end: the to-do page has no foot toolbar, so
+        // while it is in front the list's end is a toolbar's height shorter, and the list must come back where it was.
         list.swipeUp(velocity: .slow)
         list.swipeUp(velocity: .slow)
         sleep(2) // at rest
@@ -352,11 +593,11 @@ final class TodosV1ListTests: XCTestCase {
     }
 
     /// The list, opened in the iPhone's own layout and scrolled to its end, where `id`'s row is in sight clear of the bars
-    /// and of New To-Do at the foot.
+    /// and of the foot toolbar.
     @MainActor private func openList(_ hub: String, showing id: String) {
         launch(hub, ["-AppleLanguages", "(en)", "-AppleLocale", "en_US"], layout: "separate")
         XCTAssertTrue(element("todos.v1").waitForExistence(timeout: 60), "no V1 list:\n\(app.debugDescription)")
-        _ = element("todos.bar.all").waitForExistence(timeout: 10)
+        _ = element("todos.row.t01").waitForExistence(timeout: 20)
         toEnd()
         bring(id)
         let row = element("todos.row." + id)
@@ -382,18 +623,11 @@ final class TodosV1ListTests: XCTestCase {
         }
     }
 
-    /// Whether `row` is in sight between the bars and New To-Do, where a finger reaches it.
+    /// Whether `row` is in sight between the navigation bar and the foot toolbar, where a finger reaches it.
     @MainActor private func clear(_ row: XCUIElement) -> Bool {
-        let pill = element("todos.new")
-        let floor = pill.exists ? pill.frame.minY : app.windows.firstMatch.frame.height
-        // iOS 26 pins the bar over the list; on iOS 18 it is the list's first row and scrolls away.
-        let bar = element("todos.bar.all")
-        var top = max(bar.exists ? bar.frame.maxY : 0, app.navigationBars.firstMatch.frame.maxY)
-        // A section's heading pinned under the bar covers the rows scrolling under it.
-        let headings = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'todos.section.'"))
-        for heading in headings.allElementsBoundByIndex where heading.frame.minY <= top + 8 && heading.frame.maxY > top {
-            top = heading.frame.maxY
-        }
+        let new = element("todos.new")
+        let floor = new.exists ? new.frame.minY : app.windows.firstMatch.frame.height
+        let top = app.navigationBars.firstMatch.frame.maxY
         return row.isHittable && row.frame.minY > top && row.frame.maxY < floor
     }
 
@@ -501,7 +735,7 @@ final class TodosV1ListTests: XCTestCase {
     }
 
     /// Offline, the list's own line says the hub is out of reach, and the shell's pill does not say it again over the
-    /// bar's counts (docs/apple/shell.md "Said once").
+    /// list (docs/apple/shell.md "Said once").
     @MainActor func testOfflineIsSaidOnce() throws {
         guard let hub = env["PERSONA_TODOS_HUB"] else { throw XCTSkip("needs MOCK_TODO_VIEW=1 (PERSONA_TODOS_HUB)") }
         launch(hub, ["-AppleLanguages", "(en)", "-AppleLocale", "en_US", "-simulateOffline", "YES"], layout: "separate")
@@ -513,7 +747,7 @@ final class TodosV1ListTests: XCTestCase {
     /// The rows' actions as the frames draw them, for the review: the swipe and its other forms (Undo, Reopen, Remove
     /// from Someday), a tick with its Undo, the long-press menu and its Project, Date…, Delete…'s and the working tick's
     /// confirmations from rows low on the page, Mark Done on a finished row seen a day ago, New To-Do, a new row being
-    /// saved and one the hub could not be reached for, a row under a pinned heading, and the offline line. The mock is
+    /// saved and one the hub could not be reached for, and the offline line. The mock is
     /// put back before each.
     @MainActor func testActionFrames() throws {
         guard env["PERSONA_TODOS_FRAMES"] == "1", let hub = env["PERSONA_TODOS_HUB"], let dir = env["PERSONA_SHOTS"] else {
@@ -537,14 +771,15 @@ final class TodosV1ListTests: XCTestCase {
             let png = XCUIScreen.main.screenshot().pngRepresentation
             try? png.write(to: URL(fileURLWithPath: dir).appendingPathComponent("iphone-list\(frame)-\(scheme).png"))
         }
-        // Each from a fresh mock and launch, the list scrolled to its end as the frames draw it.
+        // Each from a fresh mock and launch, the list scrolled to its end as the frames draw it, in the list's own
+        // arrangement whatever an earlier run left on the device.
         let fresh = { (more: [String]) in
             _ = try? self.mock(base, "GET", "mock/delay?s=0")
             _ = try? self.mock(base, "GET", "mock/reset")
             self.app?.terminate()
-            self.launch(hub, extra + more, layout: "separate")
+            self.launch(hub, extra + ["-todos.v1.byProject", "NO", "-todos.v1.sort", "suggested"] + more, layout: "separate")
             if !self.element("todos.v1").waitForExistence(timeout: 60) { XCTFail("no V1 list:\n\(self.app.debugDescription)") }
-            _ = self.element("todos.bar.all").waitForExistence(timeout: 10)
+            _ = self.element("todos.row.t01").waitForExistence(timeout: 20)
             sleep(1)
         }
         let longPress = { (id: String) in self.element("todos.row." + id).press(forDuration: 1.2) }
@@ -554,6 +789,12 @@ final class TodosV1ListTests: XCTestCase {
             bring("t09")
             revealSwipe("t09")
             shot("~swiped", 1)
+        }
+        if wants("~swiped-first") {
+            // The first row of the first card, under its heading: the swipe inside the card's top corners.
+            fresh([])
+            revealSwipe("t01")
+            shot("~swiped-first", 1)
         }
         if wants("~ticked") {
             fresh([])
@@ -640,14 +881,6 @@ final class TodosV1ListTests: XCTestCase {
             bring("t07")
             XCTAssertTrue(element("todos.markDone.t07").waitForExistence(timeout: 10), "no Mark Done:\n\(app.debugDescription)")
             shot("~mark-done", 1)
-        }
-        if wants("~header") {
-            // A row half under a pinned heading, the list at rest.
-            fresh([])
-            let from = app.windows.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.7))
-            from.press(forDuration: 0.05, thenDragTo: from.withOffset(CGVector(dx: 0, dy: -230)), withVelocity: .slow,
-                       thenHoldForDuration: 0.5)
-            shot("~header", 1)
         }
         if wants("~new") || wants("~added") || wants("~saving") || wants("~new-unsaved") {
             let add = { (frame: String, before: (() -> Void)?) in

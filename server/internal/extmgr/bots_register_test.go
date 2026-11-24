@@ -9,8 +9,9 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/nwverse/persona/server/internal/botport"
+
 	"github.com/nwverse/persona/server/internal/assistantwire"
-	"github.com/nwverse/persona/server/internal/feishubot"
 )
 
 // fakeAccounts is the accounts site's app registration: begin hands out a device code, each poll answers the next of
@@ -65,7 +66,7 @@ func registerWorld(t *testing.T, polls ...string) (*botWorld, *fakeAccounts, *[]
 	}
 	api := newFakeOpenAPI(t)
 	acc := newFakeAccounts(t, polls...)
-	h.bots.registrar = feishubot.NewRegistrar().WithHost(acc.srv.URL)
+	h.bots.registrar = botport.NewRegistrar(acc.srv.URL)
 	h.bots.regDomain = func(string) string { return api.srv.URL }
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
@@ -91,6 +92,7 @@ func (w *botWorld) bind(t *testing.T, step string) map[string]any {
 // Binding with no app starts a registration; once confirmed, the new app is saved, its confirming person is the owner
 // in the private chat the greeting landed in, and the assistant starts the chat without greeting again.
 func TestBotRegistrationCreatesTheAppAndPairsTheOwner(t *testing.T) {
+	needsLarkModule(t)
 	w, acc, told := registerWorld(t,
 		`{"error":"authorization_pending"}`,
 		`{"client_id":"cli_new","client_secret":"new-secret","user_info":{"open_id":"ou_me","tenant_brand":"feishu"}}`)
@@ -143,8 +145,9 @@ func TestBotRegistrationCreatesTheAppAndPairsTheOwner(t *testing.T) {
 	}
 }
 
-// A declined authorization starts another one and says why; a tenant on the other cloud is polled there.
-func TestBotRegistrationDeclinedStartsAgain(t *testing.T) {
+// A tenant on the other cloud is polled there. Declining waits for an explicit bind before starting again.
+func TestBotRegistrationDeclinedWaitsForBind(t *testing.T) {
+	needsLarkModule(t)
 	w, acc, _ := registerWorld(t, `{"error":"tenant_mismatch","user_info":{"tenant_brand":"lark"}}`, `{"error":"access_denied"}`)
 	w.bind(t, "")
 	if p := w.bind(t, stepRegister); p["step"] != stepRegister || p["error"] != nil {
@@ -160,6 +163,15 @@ func TestBotRegistrationDeclinedStartsAgain(t *testing.T) {
 	if p["step"] != stepRegister || p["error"] == nil {
 		t.Fatalf("declined: %v", p)
 	}
+	if p := w.bind(t, stepRegister); p["error"] == nil {
+		t.Fatalf("declined on the next poll: %v", p)
+	}
+	if acc.devices != 1 {
+		t.Fatalf("polling a declined registration started another: %v", acc.asked)
+	}
+	if p := w.bind(t, ""); p["step"] != stepRegister || p["error"] != nil {
+		t.Fatalf("explicit retry: %v", p)
+	}
 	if n := strings.Count(strings.Join(acc.asked, "\n"), "begin"); n != 2 {
 		t.Fatalf("a second registration, asked %v", acc.asked)
 	}
@@ -167,9 +179,10 @@ func TestBotRegistrationDeclinedStartsAgain(t *testing.T) {
 
 // A bot with credentials already goes on to the pairing code, as before.
 func TestBotWithCredentialsStillPairsWithACode(t *testing.T) {
+	needsLarkModule(t)
 	w := newBotWorld(t)
 	acc := newFakeAccounts(t, `{}`)
-	w.h.bots.registrar = feishubot.NewRegistrar().WithHost(acc.srv.URL)
+	w.h.bots.registrar = botport.NewRegistrar(acc.srv.URL)
 	if p := w.bind(t, ""); p["kind"] != PromptPairCode {
 		t.Fatalf("pair step: %v", p)
 	}

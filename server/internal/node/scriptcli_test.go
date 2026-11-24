@@ -33,6 +33,15 @@ type scriptHub struct {
 	decisions      []map[string]any
 	decisionAnswer assistantwire.OutsideDecisionReply
 	larkSent       []proto.LarkSent // what the node's gate proxy told of (lark.sent)
+	lark           proto.AssistantLark
+
+	direction      func(context.Context, string, json.RawMessage) (any, error)
+	directionCalls []scriptDirectionCall
+}
+
+type scriptDirectionCall struct {
+	method string
+	params json.RawMessage
 }
 
 func newScriptHub(t *testing.T, create func(ctx context.Context, ix proto.Interaction) (any, error), notify func() (any, error)) *scriptHub {
@@ -63,6 +72,14 @@ func newScriptHub(t *testing.T, create func(ctx context.Context, ix proto.Intera
 			h.notified = append(h.notified, p)
 			h.mu.Unlock()
 			return notify()
+		case "direction.create", "direction.progress":
+			h.mu.Lock()
+			h.directionCalls = append(h.directionCalls, scriptDirectionCall{method: method, params: params})
+			h.mu.Unlock()
+			if h.direction != nil {
+				return h.direction(ctx, method, params)
+			}
+			return nil, nil
 		case assistantwire.MethodDecisionRaise, assistantwire.MethodDecisionGet, assistantwire.MethodDecisionWithdraw:
 			var p map[string]any
 			_ = json.Unmarshal(params, &p)
@@ -71,6 +88,11 @@ func newScriptHub(t *testing.T, create func(ctx context.Context, ix proto.Intera
 			answer := h.decisionAnswer
 			h.mu.Unlock()
 			return answer, nil
+		case "assistant.lark":
+			h.mu.Lock()
+			cfg := h.lark
+			h.mu.Unlock()
+			return cfg, nil
 		case proto.MethodLarkSent:
 			var s proto.LarkSent
 			_ = json.Unmarshal(params, &s)

@@ -24,6 +24,7 @@ import androidx.compose.ui.viewinterop.AndroidView
 import org.jsoup.Jsoup
 import org.jsoup.safety.Safelist
 import java.io.ByteArrayInputStream
+import persona.core.inbox.*
 
 internal fun safeMailHtml(
     html: String,

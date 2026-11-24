@@ -41,6 +41,25 @@ nonisolated struct AgentKind: Equatable, Sendable {
         }
     }
 
+    init(_ harness: SubagentOverview.HarnessInfo) {
+        surface = harness.agentSurface.flatMap(Surface.init(rawValue:))
+        let lower = (harness.agent ?? "").lowercased()
+        let isCodex = lower == "codex" || harness.sourceKind == "codex_app_server" || harness.sourceKind == "codex_history"
+        let isClaude = !isCodex && (lower.isEmpty || lower == "claude")
+        switch lower {
+        case _ where isCodex: brand = Theme.Brand.openAI; name = "Codex"
+        case "trae": brand = Theme.Brand.trae; name = "TRAE"
+        case "trae-cli", "traecli": brand = Theme.Brand.trae; name = Session.traeCLIName
+        case "traex": brand = nil; name = Session.traeCLIName
+        case _ where isClaude: brand = Theme.Brand.claude; name = "Claude Code"
+        default:
+            name = harness.displayName
+            brand = Self.brand(named: harness.agent) ?? Self.brand(named: harness.agentLabel)
+                ?? Self.brand(named: harness.displayName)
+                ?? (Session.providerEngines.contains(lower) ? Self.brand(named: harness.launcher) : nil)
+        }
+    }
+
     /// Shares and exports normally look up the displayed name. Preserve a legacy CLI's letter when that lookup
     /// would give its renamed title the TRAE logo, including when Paseo reports it as a provider.
     static func prefersLetterMark(for session: Session?) -> Bool {

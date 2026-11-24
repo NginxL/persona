@@ -27,16 +27,17 @@ const (
 // OutboxEntry is the audit row of one send: what went where, from whom, and how it ended. Only a preview of the
 // text is kept.
 type OutboxEntry struct {
-	ClientID  string    `json:"clientId"`
-	SessionID string    `json:"sessionId"`
-	Preview   string    `json:"preview"`
-	Length    int       `json:"length"`
-	Origin    string    `json:"origin,omitempty"` // app, assistant, …
-	Status    string    `json:"status"`
-	Error     string    `json:"error,omitempty"`
-	Attempts  int       `json:"attempts"`
-	CreatedAt time.Time `json:"createdAt"`
-	UpdatedAt time.Time `json:"updatedAt"`
+	ClientID   string    `json:"clientId"`
+	SessionID  string    `json:"sessionId"`
+	Preview    string    `json:"preview"`
+	Length     int       `json:"length"`
+	TextSHA256 string    `json:"textSha256,omitempty"` // exact payload fingerprint, never the text itself
+	Origin     string    `json:"origin,omitempty"`     // app, assistant, …
+	Status     string    `json:"status"`
+	Error      string    `json:"error,omitempty"`
+	Attempts   int       `json:"attempts"`
+	CreatedAt  time.Time `json:"createdAt"`
+	UpdatedAt  time.Time `json:"updatedAt"`
 }
 
 type outbox struct {

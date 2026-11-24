@@ -91,8 +91,8 @@ class LocalProxyForward(val dial: Dial) : AutoCloseable {
 
     @Synchronized override fun close() {
         stopped = true
-        runCatching { server?.close() }
-        synchronized(sockets) { sockets.toList() }.forEach { runCatching { it.close() } }
+        val _ = runCatching { server?.close() }
+        synchronized(sockets) { sockets.toList() }.forEach { val _ = runCatching { it.close() } }
         // A blocked accept can defer the descriptor close until its worker returns.
         acceptWorker?.takeIf { it !== Thread.currentThread() }?.let { worker ->
             try { worker.join(CLOSE_WAIT_MILLIS) } catch (_: InterruptedException) {
@@ -108,7 +108,7 @@ class LocalProxyForward(val dial: Dial) : AutoCloseable {
         while (!stopped) {
             val local = try { server.accept() } catch (_: IOException) { break }
             if (!track(local)) break
-            thread(isDaemon = true, name = "Local proxy connection") { carry(local) }
+            val _ = thread(isDaemon = true, name = "Local proxy connection") { carry(local) }
         }
     }
 
@@ -126,7 +126,7 @@ class LocalProxyForward(val dial: Dial) : AutoCloseable {
         try { local.tcpNoDelay = true } catch (_: IOException) { drop(local); drop(remote); return }
         val ended = AtomicInteger()
         fun end() { if (ended.incrementAndGet() == 2) { drop(local); drop(remote) } }
-        thread(isDaemon = true, name = "Local proxy upstream") { pump(local, remote); end() }
+        val _ = thread(isDaemon = true, name = "Local proxy upstream") { pump(local, remote); end() }
         pump(remote, local)
         end()
     }
@@ -150,7 +150,7 @@ class LocalProxyForward(val dial: Dial) : AutoCloseable {
 
     private fun drop(socket: Socket) {
         sockets -= socket
-        runCatching { socket.close() }
+        val _ = runCatching { socket.close() }
     }
 
     companion object {

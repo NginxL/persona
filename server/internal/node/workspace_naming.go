@@ -12,6 +12,8 @@ import (
 	"github.com/nwverse/persona/server/internal/workspacenaming"
 )
 
+func init() { nodeRPC("workspace.naming.resolve", (*Node).resolveWorkspaceNaming) }
+
 func (n *Node) resolveWorkspaceNaming(ctx context.Context, raw json.RawMessage) (any, error) {
 	var source workspacenaming.Source
 	if err := json.Unmarshal(raw, &source); err != nil {

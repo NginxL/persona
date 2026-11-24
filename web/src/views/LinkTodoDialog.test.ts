@@ -2,7 +2,8 @@ import { describe, expect, it } from "vitest";
 import { ApiError } from "../lib/api";
 import type { Session } from "../lib/types";
 import { getLinkDialogTargetKey } from "./LinkTodoDialog";
-import { isLegacySpacesRouteError, resolveLinkCurrentTodoId, type Todo } from "../lib/todos";
+import { isLegacySpacesRouteError, type Todo } from "../lib/todos";
+import { resolveLinkCurrentTodoId } from "../lib/todo-details";
 
 const mockSession = (mid: string, sid: string, patch: Partial<Session> = {}): Session => ({
   machine_id: mid,

@@ -302,9 +302,6 @@ struct FilesPane: View {
             if let n = d.string(forKey: "showFilesInfo") { info = InfoTarget(path: full(n), entry: listing?.entries.first { $0.name == n }) }
         }
         #endif
-        #if os(macOS)
-        .pageToolbar { MacRefreshItem(id: [machineID, cwd]) { await load() } } // no pull to refresh on the Mac
-        #endif
     }
 
     // MARK: Path bar and tools
@@ -369,10 +366,6 @@ struct FilesPane: View {
                                 Button { pickingFiles = true } label: { Label("Upload from Files", systemImage: Theme.Icon.upload) }
                             }
                         } label: { tool(Theme.Icon.add) }
-                        #if os(macOS)
-                        .menuStyle(.button)
-                        .menuIndicator(.hidden)
-                        #endif
                         .themedButton()
                         .clipShape(.circle)
                         .accessibilityLabel("New or Upload")
@@ -507,11 +500,6 @@ struct FilesPane: View {
                 }
             }
         } label: { tool(Theme.Icon.more) }
-        #if os(macOS)
-        // A Mac menu draws as a pop-up button with its own arrow: the ⋯ was squeezed to two dots inside the circle.
-        .menuStyle(.button)
-        .menuIndicator(.hidden)
-        #endif
         .themedButton()
         .clipShape(.circle)
         .accessibilityLabel("More")

@@ -12,7 +12,9 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/nwverse/persona/server/internal/feishubot"
+	"github.com/nwverse/persona/server/internal/botport"
+
+	"github.com/nwverse/persona/server/internal/botcard"
 )
 
 // fakeDetourAPI answers reply with replyCode, chat sends with sendCardCode for cards and 0 for rich text. A client
@@ -52,7 +54,7 @@ func newFakeDetourAPI(t *testing.T) *fakeDetourAPI {
 			f.mu.Lock()
 			f.sends = append(f.sends, in)
 			code := 0
-			if in["msg_type"] == feishubot.TypeInteractive {
+			if in["msg_type"] == botcard.TypeInteractive {
 				code = f.sendCardCode
 			}
 			f.mu.Unlock()
@@ -67,13 +69,12 @@ func newFakeDetourAPI(t *testing.T) *fakeDetourAPI {
 
 // client returns a client pointed at the fake; with replyFail its transport errors on reply paths (a dropped
 // connection: no business answer, so the detour must not trigger).
-func (f *fakeDetourAPI) client(replyFail bool) *feishubot.Client {
-	c := feishubot.New("cli", "sec", f.srv.URL)
+func (f *fakeDetourAPI) client(replyFail bool) botport.Client {
 	if !replyFail {
-		return c
+		return botport.New("cli", "sec", f.srv.URL)
 	}
 	base := f.srv.Client().Transport
-	return c.WithHTTP(&http.Client{Transport: roundTripFunc2(func(req *http.Request) (*http.Response, error) {
+	return botport.NewWithHTTP("cli", "sec", f.srv.URL, &http.Client{Transport: roundTripFunc2(func(req *http.Request) (*http.Response, error) {
 		if strings.HasSuffix(req.URL.Path, "/reply") {
 			return nil, errors.New("connection reset by peer")
 		}
@@ -86,7 +87,7 @@ type roundTripFunc2 func(*http.Request) (*http.Response, error)
 func (fn roundTripFunc2) RoundTrip(req *http.Request) (*http.Response, error) { return fn(req) }
 
 func detourCard() string {
-	return feishubot.NewCard("title", "green", "summary").Markdown("card body 4175").JSON()
+	return botcard.NewCard("title", "green", "summary").Markdown("card body 4175").JSON()
 }
 
 func (f *fakeDetourAPI) snapshot() (replies, sends []map[string]any) {
@@ -97,6 +98,7 @@ func (f *fakeDetourAPI) snapshot() (replies, sends []map[string]any) {
 
 // The parent is there: one reply, no chat send.
 func TestBotPostRepliesWhenParentPresent(t *testing.T) {
+	needsLarkModule(t)
 	f := newFakeDetourAPI(t)
 	h := newTestManager(t)
 	card := detourCard()
@@ -112,6 +114,7 @@ func TestBotPostRepliesWhenParentPresent(t *testing.T) {
 
 // The parent was recalled (230011) or deleted (230110): the same card lands as a chat send with a fresh one-shot key.
 func TestBotPostDetoursWithdrawnReplyToSend(t *testing.T) {
+	needsLarkModule(t)
 	for _, code := range []int{230011, 230110} {
 		t.Run(strconv.Itoa(code), func(t *testing.T) {
 			f := newFakeDetourAPI(t)
@@ -126,7 +129,7 @@ func TestBotPostDetoursWithdrawnReplyToSend(t *testing.T) {
 			if len(replies) != 1 || len(sends) != 1 {
 				t.Fatalf("code %d: replies=%v sends=%v", code, replies, sends)
 			}
-			if sends[0]["content"] != card || sends[0]["msg_type"] != feishubot.TypeInteractive {
+			if sends[0]["content"] != card || sends[0]["msg_type"] != botcard.TypeInteractive {
 				t.Fatalf("code %d: detoured send changed the content: %v", code, sends[0])
 			}
 			if u, _ := replies[0]["uuid"].(string); !strings.HasPrefix(u, "r:") {
@@ -141,6 +144,7 @@ func TestBotPostDetoursWithdrawnReplyToSend(t *testing.T) {
 
 // A network failure on reply must not detour: nothing is sent to the chat, and the transport error comes back.
 func TestBotPostNetworkFailureDoesNotDetour(t *testing.T) {
+	needsLarkModule(t)
 	f := newFakeDetourAPI(t)
 	h := newTestManager(t)
 	id, err := h.botPostJSON(context.Background(), f.client(true), "chat1", "om_p", detourCard(), "fb")
@@ -155,6 +159,7 @@ func TestBotPostNetworkFailureDoesNotDetour(t *testing.T) {
 
 // After the detour, a card the gateway still refuses goes out as a rich-text send; the dead reply is not retried.
 func TestBotPostDetourThenCardRejectedFallsBackBySend(t *testing.T) {
+	needsLarkModule(t)
 	f := newFakeDetourAPI(t)
 	f.replyCode = 230011    // parent recalled
 	f.sendCardCode = 230099 // CardRejected
@@ -167,7 +172,7 @@ func TestBotPostDetourThenCardRejectedFallsBackBySend(t *testing.T) {
 	if len(replies) != 1 || len(sends) != 2 {
 		t.Fatalf("replies=%v sends=%v", replies, sends)
 	}
-	if sends[0]["msg_type"] != feishubot.TypeInteractive || sends[1]["msg_type"] != feishubot.TypePost {
+	if sends[0]["msg_type"] != botcard.TypeInteractive || sends[1]["msg_type"] != botcard.TypePost {
 		t.Fatalf("want card then rich-text send, got %v then %v", sends[0]["msg_type"], sends[1]["msg_type"])
 	}
 	if content, _ := sends[1]["content"].(string); !strings.Contains(content, "plain fallback 4175") {
@@ -177,6 +182,7 @@ func TestBotPostDetourThenCardRejectedFallsBackBySend(t *testing.T) {
 
 // A card refused while the parent is alive keeps the existing behavior: the fallback replies too, never a send.
 func TestBotPostCardRejectedFallbackStillReplies(t *testing.T) {
+	needsLarkModule(t)
 	f := newFakeDetourAPI(t)
 	f.replyCode = 230099 // the card reply is refused with a card error; the code is not 230011, so no detour
 	h := newTestManager(t)
@@ -187,21 +193,22 @@ func TestBotPostCardRejectedFallbackStillReplies(t *testing.T) {
 	if len(replies) != 2 || len(sends) != 0 {
 		t.Fatalf("replies=%v sends=%v", replies, sends)
 	}
-	if replies[1]["msg_type"] != feishubot.TypePost {
+	if replies[1]["msg_type"] != botcard.TypePost {
 		t.Fatalf("second reply %v is not the rich-text fallback", replies[1])
 	}
 }
 
 // botNote to a withdrawn parent lands in the chat as a text send with the same text and a fresh one-shot key.
 func TestBotNoteDetoursWithdrawnReplyToSend(t *testing.T) {
+	needsLarkModule(t)
 	f := newFakeDetourAPI(t)
 	f.replyCode = 230011
 	h := newTestManager(t)
 	const note = "note after withdrawn 4457"
 	h.botNote(context.Background(), f.client(false), "chat1", "om_n", note)
 	replies, sends := f.snapshot()
-	wantContent := feishubot.TextContent(note)
-	if len(replies) != 1 || replies[0]["content"] != wantContent || len(sends) != 1 || sends[0]["content"] != wantContent || sends[0]["msg_type"] != feishubot.TypeText {
+	wantContent := botcard.TextContent(note)
+	if len(replies) != 1 || replies[0]["content"] != wantContent || len(sends) != 1 || sends[0]["content"] != wantContent || sends[0]["msg_type"] != botcard.TypeText {
 		t.Fatalf("replies=%v sends=%v", replies, sends)
 	}
 	if u, _ := sends[0]["uuid"].(string); !strings.HasPrefix(u, "s:") {
@@ -211,6 +218,7 @@ func TestBotNoteDetoursWithdrawnReplyToSend(t *testing.T) {
 
 // A dropped connection on the note's reply must not detour: nothing reaches the chat.
 func TestBotNoteNetworkFailureDoesNotDetour(t *testing.T) {
+	needsLarkModule(t)
 	f := newFakeDetourAPI(t)
 	newTestManager(t).botNote(context.Background(), f.client(true), "chat1", "om_n", "note 4457")
 	if replies, sends := f.snapshot(); len(replies) != 0 || len(sends) != 0 {

@@ -155,6 +155,7 @@ class MessagePointerMenuTest {
                     }
                     MessageAction.Quote -> assertEquals("quote:${target.id}", events.last())
                     MessageAction.Share -> assertReaderOpensAndReturns(R.string.chat_share_card_title)
+                    MessageAction.Star, MessageAction.Unstar -> Unit
                     MessageAction.Forward -> assertEquals("forward:${target.id}", events.last())
                     MessageAction.Context -> assertEquals("context:${target.text}", events.last())
                     MessageAction.Edit -> assertEquals("edit:${target.editText}", events.last())

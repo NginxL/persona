@@ -558,6 +558,8 @@ func (t *Tail) Settle(meta *Meta) bool {
 	meta.localTurn, meta.beforeLocal = replay.localTurn, replay.beforeLocal
 	meta.LastTurnWake, meta.ModelFallback = replay.LastTurnWake, replay.ModelFallback
 	meta.turnWorked, meta.turnSucceeded = replay.turnWorked, replay.turnSucceeded
+	meta.turnErrorCounted, meta.upstreamStreakReset = replay.turnErrorCounted, replay.upstreamStreakReset
+	meta.UpstreamErrorStreak, meta.upstreamErrorLines = replay.UpstreamErrorStreak, replay.upstreamErrorLines
 	meta.TurnError, meta.TurnErrorKind, meta.TurnErrorCode = replay.TurnError, replay.TurnErrorKind, replay.TurnErrorCode
 	meta.TurnErrorResetsAt, meta.TurnErrorResumes, meta.TurnErrorAfterWork = replay.TurnErrorResetsAt, replay.TurnErrorResumes, replay.TurnErrorAfterWork
 	meta.turnErrorLine, meta.resumesSaid = replay.turnErrorLine, replay.resumesSaid

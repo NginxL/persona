@@ -7,14 +7,8 @@
     <string name="settings_pairing_notice_local_denied">ローカルネットワークへのアクセスが許可されていません。システム設定で許可してから、戻ってもう一度お試しください。</string>
     <string name="settings_pairing_notice_camera_denied">カメラへのアクセスがオフです。アドレスとペアリングコードを手動で入力できます。</string>
     <string name="settings_pairing_notice_clipboard_empty">クリップボードにペアリングリンクがありません。</string>
+    <string name="settings_pairing_help">ヘルプ</string>
     <string name="settings_pairing_welcome_title">Personaへようこそ</string>
-    <string name="settings_pairing_welcome_body">ハブをこのスマートフォンにつなぐと、コンピューター上のエージェントをいつでも確認し、対応が必要なことを処理できます。</string>
-    <string name="settings_pairing_welcome_agents">作業の様子を見て、質問に答え、プランやツールの操作を承認します。</string>
-    <string name="settings_pairing_welcome_inbox_title">受信トレイ</string>
-    <string name="settings_pairing_welcome_inbox">Larkとメールをまとめて確認し、AIが仕分けと返信の下書きを手伝います。</string>
-    <string name="settings_pairing_welcome_assistant_title">Personaアシスタント</string>
-    <string name="settings_pairing_welcome_assistant">ナレッジとつながります。スマートフォンのデータは必要なときに個別に許可を求めます。</string>
-    <string name="settings_pairing_welcome_push">Googleサービスがなくても通知を受け取れます。スマートフォンは常時接続でハブのメッセージを受け取ります。</string>
     <string name="settings_pairing_welcome_guide">ハブがまだない場合</string>
     <string name="settings_pairing_failed_title">接続できませんでした</string>
     <string name="settings_pairing_failed_body">下の案内に沿って対処してから、もう一度お試しください。</string>

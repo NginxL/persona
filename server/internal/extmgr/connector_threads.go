@@ -227,12 +227,16 @@ func (h *Manager) connectorThreadRoutes(api *http.ServeMux) {
 		if res.IsError {
 			status := http.StatusBadGateway
 			switch {
-			case res.ErrorKind == proto.ToolErrorDeclined:
+			case res.ErrorKind == proto.ToolErrorDeclined, res.ErrorKind == proto.ToolErrorUnanswered:
 				status = http.StatusForbidden
 			case res.ErrorKind == proto.ToolErrorRateLimited, connector.StatusOf(r.Context(), c).State == connector.StateRateLimited:
 				status = http.StatusTooManyRequests
 			}
-			writeErrCode(w, status, map[int]string{http.StatusForbidden: "declined", http.StatusTooManyRequests: "rate_limited"}[status], errors.New(text))
+			code := map[int]string{http.StatusForbidden: "declined", http.StatusTooManyRequests: "rate_limited"}[status]
+			if res.ErrorKind == proto.ToolErrorUnanswered {
+				code = proto.ToolErrorUnanswered // nobody answered its card: not the user's decline
+			}
+			writeErrCode(w, status, code, errors.New(text))
 			return
 		}
 		var out json.RawMessage

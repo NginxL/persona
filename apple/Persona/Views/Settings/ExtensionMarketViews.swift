@@ -13,12 +13,8 @@ struct ExtensionMarketView: View {
             // Laid out as Knowledge's kind chips under its search field: a compact section whose row has no inset of its own,
             // so the chips sit right under the search field and line up with the cards below.
             if page.markets.count > 1 {
-                #if os(macOS)
-                marketChips
-                #else
                 Section { marketChips }
                     .listSectionSpacing(.compact)
-                #endif
             }
             ForEach(page.markets.filter { $0.error?.isEmpty == false }) { m in
                 Section {
@@ -77,18 +73,6 @@ struct ExtensionMarketView: View {
                     Button { Task { await page.load() } } label: { Text("Retry [Components b8784c]").lineLimit(1) }
                 }
             }
-            #if os(macOS)
-            // In the page, as the Mac's settings panes have their buttons (#1223): the window's toolbar put it over the
-            // settings list's column.
-            if !page.markets.isEmpty {
-                Section {
-                    NavigationLink(value: SettingsPage.pluginMarkets) {
-                        Label { Text("Manage Markets").lineLimit(1) } icon: { ThemedIcon(Theme.Icon.pluginMarket) }
-                    }
-                    .accessibilityIdentifier("market-manage")
-                }
-            }
-            #endif
         }
         .themedPage()
         #if os(iOS) || os(visionOS)
@@ -602,9 +586,6 @@ struct ExtensionInstallSheet: View {
                 }
             }
         }
-        #if os(macOS)
-        .macSheet()
-        #endif
     }
 }
 
@@ -651,15 +632,6 @@ struct ExtensionMarketsView: View {
             if let e = page.error {
                 Section { LoadProblem(text: e) }
             }
-            #if os(macOS)
-            Section {
-                HStack {
-                    Spacer(minLength: 0)
-                    Button("Add Market…") { adding = true }.lineLimit(1).formButton()
-                        .accessibilityIdentifier("market-add")
-                }
-            }
-            #endif
         }
         .themedPage()
         .overlay { if page.markets.isEmpty && page.loading { ProgressView() } }
@@ -802,9 +774,6 @@ private struct ExtensionRemovalNoticeSheet: View {
         }
         .interactiveDismissDisabled()
         .presentationDetents([.medium, .large])
-        #if os(macOS)
-        .macSheet()
-        #endif
     }
 }
 
@@ -883,9 +852,6 @@ private struct MarketTokenSheet: View {
             }
         }
         .presentationDetents([.medium, .large])
-        #if os(macOS)
-        .macSheet()
-        #endif
     }
 
     private func submit(clearing: Bool) {

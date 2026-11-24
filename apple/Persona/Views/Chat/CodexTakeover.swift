@@ -1,10 +1,7 @@
 import Observation
 import SwiftUI
-#if os(iOS)
-import UIKit
-#endif
 
-/// One flow for the iPhone chat notice and the Agents row menu.
+/// One flow for the iOS chat notice and the Agents row menu (iPhone and iPad).
 @MainActor @Observable
 final class CodexTakeoverCoordinator {
     enum Pending {
@@ -114,7 +111,7 @@ struct CodexTakeoverControl: View {
 
     var body: some View {
         #if os(iOS)
-        if UIDevice.current.userInterfaceIdiom == .phone, let capability = session.capabilities?.takeover {
+        if let capability = session.capabilities?.takeover {
             HStack(spacing: Theme.Space.s) {
                 if capability.canResume {
                     Button(role: .destructive) { run { await coordinator.takeOver(session, model: model) } } label: {

@@ -1,4 +1,8 @@
 {
+  "development_hold": "正在等待 Hub 确认更新。",
+  "development_tools": "Hub 没有适用于 {os}/{arch} 的程序包。请在独立助手所在电脑上安装 Git 和 Go 后重试。",
+  "development_build": "独立助手无法为提交 {commit} 完成 {step}。请检查源码访问和 Go 工具链后重试。",
+  "development_identity": "构建程序的版本、构建号或提交与已确认的更新不一致。",
   "os_unknown": "还不知道这台电脑的系统，连上以后再试",
   "no_binary": "hub 上没有 {os}/{arch} 的 node 程序，也没有可以下载的发布：在开发机上跑一次 scripts/deploy/deploy.sh，或者把 hub 这个版本的 {name} 放进它的 bin/nodes 目录，或者在 hub.json 里设置 node_packages（docs/operations/docker.md「Node builds」）",
   "no_package": "最新的发布 {version} 里没有这个 hub 能驱动的 {os}/{arch} node 程序，hub 这个版本的也没有：先更新 hub，或者把它这个版本的 {name} 放进它的 bin/nodes 目录（docs/operations/docker.md「Node builds」）",

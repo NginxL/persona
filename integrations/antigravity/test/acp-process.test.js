@@ -197,6 +197,25 @@ describe('ACP session recovery', () => {
     assert.equal(answers, 1)
   })
 
+  it('keeps valid capacity changes local to the reporting session', () => {
+    const client = new AgyAcpClient()
+    client.proc = {}
+    client.loadedSessions.set('first', { mcpKey: '[]' })
+    const changed = []
+    client.on('contextWindowChanged', (id) => changed.push(id))
+    const report = (sessionId, size) => client._onMessage({
+      method: 'session/update', params: { sessionId, update: { sessionUpdate: 'usage_update', used: 17, size } },
+    }, client.proc)
+    report('first', 524288)
+    for (const size of [524288, -1, 1.5, '64000', 2 ** 31, null]) report('first', size)
+    assert.deepEqual(client.loadedSessions.get('first'), { mcpKey: '[]', contextWindow: 524288 })
+    report('second', 131072)
+    report('first', 0)
+    assert.equal(client.loadedSessions.get('second').contextWindow, 131072)
+    assert.equal(client.loadedSessions.get('first').contextWindow, 0)
+    assert.deepEqual(changed, ['first', 'second', 'first'])
+  })
+
   it('resumes a deleted working directory from home', async () => {
     const client = new AgyAcpClient()
     client.ensureStarted = async () => {}

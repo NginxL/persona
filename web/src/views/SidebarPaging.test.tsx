@@ -2,6 +2,7 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { seedAgentsDisplay } from "../lib/agents-display";
 vi.hoisted(() => {
   globalThis.ResizeObserver ??= class { observe() {} unobserve() {} disconnect() {} } as unknown as typeof ResizeObserver;
   window.matchMedia ??= ((query: string) => ({ matches: false, media: query, onchange: null, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {}, dispatchEvent: () => false })) as typeof window.matchMedia;
@@ -42,7 +43,7 @@ const chosen = () => grouping()?.querySelector('[aria-checked="true"]')?.textCon
 const pagedList = () => host.querySelector("[data-paged-sessions]");
 const completeReads = (fetch: ReturnType<typeof vi.fn>) => fetch.mock.calls.filter(([url]) => (url as string).endsWith("/api/v1/sessions") || (url as string).includes("summary=0"));
 
-async function render(paged: boolean, pins = emptyPins, saved?: string, agentsOnly = paged) {
+async function render(paged: boolean, pins = emptyPins, saved?: string, agentsOnly = paged, delays: { tail?: Promise<void>; todos?: Promise<void> } = {}) {
   if (saved) localStorage.setItem("persona.agentGrouping", saved);
   let moved = false;
   const movedRow = { ...first, assistant: true };
@@ -63,16 +64,21 @@ async function render(paged: boolean, pins = emptyPins, saved?: string, agentsOn
       });
       // The complete fallback's pages (#3759): every row, in two frozen pages; the bounded list's summary pages.
       if (url.searchParams.get("summary") === "0" && !url.searchParams.has("session_id")) {
-        return url.searchParams.get("cursor") === "next"
-          ? json({ sessions: [tail], remove: [], has_more: false, revision: "r1", total })
-          : json({ sessions: firstPage, remove: [], has_more: true, next_cursor: "next", revision: "r1", total });
+        if (url.searchParams.get("cursor") === "next") {
+          const answer = () => json({ sessions: [tail], remove: [], has_more: false, revision: "r1", total });
+          return delays.tail ? delays.tail.then(answer) : answer();
+        }
+        return json({ sessions: firstPage, remove: [], has_more: true, next_cursor: "next", revision: "r1", total });
       }
       if (url.search) return json({ sessions: firstPage, remove: [], has_more: true, next_cursor: "next", revision: "r1", total });
       return json({ sessions: [...firstPage, tail] });
     }
     if (url.pathname.endsWith("/pins")) return json(pins);
     if (url.pathname.endsWith("/machines")) return json({ machines: [{ id: "computer", name: "Demo computer", online: true }] });
-    if (url.pathname.endsWith("/todos")) return json({ todos: [] });
+    if (url.pathname.endsWith("/todos")) {
+      const answer = () => json({ todos: [] });
+      return delays.todos ? delays.todos.then(answer) : answer();
+    }
     return json({});
   });
   vi.stubGlobal("fetch", fetch);
@@ -91,6 +97,8 @@ async function render(paged: boolean, pins = emptyPins, saved?: string, agentsOn
 beforeEach(() => {
   localStorage.clear();
   reset();
+  // Settings › Agents: the Filter is on for these tests (it is off until the hub says so)
+  seedAgentsDisplay({ show_botmux: true, configured: true, show_filter: true });
   FakeSocket.all = [];
   vi.stubGlobal("WebSocket", FakeSocket);
   history.replaceState(null, "", "/");
@@ -203,6 +211,47 @@ it("uses the complete Agents list when the hub supports paging without the Agent
   expect(host.textContent).not.toContain(healthDir.title);
   expect(host.textContent).not.toContain(managerHealthDir.title);
   expect(fetch.mock.calls.some(([input]) => input.includes("agents_only"))).toBe(false);
+});
+
+it("shows useful complete-list Agents before the delayed last page without settling their partial count (#12231)", async () => {
+  const rows = (session: Session) => [...host.querySelectorAll<HTMLAnchorElement>("[data-sidebar-agents] a[href]")]
+    .filter((a) => a.textContent?.includes(session.title!));
+  const block = () => grouping()!.closest<HTMLElement>("[data-sidebar-agents]")!;
+  // A warm visit gives an implementation the opportunity to persist a validated complete snapshot.
+  await render(true, emptyPins, undefined, false);
+  expect(rows(first)).toHaveLength(1);
+  expect(rows(tail)).toHaveLength(1);
+  act(() => { root.unmount(); reset(); });
+  root = createRoot(host);
+
+  let answerTodos!: () => void, answerTail!: () => void;
+  const todos = new Promise<void>((resolve) => { answerTodos = resolve; });
+  const tailPage = new Promise<void>((resolve) => { answerTail = resolve; });
+  await render(true, emptyPins, undefined, false, { todos, tail: tailPage });
+  expect(chosen()).toBe("待办");
+  // Early session data must not put every Agent under No to-do before the grouping input arrives.
+  expect(rows(first)).toHaveLength(0);
+  expect(block().textContent).toContain("加载中…");
+
+  await act(async () => { answerTodos(); });
+  await flush();
+  // Either the first authoritative page or a validated complete snapshot can supply these rows.
+  expect(rows(first)).toHaveLength(1);
+  if (rows(tail).length === 0) {
+    expect(block().textContent).toContain("加载中…");
+    expect(block().querySelector('[data-tree-branch="todo:none"]')).toBeNull();
+  }
+
+  await act(async () => { answerTail(); });
+  await flush();
+  expect(rows(first)).toHaveLength(1);
+  expect(rows(tail)).toHaveLength(1);
+  const noTodo = block().querySelector('[data-tree-branch="todo:none"]')!;
+  expect(noTodo.textContent).toContain(first.title!);
+  expect(noTodo.textContent).toContain(tail.title!);
+  expect(noTodo.textContent).toContain("2 个 Agent");
+  expect(block().textContent).not.toContain("加载中…");
+  expect(chosen()).toBe("待办");
 });
 
 it("keeps an in-flight sending launch in Starting only without duplicating it in paged groups, then moves it once ready", async () => {

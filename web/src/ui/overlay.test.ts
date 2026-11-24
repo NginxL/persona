@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest";
-import { placeMenu, placeSubmenu, trapTab } from "./overlay";
+import { describe, expect, it, vi } from "vitest";
+import { placeMenu, placePickerCard, placeSubmenu, trapTab } from "./overlay";
 
 describe("Tab inside a dialog", () => {
   it("wraps from the last control to the first and back", () => {
@@ -112,4 +112,26 @@ describe("submenu placement", () => {
     const view = { top: 0, height: 400 };
     expect(placeSubmenu({ ...row, top: 300, bottom: 332 }, 300, { ...o, view })).toEqual({ left: 304, top: 92, width: 208, maxHeight: 384 });
   });
+});
+
+it("keeps the picker detail within its dialog even on a wide viewport", () => {
+  vi.stubGlobal("innerWidth", 1400);
+  try {
+    const panel = (dialog?: { left: number; right: number }) => ({
+      getBoundingClientRect: () => ({ left: 480, top: 10 }),
+      offsetHeight: 300,
+      offsetWidth: 480,
+      closest: () => dialog ? { getBoundingClientRect: () => dialog } : null,
+    }) as unknown as HTMLElement;
+    const list = { offsetTop: 25, scrollTop: 20 } as HTMLElement;
+    const row = { offsetTop: 110 } as HTMLElement;
+    const card = { scrollHeight: 150 } as HTMLElement;
+    const size = { width: 480, cardWidth: 280, edge: 8 };
+
+    expect(placePickerCard(panel(), list, row, card, size)).toEqual({ side: "right", top: 115, height: 302 });
+    expect(placePickerCard(panel({ left: 100, right: 1100 }), list, row, card, size).side).toBe("left");
+    expect(placePickerCard(panel({ left: 400, right: 1020 }), list, row, card, size).side).toBe("inside");
+  } finally {
+    vi.unstubAllGlobals();
+  }
 });

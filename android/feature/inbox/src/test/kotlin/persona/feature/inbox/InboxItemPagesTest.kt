@@ -8,6 +8,7 @@ import persona.core.domain.inbox.InboxItem
 import persona.core.navigation.InboxItemUiRoute
 import org.junit.Assert.*
 import org.junit.Test
+import persona.core.inbox.*
 
 // docs/extensions/extensions.md "UI slots" inbox_item (#1683). Native conversations retain their chat and composer;
 // non-chat items keep the inbox_item extension contract.

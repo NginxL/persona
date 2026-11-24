@@ -61,6 +61,18 @@ describe("UI 6：行内控件和行动作", () => {
     expect(sw.hasAttribute("disabled")).toBe(true);
   });
 
+  it("lets a row's subtitle wrap to two lines, as iOS does, while its title stays on one (#13605)", () => {
+    const subtitle = "收件箱里的行改由订阅带来：和现在完全一样，「GitHub」有变化时马上读。";
+    const html = draw([{ type: "row", key: "v", title: "通过订阅读取", subtitle, control: { kind: "switch", name: "via", on: false, action: { id: "t" } } }]);
+    const line = [...doc(html).querySelectorAll("div")].find((el) => el.textContent === subtitle)!;
+    expect(line.className).toContain("line-clamp-2");
+    expect(line.className).toContain("whitespace-normal");
+    expect(line.className).not.toContain("truncate");
+    const title = [...doc(html).querySelectorAll("div")].find((el) => el.textContent === "通过订阅读取")!;
+    expect(title.className).toContain("truncate");
+    expect(doc(html).querySelector('[role="switch"]')!.closest("button:not([role=switch])")).toBeNull();
+  });
+
   it("shows the value the page holds for a control over the extension's", () => {
     const html = draw([{ type: "row", key: "l", title: "主灯", control: { kind: "switch", name: "l", on: false, action: { id: "t" } } }], { controls: { l: "true" }, onControl: () => {} });
     expect(doc(html).querySelector('[role="switch"]')!.getAttribute("aria-checked")).toBe("true");

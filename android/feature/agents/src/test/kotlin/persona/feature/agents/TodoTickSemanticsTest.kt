@@ -10,6 +10,8 @@ import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertHasClickAction
 import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performClick
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import org.junit.Rule
 import org.junit.Test
@@ -55,6 +57,7 @@ class TodoTickSemanticsTest {
     @Test fun finishedTodoTickIsCheckedAndOffersReopen() {
         show(Todo("done", title = "Write the release notes", createdAt = "2026-11-09T04:30:00Z",
             doneAt = "2026-11-09T09:00:00Z", doneBy = "user"))
+        rule.onNodeWithText("Done").performClick()
         tick(ToggleableState.On, clickLabel = "Reopen")
     }
 }

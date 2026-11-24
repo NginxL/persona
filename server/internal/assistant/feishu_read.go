@@ -5,7 +5,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/nwverse/persona/server/internal/feishubot"
+	"github.com/nwverse/persona/server/internal/botcard"
 	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/lazyre"
 	"github.com/nwverse/persona/server/internal/prompts"
@@ -51,7 +51,7 @@ func readRun(ext map[string]string) bool { return ext[readChatKey] != "" }
 // feishuRead takes the owner's "@bot /read …" from a group chat (FeishuFromRead): the hub's checks again, then the
 // request goes to the main conversation as a run that answers under the message. What keeps it from going is said
 // under the message, and nothing else is said in the group.
-func (s *Service) feishuRead(ev feishubot.MessageEvent, st FeishuStatus) {
+func (s *Service) feishuRead(ev botcard.MessageEvent, st FeishuStatus) {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()
 	msg := ev.Message
@@ -67,11 +67,11 @@ func (s *Service) feishuRead(ev feishubot.MessageEvent, st FeishuStatus) {
 		s.logf("bots: a message marked as a /read was not one from a group: dropped")
 		return
 	}
-	content := feishubot.ParseContent(msg.MessageType, msg.Content, msg.Mentions)
+	content := botcard.ParseContent(msg.MessageType, msg.Content, msg.Mentions)
 	if content.Forward {
 		return
 	}
-	task, ok := feishubot.ReadCommand(openingWords(ev, content))
+	task, ok := botcard.ReadCommand(openingCommandWords(ev, content))
 	if !ok {
 		s.logf("bots: a message marked as a /read was not one: dropped")
 		return
@@ -94,7 +94,7 @@ func (s *Service) feishuRead(ev feishubot.MessageEvent, st FeishuStatus) {
 
 // readSend sends the request into the main conversation (or starts it) and starts the run that answers under the
 // message. The reaction says it was taken; nothing more is posted until the answer.
-func (s *Service) readSend(ctx context.Context, ev feishubot.MessageEvent, task string, t botTarget) error {
+func (s *Service) readSend(ctx context.Context, ev botcard.MessageEvent, task string, t botTarget) error {
 	rt, err := s.resolveBotTarget(ctx, t)
 	if err != nil {
 		return err

@@ -3,8 +3,10 @@ package assistant
 import (
 	"bytes"
 	"context"
+	"strings"
 	"time"
 
+	approvalops "github.com/nwverse/persona/server/internal/approval"
 	"github.com/nwverse/persona/server/internal/proto"
 )
 
@@ -32,10 +34,12 @@ func (s *Service) syncPlanInteractions(machine string) {
 }
 
 // terminalReconciled: p is a hook's card whose tool call's end the transcript shows: a plan, or a Claude Code hook's
-// permission. A permission without an id needs its exact tool input to identify a unique call; Codex's and a runtime's
-// cards end through their own sources. Callers hold s.fleet.mu.
+// permission. Prepared approvals (detached command gates and clarifying cards) belong to their own coordinator: their
+// hooks return non-final WaitingText / ClarifyingText results into the transcript while the card stays pending for
+// approvalWaitingWindow (#12918). A permission without an id needs its exact tool input to identify a unique call;
+// Codex's and a runtime's cards end through their own sources. Callers hold s.fleet.mu.
 func terminalReconciled(p *pending) bool {
-	if p.local != nil || p.claimed {
+	if p.local != nil || p.prepared != nil || p.claimed {
 		return false
 	}
 	switch p.ix.Kind {
@@ -109,13 +113,20 @@ func planCallFinished(ix proto.Interaction, items []proto.Item) bool {
 	if id == "" {
 		return false
 	}
+	// First pass: check every loaded page for the call's own tool_result. checkPlanInteraction appends pages newest
+	// first, so a single-pass loop would inspect newer-page assistant text before an older page's non-final WaitingText
+	// or ClarifyingText result (#12918).
 	for _, it := range items {
 		if it.Role == "user" && it.Kind == proto.KindToolResult && it.ToolUseID == id &&
 			!it.TS.IsZero() && !it.TS.Before(ix.CreatedAt) {
-			return true
+			return !nonFinalApprovalResult(it)
 		}
-		if ix.Kind != proto.IxPermission || ix.ToolUseID != "" || it.Seq <= callSeq || it.Role != "assistant" ||
-			!it.TS.After(ix.CreatedAt) {
+	}
+	if ix.Kind != proto.IxPermission || ix.ToolUseID != "" {
+		return false
+	}
+	for _, it := range items {
+		if it.Seq <= callSeq || it.Role != "assistant" || !it.TS.After(ix.CreatedAt) {
 			continue
 		}
 		switch it.Kind {
@@ -130,6 +141,24 @@ func planCallFinished(ix proto.Interaction, items []proto.Item) bool {
 		}
 	}
 	return false
+}
+
+// nonFinalApprovalResult reports whether a tool_result is a prepared hook's non-final waiting or clarification release
+// rather than genuine command output: either the exact release message, or a PreToolUse hook error wrapping it (#12918).
+func nonFinalApprovalResult(it proto.Item) bool {
+	text := strings.TrimSpace(it.Text)
+	if strings.HasPrefix(text, "PreToolUse:") {
+		const marker = "hook error:"
+		i := strings.Index(text, marker)
+		if !it.IsError || i < 0 {
+			return false
+		}
+		text = strings.TrimSpace(text[i+len(marker):])
+	}
+	return text == approvalops.WaitingText ||
+		strings.HasPrefix(text, approvalops.WaitingText+" ") ||
+		text == approvalops.ClarifyingText ||
+		strings.HasPrefix(text, approvalops.ClarifyingText+" ")
 }
 
 // permissionCall finds the only call that can be this hook's request. Tool input, not timing alone, supplies the identity

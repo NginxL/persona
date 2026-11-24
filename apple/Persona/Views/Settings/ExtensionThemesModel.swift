@@ -1,11 +1,7 @@
 import Foundation
 import Observation
 import SwiftUI
-#if os(macOS)
-import AppKit
-#else
 import UIKit
-#endif
 import PersonaWire
 
 /// The API's theme entries reuse the generated manifest type, adding only the owning extension and the server's validation result.
@@ -73,15 +69,8 @@ extension APIClient {
 
     private static func luminance(_ color: Color, dark: Bool) -> Double {
         var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
-        #if os(macOS)
-        let appearance = NSAppearance(named: dark ? .darkAqua : .aqua)!
-        appearance.performAsCurrentDrawingAppearance {
-            NSColor(color).usingColorSpace(.sRGB)?.getRed(&r, green: &g, blue: &b, alpha: &a)
-        }
-        #else
         UIColor(color).resolvedColor(with: UITraitCollection(userInterfaceStyle: dark ? .dark : .light))
             .getRed(&r, green: &g, blue: &b, alpha: &a)
-        #endif
         func linear(_ value: CGFloat) -> Double {
             let value = Double(value)
             return value <= 0.03928 ? value / 12.92 : pow((value + 0.055) / 1.055, 2.4)

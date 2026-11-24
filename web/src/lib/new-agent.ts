@@ -1,16 +1,13 @@
 import { t } from "../i18n";
 import { agentId } from "./agent-kind";
 import { isEcho, type Seen } from "./echo";
-import { ApiError, errorText, isAbort, isTransient, sessionPath } from "./api";
+import { errorText } from "./api";
 import { parseUserText } from "./turns";
-import { imagePayload, quotePath, releaseAttachments, sendFile, type LocalAttachment } from "./attachments";
+import type { LocalAttachment } from "./attachments";
 import { uuid } from "./format";
-import { launchHasFirstTurn } from "./launch-handoff";
-import { apiOp } from "./ops";
 import { currentPlatform, modName, type Platform } from "./shortcuts";
-import { href, navigate } from "./router";
-import { getState, putLaunch, upsertSession } from "./store";
-import { ultracodeErrorText, ultracodeRefused } from "./ultracode";
+import { navigate } from "./router";
+import { getState, putLaunch } from "./store";
 import type { DraftImage } from "./drafts";
 import type { ContextRef } from "./links";
 import type { Session } from "./types";
@@ -41,6 +38,8 @@ export interface AgentLaunch {
   permissionMode?: string;
   /** The exact runtime workspace, scoped to machine and host; absent for an ordinary folder start. */
   workspaceId?: string;
+  /** The exact native desktop project, independent of terminal-host workspaces. */
+  desktopProjectId?: string;
   /** An explicit host stays explicit even when it equals the machine's default; none: follow the default. */
   host?: string;
   /** Turn ultracode on once Claude is up (#3428); only ever true: off is what a new Claude is (docs/protocol/protocol.md). */
@@ -67,6 +66,8 @@ export interface AgentLaunch {
   uncertain?: boolean;
   /** The target is locked on retry: work-session choices or a start that the hub may already have. */
   repeatOnly?: boolean;
+  /** A native session exists but desktop setup has not acknowledged completion. */
+  desktopSetupIncomplete?: boolean;
   clearable?: string;
   draft?: string;
   /** Epoch ms when a launch with an initial prompt entered handoff, keeping the session working until the hub reports working (#12380). */
@@ -74,7 +75,7 @@ export interface AgentLaunch {
 }
 
 /** `open: false` starts it without opening its conversation (Compare runs starts several and opens their page, #8916). */
-export function launchAgent(input: Pick<AgentLaunch, "machineId" | "cwd" | "workspaceId" | "launcher" | "agentType" | "displayLauncher" | "displayEngine" | "displayModel" | "workSession" | "inlinePrompt" | "model" | "effort" | "launcherDefaultEffort" | "permissionMode" | "host" | "ultracode" | "text" | "nameHint" | "attachments" | "todoId">, options: { open?: boolean } = {}) {
+export function launchAgent(input: Pick<AgentLaunch, "machineId" | "cwd" | "workspaceId" | "desktopProjectId" | "launcher" | "agentType" | "displayLauncher" | "displayEngine" | "displayModel" | "workSession" | "inlinePrompt" | "model" | "effort" | "launcherDefaultEffort" | "permissionMode" | "host" | "ultracode" | "text" | "nameHint" | "attachments" | "todoId">, options: { open?: boolean } = {}) {
   const launch: AgentLaunch = { ...input, id: `local-${uuid()}`, phase: "creating", uploaded: {}, ...launchOpIds() };
   putLaunch(launch);
   if (options.open !== false) navigate({ name: "session", mid: launch.machineId, sid: launch.id });
@@ -86,20 +87,6 @@ export function launchAgent(input: Pick<AgentLaunch, "machineId" | "cwd" | "work
 /** Fresh op ids: the hub keeps its answer to an id, so a try after a refusal needs new ones (a gap keeps the old ones). */
 function launchOpIds() {
   return { startOpId: uuid(), startPromptOpId: uuid(), messageId: uuid() };
-}
-
-/** One step of a start under its op id. A repeat can come back 202: the first try still running (ask again; the hub
- *  waits about 10 s each time), or lost to a hub restart (nobody knows how it went). */
-async function launchOp<T>(path: string, opId: string, signal: AbortSignal, json: unknown): Promise<T> {
-  for (;;) {
-    const r = await apiOp<T & { state?: string; launcher_note?: string; session?: Session }>(path, { method: "POST", signal, json, opId });
-    if (r.state === "unknown") throw new ApiError(202, t("lib-new-agent.outcome_unknown"), { delivered: "unknown" });
-    if (r.state === "pending") continue;
-    // a default launcher the computer lacks gave way to another (#4661): said once, as for the main chat; loaded only
-    // then, so New Agent's first screen does not carry it
-    if (r.launcher_note) void import("./assistant-start").then((m) => m.showLauncherNote(`${r.session?.machine_id}/${r.session?.session_id}`, r.launcher_note));
-    return r;
-  }
 }
 
 /** The engine mark ID for a starting placeholder in the sidebar; undefined falls back to the generic agent icon. */
@@ -142,113 +129,19 @@ export function acknowledgeLaunch(mid: string, sid: string, user: Seen) {
 
 const delivering = new Set<string>();
 
+/** Load transport work on intent; repeated clicks during loading or delivery share the same launch. */
 export async function deliverLaunch(id: string, clearDraft?: string) {
-  let launch: AgentLaunch = getState().launches[id];
+  const launch = getState().launches[id];
   if (!launch || delivering.has(id) || (launch.phase !== "failed" && launch.phase !== "creating")) return;
   delivering.add(id);
-  const controller = new AbortController();
-  const deadline = setTimeout(() => controller.abort(), 240_000);
-  const update = (patch: Partial<AgentLaunch>) => {
-    launch = { ...launch, ...patch };
-    if (getState().launches[id]) putLaunch(launch);
-  };
-  const hasFirstTurn = launchHasFirstTurn(launch);
-  update({ phase: launch.session ? "uploading" : "creating", error: undefined, uncertain: false, clearable: undefined, draft: undefined });
   try {
-    const imageBytes = launch.attachments.filter((a) => a.mime.startsWith("image/")).reduce((total, a) => total + Math.ceil(a.file.size / 3) * 4, 0);
-    if (imageBytes + new TextEncoder().encode(launch.text).byteLength > 31 * 1024 * 1024) throw new Error(t("lib-new-agent.attachments_too_large_start"));
-    if (!launch.session) {
-      const target = {
-        machine_id: launch.machineId, cwd: launch.cwd, workspace_id: launch.workspaceId || undefined,
-        launcher: launch.launcher || undefined, agent_type: launch.agentType, work_session: launch.workSession,
-        model: launch.model || undefined, host: launch.host || undefined, todo_id: launch.todoId || undefined,
-        launcher_default_effort: launch.launcherDefaultEffort,
-        permission_mode: launch.permissionMode || undefined,
-      };
-      // A Codex (and a compatible CLI) takes its first message with the start. With none, a computer that can opens
-      // Codex waiting for one (docs/integrations/codex.md "Starting without a first message"); an older one refuses.
-      const startWithPrompt = async () => {
-        if (launch.attachments.length) throw new Error(t("lib-new-agent.launcher_no_attachments"));
-        let r: { session: Session };
-        try {
-          r = await launchOp<{ session: Session }>("/sessions", launch.startPromptOpId, controller.signal, { ...target, name_hint: launch.nameHint, prompt: launch.text || undefined });
-        } catch (e) {
-          if (!launch.text && e instanceof ApiError && (e.code === "codex_needs_prompt" || e.code === "work_prompt_required")) throw new Error(t("lib-new-agent.launcher_needs_text"));
-          throw e;
-        }
-        update({ outgoing: { text: "", images: [] } });
-        return r.session;
-      };
-      let session: Session;
-      if (launch.inlinePrompt) {
-        session = await startWithPrompt();
-      } else {
-        try {
-          const r = await launchOp<{ session: Session }>("/sessions", launch.startOpId, controller.signal, {
-            ...target, effort: launch.effort || undefined,
-            ultracode: launch.ultracode === true ? true : undefined, async: true, name_hint: launch.nameHint ?? (launch.text || undefined),
-          });
-          session = r.session;
-        } catch (e) {
-          if (!(e instanceof ApiError) || e.code !== "codex_needs_prompt") throw e;
-          session = await startWithPrompt();
-        }
-      }
-      if (!getState().launches[id]) return;
-      update({ session, ...(hasFirstTurn ? { handoffAt: Date.now() } : {}) });
-      upsertSession(session);
-    }
-    if (!launch.outgoing) {
-      update({ phase: "uploading" });
-      const paths: string[] = [];
-      const images: { mime: string; data: string }[] = [];
-      for (const att of launch.attachments) {
-        if (att.mime.startsWith("image/")) {
-          images.push(await imagePayload(att.file));
-        } else {
-          let path = launch.uploaded[att.id];
-          if (!path) {
-            path = await sendFile(launch.machineId, att.file, { name: att.name, signal: controller.signal });
-            update({ uploaded: { ...launch.uploaded, [att.id]: path } });
-          }
-          paths.push(quotePath(path));
-        }
-      }
-      update({ outgoing: { text: [launch.text, ...paths].filter(Boolean).join("\n"), images } });
-    }
-    if (!getState().launches[id]) return;
-    controller.signal.throwIfAborted();
-    const out = launch.outgoing!;
-    if (out.text || out.images.length) {
-      update({ phase: "sending" });
-      const payload = { ...out, client_msg_id: launch.messageId, clear_draft: clearDraft, todo_id: launch.todoId || undefined };
-      if (new TextEncoder().encode(JSON.stringify(payload)).byteLength > 32 * 1024 * 1024) throw new Error(t("lib-new-agent.attachments_too_large_retry"));
-      await launchOp(`${sessionPath(launch.machineId, launch.session!.session_id)}/messages`, launch.messageId, controller.signal, payload);
-    }
-    releaseAttachments(launch.attachments);
-    update({ phase: "ready", attachments: [], ...(hasFirstTurn ? { handoffAt: Date.now() } : {}) });
-    const local = { name: "session" as const, mid: launch.machineId, sid: launch.id };
-    if (location.pathname === href(local)) navigate({ ...local, sid: launch.session!.session_id }, true);
+    const delivery = await import("./new-agent-delivery");
+    await delivery.deliverLaunch(id, clearDraft);
   } catch (e) {
-    const phase: AgentLaunch["phase"] = getState().launches[id]?.phase ?? "failed";
-    const sending = phase === "sending";
-    const creating = phase === "creating";
-    // no answer: the same op id on Retry finds out whether the hub had it, so nothing starts or sends twice
-    const gap = isTransient(e) || isAbort(e);
-    // the hub answered that it doesn't know, and its receipt would say so again: going on takes new ids and the person's word
-    const uncertain = (creating || sending) && !gap && e instanceof ApiError && (e.body.delivered === "unknown" || (e.status >= 500 && e.body.delivered !== "none"));
-    // the hub won't start it with ultracode here (an old node, a CLI or engine that can't take it): asking again would
-    // get the same answer, so "Retry" starts it without, and the card says so (#3428)
-    const noUltracode = creating && launch.ultracode === true && ultracodeRefused(e);
-    update({ phase: "failed", handoffAt: undefined, uncertain, repeatOnly: creating && (gap || launch.workSession === true), ...(gap ? {} : launchOpIds()),
-      ...(noUltracode ? { ultracode: undefined } : {}),
-      error: noUltracode ? t("ultracode.start_refused", { error: ultracodeErrorText(e) }) : t(creating ? "lib-new-agent.start_failed" : sending ? "lib-new-agent.first_message_failed" : "lib-new-agent.attachments_failed", { error: errorText(e) }),
-      clearable: e instanceof ApiError && e.code === "input_draft" && typeof e.body.clearable === "string" ? e.body.clearable : undefined,
-      draft: e instanceof ApiError && e.code === "input_draft" ? String(e.body.draft ?? "") : undefined,
-      shellWaiting: e instanceof ApiError && e.code === "shell_waiting" ? e.body : undefined,
-    });
+    // A missing chunk has made no request. Keep the draft and operation IDs so Retry remains safe.
+    const current = getState().launches[id];
+    if (current) putLaunch({ ...current, phase: "failed", error: t("lib-new-agent.start_failed", { error: errorText(e) }) });
   } finally {
-    clearTimeout(deadline);
     delivering.delete(id);
   }
 }
@@ -262,6 +155,9 @@ export interface NewAgentPreset {
   prompt?: string;
   machineId?: string;
   cwd?: string;
+  /** The exact desktop launcher and native project selected by the source page. */
+  launcher?: string;
+  desktopProjectId?: string;
   /** Messages forwarded to a new Agent (#3899; several at once, #3838): their card over the first message, which carries
    *  them in front; and the pictures they had, attached. */
   forwards?: ContextRef[];

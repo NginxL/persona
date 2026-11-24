@@ -7,6 +7,7 @@ import { MCP_SERVER_NAMES } from '../../runtime-sdk/lib/compat.js'
 import { page } from '../../runtime-sdk/index.js'
 import {
   agyModeToPersona,
+  cleanAssistantText,
   cleanGenericOutput,
   cleanUserText,
   mapToolCall,
@@ -52,6 +53,31 @@ describe('antigravity transcript and tool mapping', () => {
   it('extracts user request and strips persona-context', () => {
     const raw = `<USER_REQUEST>\n<persona-context>\nsnapshot\n</persona-context>\n\nHello world\n</USER_REQUEST>\n<ADDITIONAL_METADATA>\ntime\n</ADDITIONAL_METADATA>`
     assert.equal(cleanUserText(raw), 'Hello world')
+  })
+
+  it('projects native context resources without hiding ordinary user labels', () => {
+    const user = 'Please reply OK.\nKeep this second line.'
+    const label = 'Content of persona-context:///snapshot.txt:\n'
+    const context = '<persona-context>Attached context with /compact</persona-context>'
+    const cases = [
+      ['native first request', `<USER_REQUEST>\n${label}${context}${user}\n</USER_REQUEST>\n<ADDITIONAL_METADATA>clock</ADDITIONAL_METADATA>`, user],
+      ['unwrapped resource', label + context + user, user],
+      ['another Persona URI', 'Content of persona-context:///other.txt:\r\n' + context + user, user],
+      ['successive resources', label + context + '\n' + label + context + user, user],
+      ['no prefix', user, user],
+      ['literal label', label + user, label + user],
+      ['other URI', 'Content of file:///snapshot.txt:\n' + context + user, 'Content of file:///snapshot.txt:\n' + user],
+      ['similar scheme', 'Content of persona-context-extra:///snapshot.txt:\n' + context + user, 'Content of persona-context-extra:///snapshot.txt:\n' + user],
+      ['quoted label', 'Example:\n' + label + user, 'Example:\n' + label + user],
+      ['incomplete envelope', label + '<persona-context>unfinished', label + '<persona-context>unfinished'],
+    ]
+    for (const [name, content, expected] of cases) {
+      const steps = [{ step_index: 0, type: 'USER_INPUT', source: 'USER_EXPLICIT', content }]
+      const { items } = stepsToItems(steps)
+      assert.equal(items[0].text, expected, name)
+      assert.equal(items[0].role, 'user', name)
+      assert.equal(steps[0].content, content, 'native content stays unchanged')
+    }
   })
 
   it('maps tool names and inputs to Persona conventions', () => {
@@ -365,6 +391,65 @@ describe('antigravity transcript and tool mapping', () => {
     assert.equal(photoOnly.items[0].text, '<attached_images>\n/tmp/only-photo.png\n</attached_images>')
   })
 
+  it('normalizes local file:// Markdown links and images in assistant replies only', () => {
+    const cases = [
+      ['unix file link', 'See [notes.md](file:///work/repo/notes.md).', 'See [notes.md](/work/repo/notes.md).'],
+      ['line fragment', 'Check [app.go](file:///work/repo/app.go#L10-L20).', 'Check [app.go](/work/repo/app.go#L10-L20).'],
+      ['localhost authority', '[doc](file://localhost/work/repo/doc.md)', '[doc](/work/repo/doc.md)'],
+      ['uppercase scheme and percent spaces', '[a](FILE:///work/My%20Notes/a.md)', '[a](/work/My%20Notes/a.md)'],
+      ['angle-bracket destination', '[a](<file:///work/My Notes/a.md> "title")', '[a](</work/My Notes/a.md> "title")'],
+      ['balanced parens and title', '[p](file:///work/photo(1).png "shot")', '[p](/work/photo(1).png "shot")'],
+      ['image destination', '![chart](file:///work/repo/chart.png)', '![chart](/work/repo/chart.png)'],
+      ['windows drive', '[win](file:///C:/work/notes.md#L5)', '[win](C:/work/notes.md#L5)'],
+      ['windows encoded colon', '[win](file:///c%3A/work/notes.md)', '[win](c:/work/notes.md)'],
+      ['reference definition', '[ref]: file:///work/repo/notes.txt "Ref"', '[ref]: /work/repo/notes.txt "Ref"'],
+      ['list continuation', '- item\n    [notes](file:///work/notes.md)', '- item\n    [notes](/work/notes.md)'],
+      ['inline code untouched', 'Use `[notes](file:///work/notes.md)` literally.', 'Use `[notes](file:///work/notes.md)` literally.'],
+      ['fenced code untouched', '```md\n[notes](file:///work/notes.md)\n```\n[live](file:///work/live.md)', '```md\n[notes](file:///work/notes.md)\n```\n[live](/work/live.md)'],
+      ['indented code untouched', 'Example:\n\n    [notes](file:///work/notes.md)\n\n[live](file:///work/live.md)', 'Example:\n\n    [notes](file:///work/notes.md)\n\n[live](/work/live.md)'],
+      ['remote host untouched', '[r](file://other-host/share/notes.md)', '[r](file://other-host/share/notes.md)'],
+      ['unc double slash untouched', '[u](file:////server/share/notes.md)', '[u](file:////server/share/notes.md)'],
+      ['percent-encoded double slash untouched', '[u](file:///%2fserver/share/notes.md)', '[u](file:///%2fserver/share/notes.md)'],
+      ['percent-encoded double slash with invalid utf8 untouched', '[u](file:///%2f%ffserver/share/notes.md)', '[u](file:///%2f%ffserver/share/notes.md)'],
+      ['hub route untouched', '[api](file:///api/v1/sessions)', '[api](file:///api/v1/sessions)'],
+      ['dot-segment hub route untouched', '[api](file:///./api/v1/sessions)', '[api](file:///./api/v1/sessions)'],
+      ['parent-segment hub route untouched', '[api](file:///work/../api/v1/sessions)', '[api](file:///work/../api/v1/sessions)'],
+      ['duplicate-slash hub route untouched', '[api](file:///api//v1/sessions)', '[api](file:///api//v1/sessions)'],
+      ['percent-encoded hub route with bad percent untouched', '[api](file:///%61pi/v1/sessions%ZZ)', '[api](file:///%61pi/v1/sessions%ZZ)'],
+      ['query string untouched', '[q](file:///work/notes.md?x=1)', '[q](file:///work/notes.md?x=1)'],
+      ['nul byte untouched', '[n](file:///work/notes%00.md)', '[n](file:///work/notes%00.md)'],
+      ['percent-encoded control char untouched', '[c](file:///work/notes%0a.md)', '[c](file:///work/notes%0a.md)'],
+      ['percent literal in filename', '[p](file:///work/100%25_done.md)', '[p](/work/100%25_done.md)'],
+      ['percent literal before 00 in filename', '[p](file:///work/%2500_note.md)', '[p](/work/%2500_note.md)'],
+      ['percent literal before 2f in leading segment', '[p](file:///%252fdir/note.md)', '[p](/%252fdir/note.md)'],
+      ['relative file scheme untouched', '[rel](file:notes.md)', '[rel](file:notes.md)'],
+      ['escaped bracket untouched', 'text \\](file:///work/notes.md)', 'text \\](file:///work/notes.md)'],
+      ['partial streaming link untouched', 'See [notes](file:///work/no', 'See [notes](file:///work/no'],
+    ]
+    for (const [name, input, expected] of cases) {
+      assert.equal(cleanAssistantText(input), expected, name)
+    }
+
+    const { items, lastText } = stepsToItems([
+      { step_index: 0, source: 'USER_EXPLICIT', type: 'USER_INPUT', status: 'DONE', content: 'Open [u](file:///work/u.md)' },
+      {
+        step_index: 1,
+        source: 'MODEL',
+        type: 'PLANNER_RESPONSE',
+        status: 'DONE',
+        thinking: 'Checking [t](file:///work/t.md)',
+        content: 'Opened [notes.md](file:///work/notes.md#L12) and ![img](file:///work/img.png).',
+        tool_calls: [{ name: 'view_file', args: { AbsolutePath: '/work/notes.md' } }],
+      },
+      { step_index: 2, source: 'MODEL', type: 'GENERIC', status: 'DONE', content: '[out](file:///work/out.md)' },
+    ])
+    assert.equal(items[0].text, 'Open [u](file:///work/u.md)')
+    assert.equal(items[1].text, 'Checking [t](file:///work/t.md)')
+    assert.equal(items[2].text, 'Opened [notes.md](/work/notes.md#L12) and ![img](/work/img.png).')
+    assert.equal(items[4].text, '[out](file:///work/out.md)')
+    assert.equal(lastText, 'Opened [notes.md](/work/notes.md#L12) and ![img](/work/img.png).')
+  })
+
   it('maps modes between Persona and Antigravity ACP', () => {
     assert.equal(personaModeToAgy('plan'), 'plan')
     assert.equal(personaModeToAgy('acceptEdits'), 'accept-edits')
@@ -373,5 +458,66 @@ describe('antigravity transcript and tool mapping', () => {
     assert.equal(personaModeToAgy('default'), 'default')
     assert.equal(agyModeToPersona('accept-edits'), 'acceptEdits')
     assert.equal(cleanGenericOutput('Created At: 2026\nOutput:\nhello'), 'hello')
+  })
+
+  it('attaches per-step token usage and model in projected order and preserves usage across checkpoints and prefix cache reuse', () => {
+    const at = '2026-11-21T10:00:00Z'
+    const steps = [
+      { step_index: 0, type: 'PERSONA_MODE_NOTICE', created_at: at, content: 'mode fallback' },
+      { step_index: 1, native_step_index: 0, source: 'USER_EXPLICIT', type: 'USER_INPUT', status: 'DONE', created_at: at, content: 'Inspect' },
+      {
+        step_index: 2, native_step_index: 1, source: 'MODEL', type: 'PLANNER_RESPONSE', status: 'DONE', created_at: at,
+        model: 'claude-opus-5-5-high', thinking: 'Reading', content: 'Checking',
+        input_tokens: 1200, cache_read_tokens: 48800, cache_write_tokens: 300, cache_write_1h_tokens: 100, output_tokens: 180,
+        tool_calls: [{ name: 'run_command', args: { CommandLine: 'ls' } }],
+      },
+      { step_index: 3, native_step_index: 2, source: 'MODEL', type: 'GENERIC', status: 'DONE', created_at: at, content: 'ok' },
+      { step_index: 4, native_step_index: 3, source: 'SYSTEM', type: 'CHECKPOINT', status: 'DONE', created_at: at, input_tokens: 3000, cache_read_tokens: 500000, output_tokens: 4000 },
+      {
+        step_index: 5, native_step_index: 4, source: 'MODEL', type: 'PLANNER_RESPONSE', status: 'DONE', created_at: at,
+        model: '<synthetic>', content: 'Synthetic note', input_tokens: -5, output_tokens: -2,
+      },
+    ]
+
+    for (const full of [false, true]) {
+      const mapped = stepsToItems(steps, { full, cacheKey: `usage-prefix-${full}`, immutablePrefix: steps.length })
+      assert.deepEqual(mapped.usage, { contextTokens: 0, contextWindow: 0, outputTokens: 180, model: 'claude-opus-5-5-high' })
+      // Shifted seq 3 emitted 3 assistant items (thinking, text, tool_use): all get model, only the first gets usage.
+      const seq3 = mapped.items.filter((item) => item.seq === 3)
+      assert.equal(seq3.length, 3)
+      assert.deepEqual(seq3.map((item) => item.model), ['claude-opus-5-5-high', 'claude-opus-5-5-high', 'claude-opus-5-5-high'])
+      assert.deepEqual(seq3[0].usage, [{
+        model: 'claude-opus-5-5-high', in: 1200, out: 180, cache_read: 48800, cache_write: 300, cache_write_1h: 100,
+      }])
+      assert.equal(seq3[1].usage, undefined)
+      assert.equal(seq3[2].usage, undefined)
+      // Mode notice and synthetic/negative step stay clean.
+      assert.equal(mapped.items[0].usage, undefined)
+      assert.equal(mapped.items[0].model, undefined)
+      const seq6 = mapped.items.find((item) => item.seq === 6)
+      assert.equal(seq6.model, undefined)
+      assert.equal(seq6.usage, undefined)
+
+      // Reusing the cached prefix with a post-checkpoint reply preserves cumulative outputTokens and updates contextTokens/contextWindow.
+      const extended = [
+        ...steps,
+        {
+          step_index: 6, native_step_index: 5, source: 'MODEL', type: 'PLANNER_RESPONSE', status: 'DONE', created_at: at,
+          model: 'gemini-4-neon-high', content: 'After compaction',
+          usage: { input_tokens: 12000, cache_read_input_tokens: 3000, cache_creation_input_tokens: 500, output_tokens: 220, model_context_window: 1048576 },
+        },
+      ]
+      const reused = stepsToItems(extended, { full, cacheKey: `usage-prefix-${full}`, immutablePrefix: extended.length })
+      assert.deepEqual(reused.usage, { contextTokens: 15500, contextWindow: 1048576, outputTokens: 400, model: 'gemini-4-neon-high' })
+      const seq7 = reused.items.find((item) => item.seq === 7)
+      assert.equal(seq7.model, 'gemini-4-neon-high')
+      assert.deepEqual(seq7.usage, [{
+        model: 'gemini-4-neon-high', in: 12000, out: 220, cache_read: 3000, cache_write: 500,
+      }])
+      const switched = [...extended, { step_index: 7, type: 'PLANNER_RESPONSE', model: 'custom', input_tokens: 8000 }]
+      const next = stepsToItems(switched, { full, cacheKey: `usage-prefix-${full}`, immutablePrefix: switched.length })
+      assert.equal(next.usage.contextTokens, 8000)
+      assert.equal(next.usage.contextWindow, 0)
+    }
   })
 })

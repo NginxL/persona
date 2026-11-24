@@ -146,7 +146,7 @@ object AgentModelPanel {
     /** The row of [models] the session runs: the one its model names (the default entry only when no other does); none reported: the default entry. */
     fun currentModelRow(models: List<AgentModel>, model: String?): AgentModel? {
         if (model.isNullOrEmpty()) return defaultModel(models)
-        val hits = models.filter { ModelPanel.isCurrentModel(it.id, it.resolved, model) }
+        val hits = models.filter { ModelPanel.isCurrentModel(it.id, it.resolved, model, it.aliases) }
         return hits.firstOrNull { !it.isDefault } ?: hits.firstOrNull()
     }
 
@@ -156,6 +156,7 @@ object AgentModelPanel {
     /** A model of a list as a panel row ([listed] false: the model that runs, which its list doesn't name). */
     private fun panelModel(m: AgentModel, engine: String, current: Boolean, s: Session, listed: Boolean = true): PanelModel = PanelModel(
         id = m.id, name = m.label, description = m.description?.takeIf(String::isNotBlank), resolved = m.resolved?.takeIf(String::isNotBlank),
+        aliases = m.aliases,
         efforts = when {
             current && s.efforts.isNotEmpty() -> s.efforts
             listed && !m.custom -> m.efforts
@@ -248,7 +249,7 @@ object AgentModelPanel {
         val models = listFor(own)?.models.orEmpty()
         val row = models.firstOrNull { it.id == config.model }
         val current = currentModelRow(models, s.model)
-        val same = if (row != null) row == current || ModelPanel.isCurrentModel(row.id, row.resolved, s.model) else config.model == s.model
+        val same = if (row != null) row == current || ModelPanel.isCurrentModel(row.id, row.resolved, s.model, row.aliases) else config.model == s.model
         if (!same && (!canSwitchModel(s) || (row == null && ModelPanel.typedModelId(config.model) == null))) return null
         return buildList {
             if (s.pendingSwitch?.launcher?.let { it.isNotEmpty() && it != own } == true) add(ModeStep.Launcher(own, own))
@@ -289,7 +290,7 @@ object AgentModelPanel {
     fun pendingPill(s: Session, listFor: (String) -> ModelList, launchers: List<AgentLauncher>?, defaultModelName: String): PillSetup? {
         val ps = s.pendingSwitch?.takeIf { it.launcher.isNotEmpty() && it.launcher != launcher(s) } ?: return null
         val models = listFor(ps.launcher).list?.models.orEmpty()
-        val row = if (!ps.model.isNullOrEmpty()) models.firstOrNull { it.id == ps.model } else defaultModel(models)
+        val row = currentModelRow(models, ps.model)
         val engine = ps.agent?.takeIf(String::isNotEmpty)?.let(::engineId) ?: engine(s)
         val model = row?.label ?: ps.model?.takeIf(String::isNotEmpty)?.let(::modelLabel) ?: defaultModelName
         val effort = ps.effort?.takeIf(String::isNotEmpty) ?: if (engine != engine(s)) row?.defaultEffort else s.effort

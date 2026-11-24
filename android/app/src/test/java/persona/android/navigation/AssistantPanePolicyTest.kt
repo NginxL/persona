@@ -34,9 +34,9 @@ import persona.feature.inbox.InboxItemDetailRoute
 import persona.feature.inbox.LarkMomentRoute
 import persona.feature.inbox.LarkRoute
 import persona.feature.inbox.MailRoute
-import persona.feature.knowledge.KnowledgeDetailRoute
-import persona.feature.knowledge.KnowledgeKindRoute
-import persona.feature.knowledge.KnowledgeRoute
+import persona.core.navigation.KnowledgeDetailRoute
+import persona.core.navigation.KnowledgeKindRoute
+import persona.core.navigation.KnowledgeRoute
 
 class AssistantPanePolicyTest {
     private fun policy(

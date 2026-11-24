@@ -26,10 +26,11 @@ import persona.core.domain.FixtureReader
 
 /**
  * The Agents tab's Needs you, one row per waiting session, and its badge (#3580) against spec/fixtures/needs-you, which
- * iOS reads too: the rows, the rows the badge counts (`badge_rows`, as ShellCounts.agentRows reads them) and the number.
- * A case marked as Android's known difference (`known_differences.android`) is asserted at today's value; a mark on any
- * client must name a decision and change what that client is asserted at. With the counts report switch on
- * (spec/fixtures/counts/README.md, "Lane reports"), each case's rows and badge also go to the Android lane's report.
+ * iOS reads too: the rows, the rows the badge counts (`badge_rows`, as ShellCounts.agentRows reads them), the number and
+ * what the Agents page's Needs you header and filter show (`header`). A case marked as Android's known difference
+ * (`known_differences.android`) is asserted at today's value; a mark on any client must name a decision and change what
+ * that client is asserted at. With the counts report switch on (spec/fixtures/counts/README.md, "Lane reports"), each
+ * case's badge and header, with their rows, also go to the Android lane's report.
  */
 @RunWith(Parameterized::class)
 class AgentsNeedsYouFixtureTest(private val name: String, private val fixture: FixtureReader.Case) {
@@ -46,12 +47,15 @@ class AgentsNeedsYouFixtureTest(private val name: String, private val fixture: F
         val rows = needsYouRows(needsYouCards(input.list<Interaction>("interactions"), byKey), needsYouWaiting(sessions))
         val badgeRows = needsYouBadgeRows(rows, byKey, mutes)
         val badge = needsYouBadge(rows, byKey, mutes)
+        // The Agents page's Needs you header and filter count the section's rows (agentNeedsYouRows, by these rules).
+        val header = rows.size
         // Reported before the assertions, so a case that fails is in the report with what Android counted.
         report("agents_tab", badge, badgeRows)
-        report("agents_section", rows.size, rows)
+        report("agents_section", header, rows)
         assertEquals(name, want.getValue("rows").rows(), rows.ids())
         assertEquals("$name: badge rows", want.getValue("badge_rows").rows(), badgeRows.ids())
         assertEquals("$name: badge", want.getValue("badge").jsonPrimitive.int, badge)
+        assertEquals("$name: header", want.getValue("header").jsonPrimitive.int, header)
     }
 
     /** One line of the Android lane's report, when the switch is on: what [surface] shows for this case, and its rows. */

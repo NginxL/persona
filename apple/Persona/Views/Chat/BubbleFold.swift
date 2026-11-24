@@ -1,7 +1,5 @@
 import SwiftUI
-#if canImport(UIKit)
 import UIKit
-#endif
 import PersonaWire
 
 // MARK: - Your own long message, folded (#5676)
@@ -55,7 +53,6 @@ nonisolated enum BubbleFoldRule: Equatable, Sendable {
         lengths.reduce(0) { $0 + max(1, ($1 + perLine - 1) / perLine) }
     }
 
-    #if !os(macOS)
     /// The height of `lines` lines of body text at `size`, as `.lineHeight(.body)` spaces them: the font's line height each,
     /// and the level's extra leading between them. From the font's metrics, not a hidden text measured in the bubble
     /// (its lines were read as the bubble's own by what reads a message's lines, `readingShownWords`).
@@ -71,7 +68,6 @@ nonisolated enum BubbleFoldRule: Equatable, Sendable {
     private struct Key: Hashable { var lines: Int; var size: DynamicTypeSize }
     /// Twelve sizes, two rules.
     @MainActor private static var heights: [Key: CGFloat] = [:]
-    #endif
 
     /// Each line's characters, once per text.
     static func lengths(_ text: String) -> [Int] {
@@ -174,9 +170,6 @@ struct BubbleFold<Words: View>: View {
     @ScaledMetric(relativeTo: .body) private var bodySize = BubbleFoldRule.bodySize
 
     var body: some View {
-        #if os(macOS)
-        words(text) // the Mac app is frozen (docs/apple/mac.md): its bubbles stay whole
-        #else
         let rule = BubbleFoldRule(typeSize)
         let lengths = BubbleFoldRule.lengths(text)
         if let fold, !lifted, !BubbleFoldRule.whole,
@@ -191,7 +184,6 @@ struct BubbleFold<Words: View>: View {
         } else {
             words(text)
         }
-        #endif
     }
 }
 

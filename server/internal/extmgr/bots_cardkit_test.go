@@ -4,22 +4,23 @@ import (
 	"testing"
 
 	"github.com/nwverse/persona/server/internal/assistantwire"
-	"github.com/nwverse/persona/server/internal/feishubot"
+	"github.com/nwverse/persona/server/internal/botcard"
 )
 
 // The assistant's card entities (CardKit, feishubot/cardkit.go): it makes one, sends it with feishu.post by its id,
 // then writes into it — the whole card, an element's text streamed, its streaming turned off — each write with the
 // sequence it gives.
 func TestCardEntityCalls(t *testing.T) {
+	needsLarkModule(t)
 	w := newBotWorld(t)
 	w.pair(t)
-	card := feishubot.NewCard("", "", "Working").MarkdownID("live", "").Streaming().JSON()
+	card := botcard.NewCard("", "", "Working").MarkdownID("live", "").Streaming().JSON()
 	id, _ := w.feishu(t, assistantwire.FeishuCardCreate, map[string]any{"card": card})["card_id"].(string)
 	if id == "" {
 		t.Fatal("no card id")
 	}
 	w.api.find(t, "POST /open-apis/cardkit/v1/cards ", `"type":"card_json"`)
-	if mid, _ := w.feishu(t, assistantwire.FeishuPost, map[string]any{"card": feishubot.CardEntityContent(id)})["message_id"].(string); mid == "" {
+	if mid, _ := w.feishu(t, assistantwire.FeishuPost, map[string]any{"card": botcard.CardEntityContent(id)})["message_id"].(string); mid == "" {
 		t.Fatal("the entity was not sent")
 	}
 	w.api.find(t, "POST /open-apis/im/v1/messages", `"msg_type":"interactive"`, id)

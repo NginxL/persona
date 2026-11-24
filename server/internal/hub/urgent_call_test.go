@@ -187,10 +187,13 @@ func TestCallRoute(t *testing.T) {
 		route, cause string
 	}{
 		{Device{}, pushNone, pushNoToken},
-		{Device{VoIPToken: callVoIPToken, VoIPError: "403 topic not served by this relay", RelayURL: "https://relay.example"}, pushNone, pushRelayFailed},
+		{Device{VoIPToken: callVoIPToken, VoIPError: "403 topic not served by this relay", RelayURL: "https://relay.example", RelayGrant: "normal"}, pushNone, pushRelayFailed},
 		{Device{VoIPToken: callVoIPToken}, pushNone, pushNoRelay},
-		{Device{VoIPToken: callVoIPToken, RelayURL: "https://relay.example", VoIPGrant: "g"}, pushNone, pushRelayFailed}, // no push key
-		{Device{VoIPToken: callVoIPToken, RelayURL: "https://relay.example", VoIPGrant: "g", PushKey: "k"}, pushRelay, ""},
+		// A URL kept only to name a refused normal registration is not a usable call route.
+		{Device{VoIPToken: callVoIPToken, RelayError: "403 topic not served", RelayURL: "https://relay.example", VoIPGrant: "voip"}, pushNone, pushNoRelay},
+		{Device{VoIPToken: callVoIPToken, RelayError: "403 topic not served", RelayURL: "https://relay.example", VoIPGrant: "voip", PushKey: "k"}, pushNone, pushNoRelay},
+		{Device{VoIPToken: callVoIPToken, RelayURL: "https://relay.example", RelayGrant: "normal", VoIPGrant: "g"}, pushNone, pushRelayFailed}, // no push key
+		{Device{VoIPToken: callVoIPToken, RelayURL: "https://relay.example", RelayGrant: "normal", VoIPGrant: "g", PushKey: "k"}, pushRelay, ""},
 	} {
 		if got := p.callRouteOf(c.d); got.Route != c.route || got.Reason != c.cause {
 			t.Errorf("callRouteOf(%+v) = %+v, want %s %s", c.d, got, c.route, c.cause)

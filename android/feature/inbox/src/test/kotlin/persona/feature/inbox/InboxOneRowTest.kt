@@ -47,6 +47,7 @@ import persona.core.designsystem.PersonaTheme
 import persona.core.domain.inbox.InboxItem
 import persona.core.navigation.AppTab
 import persona.core.navigation.Navigator
+import persona.core.inbox.*
 
 /**
  * One item, one row (the Inbox's first step of "展示"): a chat's items are listed as their own rows like mail's, the

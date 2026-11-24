@@ -207,6 +207,21 @@
     <string name="machines_usage_problem_error">ゲートウェイがこのアカウントを読めませんでした。保存済みの数値を表示しています</string>
     <plurals name="machines_health_summary_attention"><item quantity="other">%d 件の機能に対応が必要です</item></plurals>
     <plurals name="machines_health_fixed"><item quantity="other">%d 件を再生成しました</item></plurals>
+    <string name="machines_usage_provider_other">その他</string>
+    <string name="machines_usage_types_title">表示するアカウントの種類</string>
+    <string name="machines_usage_types_hint">このスマートフォンの表示だけが変わります。</string>
+    <string name="machines_usage_timeline_window">%1$s · %2$s</string>
+    <plurals name="machines_usage_accounts"><item quantity="other">%d 件のアカウント</item></plurals>
+    <string name="machines_usage_days">%1$d日</string>
+    <string name="machines_usage_hours_tenths">%1$s時間</string>
+    <string name="machines_usage_axis_now">現在</string>
+    <string name="machines_usage_chart_title">リセットのタイムライン</string>
+    <string name="machines_usage_chart_row">%1$s：%2$s</string>
+    <string name="machines_usage_legend_five">5h ウィンドウの回復</string>
+    <string name="machines_usage_legend_week">7d ウィンドウの回復</string>
+    <string name="machines_usage_legend_now">現在</string>
+    <string name="machines_usage_legend_protect">保護ライン（ここで自動的に割り当てを停止）</string>
+    <string name="machines_usage_protect">保護 %1$d%%</string>
     <plurals name="machines_usage_age_seconds"><item quantity="other">%d 秒前</item></plurals>
     <plurals name="machines_usage_age_minutes"><item quantity="other">%d 分前</item></plurals>
     <plurals name="machines_usage_age_hours"><item quantity="other">%d 時間前</item></plurals>
@@ -269,4 +284,9 @@
     <string name="machines_link_switch_why_unknown">問題が発生しました。</string>
     <string name="machines_link_switch_why_unavailable">このコンピューターは今はPersona Linkに切り替えられません。</string>
     <string name="machines_manager_offline">アシスタント「%1$s」がオフラインです。アシスタントが戻ると、このコンピューターもオンラインに戻ります。</string>
+    <string name="machines_tokens_today_title">今日のトークン使用量</string>
+    <string name="machines_tokens_total">合計</string>
+    <string name="machines_tokens_now">現在</string>
+    <string name="machines_tokens_cache_hit_rate">キャッシュヒット率</string>
+    <string name="machines_tokens_per_minute">%1$s/分</string>
 </resources>

@@ -1,13 +1,17 @@
 """check-fast.sh on changes outside scripts/: docs, markdown, apple/, deploy/docker/, the wire schemas and shared
 fixtures, design tokens and icons select the scripts/test suites that guard them, and migrations the frozen
-migrations check.
+migrations check. And the server's repo-wide guard step names only tests and packages that exist (#12842).
 
 Split from test_check_fast.py (#11017), whose throwaway repository and helpers it uses, so each file stays well under
 the per-suite limit of scripts/ci/python-tests.py on a loaded machine.
 """
 import importlib.util
+from pathlib import Path
 import re
+import shutil
+import subprocess
 import sys
+import tempfile
 import unittest
 
 from test_check_fast import FAILING, PASSING, ROOT, ScriptsRepoTestCase
@@ -23,6 +27,99 @@ def section_check_dirs():
     finally:
         sys.path[:] = saved
     return [name for name in module.SOURCE_DIRS if not name.endswith(".md")]
+
+
+# A top-level Go test function: what go test -run matches a GO_GUARD_TESTS entry against.
+GO_TEST_FUNC = re.compile(r"^func (Test\w*)\(\w+ \*testing\.T\)", re.M)
+# An entry of GO_GUARD_TESTS: a test's name, or a name prefix followed by .* (TestGolden.*). Nothing else, so splitting
+# the pattern at | finds every entry and Python's regular expressions read each one as Go's do.
+GUARD_TEST_ENTRY = re.compile(r"Test\w+(?:\.\*)?")
+
+
+def go_guard_lists(script=ROOT / "scripts/test/check-fast.sh"):
+    """check-fast.sh's GO_GUARD_PKGS, GO_GUARD_TEST_PKGS and GO_GUARD_TESTS as bash reads them: (packages, packages
+    whose named tests run, the -run pattern). The assignments run in a bash of their own, from the first one to the end
+    of the GO_GUARD_TESTS line and the lines it continues onto."""
+    lines = Path(script).read_text(encoding="utf-8").splitlines()
+    start = next(i for i, line in enumerate(lines) if line.startswith("GO_GUARD_PKGS=("))
+    end = next(i for i, line in enumerate(lines) if line.startswith("GO_GUARD_TESTS="))
+    while lines[end].endswith("\\"):
+        end += 1
+    block = "\n".join(lines[start:end + 1])
+    printed = 'printf "%s\\n" "${GO_GUARD_PKGS[*]}" "${GO_GUARD_TEST_PKGS[*]}" "$GO_GUARD_TESTS"'
+    out = subprocess.run(["bash", "-c", block + "\n" + printed], capture_output=True, text=True, check=True,
+                         timeout=30).stdout.splitlines()
+    return out[0].split(), out[1].split(), out[2]
+
+
+def guard_test_misses(pattern, packages, server=ROOT / "server"):
+    """What a GO_GUARD_TESTS pattern names that is not there: each entry that matches no top-level func Test... in the
+    _test.go files of the packages (directories under server), each package directory with no _test.go, and a pattern
+    or entry of another shape. go test -run '^(A|B)$' passes when B matches nothing, so a renamed guard stops running
+    without a word; this is that word."""
+    whole = re.fullmatch(r"\^\((.+)\)\$", pattern)
+    if not whole:
+        return [f"not ^(A|B|...)$: {pattern}"]
+    misses, defined = [], set()
+    for package in packages:
+        files = sorted((Path(server) / package).glob("*_test.go"))
+        if not files:
+            misses.append(f"{package}: no _test.go there")
+        for path in files:
+            defined.update(GO_TEST_FUNC.findall(path.read_text(encoding="utf-8")))
+    for entry in whole.group(1).split("|"):
+        if not GUARD_TEST_ENTRY.fullmatch(entry):
+            misses.append(f"{entry}: not a test name or a name followed by .*")
+        elif not any(re.fullmatch(entry, name) for name in defined):
+            misses.append(entry)
+    return misses
+
+
+@unittest.skipUnless(shutil.which("bash"), "check-fast.sh is a bash script")
+class CheckFastGoGuardListTests(unittest.TestCase):
+    """The server's repo-wide guard step (job_go_guards) runs what its lists name, on this repository's server/."""
+
+    def test_every_listed_guard_test_is_a_func_of_the_listed_packages(self):
+        packages, test_packages, pattern = go_guard_lists()
+        misses = guard_test_misses(pattern, test_packages)
+        self.assertEqual([], misses, "GO_GUARD_TESTS in scripts/test/check-fast.sh names tests that no package of "
+                                     "GO_GUARD_TEST_PKGS defines (renamed or moved?); go test -run skips them silently")
+        for package in packages:
+            with self.subTest(package=package):
+                self.assertTrue(list((ROOT / "server" / package).glob("*_test.go")),
+                                f"GO_GUARD_PKGS lists {package}, which has no _test.go in server/")
+
+    def test_the_contract_tests_are_on_the_list(self):
+        # The step's reason to exist (#12842): these caught Go breakages that a correct run of the touched group missed.
+        packages, test_packages, pattern = go_guard_lists()
+        self.assertTrue({"./internal/i18n", "./internal/prompts"} <= set(packages), packages)
+        self.assertTrue({"./internal/hub", "./internal/assistant", "./internal/update", "./cmd/persona-hub",
+                         "./cmd/persona-manager", "./cmd/persona-node"} <= set(test_packages), test_packages)
+        entries = set(re.fullmatch(r"\^\((.+)\)\$", pattern).group(1).split("|"))
+        for entry in ("TestOneBuild", "TestPersonaHubDoesNotLinkTheManager", "TestPersonaManagerDoesNotLinkTheHub",
+                      "TestPersonaNodeDoesNotLinkTheHubOrTheManager", "TestGolden.*", "TestNoWholeListMCPToolGoldens",
+                      "TestWireSamples", "TestRouteScopes", "TestEveryExtensionRouteIsBounded", "TestPromptSizeRatchet",
+                      "TestSupervisionPolicySizeBudget", "TestModelPurposesDescribeThemselves",
+                      "TestRepositoryRetrievalGuidanceContract", "TestEveryStartPathIsSupervisedOrOptedOut"):
+            self.assertIn(entry, entries)
+
+    def test_a_name_that_is_not_a_func_is_reported(self):
+        # The check above on a planted server/: a renamed test, a prefix nothing has, a method and a helper that only
+        # look like tests, a package with no tests, and an entry -run would read differently from its name.
+        server = Path(tempfile.mkdtemp(prefix="check-fast-guards-"))
+        self.addCleanup(shutil.rmtree, server)
+        (server / "internal/x").mkdir(parents=True)
+        (server / "internal/x/x_test.go").write_text(
+            "package x\n\nfunc TestHere(t *testing.T) {}\n\nfunc TestGoldenOne(tt *testing.T) {}\n\n"
+            "func (s suite) TestMethod(t *testing.T) {}\n\nfunc TestHelper(n int) {}\n\n// func TestInComment(t *testing.T)\n")
+        (server / "internal/empty").mkdir(parents=True)
+        pattern = "^(TestHere|TestGolden.*|TestGone|TestSilver.*|TestMethod|TestHelper|TestInComment|Test(A|B))$"
+        self.assertEqual(["./internal/empty: no _test.go there", "TestGone", "TestSilver.*", "TestMethod",
+                          "TestHelper", "TestInComment", "Test(A: not a test name or a name followed by .*",
+                          "B): not a test name or a name followed by .*"],
+                         guard_test_misses(pattern, ["./internal/x", "./internal/empty"], server))
+        self.assertEqual([], guard_test_misses("^(TestHere|TestGolden.*)$", ["./internal/x"], server))
+        self.assertEqual(["not ^(A|B|...)$: TestHere"], guard_test_misses("TestHere", ["./internal/x"], server))
 
 
 class CheckFastGuardSuitesTests(ScriptsRepoTestCase):

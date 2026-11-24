@@ -552,13 +552,25 @@ func TestAdmissionDirectionCountExcludesIdleAgents(t *testing.T) {
 	put(admissionDirTask("held", "dir-1", "busy", "sh", func(t *Todo) {
 		t.Delivery = &TodoDelivery{State: deliveryMerged}
 	}))
-	// Only "sw" works a turn; the rest stay idle or are filtered structurally.
-	admissionMarkWorking(s, "busy", "sw")
+	now := time.Now()
+	put(admissionDirTask("released", "dir-1", "busy", "sr", func(t *Todo) {
+		t.Agents[0].ReleasedAt = &now
+	}))
+	put(admissionDirTask("dismissed", "dir-1", "busy", "sd", func(t *Todo) {
+		t.Agents[0].DismissedAt = &now
+	}))
+	// Even a working session takes no slot for a waiting task or an inactive link.
+	rows := []fleetRow{{id: "si"}}
+	for _, id := range []string{"sw", "sp", "sn", "so", "sh", "sr", "sd"} {
+		rows = append(rows, fleetRow{id: id, working: true})
+	}
+	admissionFleet(s, "busy", rows...)
 	if got := s.directionInFlight(ctx, "dir-1"); got != 1 {
-		t.Fatalf("only the working agent must count, got %d", got)
+		t.Fatalf("only the active worker on the runnable task must count, got %d", got)
 	}
 	// Once the idle agent's session starts working, it takes a second slot.
-	admissionMarkWorking(s, "busy", "sw", "si")
+	rows[0].working = true
+	admissionFleet(s, "busy", rows...)
 	if got := s.directionInFlight(ctx, "dir-1"); got != 2 {
 		t.Fatalf("the now-working agent must count, got %d", got)
 	}

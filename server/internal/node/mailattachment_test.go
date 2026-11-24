@@ -9,13 +9,13 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/nwverse/persona/server/internal/mail"
+	"github.com/nwverse/persona/server/internal/mailwire"
 	"github.com/nwverse/persona/server/internal/proto"
 )
 
 func TestMailAttachmentConstantsMatchMail(t *testing.T) {
-	if toolMailSaveAttachment != mail.ToolSaveAttachment || proto.MaxMailAttachment != mail.MaxSavedAttachment {
-		t.Fatalf("node has %q / %d, mail %q / %d", toolMailSaveAttachment, proto.MaxMailAttachment, mail.ToolSaveAttachment, mail.MaxSavedAttachment)
+	if toolMailSaveAttachment != mailwire.ToolSaveAttachment || proto.MaxMailAttachment != mailwire.MaxSavedAttachment {
+		t.Fatalf("node has %q / %d, mail %q / %d", toolMailSaveAttachment, proto.MaxMailAttachment, mailwire.ToolSaveAttachment, mailwire.MaxSavedAttachment)
 	}
 }
 

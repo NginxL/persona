@@ -5,7 +5,7 @@
 // back what was pushed for an event that is over.
 import { useSyncExternalStore } from "react";
 import { currentLanguage } from "../i18n";
-import { api, ApiError, CLIENT_FEATURES, enc } from "./api";
+import { api, ApiError, CLIENT_FEATURES, credentialOwner, enc } from "./api";
 import { BASE } from "./base";
 import { deviceId } from "./device-id";
 import type { AgentState } from "./types";
@@ -290,20 +290,38 @@ export async function sendTestPush(): Promise<void> {
 }
 
 let synced: string | undefined;
+let syncing: { key: string; promise: Promise<void> } | undefined;
 
 /**
  * Once a load (per credential): when this browser turned Web Push on and may still show notifications, makes sure its
  * subscription is the one the hub has, made with the hub's key, in this page's language. A failure is kept for
  * Settings to show; nothing is asked of the user.
  */
-export async function syncWebPush(owner = deviceId().id): Promise<void> {
-  if (synced === owner || !webPushFlag() || webPushSupport() !== "ok" || Notification.permission !== "granted") return;
-  synced = owner;
-  try {
-    setState({ status: await ensureSubscribed(), loaded: true, error: undefined });
-  } catch (e) {
-    setState({ error: e instanceof Error ? e.message : String(e) });
+export async function syncWebPush(owner = credentialOwner()): Promise<void> {
+  const key = `${owner}:${deviceId().id}`;
+  if (synced === key || !webPushFlag() || webPushSupport() !== "ok" || Notification.permission !== "granted") return;
+  if (syncing) {
+    if (syncing.key === key) return syncing.promise;
+    // A credential change while registration is under way runs after it, never as a duplicate browser subscription.
+    synced = undefined;
+    await syncing.promise;
+    return syncWebPush(owner);
   }
+  synced = undefined;
+  const promise = (async () => {
+    try {
+      const status = await ensureSubscribed();
+      synced = key;
+      setState({ status, loaded: true, error: undefined });
+    } catch (e) {
+      synced = undefined;
+      setState({ error: e instanceof Error ? e.message : String(e) });
+    } finally {
+      syncing = undefined;
+    }
+  })();
+  syncing = { key, promise };
+  return promise;
 }
 
 // ── taking back what was pushed ──────────────────────────

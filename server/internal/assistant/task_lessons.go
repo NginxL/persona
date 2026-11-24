@@ -25,8 +25,9 @@ import (
 // (kb.LessonKinds). They go into the task's project memory.jsonl, under the ownership worker outcomes use
 // (projectsForTask). Every new Agent of the project gets the most repeated fresh ones after the project's own block
 // (renderProjectLessons). A smooth acceptance makes no model call. A lesson the project already has is taught again (its
-// count goes up) instead of being stored twice, one the owner deleted is never learned again, and one not taught again
-// for lessonFresh is no longer handed out. Nothing here changes the supervisor's instructions or task_review.
+// count goes up) instead of being stored twice. The model skips recent deletions it recognizes, and the writer checks
+// the IDs and text of deleted versions it can read. A lesson not taught again for lessonFresh is no longer handed out.
+// Nothing here changes the supervisor's instructions or task_review.
 
 const (
 	lessonsReadTimeout  = time.Minute      // reading the Agent's last reply
@@ -34,7 +35,7 @@ const (
 	lessonsModelTokens  = 1024
 	lessonsPerTask      = 3    // lessons one acceptance may teach
 	lessonTextMax       = 200  // runes of one lesson
-	lessonsKnownMost    = 12   // the project's lessons the model is shown, so it can say a new one repeats one
+	lessonsKnownMost    = 12   // each of the project's live and deleted lists shown to the model
 	lessonsReviewsMost  = 8    // the latest reviews of the stretch of work read
 	lessonsCriteriaMost = 10   // criteria, scope changes and answers read, each
 	lessonsReplyMax     = 2000 // runes of the Agent's last reply
@@ -106,7 +107,7 @@ func (s *Service) learnTaskLessons(ctx context.Context, t Todo, doneAt time.Time
 	agents := s.outcomeAgents(rctx, t)
 	cancel()
 	language := answerLanguage(s.hello(ctx).Locale)
-	in := lessonsInput(language, t, briefRef, reviews, since, answers, agents, known.Live)
+	in := lessonsInput(language, t, briefRef, reviews, since, answers, agents, known)
 	mctx, mcancel := context.WithTimeout(ctx, lessonsModelTimeout)
 	defer mcancel()
 	var out lessonsReply
@@ -150,9 +151,15 @@ func lessonReviews(v Supervision) (list []TaskReview, since time.Time) {
 	return list, since
 }
 
+// briefChanged: ev changed what the task was to do or how long it was expected to take. An estimate change has an
+// event kind of its own (applyScope); a lesson still learns from it, since a revised estimate also hides an overrun.
+func briefChanged(ev BriefEvent) bool {
+	return ev.Kind == briefEventScope || ev.Kind == briefEventEstimate
+}
+
 // lessonFriction says, without a model, whether an accepted stretch of work has anything to learn from: a rework or a
-// question for the owner, a criterion a review found not met, an answer the owner gave, a scope change, or taking
-// lessonOverrun times the estimate. A task accepted at once and in time has none.
+// question for the owner, a criterion a review found not met, an answer the owner gave, a scope or estimate change, or
+// taking lessonOverrun times the estimate. A task accepted at once and in time has none.
 func lessonFriction(reviews []TaskReview, brief *TaskBrief, since time.Time, answers int) bool {
 	if answers > 0 {
 		return true
@@ -168,7 +175,7 @@ func lessonFriction(reviews []TaskReview, brief *TaskBrief, since time.Time, ans
 	if brief == nil {
 		return false
 	}
-	if slices.ContainsFunc(brief.Log, func(ev BriefEvent) bool { return ev.Kind == briefEventScope && !ev.At.Before(since) }) {
+	if slices.ContainsFunc(brief.Log, func(ev BriefEvent) bool { return briefChanged(ev) && !ev.At.Before(since) }) {
 		return true
 	}
 	return brief.ExpectNow > 0 && brief.ActualMinutes >= lessonOverrun*brief.ExpectNow
@@ -205,9 +212,9 @@ func (s *Service) lessonAnswers(ctx context.Context, id string, since time.Time)
 
 // lessonsInput is the task's story as the model reads it (todo/lessons_input): the brief's request, goal, criteria,
 // scope changes and result when it has one (else the to-do's notes and done-when), the reviews with the criteria not
-// met, the owner's answers, the time, the newest Agent's last reply, and the project's lessons.
+// met, the owner's answers, the time, the newest Agent's last reply, and the project's live and deleted lessons.
 func lessonsInput(language string, t Todo, brief *TaskBrief, reviews []TaskReview, since time.Time,
-	answers []prompts.TodoLessonsAnswer, agents []outcomeAgent, known []kb.ProjectMemoryRecord) prompts.TodoLessonsInput {
+	answers []prompts.TodoLessonsAnswer, agents []outcomeAgent, known kb.ProjectLessons) prompts.TodoLessonsInput {
 	in := prompts.TodoLessonsInput{Language: language, Title: clip(oneLine(t.Title), lessonFieldMax), Answers: answers}
 	criteria := t.Supervision.DoneWhen
 	if brief != nil {
@@ -221,7 +228,7 @@ func lessonsInput(language string, t Todo, brief *TaskBrief, reviews []TaskRevie
 			criteria = brief.Criteria
 		}
 		for _, ev := range brief.Log {
-			if ev.Kind == briefEventScope && !ev.At.Before(since) && len(in.Changes) < lessonsCriteriaMost {
+			if briefChanged(ev) && !ev.At.Before(since) && len(in.Changes) < lessonsCriteriaMost {
 				in.Changes = append(in.Changes, prompts.TodoLessonsChange{Change: clip(oneLine(ev.Change), lessonFieldMax), Why: clip(oneLine(ev.Why), lessonFieldMax)})
 			}
 		}
@@ -251,10 +258,17 @@ func lessonsInput(language string, t Todo, brief *TaskBrief, reviews []TaskRevie
 	if len(agents) > 0 {
 		in.Reply = clipMiddle(agents[0].Text, lessonsReplyMax)
 	}
-	for _, k := range known[:min(len(known), lessonsKnownMost)] {
-		in.Known = append(in.Known, prompts.TodoLessonsKnown{ID: k.ID, Kind: k.Kind, Text: clip(oneLine(k.Conclusion), lessonTextMax)})
-	}
+	in.Known = lessonsPromptList(known.Live)
+	in.Deleted = lessonsPromptList(known.Retired)
 	return in
+}
+
+func lessonsPromptList(records []kb.ProjectMemoryRecord) []prompts.TodoLessonsKnown {
+	var list []prompts.TodoLessonsKnown
+	for _, r := range records[:min(len(records), lessonsKnownMost)] {
+		list = append(list, prompts.TodoLessonsKnown{ID: r.ID, Kind: r.Kind, Text: clip(oneLine(r.Conclusion), lessonTextMax)})
+	}
+	return list
 }
 
 // lessonsReply is what the model answers (todo/lessons).
@@ -327,9 +341,11 @@ func planLessons(cur kb.ProjectLessons, todoID, key string, now time.Time, found
 	if lessonsLearned(cur, key) {
 		return nil
 	}
-	retired := map[string]bool{}
-	for _, r := range cur.Retired {
-		retired[kb.LessonKey(r.Conclusion)] = true
+	retiredKeys := map[string]bool{}
+	for _, text := range cur.RetiredTextByID {
+		if key := kb.LessonKey(text); key != "" {
+			retiredKeys[key] = true
+		}
 	}
 	live := slices.Clone(cur.Live)
 	byKey := map[string]int{}
@@ -340,7 +356,7 @@ func planLessons(cur kb.ProjectLessons, todoID, key string, now time.Time, found
 	var out []kb.ProjectMemoryRecord
 	for i, l := range found {
 		k := kb.LessonKey(l.Text)
-		if retired[k] {
+		if _, retired := cur.RetiredTextByID[l.SameAs]; retired || retiredKeys[k] {
 			continue
 		}
 		target := -1

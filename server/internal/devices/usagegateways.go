@@ -148,7 +148,7 @@ func (g *usageGateways) setConfig(cfg UsageConfig) {
 
 func (g *usageGateways) setLocked(cfg UsageConfig) {
 	cfg.Sources = slices.Clone(cfg.Sources)
-	cfg.HiddenProviders = slices.Clone(cfg.HiddenProviders)
+	cfg.HiddenProviders = canonicalHiddenUsageProviders(cfg.HiddenProviders)
 	g.cfg = cfg
 	if g.state == nil {
 		g.state = map[string]*gatewayState{}
@@ -165,6 +165,14 @@ func (g *usageGateways) setLocked(cfg UsageConfig) {
 			delete(g.state, id)
 		}
 	}
+}
+
+func canonicalHiddenUsageProviders(in []string) []string {
+	var out []string
+	for _, provider := range in {
+		out = append(out, canonicalUsageProvider(provider))
+	}
+	return uniqueSorted(out)
 }
 
 func (g *usageGateways) config() UsageConfig {

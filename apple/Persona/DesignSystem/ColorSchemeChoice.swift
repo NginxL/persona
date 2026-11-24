@@ -1,7 +1,5 @@
 import SwiftUI
-#if os(iOS) || os(visionOS)
 import UIKit
-#endif
 
 /// Settings › Appearance › Light & Dark (docs/apple/ios.md「Design language」): the app light or dark whatever the system is, or following it (the
 /// default: what the app always did). Set on the app's windows (`overrideUserInterfaceStyle`) rather than with
@@ -34,7 +32,6 @@ nonisolated enum ColorSchemeChoice: String, CaseIterable, Identifiable, Sendable
     /// `ui.scheme` (also a launch argument: `-ui.scheme dark`).
     static var current: ColorSchemeChoice { ColorSchemeChoice(rawValue: UserDefaults.standard.string(forKey: key) ?? "") ?? .system }
 
-    #if os(iOS) || os(visionOS)
     var interfaceStyle: UIUserInterfaceStyle {
         switch self {
         case .system: .unspecified
@@ -51,7 +48,6 @@ nonisolated enum ColorSchemeChoice: String, CaseIterable, Identifiable, Sendable
             }
         }
     }
-    #endif
 }
 
 #if DEBUG && (os(iOS) || os(visionOS))

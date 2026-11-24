@@ -39,10 +39,10 @@ import persona.feature.inbox.LarkDocumentLink
 import persona.feature.inbox.LarkDocumentPrefetch
 import persona.feature.inbox.LarkLinkPicks
 import persona.feature.inbox.LarkMomentsLink
-import persona.feature.inbox.LarkNativeLink
+import persona.core.inbox.LarkNativeLink
 import persona.feature.inbox.LarkTextPick
 import persona.feature.inbox.ManagerUriHandler
-import persona.feature.inbox.larkNativeLink
+import persona.core.inbox.larkNativeLink
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -336,7 +336,7 @@ fun ChatLinkHost(
                                     },
                                     JAction(stringResource(R.string.chat_link_share), PhIcons.ShareNetwork) {
                                         val send = Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, page())
-                                        runCatching { context.startActivity(Intent.createChooser(send, null)) }
+                                        val _ = runCatching { context.startActivity(Intent.createChooser(send, null)) }
                                     }.takeIf { forwarded == null },
                                 ))
                             }

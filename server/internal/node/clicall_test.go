@@ -17,6 +17,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/nwverse/persona/server/internal/assistantwire"
 	"github.com/nwverse/persona/server/internal/host"
 	"github.com/nwverse/persona/server/internal/identity"
 	"github.com/nwverse/persona/server/internal/proto"
@@ -56,7 +57,13 @@ func TestAssistantCLICallerUsesOnlyVerifiedRuntimeWorkers(t *testing.T) {
 
 func testAssistantCLICallerVerifiedRuntimeWorkers(t *testing.T, engine string) {
 	n, hub := runtimeNode(t)
-	ln, err := net.ListenUnix("unix", &net.UnixAddr{Name: filepath.Join(t.TempDir(), "s"), Net: "unix"})
+	// Short: a Unix socket path must stay under 104 bytes on macOS, and t.TempDir() there carries the long test name.
+	dir, err := os.MkdirTemp("", "ccv")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	ln, err := net.ListenUnix("unix", &net.UnixAddr{Name: filepath.Join(dir, "s"), Net: "unix"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -415,6 +422,9 @@ func TestCLICallAgentToolsGoAsThePaneAgent(t *testing.T) {
 	n.mu.Unlock()
 	ask := mcpRelay(t, n, hub)
 	for _, name := range callerTools {
+		if assistantwire.IsA2ATool(name) || name == "secret_store" || strings.HasPrefix(name, "resource_") {
+			continue // bound to the calling process, not to the pane a request names (TestCLICallAgentToolsRefuseUnknownCallers)
+		}
 		got := ask(map[string]any{"kind": "cli.call", "name": name, "args": map[string]any{"tasks": []any{}}, "pane": "w1:p1",
 			"session_id": "forged", "assistant": true})
 		if got["name"] != name || got["session_id"] != "sess-live" || got["assistant"] != false || got["guest"] != false {
@@ -468,6 +478,13 @@ func TestCLICallAgentToolsRefuseUnknownCallers(t *testing.T) {
 		refused(name+" from no pane", sockRequest{Name: name, SessionID: "forged", Assistant: true}, notAssistant)
 		// An unknown thread never falls back to the pane a shared Codex daemon may have inherited.
 		refused(name+" from an unknown Codex thread", sockRequest{Name: name, Pane: "w1:p1", CodexThreadID: "20000000-0000-0000-0000-000000000002"}, notAssistant)
+	}
+	// An A2A tool reads or writes the caller's own mailbox, so the node binds it to the process that calls (a2aCaller),
+	// never to the pane or session a request names: here no process is known, though the pane runs a live Agent (#12706).
+	for _, name := range append(append([]string{}, assistantwire.A2AToolNames...), "secret_store", "resource_status", "resource_acquire", "resource_get", "resource_renew", "resource_release", "resource_cancel") {
+		refused(name+" naming an Agent's pane", sockRequest{Name: name, Pane: "w1:p1"}, "A2A requires a verified local session")
+		refused(name+" naming an Agent's session", sockRequest{Name: name, Pane: "w1:p1", SessionID: "sess-live"}, "A2A requires a verified local session")
+		refused(name+" naming a known Codex thread", sockRequest{Name: name, CodexThreadID: thread}, "A2A requires a verified local session")
 	}
 	refused("task_spawn from an unknown pane", sockRequest{Name: "task_spawn", Pane: "w9:p9"},
 		"task_spawn is not available: no Agent session is known for this pane or Codex thread")
@@ -843,5 +860,43 @@ func TestMCPAssistantWithoutPeer(t *testing.T) {
 	// Any other reason the peer is not known (not a unix socket) is no assistant's.
 	if got, _, ok := n.mcpAssistantOf(0, errors.New("not a unix socket"), nil, "s1"); ok {
 		t.Errorf("a peer not known for another reason: %q", got)
+	}
+}
+
+// Storage cards must name the process-attested Agent even through the MCP socket: a guessed
+// pane/session cannot acquire another Agent's name on a write approval.
+func TestSecretStorageMCPRefusesAnUnverifiedCallerBeforeTheHub(t *testing.T) {
+	n, hub := runtimeNode(t)
+	n.panes = map[string]string{"w1:p1": "another-agent"}
+	var mu sync.Mutex
+	calls := 0
+	hub.mu.Lock()
+	hub.answer = func(method string, params json.RawMessage) (any, error, bool) {
+		if method == "mcp.call" {
+			mu.Lock()
+			calls++
+			mu.Unlock()
+			return proto.TextResult("unexpected", false), nil, true
+		}
+		return nil, nil, false
+	}
+	hub.mu.Unlock()
+	server, client := net.Pipe()
+	defer client.Close()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go n.serveSock(ctx, server)
+	if err := json.NewEncoder(client).Encode(map[string]any{"kind": "mcp.call", "name": "secret_store", "session_id": "another-agent", "pane": "w1:p1", "args": map[string]any{}}); err != nil {
+		t.Fatal(err)
+	}
+	_ = client.SetReadDeadline(time.Now().Add(5 * time.Second))
+	var result proto.ToolResult
+	if err := json.NewDecoder(client).Decode(&result); err != nil {
+		t.Fatal(err)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if !result.IsError || calls != 0 {
+		t.Fatal("unverified source reached the manager")
 	}
 }

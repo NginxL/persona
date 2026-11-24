@@ -245,6 +245,7 @@ func TestDeployWatchKeepsConfirmedMergeAcrossBuildsDuringForgeOutage(t *testing.
 // Deployed and in the running hub at once: deployed, accepted by the assistant (no card); a big feature (a high
 // priority to-do) asks the owner with the card instead.
 func TestDeployedInTheRunningHub(t *testing.T) {
+	needsLarkLayer(t)
 	s, f, posts, hub, _ := deployService(t)
 	hub.deploy(newHub)
 	todo := startedTask(t, s, f)

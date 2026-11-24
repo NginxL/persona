@@ -151,7 +151,15 @@ class CommandLineTests(unittest.TestCase):
         known = sorted({line["case"] for line in result["fixtures"]["needs-you"]["rows"]
                         if line["lanes"]["android"]["verdict"] == "known"})
         self.assertEqual(marked, known)
-        self.assertIn(f"android and ios differ on {len(marked)} case(s)", run.stdout)
+
+        # The lanes differ where their marks leave them at different values: a decided change both still count by
+        # today's rule (the same mark on each) leaves them agreeing with each other.
+        def today(case, lane):
+            mark = (case.get("known_differences") or {}).get(lane)
+            return {**case["expected"], **(mark["replace"] if mark else {})}
+        apart = sorted(case["name"] for case in cases["cases"] if today(case, "android") != today(case, "ios"))
+        self.assertTrue(apart, "the needs-you fixture marks a case for Android alone (step 3)")
+        self.assertIn(f"android and ios differ on {len(apart)} case(s): {', '.join(apart)}", run.stdout)
 
     def test_exit_codes(self):
         cases = {"cases": counts_agreement.fixture_cases(ROOT, "needs-you")}

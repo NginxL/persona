@@ -28,6 +28,7 @@ import persona.core.designsystem.AppStyle
 import persona.core.designsystem.PersonaTheme
 import persona.core.domain.inbox.InboxItem
 import persona.core.navigation.Navigator
+import persona.core.inbox.*
 
 internal enum class ZeroActionContentLength(val id: String) { Typical("typical"), Maximum("maximum") }
 

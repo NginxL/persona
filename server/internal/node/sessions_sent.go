@@ -37,6 +37,10 @@ type sentList struct {
 // sendSessions writes list as sessions.changed unless the manager holds these very bytes already. The wire bytes are
 // the ones Notify always wrote for {"sessions": list}.
 func (n *Node) sendSessions(list []proto.Session) {
+	n.sendSessionsChecked(list, false, 0)
+}
+
+func (n *Node) sendSessionsChecked(list []proto.Session, checkGen bool, gen uint64) {
 	peer := n.peer
 	if peer == nil {
 		return
@@ -44,6 +48,9 @@ func (n *Node) sendSessions(list []proto.Session) {
 	s := &n.sent
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if checkGen && n.outsideListGen.Load() != gen {
+		return
+	}
 	b, err := appendSessionsParams(s.scratch[:0], list)
 	if err != nil { // nothing goes, as from Notify
 		s.last = nil

@@ -74,13 +74,13 @@ func TestIdleAgentIsClosed(t *testing.T) {
 	free.SessionID, free.PaneID = "free", "w2:p1"
 	taskAgent := idleAgent(time.Now().Add(-48 * time.Hour))
 	f.setSessions("box", taskAgent, free)
-	refused, seen := taskCloseRefused{}, idleSeen{}
+	refused, seen := taskCloseRefused{}, idleSeen{idlePrimed("box"): time.Now()}
 
-	s.closeIdleAgents(ctx, refused, seen) // first sight: the clock starts now
+	s.closeIdleAgents(ctx, refused, seen) // first sight after the hub's first list: the clock starts now
 	if got := f.retires(); len(got) != 0 {
 		t.Fatalf("closed at first sight: %v", got)
 	}
-	if len(seen) != 2 {
+	if len(seen) != 3 {
 		t.Fatalf("seen %v", seen)
 	}
 	for k := range seen {
@@ -101,5 +101,34 @@ func TestIdleAgentIsClosed(t *testing.T) {
 	s.closeIdleAgents(ctx, refused, seen)
 	if got := f.retires(); len(got) != 1 {
 		t.Fatalf("closed while off: %v", got)
+	}
+}
+
+// The idle clock lives in memory: after a hub restart the first list of a machine counts from each agent's own last
+// activity, so an agent still for 13 hours is stopped at once; an agent that starts running after that (resumed) counts
+// from when it was seen, however old its last activity.
+func TestIdleClockSurvivesAHubRestart(t *testing.T) {
+	ctx := context.Background()
+	s, f := newTaskService(t)
+	still := idleAgent(time.Now().Add(-13 * time.Hour))
+	still.SessionID, still.PaneID = "still", "w2:p1"
+	f.setSessions("box", still)
+	refused, seen := taskCloseRefused{}, idleSeen{} // a fresh hub
+
+	s.closeIdleAgents(ctx, refused, seen)
+	if got := f.retires(); len(got) != 1 || got[0] != "still" {
+		t.Fatalf("after a restart retired %v, want the agent still for 13h", got)
+	}
+
+	// Later a stopped agent is resumed: its last activity is as old, but it has only just started running.
+	resumed := idleAgent(time.Now().Add(-13 * time.Hour))
+	resumed.SessionID, resumed.PaneID = "resumed", "w3:p1"
+	f.setSessions("box", resumed)
+	s.closeIdleAgents(ctx, refused, seen)
+	if got := f.retires(); len(got) != 1 {
+		t.Fatalf("retired a just-resumed agent: %v", got)
+	}
+	if since := seen[[2]string{"box", "resumed"}]; time.Since(since) > time.Minute {
+		t.Fatalf("resumed agent's clock starts at %v, want now", since)
 	}
 }

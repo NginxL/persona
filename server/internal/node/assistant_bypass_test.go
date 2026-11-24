@@ -108,7 +108,7 @@ func TestAssistantBypassCommandGate(t *testing.T) {
 			n.mu.Unlock()
 			n.persistModes(sid, tc.mode, "")
 			if tc.health {
-				n.gates().markHealth(sid)
+				n.gates().markSpace(sid)
 			}
 			fh.mu.Lock()
 			fh.answer = func(proto.Interaction) proto.Resolution {
@@ -766,7 +766,7 @@ func TestAssistantBypassRespectsConfiguredAllowRules(t *testing.T) {
 			n.mu.Unlock()
 			n.persistModes(sid, proto.ModeBypass, "")
 			if tc.health {
-				n.gates().markHealth(sid)
+				n.gates().markSpace(sid)
 			}
 			fh.mu.Lock()
 			fh.answer = func(proto.Interaction) proto.Resolution {

@@ -9,7 +9,7 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/nwverse/persona/server/internal/feishubot"
+	"github.com/nwverse/persona/server/internal/botcard"
 	"github.com/nwverse/persona/server/internal/proto"
 )
 
@@ -18,6 +18,7 @@ import (
 func todoReminderHub(t *testing.T) (*fakeHub, *Service, *[]map[string]any) {
 	t.Helper()
 	f, posts := feishuHub("ou_a", time.Unix(100, 0))
+	f.ownModels = true // Reminder delivery does not need a model HTTP fixture.
 	f.answerApp(AppFeishu, FeishuStatusGet, func(json.RawMessage) (any, error) {
 		return FeishuStatus{Ready: true, Enabled: true, Owner: "ou_a", PairedAt: time.Unix(100, 0), PublicURL: "https://hub.example.com",
 			Features: FeishuFeatures{Main: true, Cards: true, Pushes: true}}, nil
@@ -131,10 +132,10 @@ func TestFeishuTodoReminderReplyCarriesTodoContext(t *testing.T) {
 	s.todos.loaded = true
 	s.todos.mu.Unlock()
 
-	ev := &feishubot.MessageEvent{}
+	ev := &botcard.MessageEvent{}
 	ev.Message.MessageID, ev.Message.ParentID, ev.Message.RootID = "om_answer", "om_1", "om_1"
 	ev.Message.ChatType, ev.Message.MessageType, ev.Message.Content = "p2p", "text", `{"text":"这件事继续办"}`
-	content := feishubot.ParseContent(ev.Message.MessageType, ev.Message.Content, nil)
+	content := botcard.ParseContent(ev.Message.MessageType, ev.Message.Content, nil)
 	if err := s.botSend(context.Background(), ev, content, target); err != nil {
 		t.Fatal(err)
 	}
@@ -170,7 +171,7 @@ func TestFeishuTodoReminderHealthContentStaysOffChannels(t *testing.T) {
 	if strings.Contains(cards, todo.Title) || strings.Contains(cards, todo.Notes) {
 		t.Fatalf("health content reached Feishu: %s", cards)
 	}
-	wantTitle, wantBody := healthNotice(s.lang(context.Background()))
+	wantTitle, wantBody := spaceNotice(s.lang(context.Background()))
 	if !strings.Contains(cards, wantTitle) || !strings.Contains(cards, wantBody) {
 		t.Fatalf("generic health notice missing: %s", cards)
 	}
@@ -198,7 +199,7 @@ func TestTodoReminderHealthPhoneUsesGenericNotice(t *testing.T) {
 	if len(pushes) != 1 {
 		t.Fatalf("phone pushes %d, want 1", len(pushes))
 	}
-	wantTitle, wantBody := healthNotice(s.lang(context.Background()))
+	wantTitle, wantBody := spaceNotice(s.lang(context.Background()))
 	if pushes[0].Title != wantTitle || pushes[0].Body != wantBody ||
 		strings.Contains(pushes[0].Title+pushes[0].Body, "私密") {
 		t.Fatalf("health phone push = %q / %q, want generic notice", pushes[0].Title, pushes[0].Body)

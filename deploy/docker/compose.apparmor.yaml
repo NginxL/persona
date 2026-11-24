@@ -1,0 +1,6 @@
+# Opt in only on an AppArmor host after loading persona-hub.apparmor (docs/operations/docker.md).
+# docker compose -f compose.yaml -f compose.apparmor.yaml up -d
+services:
+  hub:
+    security_opt:
+      - apparmor=persona-hub

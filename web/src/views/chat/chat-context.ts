@@ -36,6 +36,12 @@ export interface ChatContextValue {
   /** The child sessions drawn as cards in this chat (#5120, lib/child-cards.ts), by the exchange each sits in. The same
    *  map while none moved: a child's own updates redraw only its card. */
   children?: ReadonlyMap<string, ChildPlace[]>;
+  /** A long chat mounts its finished off-screen exchanges near the viewport instead of all at once. Live exchanges and
+   *  the final two never get ChatView's `offscreen` watcher, so their immediate rendering path is unchanged. */
+  windowHistory?: boolean;
+  /** A deferred body just replaced its estimated placeholder. ChatView compensates it now and advances its observer
+   *  baseline; the old height was read before that commit. */
+  windowDrawn?: (section: HTMLElement, was: number) => void;
   /** The chat is drawn inside another page's panel (the Team panel's worker, ChatView `embedded`): what would open in
    *  the side panel opens in place instead, since that panel is the one it is drawn in (a workflow card, #5421). */
   embedded?: boolean;

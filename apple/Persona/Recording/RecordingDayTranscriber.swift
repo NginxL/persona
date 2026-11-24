@@ -1,8 +1,6 @@
 import Foundation
 import Observation
-#if os(iOS) || os(visionOS)
 import UIKit
-#endif
 
 // All-day recording's transcription lane (docs/assistant/day-recap.md): the chunks the watch sends, transcribed on the
 // phone as they arrive, in runs of contiguous chunks so words aren't cut at a chunk's edge. Its own lane and its
@@ -222,15 +220,10 @@ nonisolated enum RecordingDayRuns {
 /// The app's real state.
 @MainActor enum RecordingDaySystemState {
     static let shared: RecordingDayAppState = {
-        #if os(iOS) || os(visionOS)
         return RecordingDayUIKitState()
-        #else
-        return RecordingDayForeground()
-        #endif
     }()
 }
 
-#if os(iOS) || os(visionOS)
 /// In front unless the system put the app in the background. Grants of background time are iOS's
 /// (`beginBackgroundTask`); visionOS gives none, so the lanes work there only in front.
 @MainActor private final class RecordingDayUIKitState: RecordingDayAppState {
@@ -245,7 +238,6 @@ nonisolated enum RecordingDayRuns {
         #endif
     }
 }
-#endif
 
 #if os(iOS)
 /// `beginBackgroundTask`, ended exactly once: by its owner, or synchronously in the expiration handler (which must end

@@ -55,7 +55,7 @@ func (d *DB) FinishStandingInteraction(ctx context.Context, setting, grant strin
 		if err != nil {
 			return err
 		}
-		tag, err := tx.Exec(ctx, `UPDATE interactions SET status='resolved',resolution=$2,resolved_at=now(),
+		tag, err := tx.Exec(ctx, `UPDATE interactions SET status='resolved',resolution=$2,resolved_at=now(),ended_by='authorization',
    auto_authorized_at=now(),authorization_id=$3,todo_id=$4 WHERE id=$1 AND status='pending' AND created_at=$5`, ix.ID, answer, grant, decision.TodoID, ix.CreatedAt)
 		if err != nil {
 			return err

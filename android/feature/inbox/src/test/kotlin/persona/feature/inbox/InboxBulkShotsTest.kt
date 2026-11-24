@@ -34,6 +34,7 @@ import persona.core.domain.inbox.InboxItem
 import persona.core.navigation.AppTab
 import persona.core.navigation.Navigator
 import java.io.File
+import persona.core.inbox.*
 
 /**
  * The inbox's More sheet with its one bulk entry Clean up all (#5114), and the confirmation it asks for over

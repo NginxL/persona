@@ -12,6 +12,7 @@ var laterBotSwitches = []string{"board", "only_conclusions", "answer_new_card", 
 // Each is off by default and for settings saved before it; an app that does not know it leaves it as it was; the
 // assistant's feishu.status says it and feishu.configure sets it.
 func TestBotLaterSwitches(t *testing.T) {
+	needsLarkModule(t)
 	for _, id := range laterBotSwitches {
 		t.Run(id, func(t *testing.T) {
 			w := newBotWorld(t)
@@ -46,6 +47,7 @@ func TestBotLaterSwitches(t *testing.T) {
 
 // The Lark bot's channel page draws its switches from the list the manager gives: each of these is one of them, off.
 func TestChannelListHasTheLaterSwitches(t *testing.T) {
+	needsLarkModule(t)
 	for _, id := range laterBotSwitches {
 		t.Run(id, func(t *testing.T) {
 			w := newChannelWorld(t)

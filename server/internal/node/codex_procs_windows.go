@@ -37,7 +37,7 @@ func scanCodexProcessesOS() ([]codexProcess, bool) {
 		if imageName(windows.UTF16ToString(e.ExeFile[:])) != "codex" {
 			continue
 		}
-		p, rerr := readWinProc(e.ProcessID, []string{"CODEX_HOME", herdrPaneEnv})
+		p, rerr := readWinProc(e.ProcessID, []string{"CODEX_HOME", herdrPaneEnv, herdrCorePaneEnv, ternPaneEnv, orcaTerminalHandleEnv, orcaPaneEnv, orcaLegacyPaneEnv})
 		if rerr != nil {
 			if unreadableHere(int(e.ProcessID)) {
 				ok = false

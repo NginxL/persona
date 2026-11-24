@@ -21,4 +21,13 @@ class TodoRestores(context: Context) {
         prefs.edit().clear().apply { next.forEach { (k, v) -> putLong(k, v) } }.apply()
         return next
     }
+
+    /** Subscribes to changes made anywhere in this app so UI does not re-read SharedPreferences on every recomposition. */
+    fun observe(onChange: (Map<String, Long>) -> Unit): () -> Unit {
+        val listener = android.content.SharedPreferences.OnSharedPreferenceChangeListener { _, _ ->
+            onChange(read())
+        }
+        prefs.registerOnSharedPreferenceChangeListener(listener)
+        return { prefs.unregisterOnSharedPreferenceChangeListener(listener) }
+    }
 }

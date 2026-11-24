@@ -10,6 +10,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import persona.core.inbox.*
 
 /** One instance per pairing. Its scope outlives pages and is cancelled when the pairing is discarded. */
 @OptIn(ExperimentalCoroutinesApi::class)

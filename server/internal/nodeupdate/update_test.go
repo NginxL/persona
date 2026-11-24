@@ -686,6 +686,16 @@ func TestProcessIdentityIgnoresResidentAndWatchdogTimezone(t *testing.T) {
 }
 
 func TestSupervisedProcessExecPreservesSymlinkArgsEnvironmentAndRoot(t *testing.T) {
+	t.Run("install", func(t *testing.T) { testSupervisedProcessExec(t, false) })
+	t.Run("adopt", func(t *testing.T) { testSupervisedProcessExec(t, true) })
+	t.Run("adopt legacy", func(t *testing.T) {
+		t.Setenv("FIXTURE_LEGACY_ADOPTION", "1")
+		testSupervisedProcessExec(t, true)
+	})
+}
+
+func testSupervisedProcessExec(t *testing.T, adopt bool) {
+	t.Helper()
 	old, next := fixtures(t)
 	dir, err := os.MkdirTemp("/tmp", "nu-process-*")
 	if err != nil {
@@ -752,10 +762,23 @@ func TestSupervisedProcessExecPreservesSymlinkArgsEnvironmentAndRoot(t *testing.
 		call(t, peer, "chunk", proto.NodeUpdateChunkParams{ID: begin.ID, Offset: offset, Data: data[offset:end]}, &chunk)
 		offset = chunk.Offset
 	}
+	var installed os.FileInfo
+	if adopt {
+		replaceExternally(t, exe, data)
+		installed, err = os.Stat(exe)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
 	var accepted proto.NodeUpdateCommitResult
 	call(t, peer, "commit", proto.NodeUpdateCommitParams{ID: begin.ID}, &accepted)
 	if !accepted.Accepted {
 		t.Fatal("commit not accepted")
+	}
+	if adopt && os.Getenv("FIXTURE_LEGACY_ADOPTION") != "" {
+		if _, err := os.Stat(markerPath(exe)); !os.IsNotExist(err) {
+			t.Fatalf("legacy target would see an unsupported marker: %v", err)
+		}
 	}
 	before, _ := os.ReadFile(proof)
 	if !bytes.Contains(before, []byte(`"version":"old"`)) {
@@ -787,6 +810,9 @@ func TestSupervisedProcessExecPreservesSymlinkArgsEnvironmentAndRoot(t *testing.
 	call(t, peer, "confirm", proto.NodeUpdateConfirmParams{Version: "next"}, nil)
 	if _, err := os.Stat(markerPath(exe)); !os.IsNotExist(err) {
 		t.Fatal("pending transaction not confirmed")
+	}
+	if adopt {
+		assertInstalledUntouched(t, exe, installed, spec(data, "next").SHA256)
 	}
 	if st, err := os.Lstat(link); err != nil || st.Mode()&os.ModeSymlink == 0 {
 		t.Fatal("updater replaced symlink instead of its target")
@@ -1136,7 +1162,12 @@ func TestDeclaredSupervisorUpdateConfirmsOrRollsBack(t *testing.T) {
 				t.Fatal("the detached watchdog did not record itself")
 			}
 			_, watchBirth := procState(p.WatchPID) // while it runs: the pid names it as long as this start does
-			if outcome != "confirmed" {
+			// The watchdog reads the transaction's deadline on every tick, so the test can bring it forward. A crashing
+			// new program has nothing to show first: its deadline comes now. An unconfirmed one must be seen running in
+			// place before the watchdog takes it back, so its deadline comes once it is (below): set now, a slow start
+			// could outlast it and the new program would never be seen.
+			soon := func() {
+				t.Helper()
 				if err := locked(exe, func() error {
 					p, err := loadPending(markerPath(exe))
 					if err != nil {
@@ -1147,6 +1178,9 @@ func TestDeclaredSupervisorUpdateConfirmsOrRollsBack(t *testing.T) {
 				}); err != nil {
 					t.Fatal(err)
 				}
+			}
+			if outcome == "startup-crash" {
+				soon()
 			}
 			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 			_ = peer.Call(ctx, "response-written", proto.NodeUpdateCommitParams{ID: begin.ID}, nil)
@@ -1199,6 +1233,7 @@ func TestDeclaredSupervisorUpdateConfirmsOrRollsBack(t *testing.T) {
 				// runs the old program, which clears the transaction.
 				if outcome == "unconfirmed" {
 					waitFor(t, 5*time.Second, func() bool { p, ok := proofOf(proof); return ok && p.Version == "next" && p.PID == firstPID })
+					soon()
 				}
 				waitFor(t, 10*time.Second, func() bool {
 					p, ok := proofOf(proof)

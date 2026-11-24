@@ -1,7 +1,9 @@
 package hub
 
 import (
+	"bytes"
 	"context"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptrace"
@@ -43,10 +45,13 @@ type relayPools struct {
 	// rounds, when a test sets it, hears each round of pingRelay: whether the stream was idle, whether it was pinged,
 	// and the ping's error (the stream is closed by then).
 	rounds func(idle, pinged bool, err error)
+	// probed, when a test sets it, hears each pre-write liveness probe in RoundTrip.
+	probed func(reused bool, err error)
 }
 
 // relayPool is the relay streams of one manager bus connection (bus; nil: none, a pool of one request).
 type relayPool struct {
+	ps      *relayPools
 	bus     *busConn
 	tr      *http.Transport
 	retired atomic.Bool // no longer its manager's current: it keeps no stream idle
@@ -67,7 +72,7 @@ func (h *Hub) relayPool(id string) *relayPool {
 		delete(ps.by, id)
 		p.retire()
 	}
-	p = &relayPool{bus: c, tr: &http.Transport{
+	p = &relayPool{ps: ps, bus: c, tr: &http.Transport{
 		DialContext:           func(ctx context.Context, _, _ string) (net.Conn, error) { return h.dialManager(ctx, id) },
 		MaxIdleConns:          relayIdleMost,
 		MaxIdleConnsPerHost:   relayIdleMost,
@@ -113,14 +118,94 @@ func (p *relayPool) settle() {
 	}
 }
 
+const relayRetryBodyLimit = 1 << 20 // 1 MiB: extension UI and API payloads are small JSON; larger bodies stream once
+
+func isIdempotentRelayRequest(req *http.Request) bool {
+	switch req.Method {
+	case http.MethodGet, http.MethodHead, http.MethodOptions, http.MethodTrace:
+		return true
+	}
+	return req.Header.Get("Idempotency-Key") != "" || req.Header.Get("X-Idempotency-Key") != ""
+}
+
+// cloneRelayRequest clones req and buffers up to relayRetryBodyLimit (1 MiB) so Go's net/http Transport can safely
+// replay a non-idempotent request on nothingWrittenError (after a failed pre-write probe) without mutating the
+// caller's *http.Request fields. Bodies larger than relayRetryBodyLimit stream unbuffered without GetBody.
+func cloneRelayRequest(req *http.Request) (*http.Request, error) {
+	base := req.Clone(req.Context())
+	if req.Body == nil || req.Body == http.NoBody || req.GetBody != nil {
+		return base, nil
+	}
+	if req.Header.Get("Upgrade") != "" || req.ContentLength > relayRetryBodyLimit {
+		return base, nil
+	}
+	orig := req.Body
+	b, err := io.ReadAll(io.LimitReader(orig, relayRetryBodyLimit+1))
+	if err != nil {
+		_ = orig.Close()
+		return nil, err
+	}
+	if len(b) > relayRetryBodyLimit {
+		base.Body = struct {
+			io.Reader
+			io.Closer
+		}{io.MultiReader(bytes.NewReader(b), orig), orig}
+		return base, nil
+	}
+	_ = orig.Close()
+	base.Body = io.NopCloser(bytes.NewReader(b))
+	base.ContentLength = int64(len(b))
+	base.TransferEncoding = nil
+	base.GetBody = func() (io.ReadCloser, error) {
+		return io.NopCloser(bytes.NewReader(b)), nil
+	}
+	return base, nil
+}
+
+func (p *relayPool) probeTimeout() time.Duration {
+	if p.ps != nil {
+		_, timeout := p.ps.pingTimes()
+		return timeout
+	}
+	return relayPingTimeout
+}
+
 // RoundTrip sends req on one of p's streams, noting when the stream goes back to the pool idle (pingRelay).
+// For non-idempotent requests (e.g. POST without an idempotency key) reusing an idle stream, GotConn probes the
+// stream with a WebSocket ping (1 ping RTT) before writeLoop writes any request bytes: if the probe fails, the dead
+// stream is closed immediately so writeLoop fails with nothingWrittenError, and net/http automatically replays the
+// request on a fresh stream via GetBody. Requests that pass the probe or already wrote bytes are never retried.
 func (p *relayPool) RoundTrip(req *http.Request) (*http.Response, error) {
+	idempotent := isIdempotentRelayRequest(req)
+	outReq := req
+	if !idempotent {
+		var err error
+		outReq, err = cloneRelayRequest(req)
+		if err != nil {
+			return nil, err
+		}
+	}
+
 	var rc *relayConn
 	var use uint64
 	trace := &httptrace.ClientTrace{
 		GotConn: func(info httptrace.GotConnInfo) {
-			if c, ok := info.Conn.(*relayConn); ok {
-				rc, use = c, c.uses.Add(1)
+			c, ok := info.Conn.(*relayConn)
+			if !ok {
+				return
+			}
+			rc, use = c, c.uses.Add(1)
+			if !idempotent && info.Reused && c.ws != nil {
+				pctx, cancel := context.WithTimeout(outReq.Context(), p.probeTimeout())
+				perr := c.ws.Ping(pctx)
+				cancel()
+				if perr != nil {
+					_ = c.ws.CloseNow()
+					_ = c.Close()
+				}
+				if p.ps != nil && p.ps.probed != nil {
+					p.ps.probed(info.Reused, perr)
+				}
 			}
 		},
 		// Called after the stream is back in the pool, where the next request may already have taken it: the
@@ -131,7 +216,7 @@ func (p *relayPool) RoundTrip(req *http.Request) (*http.Response, error) {
 			}
 		},
 	}
-	return p.tr.RoundTrip(req.WithContext(httptrace.WithClientTrace(req.Context(), trace)))
+	return p.tr.RoundTrip(outReq.WithContext(httptrace.WithClientTrace(outReq.Context(), trace)))
 }
 
 // pingTimes are relayPingEvery and relayPingTimeout, or what a test set.

@@ -1,0 +1,10 @@
+{
+  "$schema": "../../../../schema/module.schema.json",
+  "id": "briefing",
+  "api": 1,
+  "origin": "builtin",
+  "title": "Daily briefing",
+  "feature": "module.briefing",
+  "settings": ["assistant.briefing_waits"],
+  "schedules": ["facts"]
+}

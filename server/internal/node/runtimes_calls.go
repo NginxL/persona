@@ -211,6 +211,7 @@ func (n *Node) runtimeHandle(ctx context.Context, h *runtimeConn, method string,
 			return nil, err, true
 		}
 		out = n.echoedRaw(p.SessionID, out, "items") // echo.go
+		out = n.ttft.annotateRaw(p.SessionID, out, "items", p.BeforeSeq == 0 && p.ThroughSeq == 0)
 		if !p.FoldWork || p.AfterSeq != nil || p.ThroughSeq > 0 {
 			return out, nil, true
 		}
@@ -306,8 +307,13 @@ func (n *Node) runtimeHandle(ctx context.Context, h *runtimeConn, method string,
 				if p.A2AWakeOnSend {
 					input["a2a_wake_on_send"] = true
 				}
+				sentAt := time.Now()
+				n.ttft.arm(p.SessionID, sentAt, "")
 				out, err := call(method, input)
 				said = out
+				if (err != nil && !maybeDelivered(err)) || (err == nil && runtimeAnswerFlag(out, "queued")) {
+					n.ttft.disarm(p.SessionID, sentAt)
+				}
 				return err
 			})
 		})
@@ -373,6 +379,11 @@ func (n *Node) runtimeHandle(ctx context.Context, h *runtimeConn, method string,
 			if s.SessionID == p.SessionID {
 				info["cwd"], info["model"], info["agent"], info["last_activity"] = s.Cwd, s.Model, s.Agent, s.UpdatedAt
 				info["permission_mode"], info["effort"] = s.PermissionMode, s.Effort
+				if h.agent() == agyAgent && (s.ContextTokens > 0 || s.OutputTokens > 0) {
+					info["context_tokens"] = int(s.ContextTokens)
+					info["output_tokens"] = s.OutputTokens
+					delete(info, "usage_unknown")
+				}
 			}
 		}
 		// Not in its list (an older session it still has): what the node knows without the list.

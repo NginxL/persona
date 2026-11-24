@@ -145,7 +145,7 @@ private fun ContextBody(context: MessageContext, onOpen: (String) -> Unit, modif
         if (context.body.isEmpty()) Text(stringResource(R.string.designsystem_context_no_content), style = type.caption.copy(fontWeight = FontWeight.Normal), color = palette.ink3, maxLines = 1)
         else Box(Modifier.fillMaxWidth().heightIn(max = ChatContextBodyMaxHeight).verticalScroll(rememberScrollState())) {
             SelectionContainer {
-                Text(context.body, style = type.caption.copy(fontWeight = FontWeight.Normal), color = palette.ink2)
+                ReadingContent { Text(context.body, style = type.caption.copy(fontWeight = FontWeight.Normal), color = palette.ink2) }
             }
         }
         context.url?.let { url ->

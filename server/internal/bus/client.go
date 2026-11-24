@@ -204,6 +204,11 @@ func healthy(ctx context.Context, hc *http.Client, u string) bool {
 
 // healthURL is healthPath under the hub's base URL (a reverse proxy's path kept), over http(s) for ws(s).
 func healthURL(hub string) (string, error) {
+	return HTTPURL(hub, healthPath)
+}
+
+// HTTPURL resolves a Hub path through the same reverse proxy as the bus.
+func HTTPURL(hub, path string) (string, error) {
 	if _, err := Endpoint(hub); err != nil {
 		return "", err
 	}
@@ -217,7 +222,7 @@ func healthURL(hub string) (string, error) {
 	case "wss":
 		base.Scheme = "https"
 	}
-	return base.JoinPath(strings.TrimPrefix(healthPath, "/")).String(), nil
+	return base.JoinPath(strings.TrimPrefix(path, "/")).String(), nil
 }
 
 // session is one connection: dial, handshake, serve until it drops. helloed: the handshake went through.

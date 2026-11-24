@@ -9,8 +9,11 @@ import (
 	"net/http/httptest"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/nwverse/persona/server/internal/assistant/repositorystore"
 )
 
 type statusForge struct {
@@ -68,8 +71,8 @@ func TestPRStatusReadsForgeBlockers(t *testing.T) {
 			want: TodoPRStatus{HeadOID: "head", State: "open", Draft: true, Review: "changes_requested", Checks: "pending"},
 		},
 		{
-			name: "merged needs no commit endpoints", pr: `{"state":"closed","merged":true}`,
-			want: TodoPRStatus{State: "merged", Review: "pending", Checks: "none"},
+			name: "merged needs no commit endpoints", pr: `{"state":"closed","merged":true,"title":"Improve search"}`,
+			want: TodoPRStatus{Title: "Improve search", State: "merged", Review: "pending", Checks: "none"},
 		},
 		{
 			name: "closed without merge", pr: `{"state":"closed","merged":false}`,
@@ -77,10 +80,12 @@ func TestPRStatusReadsForgeBlockers(t *testing.T) {
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			var pullReads atomic.Int32
 			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				var body string
 				switch r.URL.RequestURI() {
 				case "/repos/example/app/pulls/12":
+					pullReads.Add(1)
 					body = tc.pr
 				case "/repos/example/app/pulls/12/reviews?per_page=100":
 					body = tc.reviews
@@ -97,10 +102,50 @@ func TestPRStatusReadsForgeBlockers(t *testing.T) {
 			}))
 			defer srv.Close()
 			got, err := (githubForge{base: srv.URL, client: srv.Client()}).PRStatus(context.Background(), "example/app", 12)
+			if count := pullReads.Load(); count != 1 {
+				t.Fatalf("read pull request %d times, want once", count)
+			}
 			if err != nil || got != tc.want {
 				t.Fatalf("PR status = %+v, %v; want %+v", got, err, tc.want)
 			}
 		})
+	}
+}
+
+func TestApplyPRStatusRefreshesOnlyMatchingLinkTitle(t *testing.T) {
+	st := repositorystore.New(todoTestDB(t))
+	s, _, todo := newPRConflictTask(t, st)
+	ctx := t.Context()
+	issue := "https://github.com/example/app/issues/12"
+	before, _, err := st.ImportTodoRepositoryLinks(ctx, todo.ID, []string{todo.PRURL, issue}, "explicit")
+	if err != nil {
+		t.Fatal(err)
+	}
+	status := TodoPRStatus{URL: todo.PRURL, State: "open", CheckedAt: time.Now().UTC()}
+	long := strings.Repeat("界", 342)
+	for _, tc := range []struct {
+		observed, saved string
+		bumps           int64
+	}{
+		{"  Improve search  ", "Improve search", 1},
+		{"Improve search", "Improve search", 1},
+		{"   ", "Improve search", 1},
+		{long, strings.Repeat("界", 341), 2},
+		{long, strings.Repeat("界", 341), 2},
+	} {
+		status.Title = tc.observed
+		status.CheckedAt = status.CheckedAt.Add(time.Second)
+		if err := s.applyPRStatus(ctx, todo, status); err != nil {
+			t.Fatal(err)
+		}
+		got, err := st.TodoRepositories(ctx, todo.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		links := got.Repositories[0].Links
+		if got.Revision != before.Revision+tc.bumps || len(links) != 2 || links[0].Title != tc.saved || links[1].Title != "" {
+			t.Fatalf("revision %d, links %+v", got.Revision, links)
+		}
 	}
 }
 
@@ -795,5 +840,41 @@ func TestPRStatusConflictSignalsOnlyForTheCurrentPR(t *testing.T) {
 	s.sweepPRStatuses(ctx, time.Now().Add(deployRecheck))
 	if g, ok := pendingPRConflict(s, task.ID); !ok || g.Key != current+"@head-b" {
 		t.Fatalf("the current PR's conflict = %+v, %v", g, ok)
+	}
+}
+
+func TestPRStatusConflictStaysQuietDuringItsMergePark(t *testing.T) {
+	for _, parkFirst := range []bool{true, false} {
+		t.Run(fmt.Sprintf("park first %t", parkFirst), func(t *testing.T) {
+			s, f, task := newPRConflictTask(t, nil)
+			ctx := context.Background()
+			park := func() {
+				t.Helper()
+				if _, err := reviewErr(s, task.ID, mergePark(task.PRURL)); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if parkFirst {
+				park()
+			}
+			task, _ = s.todoNow(task.ID)
+			status := TodoPRStatus{URL: task.PRURL, State: "open", HeadOID: "conflicting-head", Conflicts: true, CheckedAt: time.Now()}
+			if err := s.applyPRStatus(ctx, task, status); err != nil {
+				t.Fatal(err)
+			}
+			if !parkFirst {
+				if _, ok := pendingPRConflict(s, task.ID); !ok {
+					t.Fatal("ordinary conflict was not queued before the park")
+				}
+				park()
+			} else if _, ok := pendingPRConflict(s, task.ID); ok {
+				t.Fatal("parked conflict queued a standalone signal")
+			}
+			sendPendingPRConflicts(s)
+			task, _ = s.todoNow(task.ID)
+			if task.PRStatus == nil || !task.PRStatus.Conflicts || task.Supervision.parking() == nil || len(f.notices()) != 0 {
+				t.Fatalf("fact=%+v park=%+v notices=%v", task.PRStatus, task.Supervision.parking(), f.notices())
+			}
+		})
 	}
 }

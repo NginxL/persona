@@ -22,7 +22,7 @@ func personReplyParkArgs(now time.Time) map[string]any {
 	return map[string]any{
 		"verdict": "parked", "reason": "Waiting for the named reviewer to reply", "waiting_on": "someone_else", "until": "3d",
 		"evidence": map[string]any{
-			"kind": "person_reply", "target": "ou_peer", "wake": "The named reviewer replies in the topic",
+			"kind": "person_reply", "next_actor": "external", "target": "ou_peer", "wake": "The named reviewer replies in the topic",
 			"contact": map[string]any{"channel": "Feishu topic", "url": personReplyContactURL, "sender": "task supervisor",
 				"sent_at": sent.Format(time.RFC3339), "request": "Please reply with the requested decision.", "status": "sent"},
 			"reply": map[string]any{"source": "larkcli", "brand": "feishu", "app_id": "cli_example", "account_open_id": "ou_owner",
@@ -88,6 +88,7 @@ func TestPersonReplyWakeRecordsReceiptAndQueuesReviewOnce(t *testing.T) {
 	before := todoNow(s, todo.ID).Supervision
 	f.answerApp(AppConnectors, "connectors.lark_reply", func(json.RawMessage) (any, error) { return personReplyObservation(now), nil })
 	s.sweepDeploys(now)
+	wokeBy := wakeBound(now)
 	got := todoNow(s, todo.ID)
 	if got.DoneAt != nil || got.Supervision.State != reviewPending || got.Supervision.Supervisor != "conv1" {
 		t.Fatalf("source reply must only return the task to review: done=%v supervision=%+v", got.DoneAt, got.Supervision)
@@ -96,7 +97,7 @@ func TestPersonReplyWakeRecordsReceiptAndQueuesReviewOnce(t *testing.T) {
 		t.Fatalf("review history length=%d, want unchanged %d", len(got.Supervision.Reviews), len(before.Reviews))
 	}
 	prior, _ := json.Marshal(before.Reviews)
-	latest, _ := json.Marshal(got.Supervision.Reviews)
+	latest, _ := json.Marshal(requireParkEnded(t, before, got.Supervision.Reviews, wokeBy))
 	var priorMaps, latestMaps []map[string]any
 	_ = json.Unmarshal(prior, &priorMaps)
 	_ = json.Unmarshal(latest, &latestMaps)

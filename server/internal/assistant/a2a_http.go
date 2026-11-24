@@ -57,10 +57,24 @@ type a2aWireTask struct {
 	Metadata  map[string]any `json:"metadata,omitempty"`
 }
 
-func a2aWireState(state string) string { return "TASK_STATE_" + strings.ToUpper(state) }
+func a2aWireState(state string) string {
+	if state == a2aQueued {
+		state = a2aSubmitted
+	}
+	return "TASK_STATE_" + strings.ToUpper(state)
+}
 
 func (t *a2aTask) wire(history *int, artifacts bool) a2aWireTask {
-	out := a2aWireTask{ID: t.ID, ContextID: t.Context, Metadata: map[string]any{"personaRevision": t.Revision, "personaTargetDisconnected": t.Disconnected}}
+	meta := map[string]any{"personaRevision": t.Revision, "personaTargetDisconnected": t.Disconnected}
+	if t.State == a2aQueued {
+		meta["personaQueued"] = true
+	}
+	if view := t.view(); !view.WaitingSince.IsZero() {
+		meta["personaWaitingSince"] = view.WaitingSince
+		meta["personaWaitingSeconds"] = view.WaitingSeconds
+		meta["personaWaitingReason"] = view.WaitingReason
+	}
+	out := a2aWireTask{ID: t.ID, ContextID: t.Context, Metadata: meta}
 	for _, e := range t.Events {
 		var m *a2aMessage
 		if e.Text != "" {

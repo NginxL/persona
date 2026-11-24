@@ -7,13 +7,16 @@ import { createPiHost } from '../../pi/lib/pi.js'
 import { agentDir, ompConfigPath } from './compat.js'
 
 // identity is the agent this package serves: runtime and instance omp-<pid>, the apps' name omp, card ids that start
-// with omp, and omp's own command to resume a session on disk.
+// with omp, and omp's own command to resume a session on disk. A turn of omp's ends with its agent_end: omp's pi
+// compatibility layer dispatches no agent_settled, pi's word for a run that is fully over (its retry, compaction and
+// queued continuation included), so without this every session after its first turn would list as working forever.
 export const identity = {
   agent: 'omp',
   name: 'omp',
   instancePrefix: 'omp',
   interactionPrefix: 'omp',
   resumeCommand: ['omp', '--resume'],
+  settleEvents: ['agent_end'],
 }
 
 // config is <agent dir>/persona.json: { "approve": ["bash"], "askUser": true, "answerFirst": "auto", "socket": "…" }.

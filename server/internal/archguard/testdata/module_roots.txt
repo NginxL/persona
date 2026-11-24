@@ -1,0 +1,11 @@
+# The composition roots of the built-in modules (docs/architecture/core-and-modules.md "Guards"): the packages that may
+# import internal/modules/all, the one list of built-in modules, so the manager they run loads them. Nothing else
+# outside internal/modules imports a module (TestCoreImportsNoModule).
+internal/manager
+internal/managercli
+# The binaries that run the built-in modules' extension programs as subcommands (`personad volc`, internal/builtinext).
+cmd/personad
+cmd/persona-manager
+# The node's composition root (`personad node`, persona-node and the manager's local node): imports
+# internal/modules/all/node, the modules that also run on the user's computers (the iMessage reader of a Mac).
+internal/nodecmd

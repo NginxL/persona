@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """How often the app pulls chats in the background (AgentSync), over a recording of a real hub's pushes
-(server/cmd/pushrec, docs/operations/testing.md "Push replay"): before the working-agent gap (a pull per transcript change, merged
+(server/scripts/pushrec, docs/operations/testing.md "Push replay"): before the working-agent gap (a pull per transcript change, merged
 over the 300 ms plan) and after (a working agent's chat at most every AgentSync.workingGap, at once when not working).
 Prints counts only; the recording stays on the machine it was made on.
 
@@ -13,39 +13,30 @@ GAP, PLAN = 60.0, 0.3
 
 
 def main(path):
-    rev, status, events = {}, {}, []  # events: (time, session, working then) per transcript change
-    for line in open(path):
-        r = json.loads(line)
-        t, m = r["t"] / 1000, r["msg"]
-        if m.get("type") == "sessions":
-            for s in m.get("sessions") or []:
-                k = (m["machine_id"], s["session_id"])
-                status[k] = s.get("status")
-                if s.get("rev") is not None and rev.get(k) != s["rev"]:
-                    if k in rev:
-                        events.append((t, k, s.get("status") == "working"))
-                    rev[k] = s["rev"]
-        elif m.get("type") == "revs":
-            for sid, v in (m.get("revs") or {}).items():
-                k = (m["machine_id"], sid)
-                if rev.get(k) != v:
-                    if k in rev:
-                        events.append((t, k, status.get(k) == "working"))
-                    rev[k] = v
-    if not events:
-        sys.exit("no transcript changes in the recording")
-    mins = (events[-1][0] - events[0][0]) / 60
-    before, last = 0, {}
-    for t, k, _ in events:
-        if t - last.get(k, -1e9) > PLAN:
-            before, last[k] = before + 1, t
-    after, pulled, held = 0, {}, {}
-    for t, k, working in events:
+    before = after = changes = working_changes = 0
+    first = last = None
+    baseline, pulled, held = {}, {}, {}
+    sessions = set()
+    for t, k, working, changed in replay_events(path):
+        if changed:
+            if first is None:
+                first = t
+            last = t
+            changes += 1
+            working_changes += working
+            sessions.add(k)
+            if t - baseline.get(k, -1e9) > PLAN:
+                before, baseline[k] = before + 1, t
         for hk, at in list(held.items()):  # held chats whose turn came
             if at <= t:
                 after, pulled[hk] = after + 1, at
                 del held[hk]
         if k in held:
+            if not working:
+                after, pulled[k] = after + 1, t
+                del held[k]
+            continue
+        if not changed:
             continue
         lp = pulled.get(k)
         if working and lp is not None and t - lp < GAP:
@@ -53,8 +44,43 @@ def main(path):
         elif t - pulled.get(k, -1e9) > PLAN:
             after, pulled[k] = after + 1, t
     after += len(held)
-    print("%d transcript changes over %.1f min in %d sessions (%d while working): pulls %.1f/min before, %.1f/min after"
-          % (len(events), mins, len({k for _, k, _ in events}), sum(1 for e in events if e[2]), before / mins, after / mins))
+    if not changes:
+        sys.exit("no transcript changes in the recording")
+    mins = (last - first) / 60
+    if mins > 0:
+        pulls = "pulls %.1f/min before, %.1f/min after" % (before / mins, after / mins)
+    else:
+        pulls = "pulls %d before, %d after (per-minute rates unavailable)" % (before, after)
+    print("%d transcript changes over %.1f min in %d sessions (%d while working): %s"
+          % (changes, mins, len(sessions), working_changes, pulls))
+
+
+def replay_events(path):
+    """Yield transcript changes and transitions that could release a held pull."""
+    rev, working = {}, {}
+    with open(path) as recording:
+        for line in recording:
+            r = json.loads(line)
+            t, m = r["t"] / 1000, r["msg"]
+            if m.get("type") == "sessions":
+                for s in m.get("sessions") or []:
+                    k = (m["machine_id"], s["session_id"])
+                    # AgentSync plans with state; older recordings only carry status.
+                    active = s.get("state", s.get("status")) == "working"
+                    stopped = working.get(k, False) and not active
+                    working[k] = active
+                    current = s.get("rev")
+                    changed = current is not None and k in rev and current != rev[k]
+                    if current is not None:
+                        rev[k] = current
+                    if changed or stopped:
+                        yield t, k, active, changed
+            elif m.get("type") == "revs":
+                for sid, current in (m.get("revs") or {}).items():
+                    k = (m["machine_id"], sid)
+                    if k in rev and rev[k] != current:
+                        yield t, k, working.get(k, False), True
+                    rev[k] = current
 
 
 if __name__ == "__main__":

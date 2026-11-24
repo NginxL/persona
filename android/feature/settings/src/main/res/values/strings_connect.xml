@@ -8,14 +8,8 @@
     <string name="settings_pairing_notice_local_denied">Local network access wasn\'t granted. Allow it in system settings, then come back and try again.</string>
     <string name="settings_pairing_notice_camera_denied">Camera access is off. You can enter the address and pairing code by hand.</string>
     <string name="settings_pairing_notice_clipboard_empty">There\'s no pairing link on the clipboard.</string>
+    <string name="settings_pairing_help">Help</string>
     <string name="settings_pairing_welcome_title">Welcome to Persona</string>
-    <string name="settings_pairing_welcome_body">Connect your hub to this phone to check on the agents on your computers and handle what needs you.</string>
-    <string name="settings_pairing_welcome_agents">Watch them work, answer questions, approve plans and tool use.</string>
-    <string name="settings_pairing_welcome_inbox_title">Inbox</string>
-    <string name="settings_pairing_welcome_inbox">Lark and mail in one place. AI sorts them and drafts replies.</string>
-    <string name="settings_pairing_welcome_assistant_title">Persona assistant</string>
-    <string name="settings_pairing_welcome_assistant">Works with your knowledge base. Phone data is asked for separately when needed.</string>
-    <string name="settings_pairing_welcome_push">Notifications work without Google services: the phone gets the hub\'s messages over a persistent connection.</string>
     <string name="settings_pairing_welcome_guide">No hub yet?</string>
     <string name="settings_pairing_failed_title">Couldn\'t connect</string>
     <string name="settings_pairing_failed_body">Follow the tip below, then try again.</string>

@@ -45,7 +45,7 @@ fun copyTextSafely(
     successNotice: String? = null,
     tooLargeNotice: String? = null,
 ): Boolean {
-    val notify = onNotice ?: { msg -> feedback?.notice(msg) }
+    val notify: (String) -> Unit = onNotice ?: { msg -> feedback?.notice(msg) }
     if (text.length > MAX_CLIPBOARD_TEXT_CHARS) {
         val notice = tooLargeNotice ?: context.getString(R.string.designsystem_copy_too_large)
         notify(notice)
@@ -70,6 +70,17 @@ fun copyTextSafely(
 }
 
 /**
+ * A copy from [rememberCopy]: `copy(text, notice)` puts the text on the clipboard and tells the person how it went.
+ *
+ * It also answers whether the text reached the clipboard, for a screen that marks the copy on itself as well. Every
+ * other caller leaves that answer, so the answer is declared ignorable here, once, instead of at each call (#13024).
+ */
+fun interface CopyAction {
+    @IgnorableReturnValue
+    operator fun invoke(text: String, notice: String?): Boolean
+}
+
+/**
  * Copying as iOS does it (#4209, `DESIGN_SYSTEM.md` section 4.3): the text goes on the clipboard through [copyTextSafely]
  * and a success haptic plays; a refusal (too large, or the clipboard failed) plays the error haptic with its notice. Every
  * copy action in the app goes through this, so they all feel the same. `val copy = rememberCopy(); … copy(text, null)`.
@@ -78,13 +89,13 @@ fun copyTextSafely(
  * says it itself. With null, the plain "Copied" shows only before Android 13, which confirms a copy on its own.
  */
 @Composable
-fun rememberCopy(): (text: String, notice: String?) -> Boolean {
+fun rememberCopy(): CopyAction {
     val context = LocalContext.current
     val feedback = LocalAppFeedback.current
     val haptics = rememberHaptics()
     val resources = LocalResources.current
     return remember(context, resources, feedback, haptics) {
-        { text, notice ->
+        CopyAction { text, notice ->
             val plain = if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) resources.getString(R.string.designsystem_copied) else null
             var said: String? = null
             val copied = copyTextSafely(context, text, onNotice = { said = it },

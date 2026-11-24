@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="inbox_mute_chat">静音这个会话</string>
+    <string name="inbox_mute_repo">静音这个仓库</string>
+    <string name="inbox_mute_sender">静音这个发件人</string>
+    <string name="inbox_policy_tier_action">始终需要你</string>
+    <string name="inbox_policy_tier_fyi">知悉</string>
+    <string name="inbox_policy_tier_noise">收起</string>
+    <string name="inbox_policy_tier_none">交给分拣</string>
+    <string name="inbox_policy_twin_first">分身优先</string>
+    <string name="inbox_policy_twin_never">分身不碰</string>
+    <string name="inbox_policy_twin_none">按设置</string>
+    <string name="inbox_lark_card_partial">部分卡片内容未显示</string>
+    <string name="inbox_lark_content_unsupported">这条内容还显示不了</string>
+    <string name="inbox_lark_image_unavailable">图片暂不可用</string>
+    <string name="inbox_lark_incomplete">消息记录尚未同步完整</string>
+    <string name="inbox_lark_messages_failed">消息没加载出来，再试一次</string>
+    <string name="inbox_lark_not_paired">请先配对 hub</string>
+    <string name="inbox_lark_thread_failed">回复没加载出来，再试一次</string>
+    <string name="inbox_mute_tag_chat">会话</string>
+    <string name="inbox_mute_tag_repo">仓库</string>
+    <string name="inbox_mute_tag_sender">发件人</string>
+    <string name="inbox_lark_emoji_beer">啤酒</string>
+    <string name="inbox_lark_emoji_cake">蛋糕</string>
+    <string name="inbox_lark_emoji_clap">鼓掌</string>
+    <string name="inbox_lark_emoji_coffee">咖啡</string>
+    <string name="inbox_lark_emoji_cry">流泪</string>
+    <string name="inbox_lark_emoji_done">完成</string>
+    <string name="inbox_lark_emoji_fire">火</string>
+    <string name="inbox_lark_emoji_fist">拳头</string>
+    <string name="inbox_lark_emoji_heart">爱心</string>
+    <string name="inbox_lark_emoji_jiayi">+1</string>
+    <string name="inbox_lark_emoji_laugh">大笑</string>
+    <string name="inbox_lark_emoji_muscle">加油</string>
+    <string name="inbox_lark_emoji_ok">OK</string>
+    <string name="inbox_lark_emoji_party">庆祝</string>
+    <string name="inbox_lark_emoji_rose">玫瑰</string>
+    <string name="inbox_lark_emoji_shake">握手</string>
+    <string name="inbox_lark_emoji_smile">微笑</string>
+    <string name="inbox_lark_emoji_surprised">惊讶</string>
+    <string name="inbox_lark_emoji_thinking">思考</string>
+    <string name="inbox_lark_emoji_thumbsup">赞</string>
+    <string name="inbox_lark_emoji_wave">再见</string>
+</resources>

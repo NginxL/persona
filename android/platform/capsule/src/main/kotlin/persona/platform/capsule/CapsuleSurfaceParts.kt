@@ -80,7 +80,7 @@ internal fun CapsuleMessageBubble(message: CapsuleMessage, modifier: Modifier = 
                 Text("Persona", style = PersonaTheme.type.micro, color = palette.ink2) // i18n-ignore: product name
                 if (message.unread) CapsuleUnreadDot("capsule.message.${message.id}.unread")
             }
-            CapsuleMarkdown(message.text, positioned)
+            ReadingContent { CapsuleMarkdown(message.text, positioned) }
         }
         return
     }
@@ -89,8 +89,10 @@ internal fun CapsuleMessageBubble(message: CapsuleMessage, modifier: Modifier = 
             .clip(PersonaTheme.shapes.controlShape).background(if (message.fromUser) palette.userBubble else palette.surfaceStrong)) {
             Column(Modifier.padding(CapsuleTokens.gap).padding(end = if (message.unread && !message.fromUser) CapsuleTokens.gap else CapsuleTokens.zero)) {
                 message.sender?.let { Text(it, style = PersonaTheme.type.micro, color = palette.ink2) }
-                Text(message.text, positioned, style = PersonaTheme.type.callout,
-                    color = if (message.fromUser) palette.userBubbleText ?: palette.ink else palette.ink)
+                ReadingContent {
+                    Text(message.text, positioned, style = PersonaTheme.type.callout,
+                        color = if (message.fromUser) palette.userBubbleText ?: palette.ink else palette.ink)
+                }
             }
             if (message.unread && !message.fromUser) Box(Modifier.align(Alignment.TopEnd).padding(CapsuleTokens.smallGap)) {
                 CapsuleUnreadDot("capsule.message.${message.id}.unread")

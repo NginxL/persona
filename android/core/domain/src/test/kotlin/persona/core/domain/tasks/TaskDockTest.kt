@@ -241,10 +241,10 @@ class TaskDockTest {
         assertTrue(store.spacesSupported)
         // A missing to-do keeps the action; the router's own 404 hides it.
         api.failWith = HubError(404, "not_found", "todo not found")
-        runCatching { store.setTodoSpace("a", "mac", "web", linked = true) }
+        val _ = runCatching { store.setTodoSpace("a", "mac", "web", linked = true) }
         assertTrue(store.spacesSupported)
         api.failWith = HubError(404, null, "HTTP 404")
-        runCatching { store.setTodoSpace("a", "mac", "web", linked = true) }
+        val _ = runCatching { store.setTodoSpace("a", "mac", "web", linked = true) }
         assertFalse(store.spacesSupported)
         assertTrue(isLegacySpacesRoute(HubError(404, "not_found", "Not Found")))
         assertFalse(isLegacySpacesRoute(HubError(500, null, "Not Found")))

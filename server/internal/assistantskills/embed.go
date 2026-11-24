@@ -32,8 +32,9 @@ var builtin, _ = fs.Sub(embedded, "builtin")
 
 // Redistributable is every built-in skill and why Persona may ship it (TestBuiltinsAreRedistributable).
 var Redistributable = map[string]string{
-	workGuideName:    "Persona’s own Assistant work management guide",
-	"persona-office": "Persona's own (personad office's skill, docs/assistant/office.md)",
+	workGuideName:       "Persona’s own Assistant work management guide",
+	MachineOpsSkillName: "Persona's opt-in read-only machine diagnostics guide (docs/server/machines.md)",
+	"persona-office":    "Persona's own (personad office's skill, docs/assistant/office.md)",
 }
 
 // ForAgents are the built-in skills the agents Persona starts get too, as the plugin WritePlugin makes (the
@@ -50,12 +51,16 @@ var Requires = map[string]string{}
 type Selection struct {
 	Connectors []string
 	WorkGuide  bool
+	MachineOps bool
 }
 
 // wanted says whether the built-in skill name goes in with the connectors signed in.
 func (s Selection) wanted(name string) bool {
 	if name == workGuideName {
 		return s.WorkGuide && !slices.Contains(pluginNames(PluginDir()), name)
+	}
+	if name == MachineOpsSkillName {
+		return s.MachineOps && !slices.Contains(pluginNames(PluginDir()), name)
 	}
 	need, ok := Requires[name]
 	return !ok || slices.Contains(s.Connectors, need)
@@ -65,9 +70,15 @@ const (
 	// Codex can discover both native skill roots. One canonical file keeps a single catalog entry.
 	runtimeGuideLink = "../../.claude/skills/" + workGuideName
 	workGuideName    = "persona-work"
-	builtinStamp     = ".persona-builtin" // the built-in skills last copied in
-	legacyStamp      = ".persona-skills"  // what older personad binaries left next to their copies
+	// MachineOpsSkillName is the built-in opt-in read-only machine diagnostics skill (#13053).
+	MachineOpsSkillName  = "persona-machine-ops"
+	machineOpsDigestFile = ".persona-machine-ops-digest"
+	builtinStamp         = ".persona-builtin" // the built-in skills last copied in
+	legacyStamp          = ".persona-skills"  // what older personad binaries left next to their copies
 )
+
+// ErrSkillConflict is returned when an opt-in skill directory already exists and is not managed by Persona.
+var ErrSkillConflict = errors.New("a local persona-machine-ops skill already exists and is not managed by Persona")
 
 // UserDir is the user's skill space: ~/.persona/skills (PERSONA_SKILLS_DIR elsewhere, for tests).
 func UserDir() string {
@@ -132,12 +143,12 @@ func Sync(dir, user string, selection Selection, logf func(string, ...any)) erro
 		target := filepath.Join(user, name)
 		at := filepath.Join(dir, name)
 		if cur, err := os.Readlink(at); err == nil {
-			if cur == target || name == workGuideName {
+			if cur == target || name == workGuideName || name == MachineOpsSkillName {
 				continue
 			}
 			_ = os.Remove(at)
 		} else if st, err := os.Lstat(at); err == nil && st.IsDir() {
-			if name == workGuideName || !slices.Contains(builtinNames(), name) {
+			if name == workGuideName || name == MachineOpsSkillName || !slices.Contains(builtinNames(), name) {
 				logf("assistant skills: %s is a directory of its own in %s; %s is not linked over it", name, dir, target)
 				continue
 			}
@@ -169,7 +180,7 @@ func migrate(dir, user string, logf func(string, ...any)) {
 	entries, _ := os.ReadDir(dir)
 	for _, e := range entries {
 		name := e.Name()
-		if !e.IsDir() || strings.HasPrefix(name, ".") || (name != workGuideName && slices.Contains(builtinNames(), name)) {
+		if !e.IsDir() || strings.HasPrefix(name, ".") || (name != workGuideName && name != MachineOpsSkillName && slices.Contains(builtinNames(), name)) {
 			continue // a link (the user's), a stamp, or what installBuiltins puts in
 		}
 		if _, err := os.Stat(filepath.Join(dir, name, pluginStamp)); err == nil {
@@ -311,6 +322,7 @@ func installBuiltins(dir string, mine []string, selection Selection) error {
 	old, _ := os.ReadFile(stamp)
 	installed := installedNames(old)
 	ownsGuide := slices.Contains(installed, workGuideName) && ownsWorkGuide(dir, old)
+	ownsOps := slices.Contains(installed, MachineOpsSkillName) && ownsManagedMachineOps(dir)
 	var guideLink string
 	if codexSkillDir(dir) {
 		guideLink = filepath.FromSlash(runtimeGuideLink)
@@ -333,23 +345,36 @@ func installBuiltins(dir string, mine []string, selection Selection) error {
 				return err
 			}
 		}
+		if n == MachineOpsSkillName && !ownsOps {
+			// Leave a handwritten or user-managed persona-machine-ops directory untouched.
+			if _, err := os.Lstat(filepath.Join(dir, n)); err == nil {
+				continue
+			} else if !os.IsNotExist(err) {
+				return err
+			}
+		}
 		if !slices.Contains(mine, n) && selection.wanted(n) {
 			names = append(names, n)
 		}
 	}
 	want := builtinVersion() + " " + strings.Join(names, ",")
 	if strings.TrimSpace(string(old)) == want {
-		if !slices.Contains(names, workGuideName) {
-			return nil
+		workOK := !slices.Contains(names, workGuideName)
+		if !workOK {
+			target, _ := os.Readlink(filepath.Join(dir, workGuideName))
+			workOK = target == guideLink && workGuideFilePresent(dir) && (guideLink != "" || filePresent(filepath.Join(dir, guideDigestFile)))
 		}
-		target, _ := os.Readlink(filepath.Join(dir, workGuideName))
-		if target == guideLink && workGuideFilePresent(dir) && (guideLink != "" || filePresent(filepath.Join(dir, guideDigestFile))) {
+		opsOK := !slices.Contains(names, MachineOpsSkillName) || (ownsManagedMachineOps(dir) && filePresent(filepath.Join(dir, MachineOpsSkillName, "SKILL.md")))
+		if workOK && opsOK {
 			return nil
 		}
 	}
 	for _, n := range installed {
 		if fs.ValidPath(n) && n != "." && filepath.Base(n) == n && !slices.Contains(names, n) {
 			if n == workGuideName && !ownsGuide {
+				continue
+			}
+			if n == MachineOpsSkillName && !ownsOps {
 				continue
 			}
 			at := filepath.Join(dir, n)
@@ -388,6 +413,19 @@ func installBuiltins(dir string, mine []string, selection Selection) error {
 		}
 	} else if err := os.Remove(filepath.Join(dir, guideDigestFile)); err != nil && !os.IsNotExist(err) {
 		return err
+	}
+	if slices.Contains(names, MachineOpsSkillName) {
+		digest, err := importTree(context.Background(), filepath.Join(dir, MachineOpsSkillName))
+		if err != nil {
+			return err
+		}
+		if err := os.WriteFile(filepath.Join(dir, machineOpsDigestFile), []byte(digest+"\n"), 0o600); err != nil {
+			return err
+		}
+	} else if ownsOps {
+		if err := os.Remove(filepath.Join(dir, machineOpsDigestFile)); err != nil && !os.IsNotExist(err) {
+			return err
+		}
 	}
 	return os.WriteFile(stamp, []byte(want+"\n"), 0o644)
 }
@@ -507,12 +545,137 @@ func List(user string, selection Selection) []Skill {
 		}
 	}
 	for _, n := range pluginNames(PluginDir()) {
-		if !slices.Contains(mine, n) && (n == workGuideName || !slices.Contains(builtinNames(), n)) {
+		if !slices.Contains(mine, n) && (n == workGuideName || n == MachineOpsSkillName || !slices.Contains(builtinNames(), n)) {
 			b, _ := os.ReadFile(filepath.Join(PluginDir(), n, "SKILL.md"))
 			out = append(out, Skill{Name: n, Description: description(string(b)), Source: "plugin"})
 		}
 	}
 	return out
+}
+
+// MachineOpsSkillStatus reports whether the opt-in persona-machine-ops skill is installed in Dir.
+type MachineOpsSkillStatus struct {
+	Name      string `json:"name"`
+	Dir       string `json:"dir"`
+	Path      string `json:"path"`
+	Installed bool   `json:"installed"`
+	Managed   bool   `json:"managed"`
+	Conflict  bool   `json:"conflict,omitempty"`
+	Version   string `json:"version"`
+}
+
+func resolveMachineOpsDir(baseDir string) string {
+	if strings.TrimSpace(baseDir) == "" {
+		return UserDir()
+	}
+	return filepath.Clean(baseDir)
+}
+
+// ownsManagedMachineOps reports whether baseDir/persona-machine-ops is an unmodified Persona-managed copy.
+func ownsManagedMachineOps(baseDir string) bool {
+	at := filepath.Join(baseDir, MachineOpsSkillName)
+	st, err := os.Lstat(at)
+	if err != nil || !st.IsDir() {
+		return false
+	}
+	saved, err := os.ReadFile(filepath.Join(baseDir, machineOpsDigestFile))
+	if err != nil {
+		return false
+	}
+	hash, err := importTree(context.Background(), at)
+	return err == nil && hash == strings.TrimSpace(string(saved))
+}
+
+// MachineOpsStatus inspects whether persona-machine-ops is installed in baseDir (default UserDir).
+func MachineOpsStatus(baseDir string) (MachineOpsSkillStatus, error) {
+	dir := resolveMachineOpsDir(baseDir)
+	at := filepath.Join(dir, MachineOpsSkillName)
+	status := MachineOpsSkillStatus{
+		Name:    MachineOpsSkillName,
+		Dir:     dir,
+		Path:    at,
+		Version: builtinVersion(),
+	}
+	_, err := os.Lstat(at)
+	if errors.Is(err, os.ErrNotExist) {
+		return status, nil
+	}
+	if err != nil {
+		return status, err
+	}
+	status.Installed = true
+	if ownsManagedMachineOps(dir) && filePresent(filepath.Join(at, "SKILL.md")) {
+		status.Managed = true
+	} else {
+		status.Conflict = true
+	}
+	return status, nil
+}
+
+// InstallMachineOps explicitly installs or refreshes the opt-in persona-machine-ops skill in baseDir
+// (default UserDir). It refuses to overwrite an existing user-authored or modified skill of the same name.
+func InstallMachineOps(baseDir string) (MachineOpsSkillStatus, error) {
+	dir := resolveMachineOpsDir(baseDir)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return MachineOpsSkillStatus{}, err
+	}
+	status, err := MachineOpsStatus(dir)
+	if err != nil {
+		return status, err
+	}
+	if status.Conflict {
+		return status, ErrSkillConflict
+	}
+	tmp := filepath.Join(dir, "."+MachineOpsSkillName+".new")
+	_ = os.RemoveAll(tmp)
+	if err := copyBuiltin(MachineOpsSkillName, tmp); err != nil {
+		_ = os.RemoveAll(tmp)
+		return status, err
+	}
+	digest, err := importTree(context.Background(), tmp)
+	if err != nil {
+		_ = os.RemoveAll(tmp)
+		return status, err
+	}
+	final := filepath.Join(dir, MachineOpsSkillName)
+	if status.Installed {
+		if err := os.RemoveAll(final); err != nil {
+			_ = os.RemoveAll(tmp)
+			return status, err
+		}
+	}
+	if err := os.Rename(tmp, final); err != nil {
+		_ = os.RemoveAll(tmp)
+		return status, err
+	}
+	if err := os.WriteFile(filepath.Join(dir, machineOpsDigestFile), []byte(digest+"\n"), 0o600); err != nil {
+		return status, err
+	}
+	return MachineOpsStatus(dir)
+}
+
+// UninstallMachineOps removes a Persona-managed persona-machine-ops installation from baseDir
+// (default UserDir). It refuses to delete a user-authored or locally modified skill of the same name.
+func UninstallMachineOps(baseDir string) (MachineOpsSkillStatus, error) {
+	dir := resolveMachineOpsDir(baseDir)
+	status, err := MachineOpsStatus(dir)
+	if err != nil {
+		return status, err
+	}
+	if !status.Installed {
+		_ = os.Remove(filepath.Join(dir, machineOpsDigestFile))
+		return status, nil
+	}
+	if status.Conflict {
+		return status, ErrSkillConflict
+	}
+	if err := os.RemoveAll(status.Path); err != nil {
+		return status, err
+	}
+	if err := os.Remove(filepath.Join(dir, machineOpsDigestFile)); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return status, err
+	}
+	return MachineOpsStatus(dir)
 }
 
 // description is the `description:` of a SKILL.md's front matter (a folded `>` or `|` one joined on one line).

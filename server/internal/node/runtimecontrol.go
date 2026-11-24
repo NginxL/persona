@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/proto"
 	"github.com/nwverse/persona/server/internal/shellcmd"
 	"github.com/nwverse/persona/server/internal/textfmt"
@@ -182,6 +183,7 @@ type runtimeStartParams struct {
 	ClientMsgID                   string
 	Images                        []proto.Image
 	WorkspaceID                   string // a space of the runtime's to start in (one of its sessions' space_id)
+	DesktopProjectID              string // the exact native desktop project selected in the project board
 	Resume                        string // the Claude session to take over and continue (caps.resume)
 	// SessionID: the id the hub named for a new session (session.start's session_id, #8130): the manager finds a
 	// start whose answer it lost by it. A runtime that can give its session that id does (Paseo); one that cannot
@@ -189,9 +191,10 @@ type runtimeStartParams struct {
 	SessionID string
 	// AgentType: the kind of agent Launcher starts (claude, codex…), for a runtime that runs only its own launchers
 	// (caps.same_kind) and does not have it: it starts one of its own of that kind, or refuses.
-	AgentType     string
-	Shell         bool // Launcher is a login shell's launcher: the runtime picks its own of that name (no caps.same_kind)
-	OpenElsewhere bool // a running claude has Resume open: only a runtime running it may take it
+	AgentType       string
+	RequireLauncher bool // the start carries context to a fresh session on its old launcher
+	Shell           bool // Launcher is a login shell's launcher: the runtime picks its own of that name (no caps.same_kind)
+	OpenElsewhere   bool // a running claude has Resume open: only a runtime running it may take it
 }
 
 // engineRuntimes maps the engines that are a runtime to that runtime's id (engine.go).
@@ -266,6 +269,9 @@ func (n *Node) startOnEngineRuntime(ctx context.Context, p runtimeStartParams) (
 	// default (shell_launcher). A managed launcher's own settings apply only where personad launch runs it
 	// (runtimeStart), never inside the engine.
 	if _, own := h.launcherNamed(p.Launcher); !own && p.Launcher != "" {
+		if p.RequireLauncher {
+			return nil, nil, refusal("launcher_missing", i18n.T(i18n.From(ctx), "hub-context_handoff.launcher_missing"), nil)
+		}
 		if sameKind(h) {
 			p.AgentType = n.agentKindOf(p.Launcher, p.AgentType)
 		} else {

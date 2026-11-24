@@ -59,6 +59,9 @@ type InboxSuggestion struct {
 	// Owner and SourceOf bind an unsent reply to its author and source snapshot; persisted, not listed.
 	Owner    *SessionRef `json:"owner,omitempty"`
 	SourceOf string      `json:"source_of,omitempty"`
+	// ReplyPolicy binds an accepted reply suggestion to its server-side category, route, content version, and policy
+	// revision (inbox_reply_policy.go); persisted, not listed.
+	ReplyPolicy *InboxReplyPolicySnapshot `json:"reply_policy,omitempty"`
 }
 
 // InboxHandoff is one hand-off of the event to Persona's main conversation (POST /api/v1/inbox/{id}/handoff): that

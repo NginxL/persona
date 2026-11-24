@@ -256,3 +256,71 @@ func TestRepositoryFailedChecksNeverPersist(t *testing.T) {
 		})
 	}
 }
+
+func TestRepositoryTaskWorkflowPersistenceValidationAndTools(t *testing.T) {
+	s, calls := repositoryService(t, ruleStore{&memStore{}})
+	// Default (unset): omitted on wire and in repository_get / repositories_list.
+	w := placeDo(s, "", "POST", repoBase, repoExample)
+	var saved struct{ Repository RepositoryBinding }
+	if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &saved) != nil || saved.Repository.TaskWorkflow != "" {
+		t.Fatalf("default save: %d %s", w.Code, w.Body)
+	}
+	if strings.Contains(w.Body.String(), `"task_workflow"`) {
+		t.Fatalf("unset task_workflow should be omitted from JSON: %s", w.Body)
+	}
+	id := saved.Repository.ID
+	if *calls != 1 {
+		t.Fatalf("expected 1 check, got %d", *calls)
+	}
+
+	// Update to shared_branch without re-probing remote.
+	sharedBody := strings.TrimSuffix(repoExample, "}") + `,"task_workflow":"shared_branch"}`
+	w = placeDo(s, "", "PUT", repoBase+"/"+id, sharedBody)
+	if w.Code != 200 || *calls != 1 {
+		t.Fatalf("shared_branch update: %d %s (calls=%d)", w.Code, w.Body, *calls)
+	}
+	if !strings.Contains(w.Body.String(), `"task_workflow":"shared_branch"`) {
+		t.Fatalf("expected task_workflow in PUT response: %s", w.Body)
+	}
+
+	// Surfaced in repository_get and repositories_list.
+	out, err := s.toolRepositories(context.Background(), "repository_get", json.RawMessage(`{"id":"`+id+`"}`))
+	if err != nil || !strings.Contains(out, `"task_workflow":"shared_branch"`) {
+		t.Fatalf("repository_get: %s %v", out, err)
+	}
+	out, err = s.toolRepositories(context.Background(), "repositories_list", json.RawMessage(`{}`))
+	if err != nil || !strings.Contains(out, `"task_workflow":"shared_branch"`) {
+		t.Fatalf("repositories_list: %s %v", out, err)
+	}
+
+	// Unbind + restore preserves task_workflow.
+	w = placeDo(s, "", "DELETE", repoBase+"/"+id, "")
+	var removed struct{ Receipt string }
+	if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &removed) != nil {
+		t.Fatalf("unbind: %d %s", w.Code, w.Body)
+	}
+	w = placeDo(s, "", "POST", repoBase+"/"+id+"/restore", `{"receipt":"`+removed.Receipt+`"}`)
+	if w.Code != 200 || !strings.Contains(w.Body.String(), `"task_workflow":"shared_branch"`) {
+		t.Fatalf("restore: %d %s", w.Code, w.Body)
+	}
+
+	// Explicit isolated round-trips; omitting clears back to unset.
+	isolatedBody := strings.TrimSuffix(repoExample, "}") + `,"task_workflow":"isolated"}`
+	w = placeDo(s, "", "PUT", repoBase+"/"+id, isolatedBody)
+	if w.Code != 200 || !strings.Contains(w.Body.String(), `"task_workflow":"isolated"`) {
+		t.Fatalf("isolated update: %d %s", w.Code, w.Body)
+	}
+	w = placeDo(s, "", "PUT", repoBase+"/"+id, repoExample)
+	if w.Code != 200 || strings.Contains(w.Body.String(), `"task_workflow"`) {
+		t.Fatalf("clear to default: %d %s", w.Code, w.Body)
+	}
+
+	// Invalid value is rejected with 400 without mutating stored record.
+	invalidBody := strings.TrimSuffix(repoExample, "}") + `,"task_workflow":"always_merge"}`
+	if w := placeDo(s, "", "PUT", repoBase+"/"+id, invalidBody); w.Code != 400 {
+		t.Fatalf("invalid task_workflow: %d %s", w.Code, w.Body)
+	}
+	if w := placeDo(s, "", "POST", repoBase, `{"url":"https://github.com/example/other","task_workflow":"bogus"}`); w.Code != 400 {
+		t.Fatalf("invalid create task_workflow: %d %s", w.Code, w.Body)
+	}
+}

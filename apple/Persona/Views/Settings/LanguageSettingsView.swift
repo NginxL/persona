@@ -1,8 +1,5 @@
 import Speech
 import SwiftUI
-#if os(macOS)
-import AppKit
-#endif
 
 /// Settings › Appearance › Language (docs/protocol/i18n.md「Choosing a language」, docs/apple/ios.md「Interface language」): Match System / 「简体中文」 / English / 「日本語」.
 /// The choice is written where Foundation reads it when the app starts, so it shows the next time the app opens;
@@ -36,12 +33,6 @@ struct LanguageSettingsPage: View {
                     VStack(alignment: .leading, spacing: Theme.Space.s) {
                         Text(relaunchNote)
                             .font(Theme.Font.body)
-                        #if os(macOS)
-                        Button(String(localized: "Reopen Now"), action: Self.relaunch)
-                            .themedButton(prominent: true)
-                            .lineLimit(1)
-                            .accessibilityIdentifier("language-relaunch")
-                        #endif
                     }
                     .padding(.vertical, Theme.Space.xs)
                 }
@@ -62,11 +53,7 @@ struct LanguageSettingsPage: View {
 
     private var relaunchNote: String {
         let name = AppLanguage(rawValue: store.current)?.title ?? store.current
-        #if os(macOS)
-        return String(localized: "Persona switches to \(name) the next time it opens.")
-        #else
         return String(localized: "Persona switches to \(name) after you quit it (swipe it up in the App Switcher) and open it again.")
-        #endif
     }
 
     private func pick(_ language: AppLanguage) {
@@ -77,16 +64,6 @@ struct LanguageSettingsPage: View {
         #endif
     }
 
-    #if os(macOS)
-    /// Opens a new copy of the app, then quits this one.
-    static func relaunch() {
-        let config = NSWorkspace.OpenConfiguration()
-        config.createsNewApplicationInstance = true
-        NSWorkspace.shared.openApplication(at: Bundle.main.bundleURL, configuration: config) { _, _ in
-            Task { @MainActor in NSApp.terminate(nil) }
-        }
-    }
-    #endif
 }
 
 /// The language dictation listens in (#5005, `DictationLanguage`): Automatic, or one the phone recognizes that the owner

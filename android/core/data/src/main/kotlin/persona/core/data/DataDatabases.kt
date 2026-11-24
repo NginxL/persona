@@ -190,6 +190,10 @@ class RoomOutboxStore(
         if (journal != null) journal.update(scope.path) { saved ->
             saved.commitAgentHandOffDelivery(checkNotNull(delivered.agentHandOff))
         }
+        // An adopted target can prove delivery, but only the originating journal may drive its inbox recording/replay.
+        // If the origin is temporarily unavailable the helper returns false and the existing originCommitted recovery
+        // retries this idempotent write rather than mistaking the target journal for the origin.
+        InboxReplyJournal.commitAgentHandOffDelivery(checkNotNull(delivered.agentHandOff), scope.path, journal)
         return delivered
     }
 

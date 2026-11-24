@@ -142,6 +142,12 @@ type Subscription struct {
 	// (MigrationID, #6265); nil while it is not. While set the subscription is pulled and its rows go to the Inbox under
 	// the built-in's own source id; its ToInbox stays false, so a manager that does not know Migrated leaves it off.
 	Migrated *time.Time `json:"-"`
+	// Answer is a things recipe's latest answer (#13637): its rows' uids, in its order, taken at AnswerAt. The Inbox
+	// gets exactly those rows, as the built-in's round gets its Collect's; they are kept from pruning while in it.
+	// AnswerAt nil: no answer taken by a build that keeps one (an upgrade, or one an older manager wrote back), and
+	// the Inbox gets each thread's newest row as before until the next run.
+	Answer   []string   `json:"-"`
+	AnswerAt *time.Time `json:"-"`
 }
 
 // Run is one execution, as the subscription's history keeps it (the newest RunsKept).

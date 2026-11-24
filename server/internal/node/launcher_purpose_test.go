@@ -66,3 +66,22 @@ func TestAssistantLauncherDiscoveryAndCheckUseShellOnPaseoHost(t *testing.T) {
 		}
 	}
 }
+
+func TestAssistantModelForwardingCheckDoesNotUseSameNamedEngineProvider(t *testing.T) {
+	home := fakeCLIHome(t)
+	n, _ := runtimeNode(t)
+	n.home = home
+	if err := n.useEngine(t.Context(), proto.EnginePaseo); err != nil {
+		t.Fatal(err)
+	}
+	hello := sameKindPaseoHello()
+	hello["launchers"] = []map[string]any{{"name": "fixed", "agent": "claude", "models": []map[string]any{{"id": "provider-model"}}}}
+	dialRuntime(t, n, hello)
+	waitFor(t, "provider", func() bool { return n.runtimes.launcherRuntime("fixed") != nil })
+	for _, purpose := range []string{"", "assistant", ""} {
+		_, err := nodeCall(t, n, "launchers.model.check", map[string]any{"name": "fixed", "model": "other-model", "purpose": purpose})
+		if (err != nil) != (purpose == "assistant") {
+			t.Fatalf("purpose %q: fixed shell model forwarding error=%v", purpose, err)
+		}
+	}
+}

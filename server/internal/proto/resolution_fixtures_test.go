@@ -820,7 +820,7 @@ func TestResolutionFixtureSourceEvidence(t *testing.T) {
 	}
 	question := swiftBlock(t, string(views), "struct QuestionForm:")
 	for _, snippet := range []string{
-		"private var showsFooter: Bool { (needsFooter || canSkip) && !(stepped && reviewing) }",
+		"private var showsFooter: Bool { (needsFooter || (canSkip && !skipInHeader)) && !(stepped && reviewing) }",
 		"private var showsReviewFooter: Bool { stepped && reviewing }",
 		"if stepped, reviewing {", "ScreenReviewFooter(rows: QuestionSteps.rows(questions, answers: shownAnswers), sending: isSending ? \"submit\" : nil,",
 	} {

@@ -149,7 +149,7 @@ describe("New agent's recent setups (#2134)", () => {
     // the effort in the picked model's flyout: none set, then up three levels
     await customizeCurrent();
     for (const k of ["ArrowRight", "ArrowRight", "ArrowRight"]) await slide(k);
-    expect(pillEffort()).toBe("高");
+    expect(pillEffort()).toBe("High");
     act(() => pill().click());
     act(() => radio("计划模式")!.click());
     act(() => button("启动")!.click());
@@ -172,13 +172,13 @@ describe("New agent's recent setups (#2134)", () => {
     ]);
     await open();
     expect(cards()).toHaveLength(2);
-    expect(lines(card("notes-app"))).toEqual(["notes-app · Studio", "work · sonnet · 完全访问 · 很高"]);
+    expect(lines(card("notes-app"))).toEqual(["notes-app · Studio", "work · sonnet · 完全访问 · XHigh"]);
     expect(lines(card("app"))).toEqual(["app · MacBook", "claude"]);
     act(() => card("notes-app").click());
     await flush();
     expect(machineChip("Studio").className).toContain("bg-ink");
     expect(folder()).toBe("/code/notes-app");
-    expect(pill().title).toBe("Claude Code · Sonnet 5 · work · 很高");
+    expect(pill().title).toBe("Claude Code · Sonnet 5 · work · XHigh");
     expect(radio("完全访问")!.getAttribute("aria-checked")).toBe("true");
     expect(card("notes-app").getAttribute("aria-pressed")).toBe("true");
     expect(document.activeElement).toBe(textarea());
@@ -190,7 +190,7 @@ describe("New agent's recent setups (#2134)", () => {
     // the form changed by hand: no longer that card
     await customizeCurrent();
     await slide("ArrowLeft");
-    expect(pillEffort()).toBe("高");
+    expect(pillEffort()).toBe("High");
     expect(card("notes-app").getAttribute("aria-pressed")).toBe("false");
     // Start is the user's: it starts what the form holds
     await slide("ArrowRight");

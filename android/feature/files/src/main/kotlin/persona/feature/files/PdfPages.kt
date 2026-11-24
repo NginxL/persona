@@ -113,8 +113,8 @@ internal class PdfDocument private constructor(
     override fun close() {
         if (closed) return
         closed = true
-        runCatching { renderer.close() }
-        runCatching { descriptor.close() }
+        val _ = runCatching { renderer.close() }
+        val _ = runCatching { descriptor.close() }
         if (owned) file.delete()
     }
 

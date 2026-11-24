@@ -7,11 +7,16 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"slices"
 	"strings"
+	"syscall"
 	"time"
 
+	"github.com/nwverse/persona/server/internal/assistantwire"
+	"github.com/nwverse/persona/server/internal/bus"
+	"github.com/nwverse/persona/server/internal/devicewire"
 	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/identity"
 	"github.com/nwverse/persona/server/internal/operations/backup"
@@ -29,12 +34,13 @@ type developmentView struct {
 	// BackupDirectory is the effective snapshot folder, BackupDefaultDirectory
 	// the recommended one under the runtime; BackupRetain how many verified
 	// snapshots are kept. BuiltinQuiesce: the hub pauses its own writers.
-	BackupDirectory        string `json:"backup_directory,omitempty"`
-	BackupDefaultDirectory string `json:"backup_default_directory,omitempty"`
-	BackupRetain           int    `json:"backup_retain,omitempty"`
-	BuiltinQuiesce         bool   `json:"builtin_quiesce,omitempty"`
-	CurrentCommit          string `json:"current_commit,omitempty"`
-	CurrentUpdatedAt       string `json:"current_updated_at,omitempty"`
+	BackupDirectory          string `json:"backup_directory,omitempty"`
+	BackupDefaultDirectory   string `json:"backup_default_directory,omitempty"`
+	BackupDirectoryIsDefault bool   `json:"backup_directory_is_default"`
+	BackupRetain             int    `json:"backup_retain,omitempty"`
+	BuiltinQuiesce           bool   `json:"builtin_quiesce,omitempty"`
+	CurrentCommit            string `json:"current_commit,omitempty"`
+	CurrentUpdatedAt         string `json:"current_updated_at,omitempty"`
 }
 
 // Installation time is recorded by confirmation, never inferred from a build or Git date.
@@ -56,37 +62,102 @@ func (u *updater) developmentConfig() *update.DevelopmentConfig {
 	return u.h.cfg.Update.Development
 }
 
+// hasOtherLocalManagers reports whether the runtime has any local manager
+// besides the built-in assistant (managers/<id>/manager.json), which webdev.py
+// inventories alongside the hub and built-in manager.
+func hasOtherLocalManagers(home string) (bool, error) {
+	if home == "" {
+		return false, nil
+	}
+	managersDir := filepath.Join(home, "managers")
+	entries, err := os.ReadDir(managersDir)
+	if errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	}
+	if err != nil {
+		return true, err
+	}
+	for _, entry := range entries {
+		if entry.Name() == assistantwire.AssistantID {
+			continue
+		}
+		// Match webdev.py's managers/*/manager.json inventory: ignore stray
+		// non-directory files (e.g. .DS_Store) while still checking directories
+		// and symlinks that may resolve to a manager directory.
+		if !entry.IsDir() && entry.Type()&os.ModeSymlink == 0 {
+			continue
+		}
+		_, err := os.Lstat(filepath.Join(managersDir, entry.Name(), "manager.json"))
+		if err == nil {
+			return true, nil
+		}
+		if !errors.Is(err, os.ErrNotExist) && !errors.Is(err, syscall.ENOTDIR) {
+			return true, err
+		}
+	}
+	return false, nil
+}
+
+func (u *updater) developmentQuiesceError(bc update.DevelopmentBackupConfig) error {
+	if !bc.Coordinated() {
+		if bc.RequiresExternalQuiesce() && len(bc.Quiesce) == 0 && len(bc.Resume) == 0 {
+			return i18n.Err("hub-selfupdate.err_development_external_quiesce")
+		}
+		return i18n.Err("hub-selfupdate.err_development_config")
+	}
+	if !bc.ExternalQuiesce() && u.h.cfg != nil {
+		if other, err := hasOtherLocalManagers(u.h.cfg.dir); err != nil || other {
+			return i18n.Err("hub-selfupdate.err_development_external_quiesce")
+		}
+	}
+	return nil
+}
+
+func (u *updater) developmentUnavailableErr() error {
+	if u.h.cfg == nil {
+		return i18n.Err("hub-selfupdate.err_development_config")
+	}
+	if u.h.build.Channel == update.Docker {
+		return i18n.Err("hub-selfupdate.err_development_docker")
+	}
+	if runtime.GOOS != "linux" && runtime.GOOS != "darwin" {
+		return i18n.Err("hub-selfupdate.err_development_platform")
+	}
+	var bc update.DevelopmentBackupConfig
+	if c := u.developmentConfig(); c != nil {
+		bc = c.Backup
+	}
+	if err := u.developmentQuiesceError(bc); err != nil {
+		return err
+	}
+	if err := u.developmentTopology(); err != nil {
+		return err
+	}
+	return nil
+}
+
 // developmentAvailable: the hub can prepare Web development updates. The hub
-// pauses its own writers for the snapshot by default (quiesceDevelopmentWriters);
-// hub.json's quiesce/resume hooks are an optional advanced override and must be
-// configured as a pair. The topology check is part of availability so the Web UI
-// does not offer a channel that its first check would refuse.
+// pauses its own writers for the snapshot by default (quiesceDevelopmentWriters)
+// when only the hub and built-in manager are snapshotted; hub.json's
+// quiesce/resume hooks are an optional override and are required as a pair
+// whenever extra databases, extra roots or another local manager are present.
+// The topology check is part of availability so the Web UI does not offer a
+// channel that its first check would refuse.
 func (u *updater) developmentAvailable() bool {
-	if u.h.cfg == nil || u.h.build.Channel == update.Docker || runtime.GOOS == "windows" {
-		return false
-	}
-	if c := u.developmentConfig(); c != nil && !c.Backup.Coordinated() {
-		return false
-	}
-	return u.developmentTopology() == nil
+	return u.h.cfg != nil && u.developmentUnavailableErr() == nil
 }
 
 // developmentUnavailableWhy is what the Web UI says when development updates
-// cannot be selected, localized; "" for a Docker hub, which has its own view.
+// cannot be selected, localized; "" when available or without config.
 func (u *updater) developmentUnavailableWhy(l i18n.Lang) string {
 	if u.h.cfg == nil {
 		return ""
 	}
-	if u.h.build.Channel == update.Docker {
-		return i18n.Localize(i18n.Err("hub-selfupdate.err_development_docker"), l)
+	err := u.developmentUnavailableErr()
+	if err == nil {
+		return ""
 	}
-	if runtime.GOOS == "windows" {
-		return i18n.Localize(i18n.Err("hub-selfupdate.err_development_platform"), l)
-	}
-	if c := u.developmentConfig(); c != nil && !c.Backup.Coordinated() {
-		return i18n.Localize(i18n.Err("hub-selfupdate.err_development_config"), l)
-	}
-	return i18n.Localize(i18n.Err("hub-selfupdate.err_development_topology"), l)
+	return i18n.Localize(err, l)
 }
 
 // developmentBackupConfigLocked is the snapshot configuration in effect: the
@@ -172,10 +243,44 @@ func (u *updater) unreplacedCandidate(r *update.Published) error {
 }
 
 func (u *updater) runDevelopment(ctx context.Context, operation string, input map[string]any, result any) error {
-	if err := u.devRun(ctx, u.developmentRequestConfig(), filepath.Join(u.dir, "development"), operation, input, result); err != nil {
-		return i18n.Err("hub-selfupdate.err_development_phase", i18n.Args{"phase": operation})
+	cfg := u.developmentRequestConfig()
+	u.mu.Lock()
+	gen := u.opGen
+	u.mu.Unlock()
+	report := func(p update.DevelopmentProgress) {
+		u.mu.Lock()
+		defer u.mu.Unlock()
+		if u.opGen == gen && u.state == p.Phase {
+			u.developmentProgress = &p
+		}
+	}
+	if err := u.devRun(ctx, cfg, filepath.Join(u.dir, "development"), operation, input, result, report); err != nil {
+		u.mu.Lock()
+		step := ""
+		if p := u.developmentProgress; p != nil && u.opGen == gen && update.DevelopmentStep(operation, p.Step, cfg.Backup.Builtin).Phase == p.Phase {
+			step = p.Step
+		}
+		u.mu.Unlock()
+		return developmentPhaseError(operation, step)
 	}
 	return nil
+}
+
+func developmentPhaseError(operation, step string) error {
+	if step == "" {
+		return i18n.Err("hub-selfupdate.err_development_phase", i18n.Args{"phase": operation})
+	}
+	return i18n.Err("hub-selfupdate.err_development_step", i18n.Args{
+		"phase": operation, "step": i18n.Err("hub-selfupdate.development_step_" + step),
+	})
+}
+
+func (u *updater) startDevelopmentPhase(p update.DevelopmentProgress, legacyProgress string) {
+	u.mu.Lock()
+	u.setLocked(p.Phase, legacyProgress, "")
+	u.developmentProgress, u.developmentStarted = &p, time.Now()
+	u.mu.Unlock()
+	u.h.broadcast(map[string]any{"type": "hub_update", "update": u.view()})
 }
 
 // quiesceDevelopmentWriters pauses the writers a snapshot must not see moving.
@@ -184,8 +289,8 @@ func (u *updater) runDevelopment(ctx context.Context, operation string, input ma
 // background writers, then checks both databases with backup.Quiesced rules.
 // The returned resume always runs, including after a partial pause.
 func (u *updater) quiesceDevelopmentWriters(ctx context.Context, cfg update.DevelopmentBackupConfig) (func(), error) {
-	if !cfg.Coordinated() {
-		return nil, i18n.Err("hub-selfupdate.err_development_config")
+	if err := u.developmentQuiesceError(cfg); err != nil {
+		return nil, err
 	}
 	if cfg.ExternalQuiesce() {
 		return func() {}, nil
@@ -250,10 +355,7 @@ func (u *updater) waitDevelopmentQuiesced(ctx context.Context) error {
 }
 
 func (u *updater) checkDevelopment(ctx context.Context) (*update.Published, error) {
-	if !u.developmentAvailable() {
-		return nil, i18n.Err("hub-selfupdate.err_development_config")
-	}
-	if err := u.developmentTopology(); err != nil {
+	if err := u.developmentUnavailableErr(); err != nil {
 		return nil, err
 	}
 	var candidate update.DevelopmentCandidate
@@ -263,6 +365,9 @@ func (u *updater) checkDevelopment(ctx context.Context) (*update.Published, erro
 	u.mu.Unlock()
 	if err != nil {
 		return nil, err
+	}
+	if !devicewire.ValidDevelopmentCommit(candidate.Commit) {
+		return nil, errors.New("development source did not resolve to a full commit")
 	}
 	number := update.DevelopmentNumber(u.h.build.Number)
 	m := &update.Manifest{Version: fmt.Sprintf("web-dev-%s-%d", candidate.Commit[:12], number), Build: number,
@@ -293,8 +398,22 @@ func (u *updater) checkDevelopment(ctx context.Context) (*update.Published, erro
 // Build only this Hub and the platforms its registered computers last reported.
 // Offline computers keep their platform; never-seen computers supply none yet.
 func (u *updater) developmentPlatforms() []string {
+	platforms := u.developmentComputerPlatforms(true)
+	for _, peer := range u.h.busRoster() {
+		if peer.Role == bus.RoleManager && peer.ID != devicesOwner && peer.OS != "" && peer.Arch != "" {
+			platforms = append(platforms, peer.OS+"-"+peer.Arch)
+		}
+	}
+	slices.Sort(platforms)
+	return slices.Compact(platforms)
+}
+
+func (u *updater) developmentComputerPlatforms(allOwners bool) []string {
 	platforms := []string{runtime.GOOS + "-" + runtime.GOARCH}
 	for _, mc := range u.h.knownEntries() {
+		if !allOwners && u.h.entryOwner(mc.ID) != devicesOwner {
+			continue
+		}
 		if m := u.h.machineByID(mc.ID); m != nil {
 			s := m.snapshot()
 			if s.OS != "" && s.Arch != "" {
@@ -307,19 +426,21 @@ func (u *updater) developmentPlatforms() []string {
 }
 
 func (u *updater) buildDevelopment(ctx context.Context, r *update.Published) error {
-	operation := "build"
-	state := "building"
+	operation, firstStep, lastStep := "build", "fetch", "manifest"
 	if r.Development.BackupID != "" {
-		operation, state = "prepare_backup", "applying_backup"
+		operation, firstStep, lastStep = "prepare_backup", "verify_snapshot", "prepare_artifacts"
 	}
-	u.set(state, "web/hub/node", "")
+	u.startDevelopmentPhase(update.DevelopmentStep(operation, firstStep, false), "web/hub/node")
 	var built struct {
 		Artifacts string   `json:"artifacts"`
 		Ancestors []string `json:"ancestors"`
 	}
 	platforms := u.developmentPlatforms()
-	if operation == "prepare_backup" && !u.nodesEnabled() {
+	if operation == "prepare_backup" {
 		platforms = []string{runtime.GOOS + "-" + runtime.GOARCH}
+		if u.nodesEnabled() {
+			platforms = u.developmentComputerPlatforms(false)
+		}
 	}
 	err := u.runDevelopment(ctx, operation, map[string]any{
 		"candidate": r.Development, "version": r.Manifest.Version, "build": r.Manifest.Build,
@@ -333,12 +454,22 @@ func (u *updater) buildDevelopment(ctx context.Context, r *update.Published) err
 	if operation == "build" {
 		ancestors, err = update.EncodeAncestors(built.Ancestors)
 		if err != nil {
-			return err
+			return developmentPhaseError(operation, lastStep)
 		}
 	}
 	m, err := update.BuildManifest(built.Artifacts, *r.Manifest)
 	if err != nil {
-		return err
+		return developmentPhaseError(operation, lastStep)
+	}
+	if operation == "build" {
+		// Compare the producer's native and archive hashes with a fresh read of every archive.
+		var produced update.Manifest
+		ok, err := update.Load(filepath.Join(built.Artifacts, "manifest.json"), &produced)
+		if err != nil || !ok || produced.Version != m.Version || produced.Build != m.Build || produced.Commit != m.Commit ||
+			!reflect.DeepEqual(produced.Files, m.Files) || !reflect.DeepEqual(produced.Programs, m.Programs) ||
+			!reflect.DeepEqual(produced.Nodes, m.Nodes) {
+			return developmentPhaseError(operation, lastStep)
+		}
 	}
 	m.Ancestors = ancestors
 	r.Manifest = m
@@ -354,26 +485,26 @@ func (u *updater) backupDevelopment(ctx context.Context, r *update.Published, ta
 	if info, err := os.Lstat(identity.NodeBinaryDir()); err == nil && info.Mode()&os.ModeSymlink != 0 {
 		return nil, errors.New("node package directory is publisher-managed; configure a dedicated development installation")
 	}
-	u.set("backing_up", "", "")
+	u.mu.Lock()
+	updatedAt := u.currentUpdatedAtLocked()
+	cfg := u.developmentBackupConfigLocked()
+	u.mu.Unlock()
+	u.startDevelopmentPhase(update.DevelopmentStep("backup", "quiesce", cfg.Builtin), "")
 	programs := map[string]string{"personad": target}
 	for _, name := range update.ProgramNames {
 		path := filepath.Join(filepath.Dir(target), name)
 		if _, err := os.Stat(path); err == nil {
 			programs[name] = path
 		} else if !errors.Is(err, os.ErrNotExist) {
-			return nil, err
+			return nil, developmentPhaseError("backup", "quiesce")
 		}
 	}
 	var saved update.DevelopmentBackup
-	u.mu.Lock()
-	updatedAt := u.currentUpdatedAtLocked()
-	cfg := u.developmentBackupConfigLocked()
-	u.mu.Unlock()
 	// The hub's own writers pause around every dump and the file archive; with
 	// hub.json's hooks the helper does it instead.
 	resume, err := u.quiesceDevelopmentWriters(ctx, cfg)
 	if err != nil {
-		return nil, err
+		return nil, developmentPhaseError("backup", "quiesce")
 	}
 	defer resume()
 	err = u.runDevelopment(ctx, "backup", map[string]any{
@@ -389,21 +520,15 @@ func (u *updater) backupDevelopment(ctx context.Context, r *update.Published, ta
 	err = u.saveLocked(ctx)
 	u.mu.Unlock()
 	if err != nil {
-		return nil, err
+		return nil, developmentPhaseError("backup", "")
 	}
 	return &saved, nil
 }
 
-// Only the built-in child manager is known to share this Hub's package directory
-// and restart with it. Independent managers keep their original update channel.
+// The Hub owns its child and can pause its writers. Independent assistants have their own update path.
 func (u *updater) developmentTopology() error {
 	if u.h.cfg == nil || !u.h.cfg.Assistant.StartsBuiltin() {
 		return i18n.Err("hub-selfupdate.err_development_topology")
-	}
-	for _, mc := range u.h.knownEntries() {
-		if u.h.entryOwner(mc.ID) != devicesOwner {
-			return i18n.Err("hub-selfupdate.err_development_topology")
-		}
 	}
 	return nil
 }

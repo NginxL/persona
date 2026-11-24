@@ -375,3 +375,120 @@ func TestSettingsCheckSettingsMoved(t *testing.T) {
 		t.Fatalf("%v", err)
 	}
 }
+
+// sandboxManifest is a manifest whose settings hold loopback addresses: base_url, an entry list's address, and an
+// unrelated key that must survive.
+func sandboxManifest(t *testing.T, defaultURL string) *Manifest {
+	t.Helper()
+	m, err := Parse(with(t, func(m map[string]any) {
+		base := map[string]any{"type": "string", "title": "Base", "format": "uri"}
+		if defaultURL != "" {
+			base["default"] = defaultURL
+		}
+		m["configuration"] = map[string]any{"type": "object", "properties": map[string]any{
+			"base_url": base,
+			"accounts": map[string]any{"type": "array", "title": "Accounts", "maxItems": 4, "x-secret": map[string]any{"name": "account_key", "title": "Key"}, "items": map[string]any{"type": "object", "properties": map[string]any{
+				"name":    map[string]any{"type": "string", "title": "Name"},
+				"address": map[string]any{"type": "string", "title": "Address", "format": "uri"},
+			}}},
+			"other": map[string]any{"type": "string", "title": "Other", "format": "uri"},
+		}}
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return m
+}
+
+// Permitted loopback addresses in the settings are written as LocalHost for the sandbox, including a schema default and
+// an entry list's address; unrelated keys and unpermitted addresses stay as they were (#13540).
+func TestSandboxConfig(t *testing.T) {
+	loopback := egress.Rule{Hosts: []string{"127.0.0.1"}}
+	m := sandboxManifest(t, "http://127.0.0.1:8080/v1")
+	call := func(config string, rule egress.Rule) map[string]any {
+		t.Helper()
+		var got map[string]any
+		raw := SandboxConfig(m, json.RawMessage(config), rule)
+		if err := json.Unmarshal(raw, &got); err != nil {
+			t.Fatalf("%s: %v", raw, err)
+		}
+		return got
+	}
+	// A schema default is filled in and rewritten when the user set nothing.
+	if got := call(`{"other":"https://notes.example.com"}`, loopback); got["base_url"] != "http://host.persona.internal:8080/v1" || got["other"] != "https://notes.example.com" {
+		t.Fatalf("default: %v", got)
+	}
+	// An explicit loopback URI.
+	got := call(`{"base_url":"http://localhost:8080/v1","other":"https://notes.example.com"}`, loopback)
+	if got["base_url"] != "http://host.persona.internal:8080/v1" || got["other"] != "https://notes.example.com" {
+		t.Fatalf("explicit: %v", got)
+	}
+	// An entry list's address, with unrelated keys kept.
+	got = call(`{"accounts":[{"_id":"entry_one","name":"One","address":"http://127.0.0.1:9000/v1"},{"_id":"entry_two","name":"Two","address":"https://other.example.com"}],"keep":true}`, loopback)
+	entries, _ := got["accounts"].([]any)
+	first, _ := entries[0].(map[string]any)
+	second, _ := entries[1].(map[string]any)
+	if first["address"] != "http://host.persona.internal:9000/v1" || first["name"] != "One" ||
+		second["address"] != "https://other.example.com" || got["keep"] != true {
+		t.Fatalf("entries: %v", got)
+	}
+	// IPv6 loopback.
+	if got := call(`{"base_url":"http://[::1]:8080/v1"}`, loopback); got["base_url"] != "http://host.persona.internal:8080/v1" {
+		t.Fatalf("ipv6: %v", got)
+	}
+	// A "config:" target on the port lets it through; on another port it does not.
+	target := egress.Rule{Targets: []egress.Target{{Host: "127.0.0.1", Port: "8080", HTTP: true}}}
+	if got := call(`{"base_url":"http://127.0.0.1:8080/v1"}`, target); got["base_url"] != "http://host.persona.internal:8080/v1" {
+		t.Fatalf("target: %v", got)
+	}
+	other := egress.Rule{Targets: []egress.Target{{Host: "127.0.0.1", Port: "9000", HTTP: true}}}
+	if got := call(`{"base_url":"http://127.0.0.1:8080/v1"}`, other); got["base_url"] != "http://127.0.0.1:8080/v1" {
+		t.Fatalf("another port: %v", got)
+	}
+	// http needs a target's HTTP allowance; https does not.
+	httpsOnly := egress.Rule{Targets: []egress.Target{{Host: "127.0.0.1", Port: "8080"}}}
+	if got := call(`{"base_url":"http://127.0.0.1:8080/v1"}`, httpsOnly); got["base_url"] != "http://127.0.0.1:8080/v1" {
+		t.Fatalf("http without the allowance: %v", got)
+	}
+	if got := call(`{"base_url":"https://127.0.0.1:8080/v1"}`, httpsOnly); got["base_url"] != "https://host.persona.internal:8080/v1" {
+		t.Fatalf("https: %v", got)
+	}
+	// An owner-allowed loopback host.
+	owner := egress.Rule{Owner: []egress.Target{{Host: "127.0.0.1"}}}
+	if got := call(`{"base_url":"http://127.0.0.1:8123/v1"}`, owner); got["base_url"] != "http://host.persona.internal:8123/v1" {
+		t.Fatalf("owner: %v", got)
+	}
+	// Not permitted: unchanged, and the same bytes come back.
+	raw := json.RawMessage(`{"base_url":"http://127.0.0.1:8080/v1"}`)
+	plain := egress.Rule{Hosts: []string{"notes.example.com"}}
+	if got := SandboxConfig(m, raw, plain); string(got) != string(raw) {
+		t.Fatalf("unpermitted: %s", got)
+	}
+	// User info stays in front of the rewritten host.
+	if got := call(`{"base_url":"http://me:pw@127.0.0.1:8080/v1"}`, loopback); got["base_url"] != "http://me:pw@host.persona.internal:8080/v1" {
+		t.Fatalf("user info: %v", got)
+	}
+	// Not a sandbox URL: an https host, another scheme.
+	for _, v := range []string{"https://notes.example.com", "ftp://127.0.0.1:8080"} {
+		cfg, _ := json.Marshal(map[string]string{"base_url": v})
+		if got := string(SandboxConfig(m, cfg, loopback)); got != string(cfg) {
+			t.Errorf("%q: %s", v, got)
+		}
+	}
+}
+
+func TestHostLoopbackURL(t *testing.T) {
+	for raw, want := range map[string]string{
+		"http://host.persona.internal:8080/v1":    "http://127.0.0.1:8080/v1",
+		"https://HOST.PERSONA.INTERNAL/v1":        "https://127.0.0.1/v1",
+		"ws://host.persona.internal:9000/sock":    "ws://127.0.0.1:9000/sock",
+		"http://notes.example.com:8080":           "http://notes.example.com:8080",
+		"http://me:pw@host.persona.internal:8080": "http://me:pw@127.0.0.1:8080",
+		"ftp://host.persona.internal:8080":        "ftp://host.persona.internal:8080",
+		"":                                        "",
+	} {
+		if got := HostLoopbackURL(raw); got != want {
+			t.Errorf("%q: %q, want %q", raw, got, want)
+		}
+	}
+}

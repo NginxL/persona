@@ -156,6 +156,7 @@ func TestAcceptanceWithReportsOffHasNoCard(t *testing.T) {
 
 // Bot ready: unchanged, the ask has its card and is not marked card-less.
 func TestAcceptanceWithABotKeepsItsCard(t *testing.T) {
+	needsLarkLayer(t)
 	s, f, posts, id := cardlessService(t, FeishuStatus{Ready: true, Enabled: true, Owner: "ou_me", Features: FeishuFeatures{Main: true, Cards: true, Reports: true}})
 	agentTurn(s, f, proto.StatusDone, deployedReply, 0)
 	waitAcceptCard(t, s, id, posts)
@@ -171,6 +172,7 @@ func TestAcceptanceWithABotKeepsItsCard(t *testing.T) {
 // waiting for its card, not card-less, and the next tick posts it once the status reads (acceptance_retry_test.go). A
 // card whose send failed is the same (TestAcceptanceCardRetriedAfterAFailedSend).
 func TestAcceptanceStatusErrorIsNotNoCard(t *testing.T) {
+	needsLarkLayer(t)
 	waiting := func(t *testing.T, s *Service, id string, posts func() []string) {
 		t.Helper()
 		if a := askOf(s, id); a == nil || a.AskedAt.IsZero() || a.MessageID != "" || a.NoCard {
@@ -274,6 +276,7 @@ func TestCardlessAskEndsLikeACardedOne(t *testing.T) {
 
 // Verifying a card-less ask says so in the to-do's Lark topic, as verifying on a card does.
 func TestCardlessAcceptSaysSoInTheTopic(t *testing.T) {
+	needsLarkLayer(t)
 	ctx := context.Background()
 	e := newPostEnv(t)
 	id := e.bound("验收", testThread)
@@ -290,6 +293,7 @@ func TestCardlessAcceptSaysSoInTheTopic(t *testing.T) {
 
 // Verifying a card-less ask plans the report back to where the request came from, as verifying on a card does.
 func TestCardlessAcceptPlansTheSourceReport(t *testing.T) {
+	needsLarkLayer(t)
 	forStores(t, func(t *testing.T, e *askEnv, database *db.DB) {
 		ctx := context.Background()
 		e.ask(ownerAsk("om_a1", "/ai 修登录崩溃"))

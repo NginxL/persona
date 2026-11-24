@@ -35,6 +35,7 @@ vi.mock("../../lib/panel", async (importOriginal) => ({ ...await importOriginal<
 vi.mock("../assistant/Persona", () => ({ usePersona: () => ({ name: "Persona" }) }));
 
 import { applyCompleteSessions, reset } from "../../lib/store";
+import { resetPullGatesForTests } from "../../lib/pull-gate";
 const { ChatView } = await import("./ChatView");
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -61,6 +62,7 @@ afterEach(() => {
   act(() => root.unmount());
   host.remove();
   reset();
+  resetPullGatesForTests(); // a case's failed index read must not hold the next case's back
   vi.restoreAllMocks();
   vi.clearAllTimers();
   vi.useRealTimers();
@@ -100,6 +102,36 @@ describe("ChatView older pages", () => {
   it("asks for nothing once the history is complete", async () => {
     const loadEarlier = await open({ scrollHeight: 400, clientHeight: 800 }, false);
     expect(loadEarlier).not.toHaveBeenCalled();
+  });
+
+  it("keeps the same line at the same offset when a prepend and new activity commit together", async () => {
+    await open({ scrollHeight: 6_000, clientHeight: 800 });
+    let release!: (page: symbol) => void;
+    transcript.loadEarlier = vi.fn(() => new Promise<symbol>((resolve) => { release = resolve; }));
+    const render = () => act(() => root.render(<ChatView mid="mac" sid="s1" inPage />));
+    render();
+    const sc = host.querySelector<HTMLElement>("[data-chat-scroll]")!;
+    const line = sc.querySelector('[data-line="seg:u1#0"]')!.firstElementChild!;
+    let lineTop = 180;
+    vi.spyOn(line, "getBoundingClientRect").mockImplementation(() => new DOMRect(0, lineTop - sc.scrollTop, 600, 300));
+    act(() => sc.dispatchEvent(new WheelEvent("wheel", { deltaY: -120 })));
+    sc.scrollTop = 220;
+    act(() => sc.dispatchEvent(new Event("scroll")));
+    expect(transcript.loadEarlier).toHaveBeenCalledOnce();
+    const offset = line.getBoundingClientRect().top;
+
+    const page = Symbol();
+    await act(async () => release(page));
+    lineTop += 800;
+    size.scrollHeight += 800 + 150;
+    Object.assign(transcript, { earlierPage: page, hasMore: false, items: [
+      { ...background[0], id: "earlier", seq: 1 }, ...background,
+      { id: "compact", seq: 12, role: "system", kind: "notice", compact: { trigger: "manual" } },
+      { ...background[0], id: "supervision", seq: 13, injected: { kind: "system", state: "supervise", line: "Check tasks" } },
+    ] });
+    render();
+    expect(line.isConnected).toBe(true);
+    expect(line.getBoundingClientRect().top).toBe(offset);
   });
 
   it("anchors a prepended page when the rail joins a read started elsewhere", async () => {

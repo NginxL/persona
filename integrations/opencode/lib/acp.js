@@ -9,6 +9,7 @@ import { homedir } from 'node:os'
 
 const DEFAULT_RPC_TIMEOUT_MS = 60_000
 const STOP_GRACE_MS = 3_000
+const childExited = (child) => !child || child.exitCode != null || child.signalCode != null
 
 // Dedicated workers must not inherit a user's fixed/public server listener.
 // Keep ordinary ACP arguments untouched, and never mutate the supplied array.
@@ -16,30 +17,18 @@ export function privateAcpArgs(args = ['acp']) {
   const result = []
   for (let index = 0; index < args.length; index++) {
     const arg = args[index]
-    if (arg === '--port' || arg === '--hostname') { index++; continue }
+    if (arg === '-p' || arg === '--port' || arg === '--hostname') { index++; continue }
     if (arg === '--mdns' || arg === '--no-mdns') {
       if (args[index + 1] === 'true' || args[index + 1] === 'false') index++
       continue
     }
-    if (/^--(?:port|hostname|mdns)=/.test(arg)) continue
+    if (/^(?:-p\d+|--(?:port|hostname|(?:no-)?mdns)=)/.test(arg)) continue
     result.push(arg)
   }
   return [...result, '--port', '0', '--hostname', '127.0.0.1', '--no-mdns']
 }
 
 export class OpencodeAcpClient extends EventEmitter {
-  /**
-   * @param {{
-   *   bin?: string,
-   *   args?: string[],
-   *   cwd?: string,
-   *   env?: NodeJS.ProcessEnv,
-   *   log?: (msg: string) => void,
-   *   spawn?: typeof spawn,
-   *   processGroup?: boolean,
-   *   onPermissionRequest?: (params: any) => Promise<any> | any,
-   * }} [options]
-   */
   constructor(options = {}) {
     super()
     this.bin = options.bin || 'opencode'
@@ -72,7 +61,7 @@ export class OpencodeAcpClient extends EventEmitter {
 
   async ensureStarted(timeoutMs = DEFAULT_RPC_TIMEOUT_MS) {
     if (this.stopped) throw new Error('opencode ACP client stopped')
-    if (this.proc && !this.proc.killed && this.proc.exitCode === null && this.capabilities) {
+    if (!childExited(this.proc) && !this.proc.killed && this.capabilities) {
       return { capabilities: this.capabilities, agentInfo: this.agentInfo }
     }
     if (this.starting) return this.starting
@@ -83,7 +72,7 @@ export class OpencodeAcpClient extends EventEmitter {
   }
 
   async _start(timeoutMs) {
-    const args = this.args.includes('--cwd') ? [...this.args] : [...this.args, '--cwd', this.cwd]
+    const args = this.args.some((a) => a === '--cwd' || a.startsWith('--cwd=')) ? [...this.args] : [...this.args, '--cwd', this.cwd]
     const child = this._spawn(this.bin, args, {
       cwd: this.cwd,
       env: this.env,
@@ -161,10 +150,10 @@ export class OpencodeAcpClient extends EventEmitter {
   }
 
   _terminateChild(child) {
-    if (!child || child.exitCode !== null) return
+    if (childExited(child)) return
     try { this._signal(child, 'SIGTERM') } catch {}
     const killTimer = setTimeout(() => {
-      if (child.exitCode === null) {
+      if (!childExited(child)) {
         try { this._signal(child, 'SIGKILL') } catch {}
       }
     }, STOP_GRACE_MS)
@@ -294,7 +283,6 @@ export class OpencodeAcpClient extends EventEmitter {
           this.pending.delete(id)
           reject(new Error(`opencode acp ${method} timed out after ${timeoutMs}ms`))
         }, timeoutMs)
-        timer.unref?.()
       }
       this.pending.set(id, { resolve, reject, timer })
       try {
@@ -313,7 +301,7 @@ export class OpencodeAcpClient extends EventEmitter {
   }
 
   notify(method, params) {
-    if (!this.proc || this.proc.killed || this.proc.exitCode !== null) return false
+    if (childExited(this.proc) || this.proc.killed) return false
     try {
       this._write({ jsonrpc: '2.0', method, params })
       return true
@@ -355,7 +343,7 @@ export class OpencodeAcpClient extends EventEmitter {
 
   async closeSession(sessionId, timeoutMs = 5_000) {
     this.loadedSessions.delete(sessionId)
-    if (!this.proc || this.proc.killed || this.proc.exitCode !== null) return
+    if (childExited(this.proc) || this.proc.killed) return
     try {
       await this._callRaw('session/close', { sessionId }, timeoutMs)
     } catch {
@@ -368,7 +356,7 @@ export class OpencodeAcpClient extends EventEmitter {
     this._failAll(new Error('opencode acp stopped'))
     if (!child) return
     this._clearProc()
-    if (child.exitCode !== null) return
+    if (childExited(child)) return
     await new Promise((resolve) => {
       const done = () => {
         clearTimeout(killTimer)
@@ -376,6 +364,7 @@ export class OpencodeAcpClient extends EventEmitter {
       }
       child.once('exit', done)
       const killTimer = setTimeout(() => {
+        if (childExited(child)) { done(); return }
         try { this._signal(child, 'SIGKILL') } catch { done() }
       }, STOP_GRACE_MS)
       killTimer.unref?.()

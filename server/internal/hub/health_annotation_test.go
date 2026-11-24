@@ -33,6 +33,22 @@ func TestAnnotateHealthSnapshot(t *testing.T) {
 		}
 	})
 
+	t.Run("sample and source snapshots are marked too", func(t *testing.T) {
+		samples := `{"type":"heart_rate","samples":[],"source":"snapshot","as_of":"2026-11-23T08:00:00+08:00"}`
+		for _, name := range []string{"phone_health_samples", "phone_health_sources"} {
+			got := annotateHealthSnapshot(name, proto.TextResult(samples, false))
+			if len(got.Content) != 2 || !strings.Contains(got.Content[0].Text, "as_of=2026-11-23T08:00:00+08:00") {
+				t.Fatalf("%s: snapshot answer not annotated: %+v", name, got)
+			}
+			if got.Content[1].Text != samples {
+				t.Fatalf("%s: the original JSON content must be preserved unchanged", name)
+			}
+		}
+		if got := annotateHealthSnapshot("phone_health_types", proto.TextResult(samples, false)); len(got.Content) != 1 {
+			t.Fatalf("phone_health_types never answers from a snapshot and must pass through: %+v", got)
+		}
+	})
+
 	t.Run("live answer is untouched", func(t *testing.T) {
 		live := proto.TextResult(`{"data":[],"source":"live"}`, false)
 		got := annotateHealthSnapshot("phone_health_summary", live)

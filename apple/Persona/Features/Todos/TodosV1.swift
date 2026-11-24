@@ -27,12 +27,14 @@ extension TodoStore {
 /// late), or while a to-do is pushed over it, never swaps it; the next time To-dos opens it is the V1 list
 /// (docs/apple/ios.md "To-dos (V1, #10465)").
 struct TodosPlacePage: View {
+    /// Programmatic opens from today's list share the stack's value-based path with rows and lineage links (#5732).
+    var openDetail: (TodoDetailRoute) -> Void
     /// A stored value's read (P3), kept for the page's life.
     @State private var choice = TodosPageChoice()
 
     var body: some View {
         Group {
-            if choice.v1 { TodoListView() } else { TodosView() }
+            if choice.v1 { TodoListView() } else { TodosView(openDetail: openDetail) }
         }
         .onAppear { choice.shown() }
         #if DEBUG || PERF_SIGNPOST

@@ -2,6 +2,10 @@ package persona.core.data
 
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
@@ -22,9 +26,9 @@ import persona.core.contracts.api.InboxAssistantConnection
 import persona.core.contracts.api.InboxAssistantTransport
 import persona.core.contracts.api.InteractionCenter
 import persona.core.contracts.api.SessionsRepository
-import persona.feature.inbox.ReplyDraft
-import persona.feature.inbox.ReplyRequest
-import persona.feature.inbox.ReplyTarget
+import persona.core.inbox.ReplyDraft
+import persona.core.inbox.ReplyRequest
+import persona.core.inbox.ReplyTarget
 import java.io.IOException
 import java.nio.file.Files
 
@@ -51,9 +55,16 @@ class InboxStoredDraftMentionsTest {
             val transport = FakeTransport(scope)
             val repository = repository(transport, journal, backgroundScope)
             runCurrent()
-
-            // Startup turns a legacy thread-pending stored draft into an immutable outbox request.
-            val recovered = journal.read(scope).outbox.single { it.request.clientId == "client-thread" }
+            // Startup turns a legacy thread-pending stored draft into an immutable outbox request. That migration writes
+            // on Dispatchers.IO, so runCurrent alone does not guarantee it has committed before the next read. Wait for
+            // the real journal commit off runTest's virtual clock instead of assuming a scheduler's startup order.
+            val recovered = withContext(Dispatchers.Default) { withTimeout(5_000) {
+                while (true) {
+                    journal.read(scope).outbox.firstOrNull { it.request.clientId == "client-thread" }?.let { return@withTimeout it }
+                    delay(10)
+                }
+                error("unreachable")
+            } }
             val recoveredJson = JsonCodec.encodeToJsonElement(ReplyRequest.serializer(), recovered.request).jsonObject
             assertEquals(mentions, recoveredJson["mentions"])
 

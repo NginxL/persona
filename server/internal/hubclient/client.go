@@ -180,15 +180,23 @@ func (c *Client) exchange(ctx context.Context, method, path string, query url.Va
 // Hello reads only the initial authenticated WebSocket hello. Public HTTP health
 // responses intentionally omit the capabilities required to select a REST contract.
 func (c *Client) Hello(ctx context.Context, out any) error {
-	ctx, cancel := context.WithTimeout(ctx, c.http.Timeout)
-	defer cancel()
+	if c.http.Timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, c.http.Timeout)
+		defer cancel()
+	}
 	conn, resp, err := websocket.Dial(ctx, c.endpoint("/api/v1/ws", nil), &websocket.DialOptions{
 		HTTPClient: c.http,
 		HTTPHeader: c.headers(),
 	})
 	if err != nil {
 		if resp != nil {
-			return c.httpError(resp, nil)
+			var body []byte
+			if resp.Body != nil {
+				body, _ = io.ReadAll(io.LimitReader(resp.Body, 64<<10))
+				_ = resp.Body.Close()
+			}
+			return c.httpError(resp, body)
 		}
 		return ErrTransport
 	}

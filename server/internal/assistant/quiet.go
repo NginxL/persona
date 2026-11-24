@@ -263,64 +263,61 @@ func (s *Service) dropQueuedNeeds(todoID string) bool {
 	return removed || changed
 }
 
-// quietAgentTask: an agent agent_start opened from the main conversation is a quiet task while the user wants those
-// told only there (quietTask), and so is one a reporting conversation opened (reporters.go): a todo is made and the
-// agent is linked to it, so it goes like a task_plan task (card, snapshot, receipt, notices). Without the setting it
-// stays an agent of its own (false). While assistant.agent_tasks is on (#3617, agent_tasks.go) an agent any other
-// conversation starts is a quiet task too, whatever main_tasks_quiet says: supervised by that conversation when it is
-// a leader, else by the main one. told is who hears of the task, as agent_start's answer says it.
-func (s *Service) quietAgentTask(ctx context.Context, conversation string, m Device, cwd, prompt string, tab any, sid, agent string) (told string, ok bool) {
-	if sid == "" {
-		return "", false
+// prepareAgentTask records an assistant agent_start before the node is called (#5732). The calling conversation stays
+// its origin; the calling lead supervises its own work, otherwise main does. Quiet controls notification behavior,
+// never whether the work is tracked. The supervisor also gets a card when it differs from the origin.
+func (s *Service) prepareAgentTask(ctx context.Context, conversation string, m Device, cwd, prompt string, tab any) (Todo, string, bool) {
+	supervisor := s.settings(ctx).Main
+	source := ""
+	if s.isLeader(ctx, conversation) {
+		supervisor, source = conversation, "plan"
 	}
-	_, reports := s.reporterOf(ctx, conversation)
-	supervisor, managed := "", false
-	if !reports {
-		supervisor, managed = s.agentTaskSupervisor(ctx, conversation)
-	}
-	if !managed {
-		supervisor = ""
-		if !reports && !s.isMain(ctx, conversation) {
-			return "", false
-		}
-		if !s.quietTask(ctx, conversation) {
-			return "", false
-		}
-	}
-	if s.isMain(ctx, conversation) {
-		supervisor = conversation
-	}
-	// The prompt cleaned up now, the model's name for it later (todo_titles.go); the tab name when nothing is left.
 	tabName, _ := tab.(string)
 	title, retitle := s.taskTitle(ctx, "", prompt)
 	if title == "" {
 		title, retitle = tabName, false
 	}
-	todo, err := s.newTodo(ctx, title, prompt, conversation, "", managed || s.quietTask(ctx, conversation))
+	todo, err := s.newTodo(ctx, title, prompt, conversation, "", s.quietTask(ctx, conversation))
 	if err != nil {
-		s.logf("agent_start %s: todo: %v", short(sid), err)
-		return "", false
+		s.logf("agent_start on %s: todo: %v", m.ID, err)
+		return Todo{}, "", false
 	}
 	if retitle {
 		s.nameTodoLater(ctx, todo.ID, title, prompt)
 	}
-	// The main conversation follows up what it hands out (supervise.go), as task_plan has it; a reporting
-	// conversation's task is not supervised: its notices go back to that conversation, not into a supervision message for the
-	// main one (#4101).
 	if supervisor != "" {
-		s.superviseTodo(ctx, todo.ID, supervisor, nil, 0)
+		if err := s.superviseTodo(ctx, todo.ID, supervisor, nil, 0, source); err != nil {
+			s.dropAdoption(ctx, todo.ID, err)
+			return Todo{}, "", false
+		}
 	}
-	s.briefFor(ctx, s.callerOrigin(ctx, conversation), todo, nil, 0) // who asked, before its agent is linked (task_brief.go)
-	if err := s.linkTodoAgent(ctx, todo.ID, m.ID, sid, title, cwd, agent); err != nil {
-		s.logf("agent_start %s: link %s: %v", short(sid), todo.ID, err)
-	}
+	s.briefFor(ctx, s.callerOrigin(ctx, conversation), todo, nil, 0)
 	if _, err := s.appendFeed(ctx, conversation, feedTask, todo.ID, nil); err != nil {
 		s.logf("task %s: feed: %v", todo.ID, err)
 	}
+	told := startToldHere
 	if supervisor != "" && supervisor != conversation {
-		return startToldMain, true
+		if _, err := s.appendFeed(ctx, supervisor, feedTask, todo.ID, nil); err != nil {
+			s.logf("task %s: main feed: %v", todo.ID, err)
+		}
+		told = startToldMain
 	}
-	return startToldHere, true
+	if current, ok := s.todoNow(todo.ID); ok {
+		todo = current
+	}
+	return todo, told, true
+}
+
+// linkPreparedAgentTask attaches the node's answered session and its actual agent kind to the task made before its start.
+func (s *Service) linkPreparedAgentTask(ctx context.Context, todo Todo, m Device, cwd, sid, agent string) error {
+	if sid == "" {
+		return fmt.Errorf("empty session id")
+	}
+	if err := s.linkTodoAgent(ctx, todo.ID, m.ID, sid, todo.Title, cwd, agent); err != nil {
+		s.logf("agent_start %s: link %s: %v", short(sid), todo.ID, err)
+		return err
+	}
+	return nil
 }
 
 // startToldHere / startToldMain: who hears of an agent_start task, in the tool's answer: the conversation that started it, or
@@ -376,7 +373,7 @@ func noticeAsk(ix proto.Interaction) string {
 			}
 			b.WriteByte('\n')
 		}
-	case terminalQuestion(ix):
+	case supervisedScreen(ix):
 		if title := clip(oneLine(ix.SessionTitle), 70); title != "" {
 			b.WriteString(title + " · ")
 		}

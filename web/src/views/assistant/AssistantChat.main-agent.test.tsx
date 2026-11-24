@@ -127,12 +127,34 @@ describe("the Main chat default's agent-kind mismatch", () => {
     expect(launcherRead.calls).toEqual([{ mid: "hub", again: true }, { mid: "hub", again: true }]);
   });
 
+  it("holds revision refreshes while the conversation works and refreshes once when its turn ends", async () => {
+    await show(session({ rev: 1 }));
+    expect(launcherRead.calls).toHaveLength(1);
+    for (let rev = 2; rev <= 6; rev++) await show(session({ rev, status: "working", state: "working" }));
+    expect(launcherRead.calls).toHaveLength(1);
+    await show(session({ rev: 7 }));
+    expect(launcherRead.calls).toEqual([{ mid: "hub", again: true }, { mid: "hub", again: true }]);
+  });
+
   it("keeps a trailing refresh when a revision arrives during a pending launcher read", async () => {
     launcherRead.hold = true;
     await show(session({ rev: 1 }));
     expect(launcherRead.calls).toHaveLength(1);
     await show(session({ rev: 2 }));
     expect(launcherRead.calls).toHaveLength(2);
+    const release = launcherRead.release!;
+    await act(async () => { release(); await flush(); });
+    expect(launcherRead.calls).toHaveLength(3);
+    expect(launcherRead.calls.every((call) => call.mid === "hub" && call.again)).toBe(true);
+  });
+
+  it("keeps that trailing refresh when the conversation starts working before the pending read settles", async () => {
+    launcherRead.hold = true;
+    await show(session({ rev: 1 }));
+    await show(session({ rev: 2 }));
+    expect(launcherRead.calls).toHaveLength(2);
+    // a new turn marks the conversation working before its first write moves the revision
+    await show(session({ rev: 2, status: "working", state: "working" }));
     const release = launcherRead.release!;
     await act(async () => { release(); await flush(); });
     expect(launcherRead.calls).toHaveLength(3);

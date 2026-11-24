@@ -4,7 +4,7 @@ import PersonaWire
 
 /// `phone_health_summary`: per-day aggregates, one HealthKit collection query
 /// per metric. `phone_health_write_sample`: one sample the user approved on the
-/// phone; nothing is imported in bulk or deleted.
+/// phone; that AI tool never imports in bulk or deletes. Opt-in intake sync has its own HealthKit writer.
 enum HealthTool {
     /// What the summary reads.
     static var readTypes: Set<HKObjectType> {
@@ -13,13 +13,14 @@ enum HealthTool {
             if let type = HKQuantityType.quantityType(forIdentifier: identifier) { types.insert(type) }
         }
         if let sleep = HKCategoryType.categoryType(forIdentifier: .sleepAnalysis) { types.insert(sleep) }
+        types.insert(HKObjectType.activitySummaryType())
         #if os(iOS) || os(visionOS)
         types.formUnion(WorkoutReader.readTypes) // phone_workouts_recent / phone_workout_detail (#2526)
         #endif
         return types
     }
 
-    static let quantityIdentifiers: [String: HKQuantityTypeIdentifier] = [
+    nonisolated static let quantityIdentifiers: [String: HKQuantityTypeIdentifier] = [
         "steps": .stepCount,
         "distance": .distanceWalkingRunning,
         "active_energy": .activeEnergyBurned,
@@ -33,7 +34,7 @@ enum HealthTool {
         "weight": .bodyMass,
     ]
 
-    private static var metricNames: [String] { Array(quantityIdentifiers.keys) + ["sleep"] }
+    nonisolated private static var metricNames: [String] { Array(quantityIdentifiers.keys) + ["sleep"] }
 
     /// What `phone_health_write_sample` may save, one approved sample at a time.
     static var writeTypes: Set<HKSampleType> { Set(HealthSample.metrics.compactMap(HealthSample.type(of:))) }
@@ -269,13 +270,15 @@ enum HealthTool {
 
     /// One metric's per-day values over the last `days` days (today included), keyed "yyyy-MM-dd": the numbers the
     /// summary gives for it, read the same way, for the app's own health trends (Views/Health/HealthTrendsModel.swift).
-    /// Days without data are left out.
-    static func daily(_ metric: String, days: Int) async throws -> [String: Double] {
-        try HealthAccess.requireAccess()
+    /// Days without data are left out. This read-only path never requests authorization; only an explicit foreground
+    /// action may ask for access, including access to types added since the user was last asked.
+    @concurrent nonisolated static func daily(_ metric: String, days: Int) async throws -> [String: Double] {
+        try Task.checkCancellation()
+        try await HealthAccess.requireAccess()
+        try Task.checkCancellation()
         guard metricNames.contains(metric), metric != "heart_rate" else {
             throw ToolFailure(.invalidArgument, "no daily trend for \"\(metric)\"")
         }
-        await requestAdditionalReadAccess(for: [metric])
         let calendar = Calendar.current
         let end = Date()
         let start = calendar.startOfDay(for: calendar.date(byAdding: .day, value: -(max(days, 1) - 1), to: end) ?? end)
@@ -283,6 +286,7 @@ enum HealthTool {
         let rows = metric == "sleep"
             ? try await sleepByDay(store, start: start, end: end, calendar: calendar)
             : try await quantityByDay(store, metric: metric, start: start, end: end, calendar: calendar)
+        try Task.checkCancellation()
         return rows.compactMapValues(\.double)
     }
 
@@ -296,7 +300,7 @@ enum HealthTool {
         _ = try? await HKHealthStore().requestAuthorization(toShare: Set<HKSampleType>(), read: readTypes)
     }
 
-    static func quantityUnit(for metric: String) -> HKUnit {
+    nonisolated static func quantityUnit(for metric: String) -> HKUnit {
         switch metric {
         case "steps": .count()
         case "distance": .meter()
@@ -307,13 +311,14 @@ enum HealthTool {
         }
     }
 
-    private static func quantityByDay(
+    @concurrent nonisolated private static func quantityByDay(
         _ store: HKHealthStore,
         metric: String,
         start: Date,
         end: Date,
         calendar: Calendar
     ) async throws -> [String: JSONValue] {
+        try Task.checkCancellation()
         guard let identifier = quantityIdentifiers[metric],
               let type = HKQuantityType.quantityType(forIdentifier: identifier) else {
             throw ToolFailure(.invalidArgument, "this iPhone does not support the metric \"\(metric)\"")
@@ -321,16 +326,15 @@ enum HealthTool {
         let options = statisticsOptions(for: type, metric: metric)
         let units = quantityUnit(for: metric)
 
-        let query = HKStatisticsCollectionQuery(
-            quantityType: type,
-            quantitySamplePredicate: HKQuery.predicateForSamples(withStart: start, end: end, options: .strictStartDate),
-            options: options,
-            anchorDate: start,
-            intervalComponents: DateComponents(day: 1)
-        )
-        let collection: HKStatisticsCollection = try await withCheckedThrowingContinuation { continuation in
-            let gate = SingleResume(continuation)
-            query.initialResultsHandler = { _, collection, error in
+        let collection: HKStatisticsCollection = try await HealthQueryExecution<HKStatisticsCollection>(store: store).result { gate in
+            let query = HKStatisticsCollectionQuery(
+                quantityType: type,
+                quantitySamplePredicate: HKQuery.predicateForSamples(withStart: start, end: end, options: .strictStartDate),
+                options: options,
+                anchorDate: start,
+                intervalComponents: DateComponents(day: 1)
+            )
+            query.initialResultsHandler = { @Sendable _, collection, error in
                 if let error {
                     gate.fail(error)
                 } else if let collection {
@@ -339,8 +343,9 @@ enum HealthTool {
                     gate.fail(ToolFailure(.unavailable, "HealthKit returned no statistics for \(metric)"))
                 }
             }
-            store.execute(query)
+            return query
         }
+        try Task.checkCancellation()
 
         var out: [String: JSONValue] = [:]
         collection.enumerateStatistics(from: start, to: end) { statistics, _ in
@@ -367,34 +372,35 @@ enum HealthTool {
     /// What a day's statistics hold: the sum of a cumulative type (steps, distance, energy, nutrients), the average of a discrete one
     /// (weight, resting heart rate), heart rate's range too. An option the type cannot answer (summing weight) raises an
     /// exception inside HealthKit when the query runs, which takes the app down.
-    static func statisticsOptions(for type: HKQuantityType, metric: String) -> HKStatisticsOptions {
+    nonisolated static func statisticsOptions(for type: HKQuantityType, metric: String) -> HKStatisticsOptions {
         if metric == "heart_rate" { return [.discreteAverage, .discreteMin, .discreteMax] }
         return type.aggregationStyle == .cumulative ? .cumulativeSum : .discreteAverage
     }
 
     /// Sleep is a category type: sum every sample whose value counts as asleep,
     /// clipped to the day so a night that crosses midnight splits correctly.
-    private static func sleepByDay(
+    @concurrent nonisolated private static func sleepByDay(
         _ store: HKHealthStore,
         start: Date,
         end: Date,
         calendar: Calendar
     ) async throws -> [String: JSONValue] {
+        try Task.checkCancellation()
         guard let type = HKCategoryType.categoryType(forIdentifier: .sleepAnalysis) else {
             throw ToolFailure(.unavailable, "此设备不支持睡眠数据 / Sleep analysis is not available") // i18n-ignore
         }
-        let predicate = HKQuery.predicateForSamples(withStart: start, end: end, options: [])
-        let samples: [HKCategorySample] = try await withCheckedThrowingContinuation { continuation in
-            let gate = SingleResume(continuation)
-            let query = HKSampleQuery(sampleType: type, predicate: predicate, limit: HKObjectQueryNoLimit, sortDescriptors: nil) { _, result, error in
+        let samples: [HKCategorySample] = try await HealthQueryExecution<[HKCategorySample]>(store: store).result { gate in
+            HKSampleQuery(sampleType: type,
+                          predicate: HKQuery.predicateForSamples(withStart: start, end: end, options: []),
+                          limit: HKObjectQueryNoLimit, sortDescriptors: nil) { @Sendable _, result, error in
                 if let error {
                     gate.fail(error)
                 } else {
                     gate.succeed((result as? [HKCategorySample]) ?? [])
                 }
             }
-            store.execute(query)
         }
+        try Task.checkCancellation()
 
         let asleepValues = Set(HKCategoryValueSleepAnalysis.allAsleepValues.map(\.rawValue))
         var seconds: [String: TimeInterval] = [:]
@@ -417,7 +423,7 @@ enum HealthTool {
         return out
     }
 
-    private static func round1(_ value: Double) -> Double {
+    nonisolated private static func round1(_ value: Double) -> Double {
         (value * 10).rounded() / 10
     }
 }

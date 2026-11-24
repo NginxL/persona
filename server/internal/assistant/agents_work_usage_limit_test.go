@@ -122,9 +122,13 @@ func TestUsageLimitIsContinuedAfterTheReset(t *testing.T) {
 		t.Fatalf("sent before the reset: %v", got)
 	}
 	s.workTick(ctx, reset.Add(2*time.Minute))
-	if got := f.sentToAgents(); len(got) != 1 || got[0] != "s1: "+prompts.MessageSourceText(prompts.RenderAgentLimitContinue(""), &proto.MessageSource{Kind: proto.SourceFollowup}) {
+	if got := f.sentToAgents(); len(got) != 1 || got[0] != "s1: "+autoContinueTextForTest(prompts.RenderAgentLimitContinue("")) {
 		t.Fatalf("sent %v", got)
 	}
+	f.mu.Lock()
+	params := f.agentSent[0]
+	f.mu.Unlock()
+	requireAutoContinueSource(t, params)
 	if e := entryOf(t, s, "s1"); e.Retries != 1 || e.WakeAt != nil {
 		t.Fatalf("after the continue: %+v", e)
 	}
@@ -385,7 +389,7 @@ func TestUsageLimitReceipt(t *testing.T) {
 	stop := func(reset time.Time, resumes bool) {
 		f.setSessions("box", proto.Session{SessionID: "s1", MachineID: "box", Cwd: "/code/app", Agent: "claude", Status: proto.StatusWorking,
 			State: proto.StateWorking, UpdatedAt: time.Now()})
-		s.taskWorking(ctx, "box", "s1")
+		s.taskWorking(ctx, "box", "s1", startRow{})
 		c := limitTurn("s1", reset, resumes)
 		c.MachineID, c.Agent, c.UpdatedAt = "box", "claude", time.Now()
 		f.setSessions("box", c)

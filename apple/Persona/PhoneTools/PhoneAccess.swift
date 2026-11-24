@@ -117,6 +117,11 @@ enum LocationAccess {
         }
     }
 
+    /// While Using or Always (`status` calls both granted): whether a read can work while Persona isn't open (#13200).
+    static func level() -> LocationLevel {
+        LocationLevel(CLLocationManager().authorizationStatus)
+    }
+
     /// Shows the system prompt and waits for the user's answer (or for an
     /// existing answer to be reported).
     static func request() async -> PhoneAuthStatus {
@@ -176,7 +181,7 @@ enum HealthAccess {
         guard HKHealthStore.isHealthDataAvailable() else { return .notNeeded }
         let read = HealthTool.readTypes
         do {
-            // Writing too (phone_health_write_sample, each sample approved on the phone); the system lists both.
+            // The AI write tool only: intake sync requests its own two write types when explicitly enabled.
             _ = try await store.requestAuthorization(toShare: HealthTool.writeTypes, read: read)
             UserDefaults.standard.set(true, forKey: askedKey)
         } catch {

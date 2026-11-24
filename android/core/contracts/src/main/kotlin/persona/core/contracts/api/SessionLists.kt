@@ -18,6 +18,8 @@ data class SessionListFilter(
     /** Runtime lists fold children when sessions_hierarchy is advertised. Complete membership keeps their rows. */
     val roots: Boolean = true,
     val parentSessionId: String? = null,
+    /** Parent machine id for cross-machine child queries (`sessions_cross_machine_hierarchy`). */
+    val parentMachineId: String? = null,
     /** Merged group namespaces with botmux hidden. A single Hub always uses its plain (null) namespace. */
     val hiddenBotmuxHubs: Set<String?> = emptySet(),
 ) {

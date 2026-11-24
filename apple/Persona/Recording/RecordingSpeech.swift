@@ -1,4 +1,5 @@
 import AVFoundation
+import os
 import Speech
 
 // The on-device engines and timestamp-based sentence splitting come from Hourhand's SpeechEngines.swift, without the cloud path.
@@ -44,6 +45,49 @@ nonisolated enum RecordingSpeechError: LocalizedError {
         case .unsupportedLanguage, .modelUnavailable: true
         case .noSpeechPermission, .needsNewerSystem, .empty: false
         }
+    }
+}
+
+/// Which on-device module transcribes a recording, and in which locale (#13385; pure, for the tests): only one that writes
+/// the recording's own language, the one its upload names to the hub. A module counts when it resolves the language to a
+/// locale of the same language in the same script (a region may differ: en-AU for en-US, never zh-TW for zh-CN) and its
+/// asset for that locale is not `unsupported`. `supportedLocale(equivalentTo:)` alone is no answer: it names a locale even
+/// for a language the module has no model for, and the locale it names is what the module would be built with. The
+/// speech module first where the device has it, then dictation; neither: nil, and the caller says this device can't
+/// transcribe the language (`RecordingSpeechError.unsupportedLanguage`) rather than write another language's words.
+nonisolated enum RecordingEngineChoice: Equatable, Sendable {
+    case speech(Locale)
+    case dictation(Locale)
+
+    /// One module's answer for the language: the locale it resolves it to (nil: none), and whether its asset status for
+    /// that locale is `unsupported`.
+    struct Answer: Equatable, Sendable {
+        var locale: Locale?
+        var unsupported = false
+    }
+
+    var locale: Locale {
+        switch self {
+        case .speech(let locale), .dictation(let locale): locale
+        }
+    }
+
+    static func pick(_ wanted: Locale, speechAvailable: Bool, speech: Answer, dictation: Answer) -> RecordingEngineChoice? {
+        if speechAvailable, let locale = usable(speech, for: wanted) { return .speech(locale) }
+        if let locale = usable(dictation, for: wanted) { return .dictation(locale) }
+        return nil
+    }
+
+    /// The locale `answer` resolves `wanted` to, when it has a model and is the same language in the same script.
+    static func usable(_ answer: Answer, for wanted: Locale) -> Locale? {
+        guard let locale = answer.locale, !answer.unsupported, sameLanguage(locale, wanted) else { return nil }
+        return locale
+    }
+
+    /// The same language written in the same script (`Locale.Language` fills in the likely script: zh-CN is Hans).
+    static func sameLanguage(_ a: Locale, _ b: Locale) -> Bool {
+        guard let code = a.language.languageCode, code == b.language.languageCode else { return false }
+        return a.language.script == b.language.script
     }
 }
 
@@ -182,16 +226,45 @@ nonisolated struct RecordingAnalyzerEngine: RecordingSpeechEngine {
     let kind: Kind
     var id: String { kind == .speech ? "analyzer" : "dictation" }
     var isCloud: Bool { false }
+    private static let log = Logger(subsystem: "persona", category: "recording-speech")
 
-    /// The best on-device module for a locale, or nil if neither supports it.
+    /// The best on-device module for a locale and the locale it runs in, always the same language
+    /// (`RecordingEngineChoice`), or nil if neither module has a model for it.
     static func best(for locale: Locale) async -> (RecordingAnalyzerEngine, Locale)? {
-        if SpeechTranscriber.isAvailable, let l = await SpeechTranscriber.supportedLocale(equivalentTo: locale) {
-            return (RecordingAnalyzerEngine(kind: .speech), l)
+        let speechAvailable = SpeechTranscriber.isAvailable
+        var speech = RecordingEngineChoice.Answer()
+        if speechAvailable { speech = await answer(.speech, await SpeechTranscriber.supportedLocale(equivalentTo: locale)) }
+        let dictation = await answer(.dictation, await DictationTranscriber.supportedLocale(equivalentTo: locale))
+        let choice = RecordingEngineChoice.pick(locale, speechAvailable: speechAvailable, speech: speech, dictation: dictation)
+        // What the system answered whenever it isn't simply the language asked for, so a device that names another
+        // language for this one shows in its log (#13385).
+        let wanted = locale.identifier(.bcp47)
+        if choice?.locale.identifier(.bcp47) != wanted {
+            let picked = switch choice {
+            case .speech(let l): "speech " + l.identifier(.bcp47)
+            case .dictation(let l): "dictation " + l.identifier(.bcp47)
+            case nil: "none"
+            }
+            let heard = "speech " + (speechAvailable ? describe(speech) : "unavailable") + ", dictation " + describe(dictation)
+            log.notice("engine for \(wanted, privacy: .public): \(picked, privacy: .public) (\(heard, privacy: .public))")
         }
-        if let l = await DictationTranscriber.supportedLocale(equivalentTo: locale) {
-            return (RecordingAnalyzerEngine(kind: .dictation), l)
+        switch choice {
+        case .speech(let resolved): return (RecordingAnalyzerEngine(kind: .speech), resolved)
+        case .dictation(let resolved): return (RecordingAnalyzerEngine(kind: .dictation), resolved)
+        case nil: return nil
         }
-        return nil
+    }
+
+    /// A module's answer for a language: the locale it resolved it to, and whether its asset status there is `unsupported`.
+    private static func answer(_ kind: Kind, _ resolved: Locale?) async -> RecordingEngineChoice.Answer {
+        guard let resolved else { return RecordingEngineChoice.Answer() }
+        let status = await AssetInventory.status(forModules: [RecordingAnalyzerEngine(kind: kind).module(resolved)])
+        return RecordingEngineChoice.Answer(locale: resolved, unsupported: status == .unsupported)
+    }
+
+    private static func describe(_ answer: RecordingEngineChoice.Answer) -> String {
+        guard let locale = answer.locale else { return "none" }
+        return locale.identifier(.bcp47) + (answer.unsupported ? " unsupported" : "")
     }
 
     private func module(_ locale: Locale) -> any SpeechModule {

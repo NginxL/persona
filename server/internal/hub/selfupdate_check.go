@@ -112,6 +112,7 @@ func (u *updater) check(ctx context.Context) (*update.Published, error) {
 		return r, nil
 	}
 	u.checking = true
+	u.opGen++
 	dev := u.developmentLocked()
 	u.mu.Unlock()
 	defer func() { u.mu.Lock(); u.checking = false; u.mu.Unlock() }()
@@ -253,7 +254,7 @@ func (u *updater) updateActiveLocked() bool {
 func (u *updater) setCheckState(state, errText string) {
 	u.mu.Lock()
 	if !u.updateActiveLocked() {
-		u.state, u.progress, u.errText = state, "", errText
+		u.setLocked(state, "", errText)
 	}
 	u.mu.Unlock()
 	u.h.broadcast(map[string]any{"type": "hub_update", "update": u.view()})
@@ -321,7 +322,7 @@ func (u *updater) freshRelease(ctx context.Context) {
 	u.release, u.releaseRead, u.blocked = r, u.lastCheck, blocked
 	available := !u.updateActiveLocked() && u.state == "idle" && u.h.build.Newer(r.Manifest.Build)
 	if available {
-		u.state, u.progress, u.errText = "available", "", ""
+		u.setLocked("available", "", "")
 	}
 	u.mu.Unlock()
 	u.noteBehind(src, r.Manifest)

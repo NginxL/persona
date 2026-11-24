@@ -9,6 +9,7 @@ import java.net.URLDecoder
 import java.time.Instant
 import java.time.ZoneId
 import java.util.Locale
+import persona.core.inbox.*
 
 /** A mail being written ("New mail" / "Reply" / "Forward"): addresses as typed, the quote already in [body]. */
 data class MailDraft(

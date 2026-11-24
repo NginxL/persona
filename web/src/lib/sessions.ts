@@ -3,13 +3,16 @@ import { useEffect, useMemo, useSyncExternalStore } from "react";
 import { credentialOwner, errorText } from "./api";
 import { CompleteSessions } from "./complete-sessions";
 import { heldOnlyNeeds } from "./attention";
+import { supervisorHeldOnly, userCards } from "./supervisor-held";
 import { backgroundWaiting, stateOf } from "./format";
 import { foldedState } from "./child-sessions";
 import { foldRows } from "./folded-rows";
 import { heldLaunchRows, observeLaunchRows } from "./launch-handoff";
 import { cardSessionRow, getState, onHubEvent, subscribe, useStore } from "./store";
-import { SESSIONS_LIST_FEATURE } from "./session-list";
+import { SESSIONS_LIST_FEATURE, type ListCounts } from "./session-list";
 import { runtimeAgents, runtimeSessions, supportsPagedAgents } from "./runtime-list";
+import { heldCounts, heldRows } from "./seen-outbox";
+import { heldSidesOf, useHeldVersion } from "./use-child-sessions";
 import type { Interaction, Session } from "./types";
 
 /** #8578: a directory-hidden session's pending cards leave the card lists and counts (Needs you, the sidebar, the Inbox,
@@ -178,6 +181,17 @@ export function useFullAgentSessions(on = true): FullAgentSessions {
 }
 
 function useCompleteAgentSessions(on: boolean): FullAgentSessions {
+  const full = useHubCompleteAgentSessions(on);
+  // the agents seen on this page that the complete list's last read still has Unread: seen in every reader of it (the
+  // row, the quick filters' counts, the groups' unread counts) at once, not when it is read again (lib/seen-outbox.ts)
+  const marks = useStore((s) => s.seen);
+  return useMemo(() => {
+    const sessions = heldRows(full.sessions, marks, Date.now());
+    return sessions === full.sessions ? full : { ...full, sessions };
+  }, [full, marks]);
+}
+
+function useHubCompleteAgentSessions(on: boolean): FullAgentSessions {
   const by = useStore((s) => s.sessions);
   const launches = useStore((s) => s.launches);
   const bounded = useStore((s) => s.features.includes(SESSIONS_LIST_FEATURE));
@@ -221,10 +235,14 @@ function useCompleteAgentSessions(on: boolean): FullAgentSessions {
  *  sidebar's quick filters count them (#10938). */
 export function stateCounts(all: Session[], interactions: readonly Interaction[] = [], grading = false) {
   const c = { needs: 0, working: 0, waiting: 0, unread: 0, badge: 0 };
+  // "Needs you" only for cards a task's supervisor holds (lib/supervisor-held.ts): the supervisor is at work on them, so
+  // it is counted Working, as the overview lists it, in neither the number nor the badge (the hub's `supervisor_held`)
+  const held = supervisorHeldOnly(interactions);
   for (const s of all) {
     if (s.hidden_by_directory) continue;
     const st = stateOf(s);
-    if (st === "needs_you") {
+    if (st === "needs_you" && held.has(`${s.machine_id}/${s.session_id}`)) c.working++;
+    else if (st === "needs_you") {
       c.needs++;
       if (!s.quiet && (!grading || !heldOnlyNeeds(s, interactions))) c.badge++;
     } else if (st === "working") {
@@ -235,6 +253,18 @@ export function stateCounts(all: Session[], interactions: readonly Interaction[]
   return c;
 }
 
+/** A paging hub's counts as the lists read them (useCounts). Its State needs_you has in it the agents that wait only on
+ *  cards a task's supervisor holds (`supervisor_held`, apart from `held_needs`): Working here, as stateCounts counts
+ *  them, in neither the number nor the badge, graded or not. */
+export function boundedCounts(counts: Pick<ListCounts, "state" | "background_waiting" | "held_needs" | "supervisor_held">, grading: boolean) {
+  const supervised = Math.max(0, Math.min(counts.supervisor_held ?? 0, counts.state.needs_you ?? 0));
+  const needs = Math.max(0, (counts.state.needs_you ?? 0) - supervised);
+  // the hub leaves the ones that only wait in the background in state.working for older apps (protocol.md "Counts")
+  const waiting = Math.min(counts.background_waiting ?? 0, counts.state.working ?? 0);
+  const badge = grading ? Math.max(0, needs - (counts.held_needs ?? 0)) : needs;
+  return { needs, working: (counts.state.working ?? 0) - waiting + supervised, waiting, unread: counts.state.unread ?? 0, badge };
+}
+
 /** `badge` without `open`, the agent on screen: it says it is waiting itself, so a count of only it would tell nothing.
  *  `quietCounted`: `badge` is the hub's own count, which has quiet agents in it. `held`: open agent was excluded for grading. */
 export function othersWaiting(badge: number, open: Session | undefined, quietCounted = false, held = false): number {
@@ -242,26 +272,36 @@ export function othersWaiting(badge: number, open: Session | undefined, quietCou
 }
 
 const scopedAgentCounts = () => runtimeAgents.getSnapshot().counts;
+const scopedAgentRows = () => runtimeAgents.getSnapshot().rows;
+const listedRows = () => runtimeSessions.getSnapshot().rows;
 
 export function useCounts() {
   const all = useAgentSessions();
   const allInteractions = useStore((s) => s.interactions);
   const grading = useStore((s) => s.pushGrading);
-  const interactions = useMemo(() => directoryVisibleCards(allInteractions).length, [allInteractions]);
+  // the cards waiting on the user: not those a task's supervisor holds (lib/supervisor-held.ts)
+  const interactions = useMemo(() => userCards(directoryVisibleCards(allInteractions)).length, [allInteractions]);
   const { bounded, pagedAgents, aggregate } = useStore((s) => ({
     bounded: s.features.includes(SESSIONS_LIST_FEATURE),
     pagedAgents: supportsPagedAgents(s.features),
     aggregate: s.sessionCounts,
   }));
   const scoped = useSyncExternalStore(runtimeAgents.subscribe, scopedAgentCounts, scopedAgentCounts);
-  const counts = pagedAgents ? scoped : aggregate;
+  // the rows read with those counts: an agent seen on this page that they still have Unread is not counted so
+  // (lib/seen-outbox.ts heldCounts), however long the list takes to read again
+  const agentRows = useSyncExternalStore(runtimeAgents.subscribe, scopedAgentRows, scopedAgentRows);
+  const rows = useSyncExternalStore(runtimeSessions.subscribe, listedRows, listedRows);
+  const marks = useStore((s) => s.seen);
+  // a parent whose unread side sessions were all seen here is not counted Unread either (heldCounts' sidesOf)
+  const heldAt = useHeldVersion();
+  const read = pagedAgents ? scoped : aggregate;
+  // only where a page's counts come with its rows (sessions_page_counts): two reads' rows and counts could disagree
+  const coupled = (pagedAgents ? runtimeAgents : runtimeSessions).usesPageCounts();
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- heldAt: heldSidesOf reads the held rows, which it versions
+  const counts = useMemo(() => read && coupled ? heldCounts(read, pagedAgents ? agentRows : rows, marks, Date.now(), heldSidesOf) : read, [read, coupled, pagedAgents, agentRows, rows, marks, heldAt]);
   return useMemo(() => {
     if (!bounded || !counts) return { ...stateCounts(all, allInteractions, grading), interactions, quietCounted: false };
-    const needs = counts.state.needs_you ?? 0;
-    // the hub leaves the ones that only wait in the background in state.working for older apps (protocol.md "Counts")
-    const waiting = Math.min(counts.background_waiting ?? 0, counts.state.working ?? 0);
-    const badge = grading ? Math.max(0, needs - (counts.held_needs ?? 0)) : needs;
-    return { needs, working: (counts.state.working ?? 0) - waiting, waiting, unread: counts.state.unread ?? 0, badge, interactions, quietCounted: true };
+    return { ...boundedCounts(counts, grading), interactions, quietCounted: true };
   }, [all, allInteractions, grading, interactions, counts, bounded]);
 }
 

@@ -80,6 +80,7 @@
   "permission_mode": "権限モード",
   "permission_mode_inherit": "デフォルトに従う · {mode}",
   "permission_mode_hint": "デフォルトのままにすると上位設定を継承するか、ランチャー既定の権限を使います。新しく開始する会話や Agent にのみ適用されます。",
+  "permission_mode_hint_inbox": "ここで個別に選択しない限り、Inbox チャットは「デフォルト権限」を使い、Agents の「フルアクセス」を継承しません。Plan は必要な Persona ツールを妨げるため選択できません。新しいチャットと、停止後に再開するチャットに適用され、実行中のチャットは現在のモードを維持します。",
   "api_models": "利用可能なモデル",
   "api_model_id": "モデル ID",
   "api_model_hint": "取得したモデルを選ぶか、任意のモデル ID を入力できます。「保存」を選ぶまで変更は保存されません。",
@@ -115,5 +116,6 @@
   "supervise_description": "Persona が任せたタスクをフォローして検収し、メインチャットがいつでも返信できるようにします。メインチャットより安価なモデルや高性能なモデルも選べます。",
   "agents": "Agents",
   "usage_other": "過去 7 日間：{calls} 回の呼び出し · {tokens} トークン",
+  "usage_failures_other": "{failures} 回失敗",
   "usage_detail": "過去 7 日間（UTC）：入力 {input}、出力 {output}、キャッシュ書き込み {cache_write}、キャッシュ読み取り {cache_read} トークン、失敗 {failures} 回。表示しているトークンは入力 + 出力 + キャッシュ書き込みで、キャッシュ読み取りは含みません。"
 }

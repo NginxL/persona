@@ -165,7 +165,7 @@ extension AppModel {
         guard let roster = managerRosters[key.group], roster.isMulti else { return nil }
         let manager: String?
         if let s = session(key) {
-            guard s.assistant, !s.isHealth else { return nil }
+            guard s.assistant, !s.inSpace else { return nil }
             manager = s.manager
         } else {
             guard let m = assistantItemManagers[key] else { return nil }
@@ -208,12 +208,8 @@ extension AppModel {
 
     /// Settings, on the page `settingsPath` names, where the caller has no way of its own to it.
     func showSettings() {
-        #if os(macOS)
-        MacShellState.shared.go(.settings, self)
-        #else
         selectedTab = .settings
         if tabRouter != nil { shellSettings = true }
-        #endif
     }
 
     /// Whether `api` was made for the Persona page as it is now (its group and manager): what it read lands.

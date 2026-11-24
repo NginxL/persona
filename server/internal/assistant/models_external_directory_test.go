@@ -116,10 +116,12 @@ func TestExternalDirectoryNameStaysTheSameWhenUnavailable(t *testing.T) {
 	l.DisplayName = "Another display label"
 	for _, available := range []bool{true, false} {
 		if !available {
-			l.External.CredentialState = "missing"
+			external := *l.External
+			external.CredentialState = "missing"
+			l.External = &external
 		}
 		setExternalAdvertisement(f, l)
-		r := appRequest(t, s, "GET", "/api/v1/machines/server/launchers?purpose=assistant", "", "en")
+		r := appRequest(t, s, "GET", "/api/v1/machines/server/launchers?purpose=assistant&refresh=1", "", "en")
 		var out struct {
 			Launchers   []ConfiguredLauncher  `json:"launchers"`
 			Unavailable []unavailableLauncher `json:"unavailable"`

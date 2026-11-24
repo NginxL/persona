@@ -138,6 +138,7 @@ func (s *server) handle(ctx context.Context, method string, params json.RawMessa
 		if err := json.Unmarshal(params, &p); err != nil {
 			return nil, err
 		}
+		ctx = p.context(ctx)
 		if it, ok := t.(connector.ImageTools); ok {
 			a, err := it.CallImages(ctx, p.Name, p.Args)
 			return CallResult{Text: a.Text, Images: a.Images}, err
@@ -159,7 +160,7 @@ func (s *server) handle(ctx context.Context, method string, params json.RawMessa
 		if err := json.Unmarshal(params, &p); err != nil {
 			return nil, err
 		}
-		act, summary, err := a.Describe(ctx, p.Name, p.Args)
+		act, summary, err := a.Describe(p.context(ctx), p.Name, p.Args)
 		return DescribeResult{Action: act, Summary: summary}, err
 	case MThread:
 		th, ok := connector.As[connector.Threads](c)
@@ -311,7 +312,7 @@ func (s *server) handle(ctx context.Context, method string, params json.RawMessa
 			return nil, errors.New("actions.do without a request_id")
 		}
 		return s.once.do(p.RequestID, func() (CallResult, error) {
-			done, err := connector.Write(ctx, a, p.Name, p.Args)
+			done, err := connector.Write(p.context(ctx), a, p.Name, p.Args)
 			return CallResult{Text: done.Text, MessageRef: done.MessageRef}, err
 		})
 	case MRecallCan:

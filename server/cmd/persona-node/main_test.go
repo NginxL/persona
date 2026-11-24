@@ -27,8 +27,8 @@ func TestPersonaNodeDoesNotLinkTheHubOrTheManager(t *testing.T) {
 	}
 	// The hub's and the manager's own packages, and their sources and channels (they run in the manager).
 	forbidden := []string{"internal/hub", "internal/hubedge", "internal/assistant", "internal/manager", "internal/devices",
-		"internal/extmgr", "internal/db", "internal/relay", "internal/voice", "internal/mail", "internal/lark",
-		"internal/feishubot", "internal/apns", "internal/bus", "internal/workspaceboard",
+		"internal/extmgr", "internal/db", "internal/relay", "internal/modules/voice", "internal/modules/mail", "internal/lark",
+		"internal/modules/lark", "internal/botport", "internal/apns", "internal/bus", "internal/workspaceboard",
 		"internal/usagesource", "internal/admin"}
 	// No database driver either, wherever it comes from.
 	drivers := []string{"github.com/jackc/pgx", "github.com/lib/pq", "database/sql/driver"}
@@ -49,6 +49,10 @@ func TestPersonaNodeDoesNotLinkTheHubOrTheManager(t *testing.T) {
 			rel, ok := strings.CutPrefix(dep, modulePath)
 			if !ok {
 				continue
+			}
+			if rel == "internal/modules/all" { // the manager's list; the node's is internal/modules/all/node
+				t.Errorf("persona-node (%s) links the manager's modules (%s): a node-side module goes into "+
+					"internal/modules/all/node (docs/architecture/core-and-modules.md \"The node's modules\")", target, dep)
 			}
 			for _, f := range forbidden {
 				if rel == f || strings.HasPrefix(rel, f+"/") {

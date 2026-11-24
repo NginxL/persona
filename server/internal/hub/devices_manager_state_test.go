@@ -257,3 +257,60 @@ func TestReportBookkeepingIsAtomicWithManagerUp(t *testing.T) {
 	}
 	<-done
 }
+
+func TestDeviceCallInteractionsListStaysOnHub(t *testing.T) {
+	h, srv := newPerManagerBusHub(t, false)
+	a := connectFakeManager(t, h, srv, assistantwire.AssistantID)
+	b := connectFakeManager(t, h, srv, perManagerOther)
+	a.report(t, "ma")
+	b.report(t, "mb")
+	eventually(t, 5*time.Second, "both managers' machines online", func() bool {
+		ma, mb := h.machineByID("ma"), h.machineByID("mb")
+		return ma != nil && mb != nil && ma.snapshot().Online && mb.snapshot().Online
+	})
+
+	now := time.Now().UTC()
+	h.takeFleetInteractionsFrom(assistantwire.AssistantID, []proto.Interaction{
+		{ID: "ix-ma", MachineID: "ma", SessionID: "s1", Kind: proto.IxQuestion, CreatedAt: now},
+		{ID: "ix-a-global", SessionID: "s2", Kind: proto.IxPermission, CreatedAt: now.Add(time.Millisecond)},
+	})
+	h.takeFleetInteractionsFrom(perManagerOther, []proto.Interaction{
+		{ID: "ix-mb", MachineID: "mb", SessionID: "s3", Kind: proto.IxQuestion, CreatedAt: now.Add(2 * time.Millisecond)},
+	})
+
+	callIDs := func(from, device string) ([]string, error) {
+		raw, err := (assistantLink{h}).deviceCallFrom(context.Background(), from, assistantwire.DeviceCall{
+			Device: device, Method: assistantwire.DeviceInteractionsList,
+		})
+		if err != nil {
+			return nil, err
+		}
+		var out struct {
+			Interactions []proto.Interaction `json:"interactions"`
+		}
+		if err := json.Unmarshal(raw, &out); err != nil {
+			t.Fatal(err)
+		}
+		ids := make([]string, 0, len(out.Interactions))
+		for _, ix := range out.Interactions {
+			ids = append(ids, ix.ID)
+		}
+		return ids, nil
+	}
+
+	if ids, err := callIDs(assistantwire.AssistantID, assistantwire.DeviceAll); err != nil || len(ids) != 2 || ids[0] != "ix-ma" || ids[1] != "ix-a-global" {
+		t.Fatalf("carrier DeviceAll = %v, %v", ids, err)
+	}
+	if ids, err := callIDs(assistantwire.AssistantID, "ma"); err != nil || len(ids) != 2 || ids[0] != "ix-ma" || ids[1] != "ix-a-global" {
+		t.Fatalf("carrier ma = %v, %v", ids, err)
+	}
+	if ids, err := callIDs(perManagerOther, "mb"); err != nil || len(ids) != 1 || ids[0] != "ix-mb" {
+		t.Fatalf("other mb = %v, %v", ids, err)
+	}
+	if _, err := callIDs(assistantwire.AssistantID, "mb"); err == nil {
+		t.Fatal("carrier read another manager's machine interactions")
+	}
+	if _, err := callIDs(assistantwire.AssistantID, "missing"); err == nil {
+		t.Fatal("unknown machine succeeded")
+	}
+}

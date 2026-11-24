@@ -48,9 +48,10 @@ const (
 	outcomeMessage   = "outcome:"
 	outcomeLine      = "o"
 
-	briefByOwner      = "owner"
-	briefEventScope   = "scope"
-	briefEventOverdue = "overdue"
+	briefByOwner       = "owner"
+	briefEventScope    = "scope"
+	briefEventEstimate = "estimate" // the assistant's briefEventEstimate: an estimate change without new criteria
+	briefEventOverdue  = "overdue"
 
 	outcomeDecide = "decide"
 	outcomeCannot = "cannot"
@@ -656,7 +657,7 @@ func (r *reader) brief() {
 		}
 		id := "brief:" + b.ID + ":" + strconv.Itoa(i)
 		switch ev.Kind {
-		case briefEventScope:
+		case briefEventScope, briefEventEstimate:
 			it := r.add(id, ev.At, assistantwire.TodoEntryTypeScope, assistantwire.TodoActorKindPersona)
 			it.e.Line = line(lineScope, "change", ev.Change, "why", ev.Why)
 		case briefEventOverdue:

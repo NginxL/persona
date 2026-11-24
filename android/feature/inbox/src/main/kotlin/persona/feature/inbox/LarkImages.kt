@@ -10,6 +10,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import persona.core.designsystem.ViewerImage
 import java.io.ByteArrayOutputStream
+import persona.core.inbox.*
 
 /**
  * Opens a picture of a Feishu conversation full screen (iOS `LarkImageGallery`): the conversation page provides it, and

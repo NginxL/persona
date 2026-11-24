@@ -21,5 +21,6 @@
   "question_more_other": "ほかに {count} 問",
   "usage_limit": "利用上限に達しました。リセット後に続けさせてください：{error}",
   "private_card": "Persona があなたの返事を待っています。Persona を開いて確認してください。",
-  "registration_required": "このデバイスの通知の登録が無効になりました。Persona の「設定 › 通知」で理由を確認してください。"
+  "registration_required": "このデバイスの通知の登録が無効になりました。Persona の「設定 › 通知」で理由を確認してください。",
+  "sealed_fallback": "新しいメッセージがあります"
 }

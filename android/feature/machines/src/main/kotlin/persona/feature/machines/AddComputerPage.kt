@@ -199,7 +199,7 @@ private fun Instructions(os: ComputerOs, code: ComputerCode) {
             ComputerOs.Linux -> {
                 val install = code.linuxInstall
                 Step(1, stringResource(if (install != null) R.string.machines_onb_linux_step_install else R.string.machines_onb_linux_step_pair))
-                if (install == null) JTextButton(stringResource(R.string.machines_onb_linux_install_link), { runCatching { uri.openUri(LinkLinuxDoc) } }, icon = PhIcons.ArrowSquareOut)
+                if (install == null) JTextButton(stringResource(R.string.machines_onb_linux_install_link), { val _ = runCatching { uri.openUri(LinkLinuxDoc) } }, icon = PhIcons.ArrowSquareOut)
                 Command(install ?: pairCommand(code), copyLabel) { copySecret(context, copyLabel, it); feedback?.notice(copied) }
                 Step(2, stringResource(R.string.machines_onb_linux_step_done))
             }
@@ -211,7 +211,7 @@ private fun Instructions(os: ComputerOs, code: ComputerCode) {
             }
             ComputerOs.Mac -> {
                 Step(1, stringResource(R.string.machines_onb_mac_step_install))
-                JTextButton(stringResource(R.string.machines_onb_mac_install_link), { runCatching { uri.openUri(PersonaLinkInstallDoc) } }, icon = PhIcons.ArrowSquareOut)
+                JTextButton(stringResource(R.string.machines_onb_mac_install_link), { val _ = runCatching { uri.openUri(PersonaLinkInstallDoc) } }, icon = PhIcons.ArrowSquareOut)
                 Step(2, stringResource(R.string.machines_onb_mac_step_link))
                 val linkLabel = stringResource(R.string.machines_onb_copy_link)
                 val shareTitle = stringResource(R.string.machines_onb_share_title)
@@ -264,5 +264,5 @@ private fun copySecret(context: Context, label: String, text: String) {
 
 private fun share(context: Context, title: String, text: String) {
     val send = Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, text).putExtra(Intent.EXTRA_TITLE, title)
-    runCatching { context.startActivity(Intent.createChooser(send, title).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+    val _ = runCatching { context.startActivity(Intent.createChooser(send, title).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
 }

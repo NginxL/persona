@@ -67,8 +67,8 @@ class AssistantSettingsEntriesTest {
         override suspend fun save(key: DraftKey, text: String, expectedVersion: Long) = error("No draft saves in settings")
     }
 
-    @Test fun settingsNavigationHasNoOwnerRowForEitherBackendOrLegacyResponse() = entries(inPlace = false)
-    @Test fun assistantProfileHasNoOwnerRowForEitherBackendOrLegacyResponse() = entries(inPlace = true)
+    @Test fun settingsNavigationShowsManagerIdentityAndTheReadOnlyFallback() = entries(inPlace = false)
+    @Test fun assistantProfileShowsManagerIdentityAndTheReadOnlyFallback() = entries(inPlace = true)
 
     private fun entries(inPlace: Boolean) {
         val conversations = Conversations()
@@ -110,11 +110,14 @@ class AssistantSettingsEntriesTest {
             for (s in AppStyle.entries) for (night in listOf(false, true)) {
                 rule.runOnIdle { style = s; dark = night }
                 rule.waitForIdle()
-                // One navigation title ("助手资料", no longer the bare "助手"), and no assistant picker of its own: the page is the
-                // current assistant's (the sidebar's switcher picks). The deleted owner row added two more matches.
+                // One navigation title, then the current manager's identity. A single-manager roster is still renameable;
+                // only a hub without the roster keeps the persona-pack name and a read-only identity.
                 rule.onAllNodesWithText("助手资料", useUnmergedTree = true).assertCountEquals(1)
-                rule.onAllNodesWithText("助手", useUnmergedTree = true).assertCountEquals(0)
+                val hasRoster = response != "no-roster"
+                rule.onAllNodesWithText(if (hasRoster) "助手" else "Persona", useUnmergedTree = true).assertCountEquals(1)
+                rule.onAllNodesWithText(if (hasRoster) "Persona" else "助手", useUnmergedTree = true).assertCountEquals(0)
                 rule.onAllNodesWithText("工作", useUnmergedTree = true).assertCountEquals(0)
+                rule.onAllNodesWithText("改名", useUnmergedTree = true).assertCountEquals(if (hasRoster) 1 else 0)
                 val permission = rule.onAllNodesWithText("新会话默认权限").onLast()
                 if (response in listOf("claude", "codex")) permission.assertIsEnabled() else permission.assertIsNotEnabled()
                 val image = rule.onNodeWithTag("entry-shot").captureToImage().asAndroidBitmap()

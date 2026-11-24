@@ -37,6 +37,8 @@ enum SidebarPageRoot: Hashable {
             switch route {
             case .health: .health
             case .messages: .messages
+            case .space(let slug): .space(slug)
+            case .newSpace: .newSpace
             }
         default: nil
         }
@@ -87,16 +89,19 @@ struct SidebarPageRoots {
     private var saved: [SidebarPageRoot: NavigationPath] = [:]
 
     /// `root` is picked while the page shows `path` over the current root. `contentChanged`: the root is the one in front
-    /// but shows something else now (another conversation picked while the conversation is in front).
-    mutating func select(_ root: SidebarPageRoot, path: NavigationPath, contentChanged: Bool = false) -> Step {
+    /// but shows something else now (another conversation picked while the conversation is in front). `fresh`: the root
+    /// shows another of its places now (a To-dos place picked in the sidebar, #10465), so what it kept belongs to the one
+    /// before: it starts at its root, replaced without a pop.
+    mutating func select(_ root: SidebarPageRoot, path: NavigationPath, contentChanged: Bool = false, fresh: Bool = false) -> Step {
         if root == current {
             saved[root] = nil
-            if contentChanged { return Step(root: root, path: NavigationPath(), move: .switchRoot) }
+            if contentChanged || fresh { return Step(root: root, path: NavigationPath(), move: .switchRoot) }
             return Step(root: root, path: NavigationPath(), move: path.isEmpty ? .none : .popToRoot)
         }
         saved[current] = path.isEmpty ? nil : path
         current = root
-        return Step(root: root, path: saved.removeValue(forKey: root) ?? NavigationPath(), move: .switchRoot)
+        let kept = saved.removeValue(forKey: root)
+        return Step(root: root, path: fresh ? NavigationPath() : kept ?? NavigationPath(), move: .switchRoot)
     }
 
     /// `value` opened from inside the page in front, over `path`: a push on its root.
@@ -139,7 +144,8 @@ extension SidebarPageRoot {
         case .recordings: .page(ShellRoute.recordings)
         case .extensionPage(let r): .page(ShellRoute.extensionPage(r))
         case .messages: .page(SidebarRoute.messages)
-        case .newConversation, .health: nil
+        case .newSpace: .page(SidebarRoute.newSpace)
+        case .newConversation, .health, .space: nil
         }
     }
 }

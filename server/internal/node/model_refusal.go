@@ -25,9 +25,18 @@ func (n *Node) mergeModelFallback(path string, m *quickMeta) {
 	}
 	// Only the latest failed turn has a code. Never revive an error cleared by a new prompt or a successful reply.
 	if m.turnErr.text != "" {
+		// Preserve a rewound tail's upstream-unavailable code (sc.meta does not apply terminal rewinds), while still
+		// promoting from sc.meta when no rewind happened (for example when a large request blob pushed the previous
+		// failed turn before quickTail) and clearing any stale refusal-fallback code.
+		keepUpstream := m.turnErr.code == proto.TurnErrorUpstreamUnavailable
 		m.turnErr.code = ""
 		if m.turnErr.text == sc.meta.TurnError {
-			m.turnErr.code = sc.meta.TurnErrorCode
+			if sc.meta.TurnErrorCode == proto.TurnErrorModelFallbackUnavailable || len(m.rewound) == 0 {
+				m.turnErr.code = sc.meta.TurnErrorCode
+			}
+		}
+		if m.turnErr.code == "" && keepUpstream {
+			m.turnErr.code = proto.TurnErrorUpstreamUnavailable
 		}
 		if m.turnErr.code == proto.TurnErrorModelFallbackUnavailable {
 			m.turnErr.kind = proto.TurnErrorUser

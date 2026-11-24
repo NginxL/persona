@@ -314,7 +314,7 @@ func TestScheduledTodoCheckDecisionGoesToSupervisor(t *testing.T) {
 			}
 			// Where the task's other supervision messages go: its supervisor, now that it no longer waits on the owner.
 			cfg := s.settings(ctx)
-			if to, want := s.digestTo(cfg, g), s.digestTo(cfg, superviseSignal{Todo: todo.ID, Kind: sigIdle}); to == "" || to != want {
+			if to, want := s.digestTo(ctx, cfg, g), s.digestTo(ctx, cfg, superviseSignal{Todo: todo.ID, Kind: sigIdle}); to == "" || to != want {
 				t.Fatalf("the owner's option went to %q, not the task's supervisor %q", to, want)
 			}
 			e, ok := s.digestEntry(ctx, g, "")

@@ -30,6 +30,7 @@ func latestBotIdentities(t *testing.T, h *Manager) []extwire.BotIdentity {
 }
 
 func TestFeishuBotIdentityReport(t *testing.T) {
+	needsLarkModule(t)
 	w := newBotWorld(t)
 	want := []extwire.BotIdentity{{Kind: "feishu", ID: "cli_test"}}
 	assertBotIdentities(t, latestBotIdentities(t, w.h), want)
@@ -56,6 +57,7 @@ func TestFeishuBotIdentityReport(t *testing.T) {
 }
 
 func TestFeishuBotIdentityConfigFallback(t *testing.T) {
+	needsLarkModule(t)
 	h := newTestManager(t)
 	h.cfg.Bots.Feishu.AppID, h.cfg.Bots.Feishu.AppSecret = "cli_config", "config-secret"
 	h.bots.loaded = true
@@ -86,6 +88,7 @@ func (*identityWeChatConnector) Status(context.Context) connector.Status {
 }
 
 func TestWeChatBotIdentityReport(t *testing.T) {
+	needsLarkModule(t)
 	h := newTestManager(t)
 	h.store = newKeepStore()
 	h.connectors = h.newConnectors(nil)

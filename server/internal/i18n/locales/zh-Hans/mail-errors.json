@@ -1,4 +1,5 @@
 {
   "account_unknown": "邮箱账号“{account}”已不在这个助手上了。",
-  "search_incomplete": "未能读取所有邮箱账号的邮件。请检查账号后重试。"
+  "search_incomplete": "未能读取所有邮箱账号的邮件。请检查账号后重试。",
+  "unreachable": "连不上这个邮箱，已经重连过一次还是不行，请稍后再试。"
 }

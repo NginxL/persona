@@ -32,6 +32,8 @@
   "all_done": "Every request on hand is done.",
   "done_fold_one": "{count} finished request",
   "done_fold_other": "{count} finished requests",
+  "cancelled_fold_one": "{count} cancelled request",
+  "cancelled_fold_other": "{count} cancelled requests",
   "show_more_one": "Show {count} more",
   "show_more_other": "Show {count} more",
   "queued": "Queued",

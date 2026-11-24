@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { beforeEach, expect, it, vi } from "vitest";
-import { refreshAgentsDisplay, resetAgentsDisplay, retryAgentsDisplay, saveAgentsDisplay, useAgentsDisplay, useBotmuxHidden, useHerdrTabName } from "./agents-display";
+import { refreshAgentsDisplay, resetAgentsDisplay, retryAgentsDisplay, saveAgentsDisplay, useAgentsDisplay, useBotmuxHidden, useHerdrTabName, useShowFilter, useSortByActivity } from "./agents-display";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { setToken } from "./api";
@@ -131,4 +131,36 @@ it("does not apply a stale read over a save or a credential change",async()=>{
  let done!:(response:Response)=>void;vi.mocked(fetch).mockImplementationOnce(()=>new Promise(resolve=>{done=resolve;}));
  const old=refreshAgentsDisplay();await act(async()=>{setToken("new-owner");done(json({show_botmux:false,configured:true}));await old;});expect(host.textContent).toBe("null");
  await act(async()=>{root.unmount();});
+});
+
+it("saves the Settings › Agents sort and Filter switches, hub-synced, and hides them on a hub without the fields", async () => {
+  let sort: boolean | undefined = false, filter: boolean | undefined = false;
+  vi.mocked(fetch).mockImplementation(async (_url, init) => {
+    const body = init?.body ? JSON.parse(init.body as string) : undefined;
+    requests.push({ method: init?.method ?? "GET", body });
+    if (typeof body?.sort_by_activity === "boolean") sort = body.sort_by_activity;
+    if (typeof body?.show_filter === "boolean") filter = body.show_filter;
+    return json({ show_botmux: true, configured: false, use_herdr_tab_name: false, ...(sort === undefined ? {} : { sort_by_activity: sort, show_filter: filter }) });
+  });
+  const host = document.createElement("div");
+  const root = createRoot(host);
+  const sw = (label: string) => [...host.querySelectorAll<HTMLButtonElement>('[role="switch"]')].find((b) => b.getAttribute("aria-label") === label);
+  function Probe() { return <span data-probe>{String(useSortByActivity())}/{String(useShowFilter())}</span>; }
+  await act(async () => { root.render(<><AgentsDisplayRow /><Probe /></>); });
+  expect(sw(t("settings.sort_by_activity"))!.getAttribute("aria-checked")).toBe("false");
+  expect(sw(t("settings.show_agents_filter"))!.getAttribute("aria-checked")).toBe("false");
+  expect(host.querySelector("[data-probe]")!.textContent).toBe("false/false");
+  await act(async () => { sw(t("settings.sort_by_activity"))!.click(); });
+  expect(requests.at(-1)).toEqual({ method: "PUT", body: { sort_by_activity: true } });
+  await act(async () => { sw(t("settings.show_agents_filter"))!.click(); });
+  expect(requests.at(-1)).toEqual({ method: "PUT", body: { show_filter: true } });
+  expect(host.querySelector("[data-probe]")!.textContent).toBe("true/true");
+  // an older hub does not send them: no switches, and the list keeps its stable order with no Filter
+  sort = undefined;
+  resetAgentsDisplay();
+  await act(refreshAgentsDisplay);
+  expect(sw(t("settings.sort_by_activity"))).toBeUndefined();
+  expect(sw(t("settings.show_agents_filter"))).toBeUndefined();
+  expect(host.querySelector("[data-probe]")!.textContent).toBe("false/false");
+  await act(async () => { root.unmount(); });
 });

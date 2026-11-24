@@ -37,6 +37,7 @@ import persona.core.designsystem.JIconButton
 import persona.core.designsystem.JSheet
 import persona.core.designsystem.JTextButton
 import persona.core.designsystem.PersonaTheme
+import persona.core.designsystem.ReadingContent
 import persona.core.designsystem.rememberCopy
 import persona.core.designsystem.LocalizedFormats
 import persona.core.designsystem.Tokens
@@ -110,9 +111,11 @@ internal fun apiErrorTime(ts: String?, resources: Resources, zone: ZoneId = Zone
  * the card keeps "Retry" whatever the error says: the configured model may be back by the time it is tapped. [lines] are
  * in reading order (oldest first).
  */
-internal fun retryLine(lines: List<ChatLine>, working: Boolean, canSend: Boolean, exhausted: Boolean = false): String? {
+internal fun retryLine(lines: List<ChatLine>, working: Boolean, canSend: Boolean, exhausted: Boolean = false,
+    turnFix: TurnErrorFix? = null): String? {
     val last = lines.lastOrNull() as? ChatLine.ApiError ?: return null
-    return last.id.takeIf { canSend && !working && (exhausted || !last.info.needsAction) }
+    val retryable = exhausted || !last.info.needsAction || turnFix == TurnErrorFix.ToolSearchUnsupported
+    return last.id.takeIf { canSend && !working && retryable }
 }
 
 /** An exhausted recovery chain (#7824) on the card of [lineId]: [refusal] is the session's marker, with the cause, the recovery time and the models tried. */
@@ -158,7 +161,7 @@ internal fun RecapLine(items: List<Item>) {
                 Text(stringResource(R.string.chat_recap_written, relativeTime(it, now, resources)), style = PersonaTheme.type.caption, color = PersonaTheme.palette.ink2)
                 Spacer(Modifier.height(Tokens.Space.s))
             }
-            ChatMarkdown(item.text.orEmpty(), "recap/${item.id}")
+            ReadingContent { ChatMarkdown(item.text.orEmpty(), "recap/${item.id}") }
         }
     }
 }

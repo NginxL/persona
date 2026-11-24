@@ -11,7 +11,9 @@ import {
   effortColor,
   effortColorAt,
   flyoutPlace,
+  levelSetup,
   matchesQuery,
+  modelCount,
   overrideKey,
   panelSections,
   priceAmount,
@@ -26,6 +28,7 @@ import {
   sameSetup,
   setOverride,
   updateFavorite,
+  variantGroups,
   type PanelFavorite,
   type PanelModel,
   type PanelProvider,
@@ -201,8 +204,8 @@ describe("the setup a row sends", () => {
     expect(rowSetup(codex(), gpt, state({ current: { provider: "codex", model: "gpt-5.5", effort: "low", fast: true } }))).toEqual({ provider: "codex", model: "gpt-5.5", effort: "low", fast: true });
   });
 
-  it("another model keeps the running effort when it takes it, else its own default", () => {
-    expect(rowSetup(claude(), sonnet, state())).toEqual({ provider: "claude", model: "sonnet", effort: "xhigh" });
+  it("another model opens at its own default, not at the effort running now (#12315)", () => {
+    expect(rowSetup(claude(), sonnet, state())).toEqual({ provider: "claude", model: "sonnet" });
     expect(rowSetup(claude(), haiku, state())).toEqual({ provider: "claude", model: "haiku" });
     expect(rowSetup(codex(), gpt, state({ current: { provider: "claude", model: "opus", effort: "max" } }))).toEqual({ provider: "codex", model: "gpt-5.5" });
   });
@@ -211,7 +214,7 @@ describe("the setup a row sends", () => {
     expect(rowSetup(claude(), sonnet, state(), { effort: "low" })).toEqual({ provider: "claude", model: "sonnet", effort: "low" });
     expect(rowSetup(codex(), gpt, state(), { effort: "high", fast: true })).toEqual({ provider: "codex", model: "gpt-5.5", effort: "high", fast: true });
     // Fast on a model that has none, an effort it doesn't take: left out
-    expect(rowSetup(claude(), sonnet, state(), { effort: "ultra", fast: true })).toEqual({ provider: "claude", model: "sonnet", effort: "xhigh" });
+    expect(rowSetup(claude(), sonnet, state(), { effort: "ultra", fast: true })).toEqual({ provider: "claude", model: "sonnet" });
   });
 
   it("a saved copy drops what the model no longer takes; one whose list isn't read stays as it is", () => {
@@ -381,3 +384,115 @@ describe("the running model's row", () => {
   });
 });
 
+
+// Antigravity lists one model per thinking level, in its own order (`agy models`); the node marks each level
+// (server agyModelList: `default_effort` is the ID's suffix, `efforts` the levels listed)
+describe("a model listed per thinking level (#12315)", () => {
+  const LEVELS = ["low", "medium", "high", "xhigh"];
+  const level = (base: string, name: string, effort: string, efforts = LEVELS): PanelModel => ({ id: `${base}-${effort}`, name: `${name} (${effort === "xhigh" ? "XHigh" : effort.charAt(0).toUpperCase() + effort.slice(1)})`, efforts, defaultEffort: effort });
+  const neon = ["high", "xhigh", "medium", "low"].map((e) => level("gemini-4-neon", "Gemini 4 Neon", e));
+  const flash = ["high", "medium", "low"].map((e) => level("gemini-3.8-flash", "Gemini 3.8 Flash", e, ["low", "medium", "high"]));
+  const orchestrator: PanelModel = { id: "gemini-pro-orchestrator-neon", name: "Orchestrator (Neon)", efforts: [] };
+  const single = level("gpt-oss-120b", "GPT-OSS 120B", "medium", ["medium"]);
+  const agy = (over: Partial<PanelProvider> = {}): PanelProvider => ({ id: "agy", name: "agy", engine: "agy", models: [...neon, orchestrator, ...flash, single], ...over });
+  const rowsOf = (o: Partial<SectionsInput> = {}) => panelSections(input({ providers: [agy()], state: { current: null, recommended: [] }, view: { kind: "provider", provider: "agy" }, ...o })).flatMap((s) => s.rows);
+
+  it("folds a model's levels into one row named for the model, the levels weakest first", () => {
+    const rows = rowsOf();
+    expect(rows.map((r) => r.model.name)).toEqual(["Gemini 4 Neon", "Orchestrator (Neon)", "Gemini 3.8 Flash", "GPT-OSS 120B (Medium)"]);
+    expect(rows[0].key).toBe("model:agy\ngemini-4-neon");
+    expect(rows[0].model.efforts).toEqual(LEVELS);
+    expect(rows[0].model.variants).toEqual({
+      base: "gemini-4-neon",
+      first: "medium",
+      levels: LEVELS.map((e) => ({ effort: e, id: `gemini-4-neon-${e}` })),
+    });
+    // a model with one level listed, and a model whose name only looks like one, stay as they are
+    expect(rows[1].model.variants).toBeUndefined();
+    expect(rows[3].model).toEqual(single);
+  });
+
+  it("counts each model once", () => {
+    expect(modelCount(agy().models!)).toBe(4);
+    expect(variantGroups(agy().models!).map((g) => g.length)).toEqual([4, 1, 3, 1]);
+    // a Default row is no model of its own
+    expect(modelCount([{ id: "default", name: "Default", efforts: [], providerDefault: true }, ...neon])).toBe(1);
+  });
+
+  it("keeps all advertised Neon and Hydrogen levels attached to their own row", () => {
+    const hydrogenLevels = [...LEVELS, "max"];
+    const hydrogen = [...hydrogenLevels].reverse().map((e) => level("gemini-4-hydrogen", "Gemini 4 Hydrogen", e, hydrogenLevels));
+    const rows = rowsOf({ providers: [agy({ models: [...neon, ...hydrogen] })] });
+    expect(rows.map((row) => [row.model.name, row.model.efforts])).toEqual([
+      ["Gemini 4 Neon", LEVELS],
+      ["Gemini 4 Hydrogen", hydrogenLevels],
+    ]);
+    expect(levelSetup(rows[0], "xhigh")?.model).toBe("gemini-4-neon-xhigh");
+    expect(levelSetup(rows[1], "xhigh")?.model).toBe("gemini-4-hydrogen-xhigh");
+    expect(levelSetup(rows[1], "max")?.model).toBe("gemini-4-hydrogen-max");
+  });
+
+  it("keeps context qualifiers on a folded row", () => {
+    const models = [level("m", "Model (1M context)", "low"), { ...level("m", "Model", "high"), name: "Model (High) (1M context)" }];
+    expect(rowsOf({ providers: [agy({ models })] })[0].model.name).toBe("Model (1M context)");
+  });
+
+  it("leaves models alone whose default effort is not their ID's last word", () => {
+    expect(variantGroups([opus, sonnet, gpt]).map((g) => g.map((m) => m.id))).toEqual([["opus"], ["sonnet"], ["gpt-5.5"]]);
+    const typed = { ...neon[0], custom: true };
+    expect(variantGroups([typed, neon[1]]).map((g) => g.length)).toEqual([1, 1]);
+  });
+
+  it("stands for Medium (agy names no default) and sends that level's ID alone; without Medium, the list's first", () => {
+    const [row] = rowsOf();
+    expect(row.model.id).toBe("gemini-4-neon-medium");
+    expect(row.model.defaultEffort).toBe("medium");
+    expect(row.setup).toEqual({ provider: "agy", model: "gemini-4-neon-medium" });
+    const noMedium = ["high", "xhigh", "low"].map((e) => level("m", "M", e));
+    expect(rowsOf({ providers: [agy({ models: noMedium })] })[0].model.id).toBe("m-high");
+    expect(row.current).toBe(false);
+  });
+
+  it("stands for the level that runs, keeping what runs", () => {
+    const [row] = rowsOf({ state: { current: { provider: "agy", model: "gemini-4-neon-low", effort: "low" }, recommended: [] } });
+    expect(row.current).toBe(true);
+    expect(row.model.id).toBe("gemini-4-neon-low");
+    expect(row.setup).toEqual({ provider: "agy", model: "gemini-4-neon-low", effort: "low" });
+  });
+
+  it("does not carry the running effort into another level's pick", () => {
+    const rows = rowsOf({ state: { current: { provider: "agy", model: "gemini-4-neon-xhigh", effort: "xhigh" }, recommended: [] } });
+    const flashRow = rows.find((r) => r.model.variants?.base === "gemini-3.8-flash")!;
+    expect(flashRow.setup).toEqual({ provider: "agy", model: "gemini-3.8-flash-medium" });
+  });
+
+  it("stands for the level a switch waits for, else the one chosen in its flyout", () => {
+    const waiting = rowsOf({ state: { current: null, pending: { provider: "agy", model: "gemini-4-neon-medium" }, recommended: [] } });
+    expect(waiting[0].model.id).toBe("gemini-4-neon-medium");
+    const chosen = rowsOf({ overrides: { [overrideKey("agy", "gemini-4-neon")]: { effort: "xhigh" } } });
+    expect(chosen[0].model.id).toBe("gemini-4-neon-xhigh");
+    expect(chosen[0].setup).toEqual({ provider: "agy", model: "gemini-4-neon-xhigh" });
+    expect(chosen[0].customized).toBe(true);
+    // a level the list no longer has: the first again
+    const gone = rowsOf({ overrides: { [overrideKey("agy", "gemini-4-neon")]: { effort: "max" } } });
+    expect(gone[0].model.id).toBe("gemini-4-neon-medium");
+  });
+
+  it("a level picked in the flyout applies that level's model", () => {
+    const [row] = rowsOf({ state: { current: { provider: "agy", model: "gemini-4-neon-high" }, recommended: [] } });
+    expect(levelSetup(row, "low")).toEqual({ provider: "agy", model: "gemini-4-neon-low" });
+    expect(levelSetup(row, "max")).toBeUndefined();
+    expect(levelSetup(rowsOf()[1], "low")).toBeUndefined();
+  });
+
+  it("a search folds the levels it finds; one level found is that level's own row", () => {
+    expect(rowsOf({ query: "neon" }).map((r) => r.model.name)).toEqual(["Gemini 4 Neon", "Orchestrator (Neon)"]);
+    expect(rowsOf({ query: "neon low" }).map((r) => `${r.model.name} ${r.model.id}`)).toEqual(["Gemini 4 Neon (Low) gemini-4-neon-low"]);
+  });
+
+  it("names the row by its base ID when the levels' names disagree", () => {
+    const odd = [level("m", "One", "low"), { ...level("m", "Two", "high") }];
+    const [row] = rowsOf({ providers: [agy({ models: odd })] });
+    expect(row.model.name).toBe("m");
+  });
+});

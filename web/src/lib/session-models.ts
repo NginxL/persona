@@ -6,7 +6,7 @@
 // A list read from the agent takes seconds the first time, so what was read is kept per computer, launcher and host for the
 // page's life: the pill and a later opening show the last list at once, and an opening reads every list again behind it
 // (the session's own first, at most three at a time).
-import { useSyncExternalStore } from "react";
+import { useEffect, useLayoutEffect, useRef, useSyncExternalStore } from "react";
 import { t } from "../i18n";
 import { ApiError, credentialOwner, errorText, onCredentialChange } from "./api";
 import { agentId, sessionAgent } from "./agent-kind";
@@ -15,7 +15,7 @@ import { sessionCan, stateOf } from "./format";
 import { runsAssistant, type AssistantLauncher } from "./assistant-chat";
 import { SUPERVISE_PURPOSE } from "./background-supervisor";
 import {
-  defaultModel, forgetCustomModel, launcherModels, listedModel, machineLaunchers, modelName, withoutCustom, type AgentModel, type LauncherDefault, type LauncherModels, type UnavailableLauncher,
+  defaultModel, effortVariantBase, forgetCustomModel, launcherModels, listedModel, machineLaunchers, modelName, withoutCustom, withoutEffortQualifier, type AgentModel, type LauncherDefault, type LauncherModels, type UnavailableLauncher,
 } from "./launcher-models";
 import { canSwitchModel, isCurrentModel, namesWholeModel, rowModelIds, sessionLauncher } from "./model-switch";
 import { hasEffortOnly, hasModes } from "./session-actions";
@@ -152,6 +152,52 @@ export function readAssistantLaunchers(mid: string, o: { again?: boolean } = {})
   });
   assistantReads.set(key, read);
   return read;
+}
+
+/** Calls `read` after a push moved conversation `s`'s revision (#6542), once per turn instead of once per write: `rev`
+ *  moves whenever the transcript does (proto Session.Rev), many times a minute while a turn streams, and what these
+ *  reads show (the computer's launchers, Main chat's default) only matters for the next message. A move while the
+ *  conversation works waits until it stops; a move while it doesn't reads at once. A move while `enabled` is false
+ *  (no computer yet) is kept and read once it turns true. Another conversation (machine and session id) starts afresh:
+ *  its revision is not a move, and nothing owed carries over. `read` may return a cleanup, run before the next read,
+ *  when the conversation changes or `enabled` turns false, and on unmount, not when the conversation starts working: a
+ *  turn starting must not drop what the last read left pending (a trailing read, #12778 review). */
+export function useRevisionReread(s: Session | undefined, enabled: boolean, read: () => void | (() => void)): void {
+  const rev = s?.rev;
+  const who = `${s?.machine_id ?? ""}/${s?.session_id ?? ""}`;
+  const working = Boolean(s && stateOf(s) === "working" && !s.background_working);
+  const seen = useRef({ who, rev });
+  const owed = useRef(false);
+  const latest = useRef(read);
+  const cleanup = useRef<(() => void) | undefined>(undefined);
+  useLayoutEffect(() => {
+    latest.current = read;
+  });
+  useEffect(() => {
+    const done = () => {
+      cleanup.current?.();
+      cleanup.current = undefined;
+    };
+    if (seen.current.who !== who) {
+      seen.current = { who, rev };
+      owed.current = false;
+      done();
+      return;
+    }
+    if (rev !== undefined && rev !== seen.current.rev) {
+      seen.current.rev = rev;
+      owed.current = true;
+    }
+    if (!enabled) done();
+    if (!owed.current || working || !enabled) return;
+    owed.current = false;
+    done();
+    cleanup.current = latest.current() || undefined;
+  }, [who, rev, working, enabled]);
+  useEffect(() => () => {
+    cleanup.current?.();
+    cleanup.current = undefined;
+  }, []);
 }
 
 // at most three lists are read at a time (each may start the agent's CLI on the computer); `first` jumps the queue
@@ -341,9 +387,12 @@ export function modelLabel(id: string): string {
   return claude !== trimmed ? claude : modelName({ id: trimmed });
 }
 
-export function pillModel(models: AgentModel[], active: string | undefined, fallback = active): string | undefined {
-  const row = currentModelRow(models, active);
-  return row && namesWholeModel(row, active) ? modelName(row) : fallback ? modelLabel(fallback) : undefined;
+export function pillModel(row: AgentModel | undefined, active: string | undefined, fallback = active): Pick<PillSetup, "model" | "effort"> {
+  if (!row || !namesWholeModel(row, active)) return { model: fallback ? modelLabel(fallback) : undefined };
+  const base = effortVariantBase(row.id, row.default_effort);
+  if (!base) return { model: modelName(row) };
+  const name = row.name?.trim() || row.id;
+  return { model: name === row.id ? modelLabel(base) : withoutEffortQualifier(name), effort: row.default_effort };
 }
 
 /** One setup as the pill draws it. */
@@ -401,10 +450,9 @@ export function pendingView(s: Session, listOf: (launcher: string) => ModelList)
 }
 
 export function pillView(s: Session, e: ModelList, displayModel?: string): PillView {
-  const model = pillModel(e.list?.models ?? [], s.model || displayModel);
-  const out: PillView = { engine: sessionEngine(s), provider: sessionLauncher(s), loading: e.list === undefined && Boolean(e.loading), failed: e.list === undefined && Boolean(e.error) };
+  const active = s.model || displayModel;
+  const out: PillView = { ...pillModel(currentModelRow(e.list?.models ?? [], active), active), engine: sessionEngine(s), provider: sessionLauncher(s), loading: e.list === undefined && Boolean(e.loading), failed: e.list === undefined && Boolean(e.error) };
   if (s.agent_label) out.engineLabel = s.agent_label;
-  if (model) out.model = model;
   if (s.effort) out.effort = s.effort;
   if (s.service_tier === "priority") out.fast = true;
   return out;

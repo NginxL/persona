@@ -1,4 +1,8 @@
 {
+  "development_hold": "Hub が更新を確認するまでお待ちください。",
+  "development_tools": "Hub に {os}/{arch} 用のパッケージがありません。独立アシスタントのコンピューターに Git と Go をインストールして再試行してください。",
+  "development_build": "独立アシスタントがコミット {commit} の {step} を完了できませんでした。ソースへのアクセスと Go ツールチェーンを確認して再試行してください。",
+  "development_identity": "ビルドしたプログラムのバージョン、ビルド番号、またはコミットが確認済みの更新と一致しません。",
   "os_unknown": "このコンピューターのOSがまだ不明です。接続してから再試行してください",
   "no_binary": "ハブに{os}/{arch}用のnodeプログラムがなく、取得できるリリースもありません。開発用マシンでscripts/deploy/deploy.shを実行するか、ハブと同じバージョンの{name}をbin/nodesフォルダーに置くか、hub.jsonでnode_packagesを設定してください（docs/operations/docker.md「Node builds」）",
   "no_package": "最新のリリース{version}には、このハブが扱える{os}/{arch}用のnodeプログラムがなく、ハブと同じバージョンのものもありません。ハブを更新するか、同じバージョンの{name}をbin/nodesフォルダーに置いてください（docs/operations/docker.md「Node builds」）",

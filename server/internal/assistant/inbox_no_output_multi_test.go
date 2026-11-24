@@ -56,7 +56,7 @@ func TestInboxNoOutputRetryPinsTheOriginalRecipient(t *testing.T) {
 	page[0].Text = prompt
 	inboxRetryPages(f, map[string][]proto.Item{"s1": page, "s2": turnPage("peer", "Unrelated work.", true)})
 	f.setSessions("box", first, peer)
-	s.taskWorking(context.Background(), "box", "s1")
+	s.taskWorking(context.Background(), "box", "s1", startRow{})
 	s.taskTurnSettled(context.Background(), "box", "s1")
 	if len(sentToAgent(f)) != before+1 || inboxRetryLastSession(f) != "s1" {
 		t.Fatalf("retry changed recipients: sends=%d, last recipient=%q", len(sentToAgent(f)), inboxRetryLastSession(f))
@@ -92,7 +92,7 @@ func TestInboxNoOutputUnavailableRecipientDoesNotRerouteToPeer(t *testing.T) {
 					f.setSessions("box", stopped, peer)
 				}
 			}}
-			s.taskWorking(context.Background(), "box", "s1")
+			s.taskWorking(context.Background(), "box", "s1", startRow{})
 			s.taskTurnSettled(context.Background(), "box", "s1")
 			failures := unhandledInboxSignals(s)
 			if len(sentToAgent(f)) != before || len(failures) != 1 ||
@@ -119,7 +119,7 @@ func TestInboxNoOutputSettlementReadsTheTriggeringRecipient(t *testing.T) {
 			page[0].Text = prompt
 			inboxRetryPages(f, map[string][]proto.Item{"s1": page, "s2": turnPage("peer", "Unrelated work.", true)})
 			f.setSessions("box", first, peer)
-			s.taskWorking(context.Background(), "box", "s1")
+			s.taskWorking(context.Background(), "box", "s1", startRow{})
 			s.taskTurnSettled(context.Background(), "box", "s1")
 			if len(sentToAgent(f)) != before+1 || inboxRetryLastSession(f) != "s1" {
 				t.Fatalf("the peer's newer transcript hid the empty event turn: sends=%d, recipient=%q",
@@ -195,7 +195,7 @@ func TestInboxNoOutputEarlierStopDoesNotHideTheRetryResult(t *testing.T) {
 			page[0].Text = prompt
 			f.setItems(append(earlier, page...)...)
 			f.setSessions("box", turnRow(proto.StatusWorking, 20, ""))
-			s.taskWorking(context.Background(), "box", "s1")
+			s.taskWorking(context.Background(), "box", "s1", startRow{})
 			f.setSessions("box", turnRow(proto.StatusDone, 21, answer))
 			s.taskTurnSettled(context.Background(), "box", "s1")
 			if len(sentToAgent(f)) != before+1 {

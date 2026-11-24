@@ -1,8 +1,6 @@
 import BeautifulUI
 import SwiftUI
-#if canImport(UIKit)
 import UIKit
-#endif
 import WebKit
 import PersonaWire
 
@@ -272,11 +270,7 @@ struct LinkSheet: View {
     }
 
     @ViewBuilder private var browserItems: some View {
-        #if os(iOS) || os(visionOS)
         Button { UIApplication.shared.open(target.url) } label: { Label("Open in Safari", systemImage: Theme.Icon.safari) }
-        #else
-        Button { UIApplication.shared.open(target.url) } label: { Label("Open in Browser", systemImage: Theme.Icon.safari) }
-        #endif
         ShareLink(item: target.url) { Label("Share", systemImage: Theme.Icon.share) }
     }
 
@@ -325,18 +319,14 @@ final class WebViewPool {
     private let config: WKWebViewConfiguration = {
         let c = WKWebViewConfiguration()
         c.websiteDataStore = .default()
-        #if os(iOS) || os(visionOS)
         c.allowsInlineMediaPlayback = true
-        #endif
         return c
     }()
     /// Preloads' store: in memory only, gone with the process.
     private let preloadConfig: WKWebViewConfiguration = {
         let c = WKWebViewConfiguration()
         c.websiteDataStore = .nonPersistent()
-        #if os(iOS) || os(visionOS)
         c.allowsInlineMediaPlayback = true
-        #endif
         return c
     }()
 
@@ -356,10 +346,8 @@ final class WebViewPool {
     private func make(_ url: URL, configuration: WKWebViewConfiguration) -> SelectableWebView {
         let key = url.absoluteString
         let v = SelectableWebView(frame: .zero, configuration: configuration)
-        #if os(iOS) || os(visionOS)
         v.scrollView.showsVerticalScrollIndicator = false
         v.scrollView.showsHorizontalScrollIndicator = false
-        #endif
         v.allowsBackForwardNavigationGestures = true
         #if os(iOS)
         CallMediaGuard.shared.register(v) // a page's media stays still while a system call is live
@@ -431,7 +419,6 @@ final class WebViewPool {
     }
 }
 
-#if os(iOS) || os(visionOS)
 /// A WKWebView whose selection menu has Edit with AI and Add as Context.
 final class SelectableWebView: WKWebView {
     var onPick: ((String, String) -> Void)?
@@ -496,7 +483,6 @@ struct PooledWebView: UIViewRepresentable {
         }
     }
 }
-#endif
 
 // MARK: - In messages
 
@@ -680,7 +666,6 @@ struct PickTextSheet: View {
     }
 }
 
-#if os(iOS) || os(visionOS)
 struct PickTextView: UIViewRepresentable {
     var text: String
     var actions = PickAction.ai
@@ -724,4 +709,3 @@ struct PickTextView: UIViewRepresentable {
         }
     }
 }
-#endif

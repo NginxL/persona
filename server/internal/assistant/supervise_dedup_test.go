@@ -48,6 +48,37 @@ func TestSupervisionPRConflictDedupPersistsAcrossHeadsAndRestart(t *testing.T) {
 	}
 }
 
+func TestSupervisionDraftPRDedupRetriesUndeliveredBeforeGoingPermanent(t *testing.T) {
+	st := &memStore{}
+	s, _ := newQuietServiceOn(t, st)
+	ctx, now := context.Background(), time.Now()
+	url := "https://github.com/example/app/pull/12"
+	e := prompts.SuperviseEntry{ID: "todo_example", Kind: sigDraftPR}
+	g := superviseSignal{Todo: e.ID, Kind: sigDraftPR, Key: url + "@head-a", PRURL: url}
+	s.signal(g) // durable delivery obligation, still unacknowledged after the reservation below
+	out, _, _, err := s.reserveSupervision(ctx, []prompts.SuperviseEntry{e}, []superviseSignal{g}, now)
+	if err != nil || len(out) != 1 {
+		t.Fatalf("first reservation = %v, %v", out, err)
+	}
+
+	// A restart loses rollback but not the dedup reservation or the pending obligation. The permanent head must not
+	// suppress this retry: no delivery or queue admission happened between those two durable writes.
+	restarted, _ := newQuietServiceOn(t, st)
+	out, _, _, err = restarted.reserveSupervision(ctx, []prompts.SuperviseEntry{e}, []superviseSignal{g}, now.Add(time.Hour))
+	if err != nil || len(out) != 1 {
+		t.Fatalf("undelivered permanent draft was suppressed: %d entries, %v; pending=%+v", len(out), err, storedSupervisePending(t, restarted))
+	}
+	restarted.ackSupervisePending([]superviseSignal{g}) // the retry really went out
+	restarted.supervise.dedupMu.Lock()
+	restarted.ackSupervisionDedupLocked(ctx, []superviseSignal{g})
+	restarted.supervise.dedupMu.Unlock()
+	afterAck, _ := newQuietServiceOn(t, st)
+	out, _, _, err = afterAck.reserveSupervision(ctx, []prompts.SuperviseEntry{e}, []superviseSignal{g}, now.Add(2*time.Hour))
+	if err != nil || len(out) != 0 {
+		t.Fatalf("an acknowledged draft head repeated permanently: %v, %v", out, err)
+	}
+}
+
 func TestSupervisionPRConflictDedupKeepsPermanentEntriesDuringOrdinaryExpiry(t *testing.T) {
 	st := &memStore{}
 	s, _ := newQuietServiceOn(t, st)
@@ -116,6 +147,71 @@ func TestSupervisionPRConflictAndAllStoppedDedupHaveIndependentLifetimes(t *test
 	}
 }
 
+func TestSupervisionAutomaticSummaryDedupPrunesClosedTasks(t *testing.T) {
+	ctx, now := context.Background(), time.Now()
+	st := &memStore{}
+	s, _ := newQuietServiceOn(t, st)
+	task, _ := stoppedFixture(now)
+	open := task
+	open.ID += "_open"
+	signals := []superviseSignal{
+		{Todo: task.ID, Kind: sigParkedSummary, Key: now.Format(time.DateOnly) + "|dependency", To: "supervisor"},
+		{Todo: open.ID, Kind: sigParkedSummary, Key: now.Format(time.DateOnly) + "|dependency", To: "supervisor"},
+	}
+	entries := []prompts.SuperviseEntry{{ID: task.ID, Kind: sigParkedSummary}, {ID: open.ID, Kind: sigParkedSummary}}
+	if out, _, _, err := s.reserveSupervision(ctx, entries, signals, now); err != nil || len(out) != 2 {
+		t.Fatalf("initial summary reservation = %d, %v", len(out), err)
+	}
+	restarted, _ := newQuietServiceOn(t, st)
+	if out, _, _, err := restarted.reserveSupervision(ctx, entries, signals, now.Add(time.Hour)); err != nil || len(out) != 0 {
+		t.Fatalf("restart or ordinary expiry repeated daily summaries: %d, %v", len(out), err)
+	}
+	if err := restarted.ensureTodosLoaded(ctx); err != nil {
+		t.Fatal(err)
+	}
+	restarted.todos.mu.Lock()
+	restarted.todos.todos[task.ID] = &task
+	restarted.todos.todos[open.ID] = &open
+	restarted.todos.mu.Unlock()
+	restarted.pruneAllStoppedDedup(ctx)
+	restarted.todos.mu.Lock()
+	task.DoneAt = &now
+	restarted.todos.mu.Unlock()
+	restarted.pruneAllStoppedDedup(ctx)
+
+	var history map[string]superviseFingerprint
+	if _, err := st.Setting(ctx, superviseDedupKey, &history); err != nil {
+		t.Fatal(err)
+	}
+	closedKey, _ := digestFingerprint(entries[0], signals[0])
+	openKey, _ := digestFingerprint(entries[1], signals[1])
+	if _, exists := history[closedKey]; exists {
+		t.Fatal("closed task retained its automatic-summary fingerprint")
+	}
+	if seen, exists := history[openKey]; !exists || !seen.Permanent || seen.Todo != open.ID {
+		t.Fatalf("pruning removed or unbound the open task's daily summary: %+v", history)
+	}
+	// Re-read a legacy receipt that predates task binding; it must not leak forever after closure either.
+	history[closedKey] = superviseFingerprint{Hash: now.Format(time.DateOnly), At: now, Permanent: true}
+	if err := st.PutSetting(ctx, superviseDedupKey, history); err != nil {
+		t.Fatal(err)
+	}
+	restarted.supervise.dedupMu.Lock()
+	restarted.supervise.dedup = nil
+	restarted.supervise.dedupMu.Unlock()
+	restarted.pruneAllStoppedDedup(ctx)
+	history = nil
+	if _, err := st.Setting(ctx, superviseDedupKey, &history); err != nil {
+		t.Fatal(err)
+	}
+	if _, exists := history[closedKey]; exists {
+		t.Fatal("closed task retained its legacy automatic-summary fingerprint")
+	}
+	if _, exists := history[openKey]; !exists {
+		t.Fatal("legacy cleanup removed an open task's summary")
+	}
+}
+
 func TestSupervisionPRConflictReservationRollbackAndFailure(t *testing.T) {
 	st := &memStore{}
 	s, _ := newQuietServiceOn(t, st)
@@ -173,8 +269,9 @@ func TestSupervisionPRConflictFailedDispatchReleasesReservation(t *testing.T) {
 	f.mu.Lock()
 	f.failAssistant = nil
 	f.mu.Unlock()
-	if !s.deliverDigest(ctx, s.settings(ctx), "conv1", []superviseSignal{g}, "", time.Now(), time.Time{}) ||
-		len(f.notices()) != 1 {
-		t.Fatalf("failed dispatch permanently swallowed the conflict: %q", f.notices())
-	}
+	// Recovery goes through the real digest path: it must persist the restored outbox entry before direct delivery.
+	// Calling deliverDigest directly here would bypass the durable prerequisite added with #5732.
+	s.superviseTimes = superviseTimings{gather: 1, every: 1, urgent: 1}
+	s.sendDigest(ctx)
+	waitFor(t, "the recovered conflict after its durable outbox write", func() bool { return len(f.notices()) == 1 })
 }

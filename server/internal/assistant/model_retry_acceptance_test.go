@@ -26,8 +26,9 @@ func TestTemporaryFailuresContinueBeyondFive(t *testing.T) {
 		if len(got) != continuation {
 			t.Fatalf("after continuation %d: sent %d continuations %v, want %d", continuation, len(got), got, continuation)
 		}
-		if got[continuation-1] != "s1: 继续" {
-			t.Fatalf("continuation %d sent %q, want %q", continuation, got[continuation-1], "s1: 继续")
+		want := "s1: " + autoContinueTextForTest(continueText)
+		if got[continuation-1] != want {
+			t.Fatalf("continuation %d sent %q, want %q", continuation, got[continuation-1], want)
 		}
 
 		// The continuation's turn fails transiently again. Recovery must keep the

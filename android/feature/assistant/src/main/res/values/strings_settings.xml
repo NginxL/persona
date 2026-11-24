@@ -10,6 +10,10 @@
     <string name="assistant_settings_loading">Loading</string>
     <string name="assistant_settings_cancel">Cancel</string>
     <string name="assistant_settings_save">Save</string>
+    <string name="assistant_settings_name">Name</string>
+    <string name="assistant_settings_rename">Rename</string>
+    <string name="assistant_settings_name_placeholder">For example: Work</string>
+    <string name="assistant_settings_name_invalid">Names are 1 to 40 characters</string>
     <string name="assistant_settings_discard">Don\'t save</string>
     <string name="assistant_settings_edit">Edit</string>
     <string name="assistant_settings_delete">Delete</string>

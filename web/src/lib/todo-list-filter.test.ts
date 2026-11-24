@@ -96,7 +96,7 @@ describe("a failed start superseded by finished work, under a filter or a search
   it("stays out of Needs you when the filter leaves its finished work out", () => {
     const r = triageTodos(all.filter(today), undefined, NOW, new Map(), { superseded });
     expect(ids(r.sections.waiting)).toEqual([]);
-    expect(ids(r.sections.just_done)).toEqual(["failed"]);
+    expect(ids(r.sections.done)).toEqual(["failed"]);
   });
 
   it("is not counted in the line about those the filter leaves out", () => {

@@ -169,7 +169,7 @@ internal fun StoragePage(onBack: () -> Unit, clearCacheFiles: ((List<File>) -> U
                     clearing = true
                     try {
                         // The WebView's own cache goes through its API (StorageUsage leaves its files alone).
-                        if (StorageKind.Web in kinds) runCatching { android.webkit.WebView(context).apply { clearCache(true); destroy() } }
+                        if (StorageKind.Web in kinds) { val _ = runCatching { android.webkit.WebView(context).apply { clearCache(true); destroy() } } }
                         withContext(Dispatchers.IO) { usage.clear(kinds) }
                         measure()
                     } finally { clearing = false }

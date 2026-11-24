@@ -10,6 +10,7 @@ import org.junit.runner.RunWith
 import org.robolectric.annotation.Config
 import persona.core.designsystem.AssistantStackProbe
 import persona.core.designsystem.AssistantStackProbeBackend
+import persona.core.inbox.*
 
 @RunWith(AndroidJUnit4::class)
 @Config(application = Application::class, sdk = [35])

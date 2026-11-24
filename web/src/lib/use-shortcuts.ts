@@ -9,6 +9,7 @@ import { closeHelp, toggleHelp } from "./shortcut-help";
 import { focusInColumn, toggleMaximized, toggleSidebarColumn } from "./layout";
 import { closePalette, getPalette, togglePalette, type PaletteMode } from "./palette";
 import { closePanel, getPanel, openPanel, type Panel } from "./panel";
+import { splitSubagentLink } from "./subagent-link";
 import { inWorkView, navigate, withWorkView, type Route } from "./router";
 import { canShowTerminal, readView, rememberView, resolveView } from "./session-view";
 import { cycleGrouping, groupingLabel, setAllFolded, stepSidebarRow } from "./sidebar-api";
@@ -46,7 +47,9 @@ let lastPanel: Panel | null = null;
 /** An overview-origin detail is valid only while that overview is open. Invalidate its visible and Cmd+B-remembered
  * states together when the origin goes away; a list-origin detail and an unrelated remembered panel stay untouched. */
 export function invalidateOverviewPanel(mid: string, sid: string) {
-  const dependent = (p: Panel | null) => p?.kind === "background" && p.from === "overview" && p.mid === mid && p.sid === sid;
+  const dependent = (p: Panel | null) =>
+    (p?.kind === "background" && p.from === "overview" && p.mid === mid && p.sid === sid) ||
+    (p?.kind === "subagent" && p.from === "overview" && (p.parentMid ?? p.mid) === mid && (p.parentSid ?? splitSubagentLink(p.sid)?.parent) === sid);
   if (dependent(lastPanel)) lastPanel = null;
   if (dependent(getPanel())) closePanel();
 }
@@ -117,7 +120,7 @@ export function useShortcuts(ctx: ShortcutContext) {
         if ("close" in to) {
           lastPanel = current;
           closePanel();
-        } else openPanel(to.open);
+        } else openPanel(to.open, { push: false });
       }),
       registerShortcut("focus-input", () => focusInput(at.current.route)),
       // the card then answers on its own keys (lib/card-keys.ts, Interactions.tsx)

@@ -32,7 +32,7 @@ import (
 //     command text names the CLI (including paths or interpreter code), or an expansion supplies
 //     a command name. A script file with no CLI name in the command text is outside this gate:
 //     its contents may still invoke the CLI. This residual risk is accepted; we do not read scripts.
-//     Explicit deny and health rules take priority.
+//     Explicit deny and space rules take priority.
 //   - anything naming a gate's secret, a process's environ, curl / wget at a gate's API, or curl flags that would
 //     print or redirect the credentials: denied.
 //   - anything else: no decision; the usual permission flow applies, including its bypass mode.
@@ -104,9 +104,9 @@ func (n *Node) larkCheck(ctx context.Context, session, cwd, command string, ix p
 	if v.deny != "" {
 		return "deny", v.deny, nil
 	}
-	health := n.gates().healthSession(session) || identity.InHealthSpace(cwd)
+	inSpace := n.gates().spaceSession(session) || identity.InSpace(cwd)
 	mode, _ := n.modesOf(session)
-	bypass := !health && mode == proto.ModeBypass && n.isAssistantSession(session) && n.guestOf(session) == nil
+	bypass := !inSpace && mode == proto.ModeBypass && n.isAssistantSession(session) && n.guestOf(session) == nil
 	// classified: every call read off the command and nothing else in it that the gate cannot follow.
 	classified := !v.unparsed && !v.unknown && !v.unsure
 	for _, c := range v.calls {
@@ -122,9 +122,9 @@ func (n *Node) larkCheck(ctx context.Context, session, cwd, command string, ix p
 			}
 		}
 		// Only a rule-allowed call needs no query-bound grant. A confirmation-required GET needs one too, and a non-Auth
-		// script has no proxy backstop. Health writes always need confirmation. Refuse every unknown query in those cases
+		// script has no proxy backstop. Writes in a space always need confirmation. Refuse every unknown query in those cases
 		// rather than confirm different bytes.
-		needsConfirmation := decision != "allow" || (health && !larkRead(c))
+		needsConfirmation := decision != "allow" || (inSpace && !larkRead(c))
 		if c.queryUnknown && needsConfirmation {
 			return "deny", "查询要在执行时才能确定，无法绑定这次确认；请把查询直接写在路径或 --url-query 参数里。", nil
 		}
@@ -180,15 +180,15 @@ func (n *Node) larkCheck(ctx context.Context, session, cwd, command string, ix p
 				// which could be anything, the CLI included. Still asked, as the ordinary Bash card it is (#4890).
 				ix.ToolName, ix.Summary = cmp.Or(ix.ToolName, "Bash"), prettyBody(command)
 			}
-			decision, reason, _, err := n.confirmLark(ctx, session, ix, nil, health, title)
+			decision, reason, _, err := n.confirmLark(ctx, session, ix, nil, inSpace, title)
 			return decision, reason, err
 		}
 		return "", "", nil
 	}
-	// A health conversation's writes are confirmed each time: no rule's allow, no "Always allow for this session" (docs/assistant/health.md "Outbound").
+	// A conversation in a space has its writes confirmed each time: no rule's allow, no "Always allow for this session" (docs/assistant/health.md "Outbound").
 	// Its space is the one its process was started in (assistantLarkEnv notes it, and the gate proxy goes by the same),
-	// not the directory the hook says: that is where the model's last `cd` left it. A hook directory in a health space
-	// (the space's own or one inside it, identity.InHealthSpace) counts too, so a mix-up can only ask more.
+	// not the directory the hook says: that is where the model's last `cd` left it. A hook directory in a space
+	// (the space's own or one inside it, identity.InSpace) counts too, so a mix-up can only ask more.
 	// ask: the calls to confirm on the phone; covered: those "Always allow for this session" covers. Once let through
 	// here, the gate proxy lets each go once (gateproxy.go).
 	var ask, covered, bypassed []larkCall
@@ -201,7 +201,7 @@ func (n *Node) larkCheck(ctx context.Context, session, cwd, command string, ix p
 			}
 			decision = "confirm" // unconfigured outbound/deletion still requires confirmation
 		}
-		if decision == "allow" && health && !larkRead(c) {
+		if decision == "allow" && inSpace && !larkRead(c) {
 			decision = "confirm"
 		}
 		switch decision {
@@ -209,7 +209,7 @@ func (n *Node) larkCheck(ctx context.Context, session, cwd, command string, ix p
 			return "deny", "这个操作按配置不允许（" + c.Method + " " + c.Path + "）。", nil
 		case "allow":
 		default:
-			if health || n.isAssistantSession(session) || !n.larkAlways(session, larkPattern(c)) {
+			if inSpace || n.isAssistantSession(session) || !n.larkAlways(session, larkPattern(c)) {
 				ask = append(ask, c)
 			} else {
 				covered = append(covered, c)
@@ -232,15 +232,15 @@ func (n *Node) larkCheck(ctx context.Context, session, cwd, command string, ix p
 	// The hub remembers these routes for assistant conversations and checks them again on every call.
 	ix.AlwaysKeys = nil
 	for _, c := range ask {
-		if k := "lark:" + larkPattern(c); !health && !bypass && !slices.Contains(ix.AlwaysKeys, k) {
+		if k := "lark:" + larkPattern(c); !inSpace && !bypass && !slices.Contains(ix.AlwaysKeys, k) {
 			ix.AlwaysKeys = append(ix.AlwaysKeys, k)
 		}
 	}
 	remember := ask
-	if health || bypass {
+	if inSpace || bypass {
 		remember = nil // hard boundaries are confirmed each time
 	}
-	decision, reason, card, err := n.confirmLark(ctx, session, ix, remember, health, ix.ToolName)
+	decision, reason, card, err := n.confirmLark(ctx, session, ix, remember, inSpace, ix.ToolName)
 	if decision == "allow" {
 		n.grantGateCalls(cfg, session, ask, card)
 		n.grantGateCalls(cfg, session, bypassed, proto.LarkLetThrough{Kind: proto.LarkThroughBypass})
@@ -368,7 +368,7 @@ func wholeCommandTitle(gates []proto.CommandGate, v larkVerdict, command string,
 // reason a refusal gives the model ("" for a card that names none).
 // When it allows, card is how: the card, with who answered it, or that "Always allow" covered it (the manager's
 // answer says it kept one).
-func (n *Node) confirmLark(ctx context.Context, session string, ix proto.Interaction, ask []larkCall, health bool, title string) (decision, reason string, card proto.LarkLetThrough, err error) {
+func (n *Node) confirmLark(ctx context.Context, session string, ix proto.Interaction, ask []larkCall, inSpace bool, title string) (decision, reason string, card proto.LarkLetThrough, err error) {
 	if ix.ID == "" { // a gated tool's card has none yet: the ledger names the card by it
 		ix.ID = "ix_" + randHex(6)
 	}
@@ -440,8 +440,64 @@ func (n *Node) assistantLark(ctx context.Context) proto.AssistantLark {
 		n.logger.Printf("assistant: Feishu gate config from hub: %v", err) // never the config itself
 		return cached
 	}
+	relayGates(&cfg)
 	n.mu.Lock()
 	n.larkCfg, n.larkCfgAt = cfg, time.Now()
 	n.mu.Unlock()
 	return cfg
+}
+
+// gateRefreshInterval: how often assistantLarkForGate asks the hub again when a gate's address is missing.
+const gateRefreshInterval = 2 * time.Second
+
+// assistantLarkForGate is assistantLark for a request at a gate's address: when the config has no such gate, or its
+// address is not in its environment yet (a gate added or re-configured on the hub after the process started), the hub is
+// asked again at most every gateRefreshInterval instead of waiting out assistantLark's minute (#13540).
+func (n *Node) assistantLarkForGate(ctx context.Context, command string) proto.AssistantLark {
+	cfg := n.assistantLark(ctx)
+	missing := command == ""
+	for i := range cfg.Gates {
+		g := cfg.Gates[i]
+		if g.Command != command {
+			continue
+		}
+		missing = !g.Relay && g.Env[g.BaseEnv] == ""
+		break
+	}
+	if !missing || n.peer == nil {
+		return cfg
+	}
+	// Both the last success and the last attempt throttle it, so an outage does not call the hub on every gate request.
+	n.mu.Lock()
+	at, tried := n.larkCfgAt, n.larkCfgTryAt
+	if time.Since(tried) < gateRefreshInterval || time.Since(at) < gateRefreshInterval {
+		n.mu.Unlock()
+		return cfg
+	}
+	n.larkCfgTryAt = time.Now()
+	n.mu.Unlock()
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	var fresh proto.AssistantLark
+	if err := n.peer.Call(ctx, "assistant.lark", map[string]any{}, &fresh); err != nil {
+		n.logger.Printf("assistant: Feishu gate config from hub: %v", err) // never the config itself
+		return cfg
+	}
+	relayGates(&fresh)
+	n.mu.Lock()
+	n.larkCfg, n.larkCfgAt = fresh, time.Now()
+	n.mu.Unlock()
+	return fresh
+}
+
+// relayGates makes each relayed gate (proto.CommandGate.Relay, #12904) one the gate proxy stands in for: an Auth of
+// its own (no header: the manager puts the credentials on the call), so that everything that holds a gate with Auth to
+// the proxy (larkgate.go, larkgate_env.go, gateproxy.go) holds this one too. Its socket and token stay out of the
+// assistant's process (larkgate_env.go).
+func relayGates(cfg *proto.AssistantLark) {
+	for i := range cfg.Gates {
+		if g := &cfg.Gates[i]; g.Relay && g.BaseEnv != "" && g.Auth == nil {
+			g.Auth = &proto.GateAuth{}
+		}
+	}
 }

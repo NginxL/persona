@@ -56,6 +56,16 @@ test('AGY streams one assistant message at a time across tool calls', { timeout:
   await until('live text cleared at completion', () => node.last('session.delta')?.text === '', 15_000)
 })
 
+test('AGY normalizes closed local file:// links while streaming without rewriting incomplete URLs', { timeout: 20_000 }, async (t) => {
+  const { node, update, chunk, promptCount } = await fixture(t)
+  await node.peer.call('session.send', { session_id: SESSION, text: 'Show the file.' })
+  await promptCount(1)
+  await chunk('See [notes.md](file:///work/repo/no')
+  await chunk('tes.md#L5) and ![pic](file:///work/repo/pic.png).', 'See [notes.md](/work/repo/notes.md#L5) and ![pic](/work/repo/pic.png).')
+  update({ end: true })
+  await until('live text cleared at completion', () => node.last('session.delta')?.text === '', 15_000)
+})
+
 test('a queued prompt does not receive the executing prompt text and starts with an empty stream', { timeout: 20_000 }, async (t) => {
   const { node, update, chunk, promptCount } = await fixture(t)
   await node.peer.call('session.send', { session_id: SESSION, text: 'First request.' })
@@ -864,18 +874,20 @@ test('pre-tool text is committed and partial user export keeps live history stab
 })
 
 test('queued sends acknowledge the queue and defer options until execution', async (t) => {
-  const { node, calls, update, promptCount } = await fixture(t)
+  const { node, calls, update, chunk, promptCount } = await fixture(t)
   await node.peer.call('session.send', { session_id: SESSION, text: 'First.' })
   await promptCount(1)
   const count = calls().length
   const result = await node.peer.call('session.send', { session_id: SESSION, text: 'Second.', model: 'next-model', mode: 'plan' })
   assert.equal(result.queued, true)
   assert.equal(calls().slice(count).some((call) => call.method === 'session/set_model' || call.method === 'session/set_mode'), false)
+  await chunk('First answer.')
   update({ end: true })
   await promptCount(2)
   const nextCalls = calls().slice(count)
   assert.ok(nextCalls.some((call) => call.method === 'session/set_model'))
   assert.ok(nextCalls.some((call) => call.method === 'session/set_mode'))
+  await chunk('Second answer.')
   update({ end: true })
 })
 
@@ -890,7 +902,7 @@ test('plan-mode starts advertise readonly support', async (t) => {
 
 for (const text of ['invalid-once', 'invalid-always']) {
   test(`stale sessions get one clean resume retry: ${text}`, async (t) => {
-    const { node, calls, update, promptCount } = await fixture(t)
+    const { node, calls, update, chunk, promptCount } = await fixture(t)
     const before = calls().length
     await node.peer.call('session.send', { session_id: SESSION, text })
     await promptCount(2)
@@ -900,6 +912,7 @@ for (const text of ['invalid-once', 'invalid-always']) {
       await until('retry failure published', () => node.last('runtime.sessions')?.sessions.find((s) => s.session_id === SESSION)?.turn_error === 'Invalid session')
       assert.equal(calls().filter((call) => call.method === 'session/prompt').length, 2)
     } else {
+      await chunk('The session resumed.')
       update({ end: true })
       await until('retried turn ends', () => node.last('runtime.sessions')?.sessions.find((s) => s.session_id === SESSION)?.status !== 'working')
     }
@@ -1026,10 +1039,11 @@ test('whitespace before a tool call does not allocate a text step', async (t) =>
 })
 
 test('a queued preparation failure remains visible after its queued acknowledgement', async (t) => {
-  const { node, update, promptCount } = await fixture(t)
+  const { node, update, chunk, promptCount } = await fixture(t)
   await node.peer.call('session.send', { session_id: SESSION, text: 'First.' })
   await promptCount(1)
   assert.equal((await node.peer.call('session.send', { session_id: SESSION, text: 'Queued.', model: 'invalid-model' })).queued, true)
+  await chunk('First answer.')
   update({ end: true })
   await until('queued failure published', () => node.last('runtime.sessions')?.sessions.find((row) => row.session_id === SESSION)?.turn_error?.includes('Unknown model'))
   const row = node.last('runtime.sessions').sessions.find((row) => row.session_id === SESSION)

@@ -32,10 +32,10 @@ func TestHubStartedConversationsStartSignedIn(t *testing.T) {
 	}
 }
 
-// A background supervisor started before this manager whose last turn ended "Not logged in" was made in a private
-// profile with no login and cannot move: it is gone, and its replacement starts signed in. One this manager started is
-// not replaced for it: it already is in the signed-in profile, and a new one would only be signed out too.
-func TestBackgroundSupervisorSignedOutIsReplaced(t *testing.T) {
+// A background supervisor started before this manager whose last turn ended "Not logged in" cannot finish its old work.
+// Since #5732 no replacement is started: its pending and queued legacy notices move to main instead of creating a new
+// background endpoint for new work. One this manager started is not treated as gone for this error either.
+func TestBackgroundSupervisorSignedOutIsNotReplaced(t *testing.T) {
 	s, f, _ := newBackgroundService(t)
 	ctx := context.Background()
 	signedOut := proto.Session{SessionID: "bg1", MachineID: "server", Assistant: true, Status: proto.StatusDone,
@@ -60,21 +60,20 @@ func TestBackgroundSupervisorSignedOutIsReplaced(t *testing.T) {
 		t.Fatal("a signed-in background supervisor counted as gone")
 	}
 
-	// Started before this manager and signed out: gone, and replaced by one that starts signed in.
+	// Started before this manager and signed out: gone, with no replacement; legacy notices move to main.
 	f.setSessions("server", main, signedOut)
 	if s.backgroundThere(ctx, s.settings(ctx), "bg1") {
 		t.Fatal("a signed-out background supervisor from before this manager is still there")
 	}
 	id, gone := s.ensureBackground(ctx)
-	if id == "" || id == "bg1" || gone != "bg1" {
+	if id != "" || gone != "bg1" {
 		t.Fatalf("ensureBackground = %q, gone %q", id, gone)
 	}
-	starts := conversationStarts(f)
-	if len(starts) != 1 || starts[0]["config_dir"] != meetingProfile {
-		t.Fatalf("the replacement started as %v", starts)
+	if starts := conversationStarts(f); len(starts) != 0 {
+		t.Fatalf("a legacy replacement started as %v", starts)
 	}
-	if got := s.settings(ctx).BackgroundSupervisor; got != id {
-		t.Fatalf("settings keep %q, want %q", got, id)
+	if got := s.settings(ctx).BackgroundSupervisor; got != "bg1" {
+		t.Fatalf("settings keep %q, want the old id for relay recovery", got)
 	}
 }
 

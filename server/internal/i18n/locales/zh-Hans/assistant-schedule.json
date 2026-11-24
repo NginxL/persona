@@ -4,7 +4,9 @@
   "skip_next_invalid": "请输入有效的执行时间。",
   "skip_next_owner": "你已跳过这次执行",
   "execution_context_unavailable": "暂时无法核对任务对话的执行环境。请重新连接其 Agent 后重试。",
+  "task_execution_wait_timeout": "task_execution_wait_timeout：等待所选电脑支持任务执行选项超时，任务未发送。",
   "followup": "定时跟进",
+  "task_label": "定时任务",
   "morning": "早报",
   "evening": "晚间回顾",
   "unavailable": "暂时读不到定时任务（数据库没有响应），过一会儿再试",
@@ -72,5 +74,12 @@
   "todo_wait_cost": "可能再过一个定时窗口，任务仍没有推进。",
   "todo_change_result": "请督办在现有授权范围内提出另一种做法。",
   "todo_wait_result": "保留已经确认的做法，等下一次定时检查。",
-  "execution_antigravity_unavailable": "{machine} 上的 Antigravity 已断开连接或不可用。请在该电脑上恢复 Antigravity，然后重新运行此任务以继续现有对话。"
+  "selected_file_unavailable": "所选文件不可用或执行上下文已更改，请移除后重新选择。",
+  "file_runtime_unsupported": "该 agent 暂不支持文件选择，请使用文本或选择其他 agent。",
+  "input_context_unavailable": "任务或其原始对话不可用，请重新打开任务后重试。",
+  "execution_antigravity_unavailable": "{machine} 上的 Antigravity 已断开连接或不可用。请在该电脑上恢复 Antigravity，然后重新运行此任务以继续现有对话。",
+  "execution_space_directory": "空间里的任务只能使用空间目录。请清空工作目录后重试。",
+  "unknown_space": "这个空间不能用于定时任务。请换一个空间，或者不选空间。",
+  "bad_topic_policy": "请选择每次运行是开新对话，还是接着同一个对话。",
+  "space_owner_only": "只有你本人能在 App 里把任务移进或移出空间。"
 }

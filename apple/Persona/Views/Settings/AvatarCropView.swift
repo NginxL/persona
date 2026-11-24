@@ -22,15 +22,8 @@ struct AvatarCropView: View {
                         .frame(maxWidth: .infinity)
                         .listRowBackground(Color.clear)
                         .listRowInsets(EdgeInsets())
-                    #if os(macOS)
-                    zoomSlider
-                    #endif
                 } footer: {
-                    #if os(macOS)
-                    Text("Drag to move the image. Use the slider to zoom.")
-                    #else
                     Text("Drag to move the photo. Pinch to zoom.")
-                    #endif
                 }
                 // Made already: the crop and the names would not be sent again.
                 .disabled(model.made != nil)
@@ -88,9 +81,6 @@ struct AvatarCropView: View {
             }
             .interactiveDismissDisabled(model.uploading)
         }
-        #if os(macOS)
-        .macSheet()
-        #endif
     }
 
     /// The image under a square window, dimmed outside the circle the avatar keeps.
@@ -132,19 +122,6 @@ struct AvatarCropView: View {
 
     /// A step of the adjustable action (VoiceOver's swipe up and down).
     private static let zoomStep = 1.25
-
-    #if os(macOS)
-    private var zoomSlider: some View {
-        HStack(spacing: Theme.Space.s) {
-            ThemedIcon(Theme.Icon.zoomOut).foregroundStyle(.secondary)
-            Slider(value: Binding(get: { model.crop.zoom }, set: { model.crop = model.crop.zoomed(to: $0) }),
-                   in: 1...max(1.01, model.crop.maxZoom))
-                .accessibilityLabel(String(localized: "Zoom"))
-            ThemedIcon(Theme.Icon.zoomIn).foregroundStyle(.secondary)
-        }
-        .disabled(model.crop.maxZoom <= 1)
-    }
-    #endif
 
     /// The picture follows the finger; each change moves it by what the drag added (stopping at the image's edges).
     private func drag(_ side: CGFloat) -> some Gesture {

@@ -10,6 +10,7 @@ import persona.core.domain.parseContexts
 import persona.core.domain.inbox.InboxItem
 import org.junit.Assert.*
 import org.junit.Test
+import persona.core.inbox.*
 
 /** "Hand to AI" and the row labels, as the old app (`InboxTest`) and iOS (`InboxHandOffSheet.message`) have them. */
 @RunWith(AndroidJUnit4::class)

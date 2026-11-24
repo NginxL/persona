@@ -2,11 +2,11 @@
 // Audit items 12 and 83: the To-dos page's header counts. One definition in every grouping: Not done is the open count
 // (lib/todo-triage countsAsOpen; the sidebar's badge counts the open ones that need the owner, ownerBadge, #11085),
 // Done the to-dos in the Done section (a merged row's related ones under the row's section, as the section titles count
-// them), and the folders keep what the status sections place
-// outside Done while their Done fold holds the Done section's, so switching grouping changes no number and each one
-// matches a section's. A to-do closed in the last day stays in its folder, with Got it, until it is seen. A failed start
-// waiting on the owner is open in every grouping, and its folder says Needs you, not Done. No counts while the list is
-// still loading. The hub is faked; the data made up.
+// them), and the folders keep what the status sections place outside Done and Cancelled while their folds hold those
+// sections, so switching grouping changes no number and each one matches a section's. A to-do closed in the last day
+// stays in its folder, with Got it, until it is seen. A failed start waiting on the owner is open in every grouping,
+// and its folder says Needs you, not Done. Cancelled has its own count and fold. No counts while the list is loading.
+// The hub is faked; the data made up.
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -51,7 +51,7 @@ const todos = [
   { id: "own", title: "Book the dentist", created_at: iso(DAY), updated_at: iso(DAY) },
   // a task whose agent never started, closed by the hub with why: Needs you, open
   { id: "failed", title: "Rotate the keys", origin: "conv", created_at: iso(2 * 3_600_000), updated_at: iso(3_600_000), done_at: iso(3_600_000), start_error: "machine offline", agents: [] },
-  // closed an hour ago: Just finished, closed
+  // closed an hour ago: Done immediately, closed
   { id: "fresh", title: "Water the plants", created_at: iso(DAY), updated_at: iso(3_600_000), done_at: iso(3_600_000) },
   // closed days ago: Done
   { id: "old1", title: "Pay the rent", created_at: iso(5 * DAY), updated_at: iso(3 * DAY), done_at: iso(3 * DAY) },
@@ -83,7 +83,7 @@ const render = async (grouping?: "status" | "folder", list = todos) => {
   await flush();
 };
 const summary = () => host.querySelector("[data-testid=todos-summary]")?.textContent;
-const expected = t("todos.summary_triage", { open: 2, parked: 0, shelved: 0, done: 2 });
+const expected = t("todos.summary_triage", { open: 2, parked: 0, shelved: 0, done: 3, cancelled: 0 });
 
 describe("the To-dos header's counts", () => {
   it("count open as the triage does and done as the Done section holds", async () => {
@@ -92,47 +92,48 @@ describe("the To-dos header's counts", () => {
     // the sidebar's badge (views/SidebarParts.tsx): both open ones need the owner, the errand and the failed start
     expect(ownerBadge(todos, undefined, Date.now()).size).toBe(2);
     expect(summary()).toBe(expected);
-    expect(host.querySelector("[data-testid=todo-section][data-section=done]")?.getAttribute("data-todos")).toBe("2");
+    expect(host.querySelector("[data-testid=todo-section][data-section=done]")?.getAttribute("data-todos")).toBe("3");
   });
 
   it("stay the same by folder, whose Done fold holds the Done section and whose folders keep a failed start open", async () => {
     await render("folder");
     expect(summary()).toBe(expected);
-    expect(host.textContent).toContain(t("todos.done_section", { count: 2 }));
+    expect(host.textContent).toContain(t("todos.done_section", { count: 3 }));
     const failed = host.querySelector<HTMLElement>("[data-todo=failed]")!;
     expect(failed.closest("[data-testid=todo-group]")).toBeTruthy();
     expect(failed.querySelector(".line-through")).toBeNull();
     expect(failed.querySelector("button")?.getAttribute("aria-label")).toBe(t("todos.complete_todo"));
-    // closed an hour ago, it is still worth a look in its folder; days ago it is in the fold
-    expect(host.querySelector("[data-todo=fresh]")?.closest("[data-testid=todo-group]")).toBeTruthy();
+    // closed work is immediately in the Done fold rather than held in a project folder
+    expect(host.querySelector("[data-todo=fresh]")?.closest("[data-testid=todo-group]")).toBeFalsy();
     expect(host.querySelector("[data-todo=old1]")).toBeNull();
   });
 
   it("count a merged row's to-dos under its section, in the header as in the section titles and the folders", async () => {
-    // two closed subtasks of one plan share a row: the fresh one leads it into Just finished, the old one goes with it
+    // two closed subtasks of one plan share a row in Done, with both members counted there
     const merged = [
       todos[0],
       { id: "p1", title: "Draft the newsletter", plan_id: "plan-1", created_at: iso(5 * DAY), updated_at: iso(3 * DAY), done_at: iso(3 * DAY) },
       { id: "p2", title: "Send the newsletter", plan_id: "plan-1", created_at: iso(5 * DAY), updated_at: iso(3_600_000), done_at: iso(3_600_000) },
     ] as unknown as Todo[];
-    const counted = t("todos.summary_triage", { open: 1, parked: 0, shelved: 0, done: 0 });
+    const counted = t("todos.summary_triage", { open: 1, parked: 0, shelved: 0, done: 2, cancelled: 0 });
     await render("status", merged);
-    expect(host.querySelector("[data-testid=todo-section][data-section=just_done]")?.getAttribute("data-todos")).toBe("2");
-    expect(host.querySelector("[data-testid=todo-section][data-section=done]")).toBeNull();
+    expect(host.querySelector("[data-testid=todo-section][data-section=just_done]")).toBeNull();
+    expect(host.querySelector("[data-testid=todo-section][data-section=done]")?.getAttribute("data-todos")).toBe("2");
     expect(summary()).toBe(counted);
-    // by folder: the same numbers, and the row's two to-dos in their folder rather than one of them in the Done fold
+    // by folder: the same numbers, with the row's two to-dos in the Done fold rather than in open project folders
     await act(async () => root.unmount());
     root = createRoot(host);
     await render("folder", merged);
     expect(summary()).toBe(counted);
-    expect(host.textContent).not.toContain(t("todos.done_section", { count: 1 }));
-    expect(host.querySelector("[data-todo=p1]")?.closest("[data-testid=todo-group]")).toBeTruthy();
-    expect(host.querySelector("[data-todo=p2]")?.closest("[data-testid=todo-group]")).toBeTruthy();
+    expect(host.textContent).toContain(t("todos.done_section", { count: 2 }));
+    expect(host.querySelector("[data-todo=p1]")?.closest("[data-testid=todo-group]")).toBeFalsy();
+    expect(host.querySelector("[data-todo=p2]")?.closest("[data-testid=todo-group]")).toBeFalsy();
   });
 
-  it("file a to-do closed in the last day from its folder with Got it, and say a folder with a failed start needs you", async () => {
+  it("file an ordinary unsupervised finished turn from its folder with Got it, and say a failed start needs you", async () => {
+    const review = { ...todos[2], done_at: undefined, ask: { outcome: "done", verdict: "Finished", asked_at: iso(3_600_000) } };
     seed({ features: ["todo_seen"] });
-    await render("folder");
+    await render("folder", [...todos.slice(0, 2), review, ...todos.slice(3)] as unknown as Todo[]);
     const fresh = host.querySelector<HTMLElement>("[data-todo=fresh]")!;
     const got = fresh.querySelector<HTMLButtonElement>("[data-testid=todo-seen]");
     expect(got?.textContent).toBe(t("todos.seen"));
@@ -154,7 +155,7 @@ describe("the To-dos header's counts", () => {
     await act(async () => root.render(<TodosView />));
     await flush();
     expect(host.querySelector("[data-testid=todos-loading]")).toBeTruthy();
-    expect(host.querySelector("header")?.textContent).not.toContain(t("todos.summary_triage", { open: 0, parked: 0, shelved: 0, done: 0 }));
+    expect(host.querySelector("header")?.textContent).not.toContain(t("todos.summary_triage", { open: 0, parked: 0, shelved: 0, done: 0, cancelled: 0 }));
     expect(summary()).toBeUndefined();
     api.mockImplementation(async (path) => (path === "/todos" ? { todos } : {}));
     await act(async () => { await refreshTodos(); });

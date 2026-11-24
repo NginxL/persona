@@ -56,6 +56,46 @@ struct DirectionTreeTests {
         #expect(try JSON.decoder.decode(DirectionTree.self, from: Data("{}".utf8)).directions.isEmpty)
     }
 
+    /// The live sessions filed under a direction (#11516, `sessions`): decoded leniently, keyed by the session; a tree
+    /// without the field (a hub without `direction_sessions`) has none, and one that does not decode fails nothing else.
+    @Test func decodesTheFiledSessionsAndATreeWithoutThem() throws {
+        let raw = #"""
+        {"directions":[
+          {"id":"lead-a","name":"Product","counts":{"needs_you":1},"tasks":[{"id":"t1","title":"Ship it","state":"needs_you"}],
+           "sessions":[
+             {"machine_id":"m","session_id":"chat","title":"Trip to Kyoto","source":"owner","at":"2026-11-20T08:00:00Z","state":"working"},
+             {"machine_id":"m","session_id":"agent","source":"leader","state":"needs_you"},
+             {"machine_id":"m","session_id":"quiet","state":"computer_offline","extra":1}]},
+          {"id":"lead-b","name":"Ops","tasks":[],"sessions":"not a list"},
+          {"id":"lead-c","name":"Infra","tasks":[]}]}
+        """#
+        let tree = try JSON.decoder.decode(DirectionTree.self, from: Data(raw.utf8))
+        let a = try #require(tree.leader("lead-a"))
+        #expect(a.sessions.map(\.id) == ["m/chat", "m/agent", "m/quiet"], "keyed by machine/session (P6)")
+        #expect(a.sessions[0].title == "Trip to Kyoto" && a.sessions[0].addedByOwner && a.sessions[0].at != nil)
+        #expect(!a.sessions[1].addedByOwner && a.sessions[1].title.isEmpty && a.sessions[1].at == nil)
+        #expect(a.sessions[0].ownState == .working && a.sessions[1].ownState == .needsYou)
+        #expect(a.sessions[2].standing == .computerOffline && a.sessions[2].ownState == nil)
+        #expect(a.tasks.map(\.id) == ["t1"] && a.counts.needsYou == 1, "the to-dos and counts are as before")
+        #expect(tree.leader("lead-b")?.sessions.isEmpty == true, "a list that does not decode is none")
+        #expect(tree.leader("lead-c")?.sessions.isEmpty == true, "an older hub omits the field")
+        #expect(try Self.tree().directions.allSatisfy { $0.sessions.isEmpty }, "the tree before #11516 decodes as it did")
+    }
+
+    /// The single read (`GET /api/v1/assistant/directions/{id}`): what this version draws of it.
+    @Test func decodesTheSingleRead() throws {
+        let raw = #"""
+        {"id":"lead-a","name":"Product","ended_at":"2026-11-21T08:00:00Z","notes":"","sessions":[
+          {"machine_id":"m","session_id":"s","source":"owner","at":"2026-11-18T08:00:00Z","state":"not_listed"}],
+         "ended_tasks":[],"more":false,"sessions_unavailable":true}
+        """#
+        let read = try JSON.decoder.decode(DirectionRead.self, from: Data(raw.utf8))
+        #expect(read.id == "lead-a" && read.name == "Product" && read.endedAt != nil)
+        #expect(read.sessions.map(\.standing) == [.notListed] && read.sessionsUnavailable)
+        let bare = try JSON.decoder.decode(DirectionRead.self, from: Data(#"{"id":"lead-b"}"#.utf8))
+        #expect(bare.sessions.isEmpty && !bare.sessionsUnavailable && bare.endedAt == nil)
+    }
+
     /// The hub's state values as the wire spells them (`working`, not the old `doing`).
     @Test func decodesEachStateValue() throws {
         let states = try JSON.decoder.decode([DirectionTree.TaskState].self,
@@ -179,6 +219,13 @@ struct DirectionTreeTests {
         #expect(sections[0].todos.map(\.id) == ["t1", "t3"], "a to-do this device does not hold is dropped")
         let searched = DirectionTodoSections.build(t, todos: todos) { $0.id == "t4" }
         #expect(searched.map(\.id) == ["main"], "a direction the search empties is left out")
+    }
+
+    @Test func cancelledTodosStayOutOfDirectionRows() throws {
+        var cancelled = TodoItem(id: "t1", title: "Cancelled")
+        cancelled.cancelledAt = Date()
+        let sections = DirectionTodoSections.build(try Self.tree(), todos: ["t1": cancelled])
+        #expect(sections.isEmpty)
     }
 
     @Test func todosGroupingFallsBackToStatusWithoutATree() {

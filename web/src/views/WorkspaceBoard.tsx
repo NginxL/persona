@@ -2,7 +2,7 @@ import { Suspense, memo, useCallback, useEffect, useMemo, useRef, useState, useS
 import { api, credentialOwner, enc, errorText, subscribeCredentialOwner } from "../lib/api";
 import { sessionTitle, stateOf } from "../lib/format";
 import { stateName } from "../lib/state-labels";
-import { openNewAgent } from "../lib/new-agent";
+import { openNewAgent, type NewAgentPreset } from "../lib/new-agent";
 import { openPanel } from "../lib/panel";
 import { useAgentSessions } from "../lib/sessions";
 import { onHubEvent, refreshTodos, useStore } from "../lib/store";
@@ -23,9 +23,14 @@ const CardActivity = lazyPage(() => import("./workspace-board/Activity").then((m
 import { navigate } from "../lib/router";
 import { openAgent } from "../lib/handoff";
 import { useWorkspaceBoardSetting } from "../lib/workspace-board-setting";
-import { CATALOG_POLL_MS } from "../lib/workspace-catalog";
+import { CATALOG_POLL_MS, refreshWorkspaceCatalog } from "../lib/workspace-catalog";
 import { isResumed } from "../lib/reconnect";
 const field = "w-full rounded-control bg-field px-3 py-2 text-sm text-ink outline-none focus:ring-2 focus:ring-accent";
+export function boardAgentPreset(card: BoardCard): NewAgentPreset {
+  const launcher = card.source === "codex_app" ? "codex-app" : card.source === "claude_desktop" ? "claude-desktop" : undefined;
+  return { machineId: card.machine_id, cwd: card.cwd,
+    ...(launcher ? { launcher, ...(card.source_id ? { desktopProjectId: card.source_id } : {}) } : {}) };
+}
 const VIEW_KEY = "persona.workspace-board.view";
 // The lanes that are an agent state take the one canonical state name; only To review and Idle are board-only words.
 const laneTitle = (lane: WorkLane) => lane === "needs_you" || lane === "working" ? stateName(lane) : t(`workspaceboard.auto_lane_${lane}`);
@@ -142,7 +147,15 @@ function Board({ onToggleSidebar }: { onToggleSidebar?: () => void }) {
   }, [view, board, search, machine, archived, sessionsOf, sessions, todos, lookup]);
   const activeLane = auto.some((l) => l.lane === columnSelection) ? columnSelection : "needs_you";
   const machineIDs = [...new Set([...machines.map((m) => m.id), ...(board?.cards.map((c) => c.machine_id) ?? [])])];
-  const mutate = async (m: BoardMutation) => { const ok = await model.mutate(m); if (!ok && model.snapshot().error) toast(model.snapshot().error, "error"); return ok; };
+  const mutate = async (m: BoardMutation) => {
+    const ok = await model.mutate(m);
+    if (ok && m.action === "add_card") {
+      void refreshWorkspaceCatalog();
+      void model.refresh();
+    }
+    if (!ok && model.snapshot().error) toast(model.snapshot().error, "error");
+    return ok;
+  };
   const dropCard = (e: React.DragEvent, column: string, before?: string) => {
     e.preventDefault(); e.stopPropagation(); const id = dragging.current || e.dataTransfer.getData("application/x-persona-workspace"); dragging.current = null; setDrop("");
     if (!disabled && !selection.active && id && id !== before && board?.cards.some((c) => c.id === id)) void mutate({ action: "move_card", id, column_id: column, before_id: before });
@@ -239,7 +252,7 @@ function Board({ onToggleSidebar }: { onToggleSidebar?: () => void }) {
       {board?.cards.some((c) => c.column_id === deleting?.id) && <select aria-label={t("workspaceboard.move_cards_to")} className={field} value={moveTo} onChange={(e) => setMoveTo(e.target.value)}><option value="">{t("workspaceboard.pick_target_column")}</option>{board.columns.filter((c) => c.id !== deleting?.id).map((c) => <option key={c.id} value={c.id}>{c.title}</option>)}</select>}
       <div className="mt-4 flex justify-end gap-2"><Button onClick={() => setDeleting(null)}>{t("common.cancel")}</Button><Button tone="danger" disabled={disabled || Boolean(board?.cards.some((c) => c.column_id === deleting?.id) && !moveTo)} busy={state.busy} onClick={() => void mutate({ action: "delete_column", id: deleting?.id, move_to: moveTo || undefined }).then((ok) => { if (ok) setDeleting(null); })}>{t("workspaceboard.delete_column")}</Button></div>
     </Dialog>
-    {adding && board && <BindWorkspace column={adding} board={board} workspaces={state.discovery.workspaces} machines={machines} busy={state.busy} disabled={state.readonly} onClose={() => setAdding(undefined)} onBind={mutate} />}
+    {adding && board && <BindWorkspace column={adding} board={board} workspaces={state.discovery.workspaces} machines={machines} busy={state.busy} disabled={state.readonly} failure={state.error} onClose={() => setAdding(undefined)} onBind={mutate} />}
     {board?.activity === true && activityOpen && <ActivityDialog currentCards={board.cards} onClose={() => setActivityOpen(false)} onOpenCard={(id) => { setActivityOpen(false); setSelected(id); }} />}
     {card && <WorkspaceDetail key={card.id} activity={board?.activity === true} card={card} column={board!.columns.find((c) => c.id === card.column_id)?.title ?? ""} machine={machineOf(card.machine_id)} sessions={sessionsOf(card)} readonly={state.readonly} onClose={() => setSelected(undefined)} />}
   </div>;
@@ -304,7 +317,7 @@ function AutoCard({ card, machine, workspace, sessions, disabled, onOpen, onMenu
     <WorkspaceCard card={card} machine={machine} workspace={workspace} sessions={sessions} disabled={disabled} drag={false} onOpen={onOpen} onMenu={onMenu} />
     <div className="mt-1 flex flex-wrap gap-1">
       {focus ? <Button tone="quiet" icon="agent" className="!px-2 !py-1 text-xs" onClick={() => openAgent(focus.machine_id, focus.session_id)}>{t("workspaceboard.auto_open_session")}</Button>
-        : <Button tone="quiet" icon="plus" className="!px-2 !py-1 text-xs" disabled={disabled || offline} onClick={() => openNewAgent({ machineId: card.machine_id, cwd: card.cwd })}>{t("workspaceboard.new_agent")}</Button>}
+        : <Button tone="quiet" icon="plus" className="!px-2 !py-1 text-xs" disabled={disabled || offline} onClick={() => openNewAgent(boardAgentPreset(card))}>{t("workspaceboard.new_agent")}</Button>}
       <Button tone="quiet" icon={card.archived ? "undo" : "check"} className="!px-2 !py-1 text-xs" disabled={disabled} onClick={() => onArchive(card, !card.archived)}>{card.archived ? t("workspaceboard.restore_card") : t("workspaceboard.archive_card")}</Button>
     </div>
   </div>;
@@ -327,7 +340,7 @@ function WorkspaceDetail({ card, column, machine, sessions, readonly, activity, 
   const [showActivity, setShowActivity] = useState(false);
   const open = (kind: "files" | "git") => { onClose(); openPanel({ kind, mid: card.machine_id, sid: sessions[0]?.session_id ?? "", cwd: card.cwd }); };
   return <Dialog open title={card.title} onClose={onClose}><div className="space-y-4"><p className="text-xs text-ink-3">{[column, card.archived && t("workspaceboard.archived"), machine?.name || card.machine_id, machine?.online === false && t("workspaceboard.offline")].filter(Boolean).join(" · ")}</p><p className="break-all rounded-control bg-inset p-3 font-mono text-xs text-ink-2">{card.cwd}</p>{card.branch && <p className="text-xs text-ink-2">{t("workspaceboard.branch", { branch: card.branch })}</p>}
-    <div className="flex flex-wrap gap-2"><Button icon="folder" disabled={!machine?.online} onClick={() => open("files")}>{t("workspaceboard.files")}</Button><Button icon="git" disabled={!machine?.online} onClick={() => open("git")}>Git</Button><Button icon="plus" disabled={readonly || !machine?.online} onClick={() => { onClose(); openNewAgent({ machineId: card.machine_id, cwd: card.cwd }); }}>{t("workspaceboard.new_agent")}</Button></div>
+    <div className="flex flex-wrap gap-2"><Button icon="folder" disabled={!machine?.online} onClick={() => open("files")}>{t("workspaceboard.files")}</Button><Button icon="git" disabled={!machine?.online} onClick={() => open("git")}>Git</Button><Button icon="plus" disabled={readonly || !machine?.online} onClick={() => { onClose(); openNewAgent(boardAgentPreset(card)); }}>{t("workspaceboard.new_agent")}</Button></div>
     <div className="border-t border-line pt-3"><h3 className="mb-2 text-xs font-medium text-ink-3">{t("workspaceboard.agents_here")}</h3>{sessions.length ? <div className="space-y-1">{sessions.map((s) => <button type="button" key={s.session_id} className="flex w-full items-center gap-2 rounded-control px-2 py-2 text-left hover:bg-hover" onClick={() => { onClose(); openAgent(s.machine_id, s.session_id); }}><Icon name="agent" size={14} className="text-ink-3" /><span className="min-w-0 flex-1 truncate text-sm text-ink">{sessionTitle(s)}</span><StatePill state={stateOf(s)} /></button>)}</div> : <p className="text-sm text-ink-3">{t("workspaceboard.no_agents_detail")}</p>}</div>
     {activity && <section className="min-w-0 border-t border-line pt-3">
       <Button icon="history" expanded={showActivity} onClick={() => setShowActivity(!showActivity)}>{t("workspaceboard.activity")}</Button>
@@ -336,29 +349,41 @@ function WorkspaceDetail({ card, column, machine, sessions, readonly, activity, 
   </div></Dialog>;
 }
 interface Dirs { path: string; parent?: string; entries: { name: string; path: string }[] }
-function BindWorkspace({ column, board, workspaces, machines, busy, disabled, onClose, onBind }: {
-  column: string; board: BoardState; workspaces: Workspace[]; machines: Machine[]; busy: boolean; disabled: boolean; onClose: () => void; onBind: (m: BoardMutation) => Promise<boolean>;
+export function BindWorkspace({ column, board, workspaces, machines, busy, disabled, failure, onClose, onBind }: {
+  column: string; board: BoardState; workspaces: Workspace[]; machines: Machine[]; busy: boolean; disabled: boolean; failure?: string; onClose: () => void; onBind: (m: BoardMutation) => Promise<boolean>;
 }) {
-  const [mode, setMode] = useState<"existing" | "directory">("existing"), [mid, setMid] = useState(machines.find((m) => m.online)?.id ?? "");
+  const [mode, setMode] = useState<"existing" | "directory" | "project">("existing"), [mid, setMid] = useState(machines.find((m) => m.online)?.id ?? "");
   const [path, setPath] = useState(""), [browse, setBrowse] = useState(""), [dirs, setDirs] = useState<Dirs | null>(null);
+  const [title, setTitle] = useState(""), [desktopApp, setDesktopApp] = useState<NonNullable<BoardMutation["desktop_app"]> | "">("");
   const [error, setError] = useState(""), [loading, setLoading] = useState(false), [query, setQuery] = useState("");
   useEffect(() => {
-    if (mode !== "directory" || !mid) return;
+    if (mode === "existing" || !mid) return;
     const controller = new AbortController(); setLoading(true); setError(""); setDirs(null);
     void api<Dirs>(`/machines/${enc(mid)}/dirs?path=${enc(browse)}`, { signal: controller.signal }).then((d) => { if (!controller.signal.aborted) setDirs(d); }).catch((e) => { if (!controller.signal.aborted) setError(errorText(e)); }).finally(() => { if (!controller.signal.aborted) setLoading(false); });
     return () => controller.abort();
   }, [mid, mode, browse]);
-  const bind = async (w?: Workspace) => { if (await onBind({ action: "add_card", column_id: column, machine_id: w?.machine_id ?? mid, workspace_id: w?.id, cwd: w?.cwd ?? path.trim() })) onClose(); };
+  const bind = async (w?: Workspace) => {
+    if (disabled || busy || (!w && (!mid || !path.trim() || (mode === "project" && (!title.trim() || desktopApp))))) return;
+    if (await onBind({ action: "add_card", column_id: column, machine_id: w?.machine_id ?? mid, workspace_id: w?.id, cwd: w?.cwd ?? path.trim(),
+      ...(!w && mode === "project" ? { title: title.trim(), create_directory: true } : {}) })) onClose();
+  };
   return <Dialog open title={t("workspaceboard.bind_workspace")} onClose={onClose}>
-    <div className="mb-4 flex gap-2"><Button tone={mode === "existing" ? "primary" : "quiet"} onClick={() => setMode("existing")}>{t("workspaceboard.mode_existing")}</Button><Button tone={mode === "directory" ? "primary" : "quiet"} onClick={() => setMode("directory")}>{t("workspaceboard.mode_directory")}</Button></div>
+    {failure && <p role="alert" className="mb-3 text-sm text-red">{failure}</p>}
+    <div className="mb-4 flex flex-wrap gap-2"><Button tone={mode === "existing" ? "primary" : "quiet"} onClick={() => setMode("existing")}>{t("workspaceboard.mode_existing")}</Button><Button tone={mode === "directory" ? "primary" : "quiet"} onClick={() => setMode("directory")}>{t("workspaceboard.mode_directory")}</Button><Button tone={mode === "project" ? "primary" : "quiet"} onClick={() => setMode("project")}>{t("workspaceboard.mode_project")}</Button></div>
     {mode === "existing" ? <div className="space-y-3"><input aria-label={t("workspaceboard.search_bindable")} className={field} value={query} onChange={(e) => setQuery(e.target.value)} placeholder={t("workspaceboard.search_label")} /><div className="max-h-80 space-y-2 overflow-y-auto">{workspaces.filter((w) => `${w.title} ${w.cwd}`.toLocaleLowerCase().includes(query.toLocaleLowerCase())).map((w) => {
       const bound = boundCard(board, w), online = machines.find((m) => m.id === w.machine_id)?.online !== false && w.online !== false;
       return <div key={w.id} className="flex items-center gap-2 rounded-control bg-inset p-3"><div className="min-w-0 flex-1"><p className="truncate text-sm text-ink">{w.title}</p><p className="truncate text-xs text-ink-3" title={w.cwd}>{machines.find((m) => m.id === w.machine_id)?.name || w.machine_id} · {w.cwd || t("workspaceboard.no_directory")}</p></div>{bound ? <Button disabled={disabled || busy || !bound.archived} onClick={() => void onBind({ action: "update_card", id: bound.id, archived: false }).then((ok) => { if (ok) onClose(); })}>{bound.archived ? t("workspaceboard.restore") : t("workspaceboard.bound")}</Button> : <Button disabled={disabled || busy || !w.cwd || !online || w.available === false} onClick={() => void bind(w)}>{online ? t("workspaceboard.bind") : t("workspaceboard.offline")}</Button>}</div>;
     })}{!workspaces.length && <p className="text-sm text-ink-3">{t("workspaceboard.none_discovered")}</p>}</div></div> : <form className="space-y-3" onSubmit={(e) => { e.preventDefault(); void bind(); }}>
-      <select aria-label={t("workspaceboard.directory_machine")} className={field} value={mid} onChange={(e) => { setMid(e.target.value); setBrowse(""); setPath(""); }}><option value="">{t("workspaceboard.pick_online_machine")}</option>{machines.filter((m) => m.online).map((m) => <option key={m.id} value={m.id}>{m.name || m.id}</option>)}</select><input aria-label={t("workspaceboard.directory_label")} className={field} value={path} onChange={(e) => setPath(e.target.value)} placeholder={t("workspaceboard.directory_placeholder")} />
+      {mode === "project" && <>
+        <label className="block space-y-1"><span className="text-xs text-ink-2">{t("workspaceboard.project_name")}</span><input aria-label={t("workspaceboard.project_name")} className={field} value={title} onChange={(e) => setTitle(e.target.value)} maxLength={200} /></label>
+        <label className="block space-y-1"><span className="text-xs text-ink-2">{t("workspaceboard.project_app")}</span><select aria-label={t("workspaceboard.project_app")} aria-describedby="desktop-project-unavailable" className={field} value={desktopApp} onChange={(e) => setDesktopApp(e.target.value as typeof desktopApp)}><option value="">{t("workspaceboard.project_persona")}</option><option value="codex_app" disabled>Codex</option><option value="claude_desktop" disabled>Claude</option></select></label>
+        <p id="desktop-project-unavailable" className="text-xs text-ink-3">{t("workspaceboard.project_desktop_unavailable")}</p>
+      </>}
+      <select aria-label={t("workspaceboard.directory_machine")} className={field} value={mid} onChange={(e) => { setMid(e.target.value); setBrowse(""); setPath(""); }}><option value="">{t("workspaceboard.pick_online_machine")}</option>{machines.filter((m) => m.online).map((m) => <option key={m.id} value={m.id}>{m.name || m.id}</option>)}</select><input aria-label={t("workspaceboard.directory_label")} className={field} value={path} onChange={(e) => setPath(e.target.value)} placeholder={t(mode === "project" ? "workspaceboard.project_directory_placeholder" : "workspaceboard.directory_placeholder")} />
       {error && <p role="alert" className="text-xs text-red">{error}</p>}{loading && <Loading label={t("workspaceboard.reading_directory")} />}
-      {dirs && <div className="max-h-64 overflow-y-auto rounded-control border border-line"><div className="flex items-center gap-2 border-b border-line p-2"><IconButton icon="chevronLeft" label={t("workspaceboard.parent_directory")} disabled={dirs.parent === undefined} onClick={() => setBrowse(dirs.parent!)} /><button type="button" className="min-w-0 flex-1 truncate text-left font-mono text-xs text-ink-2" onClick={() => setPath(dirs.path)} title={dirs.path}>{dirs.path}</button><Button tone="quiet" onClick={() => setPath(dirs.path)}>{t("workspaceboard.choose_this")}</Button></div>{dirs.entries.map((d) => <div key={d.path} className="flex items-center gap-2 px-3 py-1"><button type="button" className="flex min-w-0 flex-1 items-center gap-2 py-1 text-left text-sm text-ink" onClick={() => setBrowse(d.path)}><Icon name="folder" size={14} className="text-ink-3" /><span className="truncate">{d.name}</span></button><Button tone="quiet" onClick={() => setPath(d.path)}>{t("workspaceboard.choose")}</Button></div>)}</div>}
-      <p className="text-xs text-ink-3">{t("workspaceboard.bind_directory_hint")}</p><div className="flex justify-end"><Button type="submit" tone="primary" disabled={disabled || busy || !mid || !path.trim()} busy={busy}>{t("workspaceboard.bind_directory")}</Button></div>
+      {dirs && <div className="max-h-64 overflow-y-auto rounded-control border border-line"><div className="flex items-center gap-2 border-b border-line p-2"><IconButton icon="chevronLeft" label={t("workspaceboard.parent_directory")} disabled={!dirs.parent} onClick={() => setBrowse(dirs.parent!)} /><button type="button" className="min-w-0 flex-1 truncate text-left font-mono text-xs text-ink-2" onClick={() => setPath(dirs.path)} title={dirs.path}>{dirs.path}</button><Button tone="quiet" onClick={() => setPath(dirs.path)}>{t("workspaceboard.choose_this")}</Button></div>{dirs.entries.map((d) => <div key={d.path} className="flex items-center gap-2 px-3 py-1"><button type="button" className="flex min-w-0 flex-1 items-center gap-2 py-1 text-left text-sm text-ink" onClick={() => setBrowse(d.path)}><Icon name="folder" size={14} className="text-ink-3" /><span className="truncate">{d.name}</span></button><Button tone="quiet" onClick={() => setPath(d.path)}>{t("workspaceboard.choose")}</Button></div>)}</div>}
+      <p className="text-xs text-ink-3">{t(mode === "project" ? "workspaceboard.create_project_hint" : "workspaceboard.bind_directory_hint")}</p>
+      <div className="flex justify-end"><Button type="submit" tone="primary" disabled={disabled || busy || !mid || !path.trim() || (mode === "project" && (!title.trim() || Boolean(desktopApp)))} busy={busy}>{t(mode === "project" ? "workspaceboard.create_project" : "workspaceboard.bind_directory")}</Button></div>
     </form>}
   </Dialog>;
 }

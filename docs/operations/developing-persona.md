@@ -223,9 +223,9 @@ connections.json   iOS: the connection tally, with the logs, when something was 
 The connection tally (#11390) adds a file and a count (`counts.connection_weeks`, on iOS) and changes nothing a reader
 already relied on, so the package stays `version` 1: a reader that does not know the file leaves it alone.
 
-On iOS, `commit` is the app's `PersonaCommit`, which only a Release build (every TestFlight build) is stamped with: a
-Debug build's package has an empty `commit` unless it was built with `PERSONA_STAMP_COMMIT=YES`
-(`docs/operations/testing.md`, "Development builds").
+On iOS, `commit` is the app's commit as `BuildInfo` reads it (`3518b001`, with `-dirty` after the hash when the
+tree had uncommitted changes): every Release build (every TestFlight build) is stamped with it, and since #12926 so is
+every Debug iPhone build (`docs/operations/testing.md`, "Development builds").
 
 The export page lists four categories; the first three can be left out: **Logs** (`log.txt`, the event kinds
 other than the energy ones and, on iOS, `connections.json`, beside the socket's own lines), **Errors and Crashes** (`errors.jsonl`, `metrickit/diagnostics-*`), **Energy and
@@ -270,7 +270,7 @@ and lines), `DevConnections` (the connection tally: its opens and weeks), `DevSt
 (MetricKit), `DevPackage` (the zip), `DevScrub`, `DevModeViews`
 (About's group, Export Diagnostics), `DevSend` (Send To and the hand-off to a chat's box), `MeetingTapesPage` (Replay a
 Meeting Tape; the tapes are `MeetingTapeLibrary`, the player `MeetingReplay` in `apple/Persona/Recording/`). Shared code reports through `apple/Shared/DevProbe.swift`; requests through
-`HubRedirects.finished` in PersonaWire. DEBUG: `-openAbout YES` opens About, `-openAbout export` its export page.
+`HubRedirects.finished` in PersonaWire. DEBUG: `-openAbout YES` opens About, `-openAbout export` its export page, `-openAbout debug` About with Diagnostics open and `-openAbout debug-bottom` scrolled to Debug Info's Copy All (#12926).
 Tests: `apple/PersonaTests/DevModeTests.swift`, `apple/PersonaTests/ConnectionTallyTests.swift`.
 
 ## Code (web)

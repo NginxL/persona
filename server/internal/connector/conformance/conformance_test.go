@@ -30,6 +30,12 @@ func TestWireTypesAreTagged(t *testing.T) {
 			if !f.IsExported() {
 				continue
 			}
+			if f.Anonymous && f.Tag.Get("json") == "" && f.Type.Kind() == reflect.Struct {
+				// An untagged embedded struct's fields are the parent's on the wire (encoding/json inlines them):
+				// each of them needs its own name.
+				walk(f.Type, path+"."+f.Name)
+				continue
+			}
 			name, _, _ := splitTag(f.Tag.Get("json"))
 			if name == "" || name == "-" || !snake.MatchString(name) {
 				t.Errorf("%s.%s has no snake_case json name (%q)", path, f.Name, f.Tag.Get("json"))

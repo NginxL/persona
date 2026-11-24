@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, expect, it } from "vitest";
-import { buildTree, filterEntries, gapBefore, hunkRows, hunkSides, languageOf, placeThreads, splitRows, tokenLines, wideView, type Hunk } from "./code-view";
+import { ancestors, buildTree, filterEntries, gapBefore, hunkRows, hunkSides, languageOf, placeThreads, splitRows, tokenLines, wideView, type Hunk } from "./code-view";
 
 describe("文件树", () => {
   it("builds directories from paths, folds single chains, sorts directories first", () => {
@@ -21,6 +21,14 @@ describe("文件树", () => {
 
   it("filters files by path", () => {
     expect(filterEntries([{ path: "a/Retry.go" }, { path: "b.go" }, { path: "a", kind: "dir" }], "retry").map((e) => e.path)).toEqual(["a/Retry.go"]);
+  });
+
+  it("normalizes slashes when listing a path's ancestor directories", () => {
+    expect(ancestors("src/upload/client.go")).toEqual(["src", "src/upload"]);
+    expect(ancestors("/src/upload/client.go")).toEqual(["src", "src/upload"]);
+    expect(ancestors("/src//upload/client.go/")).toEqual(["src", "src/upload"]);
+    expect(ancestors("/README.md")).toEqual([]);
+    expect(ancestors("/")).toEqual([]);
   });
 });
 
@@ -45,6 +53,24 @@ describe("diff", () => {
     const hs: Hunk[] = [{ old_start: 1, new_start: 5, lines: [" a", "+b"] }, { old_start: 30, new_start: 31, lines: [" z"] }];
     expect(gapBefore(hs, 0)).toBe(4);
     expect(gapBefore(hs, 1)).toBe(24);
+  });
+
+  it("counts hidden lines before and after pure-deletion hunks", () => {
+    const midDelete: Hunk[] = [
+      { old_start: 5, new_start: 4, lines: ["-e", "-f"] },
+      { old_start: 9, new_start: 7, lines: ["-i", "+I"] },
+      { old_start: 11, new_start: 8, lines: ["-k"] },
+    ];
+    expect(gapBefore(midDelete, 0)).toBe(4);
+    expect(gapBefore(midDelete, 1)).toBe(2);
+    expect(gapBefore(midDelete, 2)).toBe(1);
+
+    const topDelete: Hunk[] = [
+      { old_start: 1, new_start: 0, lines: ["-a", "-b"] },
+      { old_start: 6, new_start: 4, lines: ["-f", "+F"] },
+    ];
+    expect(gapBefore(topDelete, 0)).toBe(0);
+    expect(gapBefore(topDelete, 1)).toBe(3);
   });
 
   it("puts threads at their lines, the rest at the end", () => {

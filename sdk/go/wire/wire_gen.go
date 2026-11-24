@@ -294,6 +294,7 @@ type Contributes struct {
 	AuthRelay           []AuthRelayItem          `json:"auth_relay,omitempty"`
 	SecretProviders     []SecretProviderItem     `json:"secret_providers,omitempty"`
 	RepositoryProviders []RepositoryProviderItem `json:"repository_providers,omitempty"`
+	MemorySources       []MemorySourceItem       `json:"memory_sources,omitempty"`
 	Messaging           []MessagingItem          `json:"messaging,omitempty"`
 	// Extra keys stay at this object's level on the wire; they cannot replace declared fields.
 	AdditionalProperties map[string]json.RawMessage `json:"-"`
@@ -305,7 +306,7 @@ func (v *Contributes) UnmarshalJSON(data []byte) error {
 		return err
 	}
 	declared := map[string]json.RawMessage{}
-	for _, key := range []string{"connectors", "voice", "transcription", "speech", "computer", "browser", "iphone", "quota", "usage", "providers", "api", "assistant", "mcp_servers", "ui", "agent_sources", "channel", "events", "shortcuts", "skills", "prompts", "themes", "looks", "triage_templates", "agent_filters", "tunnels", "error_reports", "auth_relay", "secret_providers", "repository_providers", "messaging"} {
+	for _, key := range []string{"connectors", "voice", "transcription", "speech", "computer", "browser", "iphone", "quota", "usage", "providers", "api", "assistant", "mcp_servers", "ui", "agent_sources", "channel", "events", "shortcuts", "skills", "prompts", "themes", "looks", "triage_templates", "agent_filters", "tunnels", "error_reports", "auth_relay", "secret_providers", "repository_providers", "memory_sources", "messaging"} {
 		if value, ok := extra[key]; ok {
 			declared[key] = value
 			delete(extra, key)
@@ -337,7 +338,7 @@ func (v Contributes) MarshalJSON() ([]byte, error) {
 	}
 	for key, value := range v.AdditionalProperties {
 		switch key {
-		case "connectors", "voice", "transcription", "speech", "computer", "browser", "iphone", "quota", "usage", "providers", "api", "assistant", "mcp_servers", "ui", "agent_sources", "channel", "events", "shortcuts", "skills", "prompts", "themes", "looks", "triage_templates", "agent_filters", "tunnels", "error_reports", "auth_relay", "secret_providers", "repository_providers", "messaging":
+		case "connectors", "voice", "transcription", "speech", "computer", "browser", "iphone", "quota", "usage", "providers", "api", "assistant", "mcp_servers", "ui", "agent_sources", "channel", "events", "shortcuts", "skills", "prompts", "themes", "looks", "triage_templates", "agent_filters", "tunnels", "error_reports", "auth_relay", "secret_providers", "repository_providers", "memory_sources", "messaging":
 			continue
 		}
 		fields[key] = value
@@ -595,6 +596,17 @@ type RepositoryProviderItem struct {
 	Capabilities []string `json:"capabilities,omitempty"`
 }
 
+// MemorySourceItem: the extension's memory, read by the manager one entry at a time (memory.entries;
+// memory.schema.json) so the hub decides which entries reach which scene (a conversation's standing context, a
+// recall, a dispatched task, the Inbox's helper). Needs the program to speak the protocol; one per extension. Once
+// declared, the hub stops delivering the extension's own text outlets (its assistant instructions, project context,
+// Inbox context and its connectors' read tools in the assistant's conversations) directly.
+type MemorySourceItem struct {
+	ID string `json:"id"`
+	// What settings call the source (My memory). Not only spaces, no control characters.
+	Name string `json:"name"`
+}
+
 // RepositoryCapability: A repository provider's optional answer: pr_status (repo.pr_status).
 const (
 	RepositoryCapabilityPrStatus = "pr_status"
@@ -813,9 +825,12 @@ type ChannelCapabilities struct {
 	MaxText   int    `json:"max_text,omitempty"`
 	Asks      string `json:"asks,omitempty"`
 	Push      bool   `json:"push,omitempty"`
-	Typing    bool   `json:"typing,omitempty"`
-	Progress  bool   `json:"progress,omitempty"`
-	Threads   bool   `json:"threads,omitempty"`
+	// It only replies to incoming messages or triggers and cannot send unsolicited proactive messages without reply_to;
+	// testing checks connectivity instead of calling channel.send.
+	ReplyOnly bool `json:"reply_only,omitempty"`
+	Typing    bool `json:"typing,omitempty"`
+	Progress  bool `json:"progress,omitempty"`
+	Threads   bool `json:"threads,omitempty"`
 }
 
 type EventsItem struct {
@@ -1458,6 +1473,43 @@ type SecretsResolveResult struct {
 	Value string `json:"value"`
 }
 
+// SecretStoreField: A public field name/type; never a value or source path.
+type SecretStoreField struct {
+	Name string `json:"name"`
+	Type string `json:"type"`
+}
+
+// SecretStoreTarget: the canonical public target approved on the secret storage card.
+type SecretStoreTarget struct {
+	Operation string             `json:"operation"`
+	Vault     string             `json:"vault"`
+	Item      string             `json:"item,omitempty"`
+	Title     string             `json:"title,omitempty"`
+	Category  string             `json:"category,omitempty"`
+	Fields    []SecretStoreField `json:"fields"`
+}
+
+// SecretStoreParams: secrets.store: describe metadata, prepare an expiring node HPKE key after explicit approval,
+// commit one encrypted payload.
+type SecretStoreParams struct {
+	Contribution string            `json:"contribution,omitempty"`
+	Phase        string            `json:"phase"`
+	Target       SecretStoreTarget `json:"target"`
+	Machine      string            `json:"machine"`
+	Session      string            `json:"session"`
+	KeyID        string            `json:"key_id,omitempty"`
+	Sealed       string            `json:"sealed,omitempty"`
+}
+
+// SecretStoreResult: metadata and a recipient key, or references of written fields. Never values.
+type SecretStoreResult struct {
+	Target     SecretStoreTarget `json:"target"`
+	VaultName  string            `json:"vault_name,omitempty"`
+	Key        string            `json:"key,omitempty"`
+	KeyID      string            `json:"key_id,omitempty"`
+	References map[string]string `json:"references,omitempty"`
+}
+
 // SecretsUsedEvent: secrets.used (an event to the provider, no answer): a reference it resolved was used, for the
 // usage record its own page shows. Never the value.
 type SecretsUsedEvent struct {
@@ -2009,6 +2061,7 @@ type SceneShape struct {
 	Top      *float64    `json:"top,omitempty"`
 	Color    string      `json:"color,omitempty"`
 	Material string      `json:"material,omitempty"`
+	Wall     bool        `json:"wall,omitempty"`
 	Radius   float64     `json:"radius,omitempty"`
 	Points   [][]float64 `json:"points,omitempty"`
 }
@@ -3383,8 +3436,8 @@ type ConnectorCatalogCallParams struct {
 }
 
 // ConnectorSubscriptionMode: items: new items, each kept once; snapshot: the answer as one state, kept when it
-// changes; things: the answer lists Inbox rows ready-made (ConnectorInboxThing), kept and handed to the Inbox as they
-// are.
+// changes; things: the answer lists Inbox rows ready-made (ConnectorInboxThing), and the Inbox gets the latest
+// answer's rows as they are, in its order.
 const (
 	ConnectorSubscriptionModeItems    = "items"
 	ConnectorSubscriptionModeSnapshot = "snapshot"
@@ -3694,6 +3747,14 @@ type ConnectorCallParams struct {
 	Contribution string          `json:"contribution"`
 	Name         string          `json:"name"`
 	Args         json.RawMessage `json:"args,omitempty"`
+	// The calling conversation's track (#13246): its slug, main for the main track; absent when the hub cannot tell.
+	Track string `json:"track,omitempty"`
+	// The track's kind; absent when not known (the main track).
+	TrackKind string `json:"track_kind,omitempty"`
+	// The calling conversation's information categories (health, finance, relationships, emotion, legal_id); empty is
+	// general. Absent means not known (an older hub, a turn not tagged yet): take it for sensitive. Whether the phone
+	// confirms a write stays the hub's decision.
+	Categories []string `json:"categories,omitempty"`
 }
 
 // ConnectorCallResult: tools.call and actions.do.
@@ -3742,6 +3803,14 @@ type ConnectorDoParams struct {
 	Name         string          `json:"name"`
 	Args         json.RawMessage `json:"args,omitempty"`
 	RequestID    string          `json:"request_id"`
+	// The calling conversation's track (#13246): its slug, main for the main track; absent when the hub cannot tell.
+	Track string `json:"track,omitempty"`
+	// The track's kind; absent when not known (the main track).
+	TrackKind string `json:"track_kind,omitempty"`
+	// The calling conversation's information categories (health, finance, relationships, emotion, legal_id); empty is
+	// general. Absent means not known (an older hub, a turn not tagged yet): take it for sensitive. Whether the phone
+	// confirms a write stays the hub's decision.
+	Categories []string `json:"categories,omitempty"`
 }
 
 // ConnectorRecallParams: recall: take back a message the connector's program sent in the user's name, which the
@@ -3978,6 +4047,8 @@ type ConnectorInboxThing struct {
 	// Marks the newest move: a different last adds to the open item.
 	Last string `json:"last,omitempty"`
 	URL  string `json:"url,omitempty"`
+	// The observed lifecycle of a GitHub pull request: open, closed or merged.
+	ThreadState string `json:"thread_state,omitempty"`
 	// A link the system opens instead (sms:…).
 	OpenURL string `json:"open_url,omitempty"`
 	// Where a reply goes and who sees it.
@@ -5204,24 +5275,35 @@ type TodoEventThread struct {
 	Title    string `json:"title"`
 }
 
+// TodoEventResponsible: an external responsible party on a to-do that is not a Persona-started agent: a long-running
+// session or a person, with optional machine_id and session_id hints.
+type TodoEventResponsible struct {
+	Kind      string `json:"kind"`
+	Name      string `json:"name"`
+	MachineID string `json:"machine_id,omitempty"`
+	SessionID string `json:"session_id,omitempty"`
+}
+
 // TodoChangedEvent: event.todo.changed: a to-do was created or deleted, or its title, whether it is done (or failed
-// to start), its supervisor, or the thread it is bound to changed. Changes within about a second of each other are
-// told once, as the to-do is at the end of them. title, thread and done are as after the change (the last ones for a
-// deleted to-do); thread is left out when the to-do has none, done unless the to-do is done (closed, or its task
-// failed to start). supervisor is the conversation that supervises it (the main conversation or a leader, see
-// leaders.schema.json), left out when none does; a change of supervisor (the task moved to another leader) sends it
-// too. kind is concern for something the owner raised in the main conversation and wants an answer to; such a to-do
-// is done only once its outcome was reported to the owner (an event.todo.decision of source reported comes with it),
-// never on its own; kind is left out for a to-do or a task and never changes. Notes, agents and decisions changing do
-// not send it (decisions have event.todo.decision). Read the to-do again if it matters.
+// to start), its supervisor, the thread it is bound to, or its external responsible party changed. Changes within
+// about a second of each other are told once, as the to-do is at the end of them. title, thread, done and responsible
+// are as after the change (the last ones for a deleted to-do); thread and responsible are left out when the to-do has
+// none, done unless the to-do is done (closed, or its task failed to start). supervisor is the conversation that
+// supervises it (the main conversation or a leader, see leaders.schema.json), left out when none does; a change of
+// supervisor (the task moved to another leader) sends it too. kind is concern for something the owner raised in the
+// main conversation and wants an answer to; such a to-do is done only once its outcome was reported to the owner (an
+// event.todo.decision of source reported comes with it), never on its own; kind is left out for a to-do or a task and
+// never changes. Notes, agents and decisions changing do not send it (decisions have event.todo.decision). Read the
+// to-do again if it matters.
 type TodoChangedEvent struct {
-	ID         string           `json:"id"`
-	Title      string           `json:"title"`
-	Thread     *TodoEventThread `json:"thread,omitempty"`
-	Done       bool             `json:"done,omitempty"`
-	Supervisor string           `json:"supervisor,omitempty"`
-	Kind       string           `json:"kind,omitempty"`
-	What       string           `json:"what"`
+	ID          string                `json:"id"`
+	Title       string                `json:"title"`
+	Thread      *TodoEventThread      `json:"thread,omitempty"`
+	Done        bool                  `json:"done,omitempty"`
+	Supervisor  string                `json:"supervisor,omitempty"`
+	Kind        string                `json:"kind,omitempty"`
+	Responsible *TodoEventResponsible `json:"responsible,omitempty"`
+	What        string                `json:"what"`
 }
 
 // TodoEventDecision: A decision on a to-do: what was asked and chosen (reason and supersedes_id left out when empty),
@@ -5249,13 +5331,13 @@ type TodoDecisionEvent struct {
 	Decision TodoEventDecision `json:"decision"`
 }
 
-// LeaderChangedEvent: event.leader.changed: a leader conversation was made (a side conversation added to
-// assistant.leaders), its title changed, it was filed under another knowledge-base project, it ended (it left
-// assistant.leaders; nothing is deleted) or it was made a leader again. id is the leader conversation's session id,
-// the key a work-log record keeps; title its title as the apps show it; name what the direction is called, to show it
-// by (the name the owner or the secretary gave it, else its knowledge-base project's name, else the title without its
-// "MMDD | kind | " prefix; always sent by a hub that has it, #3679); project the knowledge-base project's slug, left
-// out while it has none; ended true once it is no longer a leader, left out while it is.
+// LeaderChangedEvent: event.leader.changed: a direction was made (an id added to assistant.leaders), its title
+// changed, it was filed under another knowledge-base project, it ended (it left assistant.leaders; nothing is
+// deleted) or it was made current again. id is the stable direction id, the key a work-log record keeps; it is a
+// conversation session id only for a conversation-backed direction. title is its conversation title, or its explicit
+// name when no Persona conversation exists; name is what the direction is called (an explicit name, else its
+// knowledge-base project's name, else the title without its "MMDD | kind | " prefix); project is the knowledge-base
+// project's slug, left out while it has none; ended is true once it is no longer current, left out while it is.
 type LeaderChangedEvent struct {
 	ID      string `json:"id"`
 	Title   string `json:"title"`
@@ -5264,16 +5346,17 @@ type LeaderChangedEvent struct {
 	Ended   bool   `json:"ended,omitempty"`
 }
 
-// LeaderReportEvent: event.leader.report: one of a leader's tasks reached its goal (reached: its review accepted it),
-// needs the owner's decision (decision: its review says needs_user, or a plan of the leader's waits for the owner's
-// Start), or is stuck (stuck: in Waiting on you or stopped unfinished for 24 hours, told at most once per 24 hours);
-// those are written by the hub from the task's ledger, never by a model. progress (#3679) is the leader's own summary
-// of its direction at the goal level, sent with its leader_progress tool: reached, doing (and where it is stuck),
-// needs_you (what the owner has to do) and links (evidence; link is the first), text the three put together, todo "".
-// id names the report (never sent twice; key on it to be safe), leader the leader conversation's id, todo the task's
-// to-do id (GET /api/v1/todos with todos.read reads it; "" for a plan, which has no to-do until it starts), plan the
-// waiting plan's id (only on a decision about a plan), text at most 300 characters in the owner's language, link the
-// task's PR or delivery link when it has one, at when what it reports happened.
+// LeaderReportEvent: event.leader.report: one of a direction's tasks reached its goal (reached: its review accepted
+// it), needs the owner's decision (decision: its review says needs_user, or a plan of the direction's waits for the
+// owner's Start), or is stuck (stuck: in Waiting on you or stopped unfinished for 24 hours, told at most once per 24
+// hours); those are written by the hub from the task's ledger, never by a model. progress (#3679, #8236) is the
+// direction's own summary at the goal level, sent with leader_progress or an authorized leaders.write HTTP / node CLI
+// report: reached, doing (and where it is stuck), needs_you (what the owner has to do) and links (evidence; link is
+// the first), text the three put together, todo "". id names the report (never sent twice; key on it to be safe),
+// leader the stable direction id, todo the task's to-do id (GET /api/v1/todos with todos.read reads it; "" for a
+// plan, which has no to-do until it starts), plan the waiting plan's id (only on a decision about a plan), text at
+// most 300 characters in the owner's language, link the task's PR or delivery link when it has one, at when what it
+// reports happened.
 type LeaderReportEvent struct {
 	ID       string    `json:"id"`
 	Leader   string    `json:"leader"`
@@ -5435,9 +5518,10 @@ type ModelRefusal struct {
 }
 
 // AssistantErrorCode: error.code of the assistant calls besides permission_denied (data {scope: "assistant.read"}, or
-// "assistant.memory.read" for assistant.memory): invalid_params; not_found (assistant.messages: no such conversation
-// in the assistant's own space); assistant_offline (the manager is away: try again); machine_offline (the assistant's
-// computer is not connected or not set up: try again).
+// "assistant.memory.read" for assistant.memory, or "assistant.entries.read" for assistant.entries.list):
+// invalid_params; not_found (assistant.messages: no such conversation in the assistant's own space);
+// assistant_offline (the manager is away: try again); machine_offline (the assistant's computer is not connected or
+// not set up: try again).
 const (
 	AssistantErrorCodeInvalidParams    = "invalid_params"
 	AssistantErrorCodeNotFound         = "not_found"
@@ -5538,6 +5622,9 @@ type AssistantMemoryEntry struct {
 	Content string `json:"content,omitempty"`
 	// content was cut or left out for its size.
 	Truncated bool `json:"truncated,omitempty"`
+	// The track whose memory it is; absent for the main track's. Another track's is shown only to an extension that may
+	// read what comes from it: the user's own, or one granted every default category of the track.
+	Track string `json:"track,omitempty"`
 }
 
 // AssistantMemoryResult: an assistant without memory (none written yet, or the feature off) has no entries.
@@ -5550,6 +5637,87 @@ type AssistantMemoryResult struct {
 type AssistantMessagesResult struct {
 	Messages []AssistantMessage `json:"messages"`
 	NextSeq  *int               `json:"next_seq,omitempty"`
+}
+
+// An RFC 3339 expiry timestamp, or null when absent.
+type AssistantEntryNullableTime = json.RawMessage
+
+// Whether the choice is reversible; null means unknown.
+type AssistantEntryNullableBool = json.RawMessage
+
+type AssistantEntrySource struct {
+	Machine string `json:"machine"`
+	Session string `json:"session"`
+	MsgUuid string `json:"msg_uuid,omitempty"`
+	CardID  string `json:"card_id,omitempty"`
+	File    string `json:"file,omitempty"`
+	Line    int    `json:"line,omitempty"`
+}
+
+type AssistantEntryScope struct {
+	Executor string   `json:"executor"`
+	Machine  []string `json:"machine"`
+	Project  []string `json:"project"`
+	Personal bool     `json:"personal"`
+}
+
+type AssistantEntryScopeFilter struct {
+	Executor string   `json:"executor,omitempty"`
+	Machine  []string `json:"machine,omitempty"`
+	Project  []string `json:"project,omitempty"`
+	Personal *bool    `json:"personal,omitempty"`
+}
+
+type AssistantEntryDecision struct {
+	Options    []string        `json:"options"`
+	Selected   []string        `json:"selected"`
+	Rejected   []string        `json:"rejected"`
+	Reason     string          `json:"reason"`
+	Reversible json.RawMessage `json:"reversible"`
+}
+
+type AssistantLedgerEntry struct {
+	ID          string                  `json:"id"`
+	Type        string                  `json:"type"`
+	Text        string                  `json:"text"`
+	Quote       string                  `json:"quote"`
+	Source      AssistantEntrySource    `json:"source"`
+	RelayedVia  []string                `json:"relayed_via"`
+	Scope       AssistantEntryScope     `json:"scope"`
+	At          time.Time               `json:"at"`
+	ExpiresAt   json.RawMessage         `json:"expires_at"`
+	Supersedes  string                  `json:"supersedes"`
+	Trust       string                  `json:"trust"`
+	Status      string                  `json:"status"`
+	By          string                  `json:"by"`
+	Tag         []string                `json:"tag"`
+	Decision    *AssistantEntryDecision `json:"decision,omitempty"`
+	ExtID       string                  `json:"ext_id,omitempty"`
+	OriginSpace string                  `json:"origin_space"`
+	Category    []string                `json:"category"`
+}
+
+type AssistantEntriesParams struct {
+	After  string                     `json:"after,omitempty"`
+	Limit  int                        `json:"limit,omitempty"`
+	By     string                     `json:"by,omitempty"`
+	Trust  string                     `json:"trust,omitempty"`
+	Status string                     `json:"status,omitempty"`
+	Scope  *AssistantEntryScopeFilter `json:"scope,omitempty"`
+	Tag    string                     `json:"tag,omitempty"`
+	Type   string                     `json:"type,omitempty"`
+}
+
+type AssistantEntriesResult struct {
+	Entries []AssistantLedgerEntry `json:"entries"`
+	After   string                 `json:"after"`
+	HasMore bool                   `json:"has_more"`
+}
+
+type AssistantEntriesChangedEvent struct {
+	ID       string `json:"id"`
+	RecordID string `json:"record_id"`
+	Status   string `json:"status"`
 }
 
 // AssistantDataStatusParams: assistant.data_status takes no parameters.
@@ -5626,6 +5794,99 @@ type AssistantDataItem struct {
 
 type AssistantDataStatusResult struct {
 	Items []AssistantDataItem `json:"items"`
+}
+
+// MachinesPairLinkParams: machines.pair_link (machines.pair): request a one-time persona://link?... pairing link for
+// a pending link computer.
+type MachinesPairLinkParams struct {
+	// Optional computer id: re-issues a pairing link when an existing pending link machine matches (with name/os/icon
+	// omitted), or creates a new pending link machine with this id (defaulting name to machine_id when name is omitted).
+	MachineID string `json:"machine_id,omitempty"`
+	// Display name for a newly added computer (defaults to machine_id when machine_id is given; required when machine_id
+	// is omitted).
+	Name string `json:"name,omitempty"`
+	// Target OS hint for install commands.
+	OS string `json:"os,omitempty"`
+	// Optional icon for the computer.
+	Icon string `json:"icon,omitempty"`
+}
+
+type MachinesPairLinkResult struct {
+	// The hub machine id assigned to the computer.
+	MachineID string `json:"machine_id"`
+	// The display name of the computer.
+	Name string `json:"name"`
+	// The one-time persona://link?... pairing URL.
+	Link string `json:"link"`
+	// When the pairing link expires.
+	ExpiresAt time.Time `json:"expires_at"`
+	// Whether the computer is waiting for the owner's confirmation.
+	Pending bool `json:"pending"`
+	// Optional one-line Linux install-and-pair command when the hub knows its publication site.
+	InstallLinux string `json:"install_linux,omitempty"`
+}
+
+// MachinesStatusParams: machines.status (machines.read or machines.pair): read one computer's current connection and
+// confirmation state.
+type MachinesStatusParams struct {
+	// The computer's hub machine id.
+	MachineID string `json:"machine_id"`
+}
+
+type MachinesStatusResult struct {
+	MachineID string `json:"machine_id"`
+	Name      string `json:"name,omitempty"`
+	Exists    bool   `json:"exists"`
+	// Whether the computer's link/connection is currently up.
+	Online bool `json:"online"`
+	// Whether the resident node is connected and responding.
+	NodeOnline bool `json:"node_online"`
+	// Whether the computer is waiting for the owner's confirmation.
+	Pending bool `json:"pending"`
+	// When the computer was last seen online, if ever.
+	LastSeen time.Time `json:"last_seen,omitzero"`
+	// Last connection error, if any.
+	Error string `json:"error,omitempty"`
+}
+
+// BrowserMachinesParams: browser.machines (browser.run): list computers that have a browser backend enabled.
+type BrowserMachinesParams struct {
+	// Optional backend filter (e.g. ego, cdp). Empty returns all backends.
+	Backend string `json:"backend,omitempty"`
+}
+
+type BrowserMachine struct {
+	MachineID string `json:"machine_id"`
+	Name      string `json:"name"`
+	// Browser backend identifier (e.g. ego, cdp).
+	Backend string `json:"backend"`
+	Online  bool   `json:"online"`
+	Ready   bool   `json:"ready"`
+}
+
+type BrowserMachinesResult struct {
+	Machines []BrowserMachine `json:"machines"`
+}
+
+// BrowserRunParams: browser.run (browser.run): run a script inside an extension-isolated browser task space on
+// machine_id.
+type BrowserRunParams struct {
+	MachineID string `json:"machine_id"`
+	// Browser backend to use (default: ego).
+	Backend string `json:"backend,omitempty"`
+	// Logical slot name scoped to this extension (e.g. pac-muse).
+	Slot string `json:"slot"`
+	// Async JS script body executed inside the isolated task space.
+	Script    string `json:"script"`
+	TimeoutMs int    `json:"timeout_ms,omitempty"`
+}
+
+type BrowserRunResult struct {
+	Backend string `json:"backend"`
+	// Raw output / JSON payload returned by the browser backend.
+	Output string `json:"output"`
+	// Script error message, if any.
+	Error string `json:"error,omitempty"`
 }
 
 type StorageEmptyParams struct {
@@ -6415,6 +6676,75 @@ type RepoPRStatusResult struct {
 	ViewerIsAuthor *bool `json:"viewer_is_author,omitempty"`
 }
 
+// MemoryErrorCode: error.code a memory source answers besides the base ErrorCode: not_ready (its entries are not
+// loaded yet; the manager uses none of them this time and asks again at the next assembly), failed (anything else,
+// say why in message).
+const (
+	MemoryErrorCodeNotReady = "not_ready"
+	MemoryErrorCodeFailed   = "failed"
+)
+
+// MemoryErrorCodes are the values of MemoryErrorCode, in order.
+var MemoryErrorCodes = []string{"not_ready", "failed"}
+
+// MemoryEntriesParams: memory.entries: one page of the contribution's entries, most important first (standing ones
+// first, then by rank, then newest). Read-only: answering changes nothing in the program's state.
+type MemoryEntriesParams struct {
+	// The memory_sources item's id.
+	Contribution string `json:"contribution"`
+	// At most this many entries on the page (the manager asks 200). Only a cap: the program ends a page early, with
+	// has_more and after, so the answer stays within 1 MB.
+	Limit int `json:"limit"`
+	// The previous page's after, to read on; empty for the first page.
+	After string `json:"after,omitempty"`
+}
+
+// MemoryEntriesResult: one page of entries. tagged is the program's promise for the whole page: it writes
+// origin_space and categories on every entry and leaves them out only when empty, so a missing origin_space means the
+// main space and missing categories mean general. A program that cannot promise that answers tagged false, and the
+// manager then takes none of its entries for its own track (each is in no track, not known, so the strictest rule
+// holds).
+type MemoryEntriesResult struct {
+	Entries []MemoryEntry `json:"entries"`
+	Tagged  bool          `json:"tagged"`
+	// Another page follows; ask again with after. When true, after must be set: true with an empty after counts as the
+	// end of the entries.
+	HasMore bool `json:"has_more"`
+	// Opaque: what to send as after for the next page; required in practice whenever has_more is true.
+	After string `json:"after,omitempty"`
+}
+
+// MemoryEntry: one entry as the program keeps it. Only an active entry is carried; the others may be answered (so a
+// page's order stays the program's) and are skipped. An entry that breaks a rule here is dropped alone, never the
+// page.
+type MemoryEntry struct {
+	// Stable across pages and answers: a to-do's brief names the entries it carried by it (prefixed memory-extension:).
+	ID string `json:"id"`
+	// What the entry says, as the program would render it, on one or a few lines.
+	Text string `json:"text"`
+	// The program's own grouping (preferences, workflow, people…). Informational: the hub neither filters nor orders by
+	// it.
+	Facet string `json:"facet,omitempty"`
+	// active: the program would use it today, whatever it calls that state itself (a program with its own stable or
+	// shifting states answers active for both); candidate: not borne out yet; dormant: not seen lately; retired: no
+	// longer true. Only active entries are carried; an entry with any other value is dropped.
+	Status string `json:"status"`
+	// The slug of the space the entry was first said in; left out for the main space.
+	OriginSpace string `json:"origin_space,omitempty"`
+	// Its information categories (health, finance, relationships, emotion, legal_id); left out for a general entry. A
+	// category the hub does not know makes the entry not known.
+	Categories []string `json:"categories,omitempty"`
+	// The program kept it in every conversation (always in context). Only a standing entry goes to a standing channel
+	// (usage still decides); the others come in only by relevance (their subjects or text) in a recall, a hand-off or
+	// the Inbox.
+	Standing bool `json:"standing,omitempty"`
+	// The program's order among entries alike in standing: higher first. Left out: 0.
+	Rank int `json:"rank,omitempty"`
+	// The names whose mention brings the entry in (a person, a project, a place): what a task's or a message's words are
+	// matched with, besides its text.
+	Subjects []string `json:"subjects,omitempty"`
+}
+
 // requiredJSONComponent preserves required fields only inside stream payloads.
 type requiredJSONComponent Component
 
@@ -7016,6 +7346,7 @@ var newDef = map[string]func() any{
 	"AuthRelayItem":                 func() any { return new(AuthRelayItem) },
 	"SecretProviderItem":            func() any { return new(SecretProviderItem) },
 	"RepositoryProviderItem":        func() any { return new(RepositoryProviderItem) },
+	"MemorySourceItem":              func() any { return new(MemorySourceItem) },
 	"RepositoryLinkLabel":           func() any { return new(RepositoryLinkLabel) },
 	"ErrorReportsItem":              func() any { return new(ErrorReportsItem) },
 	"TunnelItem":                    func() any { return new(TunnelItem) },
@@ -7089,6 +7420,10 @@ var newDef = map[string]func() any{
 	"SecretsDescribeResult":         func() any { return new(SecretsDescribeResult) },
 	"SecretsResolveParams":          func() any { return new(SecretsResolveParams) },
 	"SecretsResolveResult":          func() any { return new(SecretsResolveResult) },
+	"SecretStoreField":              func() any { return new(SecretStoreField) },
+	"SecretStoreTarget":             func() any { return new(SecretStoreTarget) },
+	"SecretStoreParams":             func() any { return new(SecretStoreParams) },
+	"SecretStoreResult":             func() any { return new(SecretStoreResult) },
 	"SecretsUsedEvent":              func() any { return new(SecretsUsedEvent) },
 	"ExtensionNotification":         func() any { return new(ExtensionNotification) },
 	"View":                          func() any { return new(View) },
@@ -7363,6 +7698,7 @@ var newDef = map[string]func() any{
 	"KBChangedEvent":                func() any { return new(KBChangedEvent) },
 	"KBForgottenEvent":              func() any { return new(KBForgottenEvent) },
 	"TodoEventThread":               func() any { return new(TodoEventThread) },
+	"TodoEventResponsible":          func() any { return new(TodoEventResponsible) },
 	"TodoChangedEvent":              func() any { return new(TodoChangedEvent) },
 	"TodoEventDecision":             func() any { return new(TodoEventDecision) },
 	"TodoDecisionEvent":             func() any { return new(TodoDecisionEvent) },
@@ -7387,9 +7723,26 @@ var newDef = map[string]func() any{
 	"AssistantMemoryEntry":          func() any { return new(AssistantMemoryEntry) },
 	"AssistantMemoryResult":         func() any { return new(AssistantMemoryResult) },
 	"AssistantMessagesResult":       func() any { return new(AssistantMessagesResult) },
+	"AssistantEntrySource":          func() any { return new(AssistantEntrySource) },
+	"AssistantEntryScope":           func() any { return new(AssistantEntryScope) },
+	"AssistantEntryScopeFilter":     func() any { return new(AssistantEntryScopeFilter) },
+	"AssistantEntryDecision":        func() any { return new(AssistantEntryDecision) },
+	"AssistantLedgerEntry":          func() any { return new(AssistantLedgerEntry) },
+	"AssistantEntriesParams":        func() any { return new(AssistantEntriesParams) },
+	"AssistantEntriesResult":        func() any { return new(AssistantEntriesResult) },
+	"AssistantEntriesChangedEvent":  func() any { return new(AssistantEntriesChangedEvent) },
 	"AssistantDataStatusParams":     func() any { return new(AssistantDataStatusParams) },
 	"AssistantDataItem":             func() any { return new(AssistantDataItem) },
 	"AssistantDataStatusResult":     func() any { return new(AssistantDataStatusResult) },
+	"MachinesPairLinkParams":        func() any { return new(MachinesPairLinkParams) },
+	"MachinesPairLinkResult":        func() any { return new(MachinesPairLinkResult) },
+	"MachinesStatusParams":          func() any { return new(MachinesStatusParams) },
+	"MachinesStatusResult":          func() any { return new(MachinesStatusResult) },
+	"BrowserMachinesParams":         func() any { return new(BrowserMachinesParams) },
+	"BrowserMachine":                func() any { return new(BrowserMachine) },
+	"BrowserMachinesResult":         func() any { return new(BrowserMachinesResult) },
+	"BrowserRunParams":              func() any { return new(BrowserRunParams) },
+	"BrowserRunResult":              func() any { return new(BrowserRunResult) },
 	"StorageEmptyParams":            func() any { return new(StorageEmptyParams) },
 	"StorageRequestResult":          func() any { return new(StorageRequestResult) },
 	"StorageKeyParams":              func() any { return new(StorageKeyParams) },
@@ -7450,6 +7803,9 @@ var newDef = map[string]func() any{
 	"RepoDescribeResult":            func() any { return new(RepoDescribeResult) },
 	"RepoPRStatusParams":            func() any { return new(RepoPRStatusParams) },
 	"RepoPRStatusResult":            func() any { return new(RepoPRStatusResult) },
+	"MemoryEntriesParams":           func() any { return new(MemoryEntriesParams) },
+	"MemoryEntriesResult":           func() any { return new(MemoryEntriesResult) },
+	"MemoryEntry":                   func() any { return new(MemoryEntry) },
 }
 
 // Call is one call or event of an extension point's protocol (the schemas' x-methods and x-events): who
@@ -7462,97 +7818,104 @@ type Call struct {
 
 // Calls are the calls and events the schemas describe, by name as on the wire.
 var Calls = map[string]Call{
-	"connector.status":               {Name: "connector.status", From: "hub", Params: "ConnectorParams", Result: "ConnectorStatus"},
-	"connector.manifest":             {Name: "connector.manifest", From: "hub", Params: "ConnectorParams", Result: "ConnectorManifest"},
-	"connector.catalog.list":         {Name: "connector.catalog.list", From: "hub", Params: "ConnectorParams", Result: "ConnectorCatalog"},
-	"connector.catalog.call":         {Name: "connector.catalog.call", From: "hub", Params: "ConnectorCatalogCallParams", Result: "ConnectorCallResult"},
-	"connector.tools.list":           {Name: "connector.tools.list", From: "hub", Params: "ConnectorParams", Result: "ConnectorTools"},
-	"connector.tools.call":           {Name: "connector.tools.call", From: "hub", Params: "ConnectorCallParams", Result: "ConnectorCallResult"},
-	"connector.actions.list":         {Name: "connector.actions.list", From: "hub", Params: "ConnectorParams", Result: "ConnectorTools"},
-	"connector.actions.describe":     {Name: "connector.actions.describe", From: "hub", Params: "ConnectorCallParams", Result: "ConnectorDescribeResult"},
-	"connector.actions.do":           {Name: "connector.actions.do", From: "hub", Params: "ConnectorDoParams", Result: "ConnectorCallResult"},
-	"connector.recall":               {Name: "connector.recall", From: "hub", Params: "ConnectorRecallParams", Result: "ConnectorRecallResult"},
-	"connector.recall.can":           {Name: "connector.recall.can", From: "hub", Params: "ConnectorRecallCanParams", Result: "ConnectorRecallCanResult"},
-	"connector.recall.do":            {Name: "connector.recall.do", From: "hub", Params: "ConnectorRecallDoParams", Result: "ConnectorRecallDoResult"},
-	"connector.thread.page":          {Name: "connector.thread.page", From: "hub", Params: "ConnectorThreadParams", Result: "ConnectorThreadPage"},
-	"connector.thread.media":         {Name: "connector.thread.media", From: "hub", Params: "ConnectorMediaParams", Result: "ConnectorMedia"},
-	"connector.inbox.collect":        {Name: "connector.inbox.collect", From: "hub", Params: "ConnectorParams", Result: "ConnectorCollectResult"},
-	"connector.inbox.reply":          {Name: "connector.inbox.reply", From: "hub", Params: "ConnectorInboxReply", Result: "Empty"},
-	"connector.inbox.settle":         {Name: "connector.inbox.settle", From: "hub", Params: "ConnectorSettleParams", Result: "ConnectorSettled"},
-	"connector.archive.changes":      {Name: "connector.archive.changes", From: "hub", Params: "ConnectorChangesParams", Result: "ConnectorChangesResult"},
-	"connector.archive.media":        {Name: "connector.archive.media", From: "hub", Params: "ConnectorMediaParams", Result: "ConnectorMedia"},
-	"connector.history.chats":        {Name: "connector.history.chats", From: "hub", Params: "ConnectorParams", Result: "ConnectorHistoryChats"},
-	"connector.archive.history":      {Name: "connector.archive.history", From: "hub", Params: "ConnectorHistoryParams", Result: "ConnectorHistoryPage"},
-	"connector.history.anchors":      {Name: "connector.history.anchors", From: "hub", Params: "ConnectorHistoryAnchorsParams", Result: "ConnectorHistoryAnchors"},
-	"connector.items.list":           {Name: "connector.items.list", From: "hub", Params: "ConnectorParams", Result: "ConnectorItems"},
-	"connector.items.doc_title":      {Name: "connector.items.doc_title", From: "hub", Params: "ConnectorDocTitleParams", Result: "ConnectorDocTitle"},
-	"connector.snapshot.get":         {Name: "connector.snapshot.get", From: "hub", Params: "ConnectorSnapshotParams", Result: "ConnectorSnapshot"},
-	"connector.group.tool":           {Name: "connector.group.tool", From: "hub", Params: "ConnectorGroupToolParams", Result: ""},
-	"connector.group.append":         {Name: "connector.group.append", From: "hub", Params: "ConnectorGroupAppendParams", Result: "ConnectorInboxThing"},
-	"connector.group.fallback":       {Name: "connector.group.fallback", From: "hub", Params: "ConnectorGroupFallbackParams", Result: "ConnectorGroupFallback"},
-	"connector.login.step":           {Name: "connector.login.step", From: "hub", Params: "ConnectorLoginParams", Result: "ConnectorPrompt"},
-	"connector.logout":               {Name: "connector.logout", From: "hub", Params: "ConnectorParams", Result: "Empty"},
-	"connector.options.get":          {Name: "connector.options.get", From: "hub", Params: "ConnectorParams", Result: "ConnectorOptions"},
-	"connector.options.set":          {Name: "connector.options.set", From: "hub", Params: "ConnectorOptionsParams", Result: "Empty"},
-	"connector.machines.online":      {Name: "connector.machines.online", From: "hub", Params: "ConnectorMachineParams", Result: "Empty"},
-	"connector.auth.get":             {Name: "connector.auth.get", From: "hub", Params: "ConnectorParams", Result: "ConnectorAuth"},
-	"connector.auth.set":             {Name: "connector.auth.set", From: "hub", Params: "ConnectorAuthSource", Result: "ConnectorAuth"},
-	"connector.secrets.load":         {Name: "connector.secrets.load", From: "program", Params: "ConnectorParams", Result: "ConnectorSecret"},
-	"connector.secrets.save":         {Name: "connector.secrets.save", From: "program", Params: "ConnectorSecretSaveParams", Result: "Empty"},
-	"connector.secrets.delete":       {Name: "connector.secrets.delete", From: "program", Params: "ConnectorParams", Result: "Empty"},
-	"connector.posts.put":            {Name: "connector.posts.put", From: "program", Params: "ConnectorPostsPutParams", Result: "ConnectorPostsPut"},
-	"connector.posts.comments":       {Name: "connector.posts.comments", From: "program", Params: "ConnectorPostsCommentsParams", Result: "Empty"},
-	"connector.posts.pending":        {Name: "connector.posts.pending", From: "program", Params: "ConnectorPostsPendingParams", Result: "ConnectorPostsPending"},
-	"connector.archive.chats":        {Name: "connector.archive.chats", From: "program", Params: "ConnectorArchiveChatsParams", Result: "ConnectorArchivedChats"},
-	"connector.credentials.gh_token": {Name: "connector.credentials.gh_token", From: "program", Params: "ConnectorGhTokenParams", Result: "ConnectorGhToken"},
-	"sent.record":                    {Name: "sent.record", From: "program", Params: "ConnectorSentRecordParams", Result: "Empty"},
-	"connector.changed":              {Name: "connector.changed", From: "program", Params: "ConnectorChangedEvent", Result: "", Event: true},
-	"channel.receive":                {Name: "channel.receive", From: "program", Params: "ChannelReceiveParams", Result: "Empty"},
-	"channel.status":                 {Name: "channel.status", From: "program", Params: "ChannelStatusParams", Result: "Empty"},
-	"channel.send":                   {Name: "channel.send", From: "hub", Params: "ChannelSendParams", Result: "ChannelSendResult"},
-	"channel.typing":                 {Name: "channel.typing", From: "hub", Params: "ChannelTypingParams", Result: "Empty"},
-	"channel.edit":                   {Name: "channel.edit", From: "hub", Params: "ChannelEditParams", Result: "Empty"},
-	"kb.list":                        {Name: "kb.list", From: "program", Params: "KBListParams", Result: "KBListResult"},
-	"kb.get":                         {Name: "kb.get", From: "program", Params: "KBGetParams", Result: "KBGetResult"},
-	"kb.day":                         {Name: "kb.day", From: "program", Params: "KBDayParams", Result: "KBDayResult"},
-	"kb.search":                      {Name: "kb.search", From: "program", Params: "KBSearchParams", Result: "KBSearchResult"},
-	"kb.update":                      {Name: "kb.update", From: "program", Params: "KBUpdateParams", Result: "KBUpdateResult"},
-	"kb.owner":                       {Name: "kb.owner", From: "program", Params: "KBOwnerParams", Result: "KBOwner"},
-	"kb.recent":                      {Name: "kb.recent", From: "program", Params: "KBRecentParams", Result: "KBRecentResult"},
-	"event.kb.changed":               {Name: "event.kb.changed", From: "hub", Params: "KBChangedEvent", Result: "", Event: true},
-	"event.kb.forgotten":             {Name: "event.kb.forgotten", From: "hub", Params: "KBForgottenEvent", Result: "", Event: true},
-	"event.todo.changed":             {Name: "event.todo.changed", From: "hub", Params: "TodoChangedEvent", Result: "", Event: true},
-	"event.todo.decision":            {Name: "event.todo.decision", From: "hub", Params: "TodoDecisionEvent", Result: "", Event: true},
-	"event.leader.changed":           {Name: "event.leader.changed", From: "hub", Params: "LeaderChangedEvent", Result: "", Event: true},
-	"event.leader.report":            {Name: "event.leader.report", From: "hub", Params: "LeaderReportEvent", Result: "", Event: true},
-	"model.complete":                 {Name: "model.complete", From: "program", Params: "ModelCompleteParams", Result: "ModelCompleteResult"},
-	"assistant.conversations":        {Name: "assistant.conversations", From: "program", Params: "AssistantConversationsParams", Result: "AssistantConversationsResult"},
-	"assistant.messages":             {Name: "assistant.messages", From: "program", Params: "AssistantMessagesParams", Result: "AssistantMessagesResult"},
-	"assistant.memory":               {Name: "assistant.memory", From: "program", Params: "AssistantMemoryParams", Result: "AssistantMemoryResult"},
-	"assistant.data_status":          {Name: "assistant.data_status", From: "program", Params: "AssistantDataStatusParams", Result: "AssistantDataStatusResult"},
-	"storage.request":                {Name: "storage.request", From: "program", Params: "StorageEmptyParams", Result: "StorageRequestResult"},
-	"storage.get":                    {Name: "storage.get", From: "program", Params: "StorageKeyParams", Result: "StorageEntry"},
-	"storage.list":                   {Name: "storage.list", From: "program", Params: "StorageListParams", Result: "StorageListResult"},
-	"storage.transaction":            {Name: "storage.transaction", From: "program", Params: "StorageTransactionParams", Result: "StorageTransactionResult"},
-	"storage.queue.list":             {Name: "storage.queue.list", From: "program", Params: "StorageQueueListParams", Result: "StorageQueueListResult"},
-	"storage.queue.enqueue":          {Name: "storage.queue.enqueue", From: "program", Params: "StorageEnqueueParams", Result: "StorageJobResult"},
-	"storage.queue.claim":            {Name: "storage.queue.claim", From: "program", Params: "StorageClaimParams", Result: "StorageClaimResult"},
-	"storage.queue.renew":            {Name: "storage.queue.renew", From: "program", Params: "StorageRenewParams", Result: "StorageJobResult"},
-	"storage.queue.ack":              {Name: "storage.queue.ack", From: "program", Params: "StorageSettleParams", Result: "StorageJobResult"},
-	"storage.queue.forget":           {Name: "storage.queue.forget", From: "program", Params: "StorageSettleParams", Result: "StorageDeleteResult"},
-	"storage.queue.retry":            {Name: "storage.queue.retry", From: "program", Params: "StorageRetryParams", Result: "StorageJobResult"},
-	"storage.blob.create":            {Name: "storage.blob.create", From: "program", Params: "StorageBlobCreateParams", Result: "StorageBlobCreateResult"},
-	"storage.blob.write":             {Name: "storage.blob.write", From: "program", Params: "StorageBlobWriteParams", Result: "StorageBlobWriteResult"},
-	"storage.blob.finish":            {Name: "storage.blob.finish", From: "program", Params: "StorageBlobMutateParams", Result: "StorageBlobFinishResult"},
-	"storage.blob.delete":            {Name: "storage.blob.delete", From: "program", Params: "StorageBlobMutateParams", Result: "StorageDeleteResult"},
-	"storage.blob.read":              {Name: "storage.blob.read", From: "program", Params: "StorageBlobReadParams", Result: "StorageBlobReadResult"},
-	"transcription.start":            {Name: "transcription.start", From: "program", Params: "TranscriptionStartParams", Result: "TranscriptionStartResult"},
-	"transcription.audio":            {Name: "transcription.audio", From: "program", Params: "TranscriptionAudioParams", Result: "Empty"},
-	"transcription.finish":           {Name: "transcription.finish", From: "program", Params: "TranscriptionJobParams", Result: "TranscriptionFinishResult"},
-	"transcription.cancel":           {Name: "transcription.cancel", From: "program", Params: "TranscriptionJobParams", Result: "Empty"},
-	"repo.parse":                     {Name: "repo.parse", From: "hub", Params: "RepoParseParams", Result: "RepoParseResult"},
-	"repo.check":                     {Name: "repo.check", From: "hub", Params: "RepoCheckParams", Result: "Empty"},
-	"repo.link":                      {Name: "repo.link", From: "hub", Params: "RepoLinkParams", Result: "RepoLinkResult"},
-	"repo.describe":                  {Name: "repo.describe", From: "hub", Params: "RepoDescribeParams", Result: "RepoDescribeResult"},
-	"repo.pr_status":                 {Name: "repo.pr_status", From: "hub", Params: "RepoPRStatusParams", Result: "RepoPRStatusResult"},
+	"connector.status":                {Name: "connector.status", From: "hub", Params: "ConnectorParams", Result: "ConnectorStatus"},
+	"connector.manifest":              {Name: "connector.manifest", From: "hub", Params: "ConnectorParams", Result: "ConnectorManifest"},
+	"connector.catalog.list":          {Name: "connector.catalog.list", From: "hub", Params: "ConnectorParams", Result: "ConnectorCatalog"},
+	"connector.catalog.call":          {Name: "connector.catalog.call", From: "hub", Params: "ConnectorCatalogCallParams", Result: "ConnectorCallResult"},
+	"connector.tools.list":            {Name: "connector.tools.list", From: "hub", Params: "ConnectorParams", Result: "ConnectorTools"},
+	"connector.tools.call":            {Name: "connector.tools.call", From: "hub", Params: "ConnectorCallParams", Result: "ConnectorCallResult"},
+	"connector.actions.list":          {Name: "connector.actions.list", From: "hub", Params: "ConnectorParams", Result: "ConnectorTools"},
+	"connector.actions.describe":      {Name: "connector.actions.describe", From: "hub", Params: "ConnectorCallParams", Result: "ConnectorDescribeResult"},
+	"connector.actions.do":            {Name: "connector.actions.do", From: "hub", Params: "ConnectorDoParams", Result: "ConnectorCallResult"},
+	"connector.recall":                {Name: "connector.recall", From: "hub", Params: "ConnectorRecallParams", Result: "ConnectorRecallResult"},
+	"connector.recall.can":            {Name: "connector.recall.can", From: "hub", Params: "ConnectorRecallCanParams", Result: "ConnectorRecallCanResult"},
+	"connector.recall.do":             {Name: "connector.recall.do", From: "hub", Params: "ConnectorRecallDoParams", Result: "ConnectorRecallDoResult"},
+	"connector.thread.page":           {Name: "connector.thread.page", From: "hub", Params: "ConnectorThreadParams", Result: "ConnectorThreadPage"},
+	"connector.thread.media":          {Name: "connector.thread.media", From: "hub", Params: "ConnectorMediaParams", Result: "ConnectorMedia"},
+	"connector.inbox.collect":         {Name: "connector.inbox.collect", From: "hub", Params: "ConnectorParams", Result: "ConnectorCollectResult"},
+	"connector.inbox.reply":           {Name: "connector.inbox.reply", From: "hub", Params: "ConnectorInboxReply", Result: "Empty"},
+	"connector.inbox.settle":          {Name: "connector.inbox.settle", From: "hub", Params: "ConnectorSettleParams", Result: "ConnectorSettled"},
+	"connector.archive.changes":       {Name: "connector.archive.changes", From: "hub", Params: "ConnectorChangesParams", Result: "ConnectorChangesResult"},
+	"connector.archive.media":         {Name: "connector.archive.media", From: "hub", Params: "ConnectorMediaParams", Result: "ConnectorMedia"},
+	"connector.history.chats":         {Name: "connector.history.chats", From: "hub", Params: "ConnectorParams", Result: "ConnectorHistoryChats"},
+	"connector.archive.history":       {Name: "connector.archive.history", From: "hub", Params: "ConnectorHistoryParams", Result: "ConnectorHistoryPage"},
+	"connector.history.anchors":       {Name: "connector.history.anchors", From: "hub", Params: "ConnectorHistoryAnchorsParams", Result: "ConnectorHistoryAnchors"},
+	"connector.items.list":            {Name: "connector.items.list", From: "hub", Params: "ConnectorParams", Result: "ConnectorItems"},
+	"connector.items.doc_title":       {Name: "connector.items.doc_title", From: "hub", Params: "ConnectorDocTitleParams", Result: "ConnectorDocTitle"},
+	"connector.snapshot.get":          {Name: "connector.snapshot.get", From: "hub", Params: "ConnectorSnapshotParams", Result: "ConnectorSnapshot"},
+	"connector.group.tool":            {Name: "connector.group.tool", From: "hub", Params: "ConnectorGroupToolParams", Result: ""},
+	"connector.group.append":          {Name: "connector.group.append", From: "hub", Params: "ConnectorGroupAppendParams", Result: "ConnectorInboxThing"},
+	"connector.group.fallback":        {Name: "connector.group.fallback", From: "hub", Params: "ConnectorGroupFallbackParams", Result: "ConnectorGroupFallback"},
+	"connector.login.step":            {Name: "connector.login.step", From: "hub", Params: "ConnectorLoginParams", Result: "ConnectorPrompt"},
+	"connector.logout":                {Name: "connector.logout", From: "hub", Params: "ConnectorParams", Result: "Empty"},
+	"connector.options.get":           {Name: "connector.options.get", From: "hub", Params: "ConnectorParams", Result: "ConnectorOptions"},
+	"connector.options.set":           {Name: "connector.options.set", From: "hub", Params: "ConnectorOptionsParams", Result: "Empty"},
+	"connector.machines.online":       {Name: "connector.machines.online", From: "hub", Params: "ConnectorMachineParams", Result: "Empty"},
+	"connector.auth.get":              {Name: "connector.auth.get", From: "hub", Params: "ConnectorParams", Result: "ConnectorAuth"},
+	"connector.auth.set":              {Name: "connector.auth.set", From: "hub", Params: "ConnectorAuthSource", Result: "ConnectorAuth"},
+	"connector.secrets.load":          {Name: "connector.secrets.load", From: "program", Params: "ConnectorParams", Result: "ConnectorSecret"},
+	"connector.secrets.save":          {Name: "connector.secrets.save", From: "program", Params: "ConnectorSecretSaveParams", Result: "Empty"},
+	"connector.secrets.delete":        {Name: "connector.secrets.delete", From: "program", Params: "ConnectorParams", Result: "Empty"},
+	"connector.posts.put":             {Name: "connector.posts.put", From: "program", Params: "ConnectorPostsPutParams", Result: "ConnectorPostsPut"},
+	"connector.posts.comments":        {Name: "connector.posts.comments", From: "program", Params: "ConnectorPostsCommentsParams", Result: "Empty"},
+	"connector.posts.pending":         {Name: "connector.posts.pending", From: "program", Params: "ConnectorPostsPendingParams", Result: "ConnectorPostsPending"},
+	"connector.archive.chats":         {Name: "connector.archive.chats", From: "program", Params: "ConnectorArchiveChatsParams", Result: "ConnectorArchivedChats"},
+	"connector.credentials.gh_token":  {Name: "connector.credentials.gh_token", From: "program", Params: "ConnectorGhTokenParams", Result: "ConnectorGhToken"},
+	"sent.record":                     {Name: "sent.record", From: "program", Params: "ConnectorSentRecordParams", Result: "Empty"},
+	"connector.changed":               {Name: "connector.changed", From: "program", Params: "ConnectorChangedEvent", Result: "", Event: true},
+	"channel.receive":                 {Name: "channel.receive", From: "program", Params: "ChannelReceiveParams", Result: "Empty"},
+	"channel.status":                  {Name: "channel.status", From: "program", Params: "ChannelStatusParams", Result: "Empty"},
+	"channel.send":                    {Name: "channel.send", From: "hub", Params: "ChannelSendParams", Result: "ChannelSendResult"},
+	"channel.typing":                  {Name: "channel.typing", From: "hub", Params: "ChannelTypingParams", Result: "Empty"},
+	"channel.edit":                    {Name: "channel.edit", From: "hub", Params: "ChannelEditParams", Result: "Empty"},
+	"kb.list":                         {Name: "kb.list", From: "program", Params: "KBListParams", Result: "KBListResult"},
+	"kb.get":                          {Name: "kb.get", From: "program", Params: "KBGetParams", Result: "KBGetResult"},
+	"kb.day":                          {Name: "kb.day", From: "program", Params: "KBDayParams", Result: "KBDayResult"},
+	"kb.search":                       {Name: "kb.search", From: "program", Params: "KBSearchParams", Result: "KBSearchResult"},
+	"kb.update":                       {Name: "kb.update", From: "program", Params: "KBUpdateParams", Result: "KBUpdateResult"},
+	"kb.owner":                        {Name: "kb.owner", From: "program", Params: "KBOwnerParams", Result: "KBOwner"},
+	"kb.recent":                       {Name: "kb.recent", From: "program", Params: "KBRecentParams", Result: "KBRecentResult"},
+	"event.kb.changed":                {Name: "event.kb.changed", From: "hub", Params: "KBChangedEvent", Result: "", Event: true},
+	"event.kb.forgotten":              {Name: "event.kb.forgotten", From: "hub", Params: "KBForgottenEvent", Result: "", Event: true},
+	"event.todo.changed":              {Name: "event.todo.changed", From: "hub", Params: "TodoChangedEvent", Result: "", Event: true},
+	"event.todo.decision":             {Name: "event.todo.decision", From: "hub", Params: "TodoDecisionEvent", Result: "", Event: true},
+	"event.leader.changed":            {Name: "event.leader.changed", From: "hub", Params: "LeaderChangedEvent", Result: "", Event: true},
+	"event.leader.report":             {Name: "event.leader.report", From: "hub", Params: "LeaderReportEvent", Result: "", Event: true},
+	"model.complete":                  {Name: "model.complete", From: "program", Params: "ModelCompleteParams", Result: "ModelCompleteResult"},
+	"assistant.conversations":         {Name: "assistant.conversations", From: "program", Params: "AssistantConversationsParams", Result: "AssistantConversationsResult"},
+	"assistant.messages":              {Name: "assistant.messages", From: "program", Params: "AssistantMessagesParams", Result: "AssistantMessagesResult"},
+	"assistant.memory":                {Name: "assistant.memory", From: "program", Params: "AssistantMemoryParams", Result: "AssistantMemoryResult"},
+	"assistant.entries.list":          {Name: "assistant.entries.list", From: "program", Params: "AssistantEntriesParams", Result: "AssistantEntriesResult"},
+	"event.assistant.entries.changed": {Name: "event.assistant.entries.changed", From: "hub", Params: "AssistantEntriesChangedEvent", Result: "", Event: true},
+	"assistant.data_status":           {Name: "assistant.data_status", From: "program", Params: "AssistantDataStatusParams", Result: "AssistantDataStatusResult"},
+	"machines.pair_link":              {Name: "machines.pair_link", From: "program", Params: "MachinesPairLinkParams", Result: "MachinesPairLinkResult"},
+	"machines.status":                 {Name: "machines.status", From: "program", Params: "MachinesStatusParams", Result: "MachinesStatusResult"},
+	"browser.machines":                {Name: "browser.machines", From: "program", Params: "BrowserMachinesParams", Result: "BrowserMachinesResult"},
+	"browser.run":                     {Name: "browser.run", From: "program", Params: "BrowserRunParams", Result: "BrowserRunResult"},
+	"storage.request":                 {Name: "storage.request", From: "program", Params: "StorageEmptyParams", Result: "StorageRequestResult"},
+	"storage.get":                     {Name: "storage.get", From: "program", Params: "StorageKeyParams", Result: "StorageEntry"},
+	"storage.list":                    {Name: "storage.list", From: "program", Params: "StorageListParams", Result: "StorageListResult"},
+	"storage.transaction":             {Name: "storage.transaction", From: "program", Params: "StorageTransactionParams", Result: "StorageTransactionResult"},
+	"storage.queue.list":              {Name: "storage.queue.list", From: "program", Params: "StorageQueueListParams", Result: "StorageQueueListResult"},
+	"storage.queue.enqueue":           {Name: "storage.queue.enqueue", From: "program", Params: "StorageEnqueueParams", Result: "StorageJobResult"},
+	"storage.queue.claim":             {Name: "storage.queue.claim", From: "program", Params: "StorageClaimParams", Result: "StorageClaimResult"},
+	"storage.queue.renew":             {Name: "storage.queue.renew", From: "program", Params: "StorageRenewParams", Result: "StorageJobResult"},
+	"storage.queue.ack":               {Name: "storage.queue.ack", From: "program", Params: "StorageSettleParams", Result: "StorageJobResult"},
+	"storage.queue.forget":            {Name: "storage.queue.forget", From: "program", Params: "StorageSettleParams", Result: "StorageDeleteResult"},
+	"storage.queue.retry":             {Name: "storage.queue.retry", From: "program", Params: "StorageRetryParams", Result: "StorageJobResult"},
+	"storage.blob.create":             {Name: "storage.blob.create", From: "program", Params: "StorageBlobCreateParams", Result: "StorageBlobCreateResult"},
+	"storage.blob.write":              {Name: "storage.blob.write", From: "program", Params: "StorageBlobWriteParams", Result: "StorageBlobWriteResult"},
+	"storage.blob.finish":             {Name: "storage.blob.finish", From: "program", Params: "StorageBlobMutateParams", Result: "StorageBlobFinishResult"},
+	"storage.blob.delete":             {Name: "storage.blob.delete", From: "program", Params: "StorageBlobMutateParams", Result: "StorageDeleteResult"},
+	"storage.blob.read":               {Name: "storage.blob.read", From: "program", Params: "StorageBlobReadParams", Result: "StorageBlobReadResult"},
+	"transcription.start":             {Name: "transcription.start", From: "program", Params: "TranscriptionStartParams", Result: "TranscriptionStartResult"},
+	"transcription.audio":             {Name: "transcription.audio", From: "program", Params: "TranscriptionAudioParams", Result: "Empty"},
+	"transcription.finish":            {Name: "transcription.finish", From: "program", Params: "TranscriptionJobParams", Result: "TranscriptionFinishResult"},
+	"transcription.cancel":            {Name: "transcription.cancel", From: "program", Params: "TranscriptionJobParams", Result: "Empty"},
+	"repo.parse":                      {Name: "repo.parse", From: "hub", Params: "RepoParseParams", Result: "RepoParseResult"},
+	"repo.check":                      {Name: "repo.check", From: "hub", Params: "RepoCheckParams", Result: "Empty"},
+	"repo.link":                       {Name: "repo.link", From: "hub", Params: "RepoLinkParams", Result: "RepoLinkResult"},
+	"repo.describe":                   {Name: "repo.describe", From: "hub", Params: "RepoDescribeParams", Result: "RepoDescribeResult"},
+	"repo.pr_status":                  {Name: "repo.pr_status", From: "hub", Params: "RepoPRStatusParams", Result: "RepoPRStatusResult"},
+	"memory.entries":                  {Name: "memory.entries", From: "hub", Params: "MemoryEntriesParams", Result: "MemoryEntriesResult"},
 }

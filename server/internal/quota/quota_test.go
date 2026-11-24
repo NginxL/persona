@@ -185,3 +185,29 @@ func TestDoPutsTheKeyInThePath(t *testing.T) {
 		}
 	}
 }
+
+// A quota or usage read is Persona's background request at an allowed gateway, whatever source headers the extension
+// sent; at a gateway outside the allowlist no source goes at all.
+func TestDoMarksItsSourceAsBackground(t *testing.T) {
+	var got http.Header
+	gw := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { got = r.Header.Clone() }))
+	defer gw.Close()
+	forged := map[string]string{"x-persona-role": "main", "X-Persona-Todo": "todo_forged", "User-Agent": ""}
+	u, _ := url.Parse(gw.URL)
+	t.Setenv(modelhttp.SourceHostsEnv, u.Hostname())
+	if _, err := Do(context.Background(), nil, gw.URL, "", Request{URL: "/usage", Headers: forged}); err != nil {
+		t.Fatal(err)
+	}
+	if got.Get(modelhttp.RoleHeader) != "background" || got.Get(modelhttp.TodoHeader) != "" || got.Get(modelhttp.SessionHeader) != "" {
+		t.Fatalf("allowed gateway: headers %v", got)
+	}
+	t.Setenv(modelhttp.SourceHostsEnv, "")
+	if _, err := Do(context.Background(), nil, gw.URL, "", Request{URL: "/usage", Headers: forged}); err != nil {
+		t.Fatal(err)
+	}
+	for name := range got {
+		if modelhttp.SourceHeader(name) {
+			t.Fatalf("source sent outside the allowlist: %v", got)
+		}
+	}
+}

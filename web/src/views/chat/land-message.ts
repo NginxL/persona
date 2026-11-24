@@ -1,13 +1,17 @@
-// Deep links and forwarded originals page back only when someone asks to open a message.
+// Search hits, deep links and forwarded originals share the final seek after any paging or fold expansion.
 import { t } from "../../i18n";
+import { untilStill } from "../../lib/chat-search";
 import { ApiError, fullItem } from "../../lib/api";
 import type { Item } from "../../lib/types";
 import { insideFold } from "../../lib/turns";
 import { toast } from "../../ui/atoms";
+import { revealItem } from "./search-reveal";
 import { openFoldRange } from "./expanded";
 import type { Transcript } from "./useTranscript";
 
 const LANDING_WAIT_MS = 5000;
+const FIND_ROW_MS = 400;
+const SETTLE_ROW_MS = 2000;
 const nextFrame = () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
 
 /** Guarded links keep the identity even after reloading or opening in another tab. */
@@ -16,25 +20,75 @@ export function readStarTarget(target: string) {
   return match ? { fingerprint: match[1]!, item: match[2]! } : undefined;
 }
 
-export interface LandingProof {
+interface LandingProof {
   selector: string;
   matches: (items: readonly Item[]) => boolean;
   unavailable: () => void;
+}
+
+export interface MessageView {
+  scope: string;
+  transcript: () => Transcript;
+  lineFor: (id: string) => string | undefined;
+  beginSeek: () => HTMLElement | null;
+  land: (row: HTMLElement, scroller: HTMLElement) => void;
+}
+
+async function seekItem(view: MessageView, itemId: string, current: () => boolean, quiet = false, proof?: LandingProof) {
+  if (!current()) return;
+  const sourceMatches = () => !proof || proof.matches(view.transcript().items);
+  if (!sourceMatches()) return proof?.unavailable();
+  const sc = view.beginSeek();
+  if (!sc) return;
+  const finishReveal = revealItem(view.scope, itemId);
+  const result = await untilStill<HTMLElement>({
+    frame: nextFrame, now: () => performance.now(), cancelled: () => !current(), giveUpMs: SETTLE_ROW_MS,
+    // Give opening rows a few frames before falling back to the line that owns the item.
+    locate: (waited) => {
+      if (!sourceMatches()) return null;
+      const exact = sc.querySelector<HTMLElement>(`[data-items~="${CSS.escape(itemId)}"]${proof?.selector ?? ""}`);
+      const lineId = exact || proof || waited <= FIND_ROW_MS ? undefined : view.lineFor(itemId);
+      const el = exact ?? (lineId ? sc.querySelector(`[data-line="${CSS.escape(lineId)}"]`)?.firstElementChild : null);
+      return el instanceof HTMLElement ? { y: el.getBoundingClientRect().top - sc.getBoundingClientRect().top + sc.scrollTop, value: el } : null;
+    },
+  });
+  finishReveal();
+  if (!current() || result === "cancelled") return;
+  if (proof && (result === "missing" || !sourceMatches() || !result.value.matches(proof.selector))) return proof.unavailable();
+  if (result === "missing") {
+    if (!quiet) toast(t("chat-chatview.search_not_found"));
+    return;
+  }
+  view.land(result.value, sc);
+}
+
+export async function landSearchHit(item: string, fold: Item | undefined, view: MessageView, current: () => boolean) {
+  if (!current()) return;
+  if (fold?.fold) {
+    openFoldRange(view.scope, fold.seq, fold.fold.through_seq);
+    try {
+      await view.transcript().expandFold(fold);
+      await nextFrame();
+    } catch {
+      if (current()) toast(t("chat-chatview.search_not_found"));
+      return;
+    }
+  }
+  await seekItem(view, item, current);
 }
 
 interface Landing {
   target: string;
   mid: string;
   sid: string;
-  scope: string;
+  view: MessageView;
   fromLink: boolean;
   current: () => boolean;
-  transcript: () => Transcript;
-  seek: (item: string, quiet?: boolean, proof?: LandingProof) => void;
   loadEarlier: (stop: () => boolean) => Promise<unknown>;
 }
 
-export async function landMessage({ target, mid, sid, scope, fromLink, current, transcript, seek, loadEarlier }: Landing) {
+export async function landMessage({ target, mid, sid, view, fromLink, current, loadEarlier }: Landing) {
+  const { transcript, scope } = view;
   if (!current()) return;
   const saved = readStarTarget(target);
   const item = saved?.item ?? target;
@@ -43,9 +97,7 @@ export async function landMessage({ target, mid, sid, scope, fromLink, current, 
     matches: (items) => items.some((entry) => entry.id === item && entry.source_fingerprint === saved.fingerprint),
     unavailable: () => toast(t("starred.source_unavailable")),
   } : undefined;
-  const open = (quiet = false) => requestAnimationFrame(() => {
-    if (current()) seek(item, quiet, proof);
-  });
+  const open = (quiet = false) => requestAnimationFrame(() => void seekItem(view, item, current, quiet, proof));
   const holds = () => transcript().items.some((i) => i.id === item);
   let verified: Item | undefined;
   if (saved) {

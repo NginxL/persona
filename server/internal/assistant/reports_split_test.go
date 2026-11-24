@@ -63,6 +63,7 @@ func handTodos(s *Service, n int, rich bool) []Todo {
 
 // A few items stay one card without a part suffix; the fallback keeps every title instead of a 60-rune clip.
 func TestReportCardsSmallBatchOneCard(t *testing.T) {
+	needsLarkLayer(t)
 	s, _, posts := splitService(t, "")
 	handTodos(s, 3, false)
 	waitFor(t, "the one report card", func() bool { return len(posts()) == 1 })
@@ -73,6 +74,7 @@ func TestReportCardsSmallBatchOneCard(t *testing.T) {
 
 // 60 tasks go out as 4 ordered cards with every link and (k/N) titles; a failure after card 1 requeues the batch.
 func TestReportCardsSplitAndRetryWholeBatch(t *testing.T) {
+	needsLarkLayer(t)
 	s, _, posts := splitService(t, "（2/4）")
 	ts := handTodos(s, 60, false)
 	waitFor(t, "card 1, failed card 2, then four retried cards", func() bool { return len(posts()) == 6 })
@@ -101,6 +103,7 @@ func TestReportCardsSplitAndRetryWholeBatch(t *testing.T) {
 
 // The needs item leads the first card; its answerable question card follows every report card.
 func TestReportCardsNeedsItemOnFirstCard(t *testing.T) {
+	needsLarkLayer(t)
 	s, f, posts := splitService(t, "")
 	td := startedTask(t, s, f)
 	agentTurn(s, f, proto.StatusBlocked, "", 1)
@@ -119,6 +122,7 @@ func TestReportCardsNeedsItemOnFirstCard(t *testing.T) {
 // With three link buttons and 300-rune text per task, the real cards stay within the byte and element budgets; every
 // task/PR/agent link lands once in order and the last item stays whole on its card.
 func TestReportCardsRealJSONBudgetWithButtonRows(t *testing.T) {
+	needsLarkLayer(t)
 	s, _, posts := splitService(t, "")
 	ts := handTodos(s, 15, true)
 	waitFor(t, "the byte budget to split the heavy cards", func() bool { return len(posts()) >= 2 })

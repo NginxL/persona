@@ -1,0 +1,44 @@
+{
+  "name": "resource_acquire",
+  "description": "按项目、完整提交和分片组申请 CI 租约。返回 granted、queued、joined、cached 或 refused。仅 granted 持有者提交，joined 等待已有结果。",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "resource": {
+        "type": "string"
+      },
+      "project": {
+        "type": "string"
+      },
+      "commit": {
+        "type": "string"
+      },
+      "groups": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      },
+      "lease_id": {
+        "type": "string"
+      },
+      "holder": {
+        "type": "object",
+        "properties": {
+          "label": {
+            "type": "string"
+          },
+          "pid": {
+            "type": "integer"
+          }
+        }
+      }
+    },
+    "required": [
+      "resource",
+      "project",
+      "commit",
+      "groups"
+    ]
+  }
+}

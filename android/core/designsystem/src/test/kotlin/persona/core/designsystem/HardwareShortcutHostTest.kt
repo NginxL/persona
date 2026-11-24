@@ -187,7 +187,7 @@ class HardwareShortcutHostTest {
                 PersonaTheme(darkTheme = false, reduceMotion = true) {
                     HardwareShortcutHost(Modifier.fillMaxSize().testTag("host-with-field")) {
                         val field = remember { FocusRequester() }
-                        LaunchedEffect(Unit) { runCatching { field.requestFocus() } }
+                        LaunchedEffect(Unit) { val _ = runCatching { field.requestFocus() } }
                         BasicTextField("draft", {}, Modifier.testTag("compact-focused-field").focusRequester(field))
                     }
                 }
@@ -208,7 +208,7 @@ class HardwareShortcutHostTest {
                     HardwareShortcutHost(Modifier.fillMaxSize(), requestFocusWhenLarge = false) {
                         Column(Modifier.fillMaxSize().hardwareShortcutDismiss({})) {
                             val second = remember { FocusRequester() }
-                            LaunchedEffect(Unit) { runCatching { second.requestFocus() } }
+                            LaunchedEffect(Unit) { val _ = runCatching { second.requestFocus() } }
                             BasicTextField("first", {}, Modifier.testTag("first-dismiss-field"))
                             BasicTextField("second", {}, Modifier.testTag("second-dismiss-field").focusRequester(second))
                         }
@@ -240,7 +240,7 @@ class HardwareShortcutHostTest {
                         SideEffect { marker = remembered; list = scroll }
                         DisposableEffect(Unit) { onDispose { disposals++ } }
                         LaunchedEffect(Unit) { effectStarts++; awaitCancellation() }
-                        LaunchedEffect(Unit) { runCatching { field.requestFocus() } }
+                        LaunchedEffect(Unit) { val _ = runCatching { field.requestFocus() } }
                         Column {
                             BasicTextField(draft, { draft = it }, Modifier.testTag("continuous-draft").focusRequester(field))
                             LazyColumn(Modifier.height(Tokens.Size.box280), state = scroll) {

@@ -4,7 +4,9 @@
   "skip_next_invalid": "有効な実行時刻を入力してください。",
   "skip_next_owner": "あなたがスキップしました",
   "execution_context_unavailable": "タスクの会話の実行環境を確認できません。Agent を再接続して再試行してください。",
+  "task_execution_wait_timeout": "task_execution_wait_timeout: 選択したコンピューターが実行オプションに対応する前に待機時間が切れました。タスクは送信されていません。",
   "followup": "フォローアップ",
+  "task_label": "スケジュールタスク",
   "morning": "朝のまとめ",
   "evening": "夜の振り返り",
   "unavailable": "定期タスクを読み込めません（データベースが応答していません）。しばらくしてからもう一度お試しください。",
@@ -72,5 +74,12 @@
   "todo_wait_cost": "次の実行時間になってもタスクが進まない可能性があります。",
   "todo_change_result": "現在の許可の範囲内で別の方法を提案するよう監督役に依頼します。",
   "todo_wait_result": "承認済みの方法を維持し、次回の定期確認を待ちます。",
-  "execution_antigravity_unavailable": "{machine} の Antigravity が切断されているか、利用できません。そのコンピュータで Antigravity を復旧してから、このタスクを再実行すると既存の会話を続けられます。"
+  "selected_file_unavailable": "選択したファイルを利用できないか、実行環境が変わりました。削除して再度選択してください。",
+  "file_runtime_unsupported": "このエージェントはファイル選択に対応していません。テキストを使うか、別のエージェントを選んでください。",
+  "input_context_unavailable": "タスクまたは元の会話を利用できません。タスクを開き直して再試行してください。",
+  "execution_antigravity_unavailable": "{machine} の Antigravity が切断されているか、利用できません。そのコンピュータで Antigravity を復旧してから、このタスクを再実行すると既存の会話を続けられます。",
+  "execution_space_directory": "スペースのタスクはスペースのフォルダーを使用します。作業フォルダーを空にしてから、もう一度お試しください。",
+  "unknown_space": "このスペースはタスクに使用できません。別のスペースを選ぶか、スペースなしにしてください。",
+  "bad_topic_policy": "実行ごとに新しい会話を始めるか、同じ会話を続けるかを選んでください。",
+  "space_owner_only": "タスクをスペースに移動したりスペースから外したりできるのは、アプリからのあなた自身だけです。"
 }

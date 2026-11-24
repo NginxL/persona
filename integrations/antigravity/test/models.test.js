@@ -8,16 +8,19 @@ import { startFakeNode, until } from '../../runtime-sdk/testing/fake-node.js'
 import { createAgyRuntime } from '../lib/runtime.js'
 import { mapModels } from '../lib/models.js'
 
-const entries = ['medium', 'high', 'low'].map((level) => ({ modelId: `gemini-future-${level}`, name: `Gemini Future (${level})` }))
+const entries = ['medium', 'high', 'low', 'xhigh', 'max'].map((level) => ({ modelId: `gemini-future-${level}`, name: `Gemini Future (${level})` }))
 const AUTO_REFUSAL_NOTICE = 'agy 拒绝了 Auto 模式，已改由 Persona 自动批准权限请求'
 
 test('native catalog preserves new IDs, defaults and only advertised thinking variants', () => {
   const models = mapModels([...entries, entries[0], { modelId: 'single', name: 'Single' }], entries[1].name)
-  assert.equal(models.length, 4)
+  assert.equal(models.length, 6)
   assert.equal(models[1].default, true)
-  assert.deepEqual(models[0].efforts, ['low', 'medium', 'high'])
-  assert.deepEqual(models[3].efforts, [])
-  assert.equal(models[0].default_effort, 'medium')
+  for (const model of models.slice(0, -1)) {
+    assert.deepEqual(model.efforts, ['low', 'medium', 'high', 'xhigh', 'max'])
+    assert.equal(model.default_effort, model.id.split('-').at(-1))
+  }
+  assert.deepEqual(models.at(-1).efforts, [])
+  assert.equal(models.at(-1).default_effort, undefined)
 })
 
 async function fixture(t, options = {}) {
@@ -94,10 +97,42 @@ test('session controls confirm native state and preserve acknowledged fields on 
   assert.equal(row().model, entries[1].modelId)
   await n.peer.call('session.modes', { session_id: sessionId, effort: 'low' })
   await until('native configuration', () => row()?.model === entries[2].modelId && row()?.effort === 'low')
-  await assert.rejects(n.peer.call('session.modes', { session_id: sessionId, model: entries[1].modelId, effort: 'max' }), /Thinking level unavailable/)
+  await assert.rejects(n.peer.call('session.modes', { session_id: sessionId, model: entries[1].modelId, effort: 'ultra' }), /Thinking level unavailable/)
   await until('native configuration', () => row()?.model === entries[1].modelId && row()?.effort === 'high')
   await n.peer.call('session.modes', { session_id: sessionId, permission_mode: 'bypassPermissions' })
   await until('native configuration', () => row()?.permission_mode === 'bypassPermissions')
+})
+
+test('a model pick or a thought-level switch applies the advertised native variant', async (t) => {
+  const { n, sessionId, row, calls } = await fixture(t)
+  const advertised = await n.peer.call('launchers.models', {})
+  assert.deepEqual(advertised.models.find((model) => model.id === 'gemini-future-xhigh')?.efforts, ['low', 'medium', 'high', 'xhigh', 'max'])
+  for (const effort of ['low', 'medium', 'high', 'xhigh', 'max']) {
+    const model = `gemini-future-${effort}`
+    await n.peer.call('session.modes', { session_id: sessionId, model })
+    await until(`ACP selected ${model}`, () => row()?.model === model && row()?.effort === effort)
+    assert.equal(calls().filter((call) => call.method === 'session/set_model').at(-1)?.params.modelId, model)
+  }
+  for (const effort of ['xhigh', 'max', 'medium']) {
+    await n.peer.call('session.modes', { session_id: sessionId, effort })
+    await until(`ACP selected ${effort}`, () => row()?.model === `gemini-future-${effort}` && row()?.effort === effort)
+  }
+})
+
+test('uses the ACP session window until the transcript reports its own', async (t) => {
+  const { n, home, catalog } = await fixture(t, { noStart: true })
+  catalog({ models: entries, windows: { [entries[0].modelId]: 524288, [entries[2].modelId]: 131072 } })
+  const { session } = await n.peer.call('session.start', { cwd: home })
+  const row = () => n.last('runtime.sessions')?.sessions.find((entry) => entry.session_id === session.session_id)
+  await until('initial ACP window', () => row()?.context_window === 524288)
+  await n.peer.call('session.modes', { session_id: session.session_id, model: entries[2].modelId })
+  await until('new model window', () => row()?.context_window === 131072)
+  const logs = join(home, 'settings', 'brain', session.session_id.slice(4), '.system_generated', 'logs')
+  mkdirSync(logs, { recursive: true })
+  writeFileSync(join(logs, 'transcript.jsonl'), JSON.stringify({ step_index: 0, type: 'PLANNER_RESPONSE',
+    model: entries[2].modelId.toUpperCase(), content: 'Done', input_tokens: 8000, context_window: 64000 }) + '\n')
+  await n.peer.call('session.rename', { session_id: session.session_id, title: 'Recorded usage' })
+  await until('transcript window overrides ACP', () => row()?.context_tokens === 8000 && row()?.context_window === 64000)
 })
 
 test('a rejected startup configuration closes the newly created native session', async (t) => {
@@ -306,6 +341,59 @@ test('a delayed default after auto acknowledgement still uses the fallback', asy
   assert.deepEqual(f.answers()[0].result, selected('always'))
   const notices = (await f.items()).items.filter((item) => item.kind === 'notice' && item.text === AUTO_REFUSAL_NOTICE)
   assert.equal(notices.length, 1)
+})
+
+test('auto-mode refusal notice shifts projected seq without misaligning item usage or model', async (t) => {
+  const f = await modePermissionFixture(t, { refuseAuto: true }, { assistant: true, permission_mode: 'auto' })
+  const rawId = f.sessionId.replace(/^agy-/, '')
+  const logs = join(f.home, 'settings', 'brain', rawId, '.system_generated', 'logs')
+  mkdirSync(logs, { recursive: true })
+  const at = '2026-11-21T10:00:00Z'
+  const rawSteps = [
+    { step_index: 0, source: 'USER_EXPLICIT', type: 'USER_INPUT', status: 'DONE', created_at: at, content: 'Run check' },
+    {
+      step_index: 1, source: 'MODEL', type: 'PLANNER_RESPONSE', status: 'DONE', created_at: at,
+      model: 'claude-opus-5-5-high', thinking: 'Checking', content: 'Running tool',
+      input_tokens: 1200, cache_read_tokens: 48800, cache_write_tokens: 300, output_tokens: 180,
+      tool_calls: [{ name: 'run_command', args: { CommandLine: 'echo ok' } }],
+    },
+    { step_index: 2, source: 'MODEL', type: 'GENERIC', status: 'DONE', created_at: at, content: 'ok' },
+    {
+      step_index: 3, source: 'MODEL', type: 'PLANNER_RESPONSE', status: 'DONE', created_at: at,
+      model: 'claude-opus-5-5-high', content: 'Done.',
+      input_tokens: 500, cache_read_tokens: 51000, output_tokens: 70,
+    },
+  ]
+  writeFileSync(join(logs, 'transcript_full.jsonl'), rawSteps.map((s) => JSON.stringify(s)).join('\n') + '\n')
+
+  const page = await f.items()
+  assert.equal(page.items[0].kind, 'notice')
+  assert.equal(page.items[0].text, AUTO_REFUSAL_NOTICE)
+  assert.equal(page.items[0].seq, 1)
+  assert.equal(page.items[0].usage, undefined)
+  assert.equal(page.items[0].model, undefined)
+
+  // Raw step 1 shifted to projected seq 3; raw step 3 shifted to projected seq 5.
+  const step1Items = page.items.filter((item) => item.seq === 3)
+  assert.equal(step1Items.length, 3)
+  const wantStep1Usage = [{ model: 'claude-opus-5-5-high', in: 1200, out: 180, cache_read: 48800, cache_write: 300 }]
+  assert.deepEqual(step1Items[0].usage, wantStep1Usage)
+  assert.equal(step1Items[1].usage, undefined)
+  assert.equal(step1Items[2].usage, undefined)
+  assert.deepEqual(step1Items.map((item) => item.model), ['claude-opus-5-5-high', 'claude-opus-5-5-high', 'claude-opus-5-5-high'])
+
+  const step3Item = page.items.find((item) => item.seq === 5)
+  assert.equal(step3Item.text, 'Done.')
+  assert.equal(step3Item.model, 'claude-opus-5-5-high')
+  assert.deepEqual(step3Item.usage, [{ model: 'claude-opus-5-5-high', in: 500, out: 70, cache_read: 51000 }])
+
+  // session.item returns exact projected usage on #0 and omits it on secondary #1.
+  const primary = await f.n.peer.call('session.item', { session_id: f.sessionId, item_id: step1Items[0].id })
+  assert.deepEqual(primary.usage, wantStep1Usage)
+  assert.equal(primary.model, 'claude-opus-5-5-high')
+  const secondary = await f.n.peer.call('session.item', { session_id: f.sessionId, item_id: step1Items[1].id })
+  assert.equal(secondary.usage, undefined)
+  assert.equal(secondary.model, 'claude-opus-5-5-high')
 })
 
 // #11106: an expired sign-in makes agy models hang rather than fail. The timeout says what to do about it.

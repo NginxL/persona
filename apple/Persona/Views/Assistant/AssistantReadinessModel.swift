@@ -17,6 +17,8 @@ final class AssistantReadinessModel {
     private(set) var probeError: String?
     /// The checklist step that started this try; its feedback stays beside that row's button.
     private(set) var probeStep: String?
+    /// The model pick already tried for this route failure; a different one promotes Try a Message.
+    @ObservationIgnored private var triedRoutePick: ModelPick?
     /// A coded refusal of a start or a send: a card where the send was, not a toast.
     var failure: CodedFailure?
 
@@ -55,7 +57,10 @@ final class AssistantReadinessModel {
     }
 
     /// An answer from elsewhere (`warm`): kept unless a later ask has answered. A new answer also retires a failed try.
-    func land(_ r: AssistantReadiness) {
+    func land(_ r: AssistantReadiness, modelPick: ModelPick? = nil) {
+        let wasRoute = readiness?.cardStep?.code == "model_route"
+        let isRoute = r.cardStep?.code == "model_route"
+        if !isRoute { triedRoutePick = nil } else if !wasRoute { triedRoutePick = modelPick }
         readiness = r
         unsupported = false
         probeError = nil
@@ -66,7 +71,8 @@ final class AssistantReadinessModel {
     /// Asks the hub. `force`: even with a fresh answer; `probe`: try one word on the main conversation (costs a little).
     /// A later ordinary answer is never overwritten by an earlier one; only the latest probe may land or end `probing`.
     /// `probeStep` is the checklist row that owns this try's spinner and result.
-    func refresh(api: APIClient?, force: Bool = false, probe: Bool = false, probeStep: String? = nil) async {
+    func refresh(api: APIClient?, force: Bool = false, probe: Bool = false, probeStep: String? = nil,
+                 modelPick: ModelPick? = nil) async {
         guard let api else { return }
         if !probe, !force, Date.now.timeIntervalSince(at) < Self.fresh { return }
         if !probe, !force, let inflight { await inflight.value; return }
@@ -74,6 +80,7 @@ final class AssistantReadinessModel {
         let mine = asked
         let gen = generation
         if probe {
+            if current?.cardStep?.code == "model_route" { triedRoutePick = modelPick }
             probing = true
             latestProbe = mine
             self.probeStep = probeStep
@@ -85,7 +92,7 @@ final class AssistantReadinessModel {
                 let r = try await api.assistantReadiness(probe: probe)
                 guard let self, gen == self.generation, (probe ? mine == self.latestProbe : mine > self.answered) else { return }
                 self.answered = max(self.answered, mine)
-                self.land(r)
+                self.land(r, modelPick: modelPick)
                 if probe { self.probe = r.probe } else if r.probe == nil { self.probe = nil }
             } catch {
                 guard let self, gen == self.generation, (probe ? mine == self.latestProbe : mine > self.answered) else { return }
@@ -114,6 +121,11 @@ final class AssistantReadinessModel {
         if inflight == task { inflight = nil }
     }
 
+    /// The card and blocked-send action share one order, including the replacement-pick Try a Message promotion.
+    func actions(_ step: AssistantReadiness.Step, currentPick: ModelPick?) -> [String] {
+        step.clientActions(promoteTry: step.code == "model_route" && currentPick != triedRoutePick)
+    }
+
     /// Later: the checklist stops coming up by itself; the card still shows when something is missing.
     func dismiss(api: APIClient?) async {
         guard let api else { return }
@@ -132,8 +144,9 @@ final class AssistantReadinessModel {
     }
 
     /// For tests and screenshots.
-    func reset(_ r: AssistantReadiness? = nil) {
+    func reset(_ r: AssistantReadiness? = nil, modelPick: ModelPick? = nil) {
         readiness = r
+        triedRoutePick = r?.cardStep?.code == "model_route" ? modelPick : nil
         unsupported = false
         probe = nil
         probeError = nil

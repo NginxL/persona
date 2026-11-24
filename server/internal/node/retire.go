@@ -302,6 +302,7 @@ func (n *Node) resumeWith(id string, opts sendOpts) resumed {
 		r.taskID, r.workspaceID, r.workspaceLabel = opts.TaskID, opts.WorkspaceID, opts.WorkspaceLabel
 	}
 	r.launcher, r.execution = n.resumeLauncher(st, id, opts)
+	r.execution.Source = st.ModelSource
 	if r.cwd == "" {
 		if p := n.transcriptPath(id); p != "" {
 			if fi, err := os.Stat(p); err == nil {
@@ -327,6 +328,9 @@ func (n *Node) fillResume(id string, asked resumed) resumed {
 	}
 	r := n.resumeWith(id, sendOpts{})
 	out := asked
+	if out.execution.Source.Role == "" {
+		out.execution.Source = r.execution.Source
+	}
 	out.launcher = cmp.Or(asked.launcher, r.launcher)
 	if out.launcher == r.launcher && asked.execution.Model == "" && asked.execution.Fingerprint == "" {
 		out.execution.Model, out.execution.Fingerprint = r.execution.Model, r.execution.Fingerprint
@@ -431,14 +435,18 @@ func (n *Node) resumeCodex(ctx context.Context, launch host.Launcher, id string,
 	if codexOnRemote(argv) {
 		argv = append(argv, "-C", st.Cwd)
 	}
-	argv = append(argv, "resume", id)
+	thread := id
+	if _, raw, ok := n.codexThread(id); ok && raw != "" {
+		thread = raw
+	}
+	argv = append(argv, "resume", thread)
 	dir, err := os.MkdirTemp(n.dir, "codex-start-")
 	if err != nil {
 		return err
 	}
 	defer os.RemoveAll(dir)
 	file := filepath.Join(dir, "start.json")
-	b, _ := json.Marshal(codexStartFile{Argv: argv, Prompt: prompt, Agent: herdrAgentFor(launch, "codex"), Dir: st.Cwd})
+	b, _ := json.Marshal(codexStartFile{Source: sourceSession(st.ModelSource, id), SourceHosts: sourceHostsFor(st.ModelSource), Argv: argv, Prompt: prompt, Agent: herdrAgentFor(launch, "codex"), Dir: st.Cwd})
 	if err := os.WriteFile(file, b, 0o600); err != nil {
 		return err
 	}

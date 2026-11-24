@@ -14,6 +14,7 @@ import kotlinx.serialization.json.decodeFromJsonElement
 import persona.core.contracts.JsonCodec
 import persona.core.contracts.api.InboxAssistantTransport
 import persona.core.designsystem.UiText
+import persona.core.inbox.*
 
 /** One direct or group chat in the optional Messages list. This is summary metadata, never a prefetched message window. */
 data class LarkChatSummary(

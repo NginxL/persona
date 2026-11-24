@@ -41,7 +41,9 @@ func TestRuntimeListedCodexSessionAnswersStopRenameAndClose(t *testing.T) {
 	host := dialRuntime(t, n, paseoHello())
 	_ = host.peer.Notify("runtime.sessions", map[string]any{"sessions": []map[string]any{
 		{"session_id": thread, "agent": "codex", "title": "Hosted CLI", "cwd": "/w/app", "status": "working"}}})
-	waitFor(t, "listed", func() bool { _, ok := listed(t, n)[thread]; return ok })
+	// The node's own Codex inventory lists the thread already: wait for the runtime's listing to take it, not for the
+	// thread to show up.
+	waitFor(t, "listed by the runtime", func() bool { h, _, _ := n.runtimes.belongs(thread); return h != nil })
 
 	for method, params := range map[string]map[string]any{
 		"session.interrupt": {"session_id": thread},

@@ -32,6 +32,25 @@ func (c StopCause) String() string {
 	}
 }
 
+// AllowsSupervisorResume: c is a recorded stop that was not the user's (idle, a finished task, a restart, a failed
+// resume or compaction, a gateway error). A resume consumes such a stop before it starts, and an automatic stop or close
+// that records one maps any other cause to the user's. Whether the assistant may resume an Agent is
+// SupervisorMayResume, which also takes an unknown cause.
 func (c StopCause) AllowsSupervisorResume() bool {
 	return c == StopIdle || c == StopTaskCompleted || c == StopRestart || c == StopResumeFailed || c == StopCompactFailed || c == StopUsageLimit || c == StopTransientError
+}
+
+// UserStopped: the user ended the Agent: their Stop, Close or "Archive and close" (user), or the quit command sent
+// through Persona (exit). Only these need the user's own Resume on its terminal page.
+func (c StopCause) UserStopped() bool {
+	return c == StopUser || c == StopExit
+}
+
+// SupervisorMayResume: the assistant may resume an Agent stopped with c (agent_send with resume). Every stop but the
+// user's: a recorded non-user stop, and an unknown one too (an Agent that quit by itself, a crash, a machine that was
+// off for longer than the restart window): nothing says the user ended it, and leaving it to the user's Resume made the
+// supervisor start a replacement without its context. A cause this build does not know stays refused: it may be a
+// newer node's user stop. The node still refuses an Agent that runs, or one a resume of which is still settling.
+func (c StopCause) SupervisorMayResume() bool {
+	return c == StopUnknown || c.AllowsSupervisorResume()
 }

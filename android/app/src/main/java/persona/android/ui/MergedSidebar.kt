@@ -1,5 +1,6 @@
 package persona.android.ui
 
+import persona.core.moduleapi.serves
 import androidx.compose.runtime.*
 import androidx.lifecycle.ViewModelStoreOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -60,6 +61,8 @@ internal fun mergedSidebar(
         pinnedAgents = remember(preferences.pins.sessions) { preferences.pins.sessions.toSet() },
         onSearchAgent = { key -> searchPick = knownAgents.firstOrNull { it.key == key } },
         agentsInFront = agentsInFront,
-        showKnowledge = session.knowledge != null,
+        // The knowledge pages are a module's (#13934): shown while it serves them, and never in demo mode.
+        showKnowledge = session.knowledge != null &&
+            persona.core.moduleapi.LocalModulePlaces.current.serves(persona.core.navigation.KnowledgeRoute::class),
     )
 }

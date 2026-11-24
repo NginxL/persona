@@ -86,6 +86,7 @@ func TestUserCheckKeepsTaskAndAgentOpenUntilPass(t *testing.T) {
 }
 
 func TestUserCheckFeedbackReturnsToTheSameAgent(t *testing.T) {
+	needsLarkLayer(t)
 	s, f, todo := acceptedForUserCheck(t)
 	a := askOf(s, todo.ID)
 	before := len(sentToAgent(f))
@@ -301,6 +302,7 @@ func TestUserCheckReplacesAnEarlierDecision(t *testing.T) {
 }
 
 func TestUserCheckFeedbackRoundPersistsAcrossRestart(t *testing.T) {
+	needsLarkLayer(t)
 	ctx := context.Background()
 	for _, via := range []string{"verification card", "task card", "Agent chat"} {
 		t.Run(via, func(t *testing.T) {

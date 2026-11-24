@@ -13,8 +13,11 @@ import (
 	"sync"
 	"time"
 
+	"github.com/nwverse/persona/server/internal/botport"
+
+	"github.com/nwverse/persona/server/internal/agents"
 	"github.com/nwverse/persona/server/internal/assistantwire"
-	"github.com/nwverse/persona/server/internal/feishubot"
+	"github.com/nwverse/persona/server/internal/botcard"
 	"github.com/nwverse/persona/server/internal/i18n"
 )
 
@@ -29,6 +32,8 @@ import (
 // BotsConfig is hub.json "bots".
 type BotsConfig struct {
 	Feishu FeishuBotConfig `json:"feishu,omitempty"`
+	// Endpoints are the explicit Agents → Bots registrations; no structured session is inferred to be a bot.
+	Endpoints []agents.BotRegistration `json:"endpoints,omitempty"`
 }
 
 // FeishuBotConfig: the app's credentials, for those who would rather keep them in manager.json (0600) than enter them in
@@ -51,6 +56,8 @@ type FeishuBotSettings struct {
 	Features       BotFeatures `json:"features"`
 	Owner          *BotOwner   `json:"owner,omitempty"`
 	Pairing        *botPairing `json:"pairing,omitempty"`
+	// Configure is the sanitized automatic-configuration outcome for these credentials, until paired.
+	Configure *botConfigure `json:"configure,omitempty"`
 	// Registration is an app registration under way (bots_register.go): binding in one authorization.
 	Registration *botRegistration `json:"registration,omitempty"`
 	// RegistrationDeviceEnc and RegistrationSecretEnc are the registration's device code and, once confirmed, the new
@@ -113,6 +120,21 @@ type BotFeatures struct {
 
 var defaultBotFeatures = BotFeatures{Main: true, Cards: true, Reports: true, TopicCot: true}
 
+// botFeatureUpdate keeps partial settings intent separate from an internal full replacement.
+// A patch is validated by its entry point, then merged into current features under bots.mu.
+type botFeatureUpdate struct {
+	replace *BotFeatures
+	patch   json.RawMessage
+}
+
+func (u botFeatureUpdate) apply(current BotFeatures) (BotFeatures, error) {
+	if u.replace != nil {
+		return *u.replace, nil
+	}
+	err := json.Unmarshal(u.patch, &current)
+	return current, err
+}
+
 // BotOwner is the paired user: the only one the bot answers, and where pushes go.
 type BotOwner struct {
 	OpenID string    `json:"open_id"`
@@ -134,24 +156,32 @@ const (
 )
 
 type botHub struct {
-	mu       sync.Mutex
-	loaded   bool
-	set      FeishuBotSettings
-	api      *feishubot.Client
-	conn     *feishubot.Conn
-	stop     context.CancelFunc
-	info     feishubot.BotInfo
-	base     context.Context
-	told     map[string]time.Time // sender -> when the bot last refused them (10-minute window)
-	pairTold map[string]time.Time // sender -> when the pairing path last answered (short redelivery window)
-	names    map[string]string    // open id -> name
-	seen     []string             // the messages taken lately (Feishu delivers some again), memory only
+	mu        sync.Mutex
+	loaded    bool
+	loading   bool
+	loadErr   error
+	loadAfter time.Time
+	// pairLifecycle advances after a committed unpair, including an already-unpaired cancellation.
+	pairLifecycle uint64
+	set           FeishuBotSettings
+	api           botport.Client
+	conn          botport.Conn
+	stop          context.CancelFunc
+	info          botcard.BotInfo
+	base          context.Context
+	told          map[string]time.Time // sender -> when the bot last refused them (10-minute window)
+	pairTold      map[string]time.Time // sender -> when the pairing path last answered (short redelivery window)
+	names         map[string]string    // open id -> name
+	seen          []string             // the messages taken lately (Feishu delivers some again), memory only
 	// msgChat is the chat of the messages the bot may use, seen or sent lately (message id -> chat id): what a reply's
 	// parent is checked against (checkReplyParent), memory only.
 	msgChat idRing
-	// handedGroup are the group messages handed to the assistant lately: a recall in a group is only passed on for one
-	// of these (botRecalled), memory only.
-	handedGroup idRing
+	// Pending recalls are tracked separately from bounded recent source history, so a
+	// backlog cannot evict a message that is still waiting for its predecessor.
+	queuedMessages map[botMessageRef]*botQueuedMessage
+	// Recent source evidence distinguishes local cancellation from handoff.
+	recentMessages     map[botMessageRef]botMessageState
+	recentMessageOrder []botMessageRef
 	// answerFiles keeps prepared long replies across retries and hub restarts.
 	answerFiles botAnswerFiles
 	// line is closed once the last message taken has been handed to the assistant (botMessage): they go in the
@@ -161,8 +191,11 @@ type botHub struct {
 	now func() time.Time
 	// registrar is the accounts site's client for app registration, regDomain where a registered app's calls go
 	// (bots_register.go); both replaced in tests.
-	registrar *feishubot.Registrar
+	registrar botport.Registrar
 	regDomain func(region string) string
+	// bindGate serializes Feishu binding, including registration network calls, independently of mu.
+	// A channel lets a waiting client's context cancel without waiting for the current bind.
+	bindGate chan struct{}
 }
 
 func (b *botHub) clock() time.Time {
@@ -172,22 +205,73 @@ func (b *botHub) clock() time.Time {
 	return time.Now()
 }
 
-// loadBotsLocked reads the settings once; b.mu is held. The chat's state (bots.feishu.state) is the assistant's.
-func (h *Manager) loadBotsLocked(ctx context.Context) {
+const (
+	botSettingsRetry       = 5 * time.Second
+	botSettingsReadTimeout = 5 * time.Second
+)
+
+var errBotSettingsUnread = i18n.Err("hub-bots.settings_unavailable")
+
+// loadBotsLocked publishes only a complete read; b.mu is held on entry and return, released during storage I/O.
+// Concurrent lookups fail closed while the single read runs. Failed reads are retried by later lookups,
+// at most once per cooldown, including records repaired outside the manager. The assistant owns bots.feishu.state.
+func (h *Manager) loadBotsLocked(ctx context.Context) error {
 	b := &h.bots
 	if b.loaded {
-		return
+		return nil
 	}
-	b.loaded = true
-	b.set = FeishuBotSettings{Features: defaultBotFeatures}
+	if b.loading {
+		return errBotSettingsUnread
+	}
+	if b.loadErr != nil && b.clock().Before(b.loadAfter) {
+		return b.loadErr
+	}
+	next := FeishuBotSettings{Features: defaultBotFeatures}
 	if h.store != nil {
-		if _, err := h.store.Setting(ctx, botSettingsKey, &b.set); err != nil {
+		readCtx, cancel := context.WithTimeout(ctx, botSettingsReadTimeout)
+		b.loading = true
+		b.mu.Unlock()
+		_, err := h.store.Setting(readCtx, botSettingsKey, &next)
+		cancel()
+		b.mu.Lock()
+		b.loading = false
+		if err != nil {
 			h.logf("bots: load settings: %v", err)
+			b.loadErr, b.loadAfter = errBotSettingsUnread, b.clock().Add(botSettingsRetry)
+			return b.loadErr
 		}
 	}
+	b.set, b.loaded, b.loadErr = next, true, nil
+	if b.base != nil {
+		h.restartBotLocked()
+		if h.cfg.Lark.CLI != nil {
+			// CLI synchronization and registry replacement must run outside bots.mu.
+			h.larkCLIRecovery.needed.Store(true)
+			h.requestLarkCLIRecovery(b.base)
+		}
+	}
+	return nil
+}
+
+func (h *Manager) loadBotSettings(ctx context.Context) error {
+	h.bots.mu.Lock()
+	err := h.loadBotsLocked(ctx)
+	base := h.bots.base
+	h.bots.mu.Unlock()
+	h.requestLarkCLIRecovery(base)
+	return err
 }
 
 func (h *Manager) saveBotSettingsLocked() error {
+	if !h.bots.loaded {
+		return errBotSettingsUnread
+	}
+	// A committed owner no longer needs setup guidance. Restore it on a rejected write so callers such as
+	// manual redemption can roll back their own owner/code transaction without losing the previous diagnosis.
+	previousConfigure := h.bots.set.Configure
+	if h.bots.set.Owner != nil {
+		h.bots.set.Configure = nil
+	}
 	if h.store == nil {
 		return nil
 	}
@@ -195,6 +279,7 @@ func (h *Manager) saveBotSettingsLocked() error {
 	defer cancel()
 	if err := h.store.PutSetting(ctx, botSettingsKey, h.bots.set); err != nil {
 		h.logf("bots: save settings: %v", err)
+		h.bots.set.Configure = previousConfigure
 		return err
 	}
 	return nil
@@ -217,25 +302,30 @@ func (h *Manager) botCredentialsLocked() (appID, secret, domain string, fromConf
 // startBots connects the bot when it is switched on (at start, and after the settings change).
 func (h *Manager) startBots(ctx context.Context) {
 	h.bots.mu.Lock()
-	h.bots.base = ctx
 	h.loadBotsLocked(ctx)
+	h.bots.base = ctx
+	h.restartBotLocked()
 	h.bots.mu.Unlock()
-	h.restartBot()
 }
 
 // restartBot drops the connection and, if the bot is on and configured, opens a new one. A member hub keeps it closed:
 // Feishu hands each event to one of the connections, and the center's bot serves the group (mesh_group.go).
 func (h *Manager) restartBot() {
-	member := h.isMember()
 	b := &h.bots
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	b.info = feishubot.BotInfo{} // the bot may be another app now: its own id is read again
+	h.restartBotLocked()
+}
+
+// restartBotLocked uses only the successfully loaded settings; b.mu is held.
+func (h *Manager) restartBotLocked() {
+	b := &h.bots
+	b.info = botcard.BotInfo{} // the bot may be another app now: its own id is read again
 	if b.stop != nil {
 		b.stop()
 		b.stop, b.conn = nil, nil
 	}
-	if !b.set.Enabled || b.base == nil || member {
+	if !b.loaded || !b.set.Enabled || b.base == nil || b.base.Err() != nil || h.isMember() {
 		b.api = nil
 		return
 	}
@@ -248,8 +338,13 @@ func (h *Manager) restartBot() {
 		b.api = nil
 		return
 	}
-	b.api = feishubot.New(appID, secret, domain)
-	b.conn = feishubot.NewConn(b.api, h.botEvent, h.logf)
+	if !botport.Available() { // a build without the lark module (persona_without_lark): the bot stays off
+		h.logf("bots: %v", botport.ErrUnavailable)
+		b.api = nil
+		return
+	}
+	b.api = botport.New(appID, secret, domain)
+	b.conn = botport.NewConn(b.api, h.botEventHandler(b.api), h.logf)
 	ctx, cancel := context.WithCancel(b.base)
 	b.stop = cancel
 	conn, api := b.conn, b.api
@@ -271,10 +366,14 @@ func (h *Manager) restartBot() {
 }
 
 // botAPI is the client while the bot is on and paired (nil otherwise), with the settings it runs under (a copy).
-func (h *Manager) botAPI() (*feishubot.Client, FeishuBotSettings) {
+func (h *Manager) botAPI() (botport.Client, FeishuBotSettings) {
 	b := &h.bots
 	b.mu.Lock()
-	defer b.mu.Unlock()
+	defer func() {
+		base := b.base
+		b.mu.Unlock()
+		h.requestLarkCLIRecovery(base)
+	}()
 	if !b.loaded {
 		h.loadBotsLocked(context.Background())
 	}
@@ -319,6 +418,10 @@ func (s FeishuBotSettings) copy() FeishuBotSettings {
 	if s.Pairing != nil {
 		p := *s.Pairing
 		s.Pairing = &p
+	}
+	if s.Configure != nil {
+		r := *s.Configure
+		s.Configure = &r
 	}
 	if s.Registration != nil {
 		r := *s.Registration
@@ -367,13 +470,15 @@ type botPairView struct {
 func (h *Manager) botView(ctx context.Context) feishuBotView {
 	b := &h.bots
 	b.mu.Lock()
-	h.loadBotsLocked(ctx)
+	loadErr := h.loadBotsLocked(ctx)
 	s := b.set
 	appID, _, domain, fromConfig, _ := h.botCredentialsLocked()
-	v := feishuBotView{Enabled: s.Enabled, AppID: appID, Domain: feishubot.ResolveDomain(domain), HasSecret: appID != "",
+	v := feishuBotView{Enabled: s.Enabled, AppID: appID, Domain: botcard.ResolveDomain(domain), HasSecret: appID != "",
 		FromConfig: fromConfig, Features: s.Features, BotName: b.info.Name, NudgeAfter: s.nudgeAfter(),
 		SourceReportDelayMinutes: s.sourceReportDelayMinutes(), SourceReportFullReply: s.SourceReportFullReply}
-	if b.conn != nil {
+	if loadErr != nil {
+		v.Error = i18n.Localize(loadErr, h.botLang(ctx))
+	} else if b.conn != nil {
 		st := b.conn.State()
 		v.Connected, v.Error = st.Connected, st.Error
 		if !st.LastEvent.IsZero() {
@@ -405,7 +510,10 @@ const sourceReportDelayMaxMinutes = 60
 func (h *Manager) setSourceReportSettings(ctx context.Context, delay *int, fullReply *bool) error {
 	b := &h.bots
 	b.mu.Lock()
-	h.loadBotsLocked(ctx)
+	if err := h.loadBotsLocked(ctx); err != nil {
+		b.mu.Unlock()
+		return err
+	}
 	previousDelay, previousFullReply := b.set.SourceReportDelayMinutes, b.set.SourceReportFullReply
 	var changes []botRecord
 	if delay != nil && b.set.sourceReportDelayMinutes() != *delay {
@@ -433,9 +541,17 @@ func (h *Manager) setSourceReportSettings(ctx context.Context, delay *int, fullR
 func (h *Manager) botRoutes(api *http.ServeMux) {
 	h.channelBindRoute(api) // binding a channel carries its secrets: the hub's, never relayed
 	api.HandleFunc("GET /api/v1/bots/feishu", func(w http.ResponseWriter, r *http.Request) {
+		if err := h.loadBotSettings(r.Context()); err != nil {
+			writeErr(w, http.StatusServiceUnavailable, err)
+			return
+		}
 		writeJSON(w, h.botView(r.Context()))
 	})
 	api.HandleFunc("PUT /api/v1/bots/feishu", func(w http.ResponseWriter, r *http.Request) {
+		if err := h.loadBotSettings(r.Context()); err != nil {
+			writeErr(w, http.StatusServiceUnavailable, err)
+			return
+		}
 		var in struct {
 			Enabled        *bool           `json:"enabled"`
 			AppID          *string         `json:"app_id"`
@@ -483,16 +599,16 @@ func (h *Manager) botRoutes(api *http.ServeMux) {
 			writeErr(w, http.StatusBadRequest, err)
 			return
 		}
-		var fs *BotFeatures
+		var fs *botFeatureUpdate
 		if len(in.Features) > 0 && string(in.Features) != "null" {
-			// Over the switches as they are: an app from before a switch (reports) sends the others only, and leaves
-			// that one as it was.
-			f := h.botFeatures()
+			// Validate before any credential check or write, but keep the supplied keys until commit:
+			// an older app omits newer switches, and another save may change them meanwhile.
+			var f BotFeatures
 			if err := json.Unmarshal(in.Features, &f); err != nil {
 				writeErr(w, http.StatusBadRequest, err)
 				return
 			}
-			fs = &f
+			fs = &botFeatureUpdate{patch: in.Features}
 		}
 		var topics []BotChat
 		mentionEdits := map[string]bool{}
@@ -532,7 +648,10 @@ func (h *Manager) botRoutes(api *http.ServeMux) {
 			}
 		}
 		if nudge != nil {
-			h.setNudgeAfter(r.Context(), *nudge)
+			if err := h.setNudgeAfter(r.Context(), *nudge); err != nil {
+				writeErr(w, http.StatusInternalServerError, i18n.Err("hub-bots.nudge_save_failed"))
+				return
+			}
 		}
 		if reportDelay != nil || in.SourceReportFullReply != nil {
 			if err := h.setSourceReportSettings(r.Context(), reportDelay, in.SourceReportFullReply); err != nil {
@@ -552,15 +671,28 @@ func (h *Manager) botRoutes(api *http.ServeMux) {
 	api.HandleFunc("POST /api/v1/bots/feishu/pair", func(w http.ResponseWriter, r *http.Request) {
 		b := &h.bots
 		b.mu.Lock()
-		h.loadBotsLocked(r.Context())
+		if err := h.loadBotsLocked(r.Context()); err != nil {
+			b.mu.Unlock()
+			writeErr(w, http.StatusServiceUnavailable, err)
+			return
+		}
+		previous := b.set.Pairing
 		b.set.Pairing = &botPairing{Code: botPairCode(), Expires: b.clock().Add(botPairFor)}
-		h.saveBotSettingsLocked()
+		if err := h.saveBotSettingsLocked(); err != nil {
+			b.set.Pairing = previous
+			b.mu.Unlock()
+			writeErr(w, http.StatusServiceUnavailable, errBotSettingsSave)
+			return
+		}
 		b.mu.Unlock()
 		h.auditBot(r.Context(), botRecord{action: auditBotPairCode})
 		writeJSON(w, h.botView(r.Context()))
 	})
 	api.HandleFunc("DELETE /api/v1/bots/feishu/owner", func(w http.ResponseWriter, r *http.Request) {
-		h.unpairBot(r.Context())
+		if err := h.unpairBot(r.Context()); err != nil {
+			writeErr(w, http.StatusServiceUnavailable, err)
+			return
+		}
 		writeJSON(w, h.botView(r.Context()))
 	})
 	// test: a message to the owner, to see that the bot reaches them.
@@ -586,18 +718,29 @@ func botPairCode() string {
 }
 
 // unpairBot forgets the owner; the assistant forgets the chat's state (feishu.owner).
-func (h *Manager) unpairBot(ctx context.Context) {
+func (h *Manager) unpairBot(ctx context.Context) error {
 	b := &h.bots
 	b.mu.Lock()
-	h.loadBotsLocked(ctx)
+	if err := h.loadBotsLocked(ctx); err != nil {
+		b.mu.Unlock()
+		return err
+	}
+	previous := b.set.copy()
 	had := b.set.Owner != nil
 	b.set.Owner, b.set.Pairing, b.set.TopicChats, b.set.AISources = nil, nil, nil, nil // the topic chats and the /ai sources were the owner's
-	h.saveBotSettingsLocked()
+	b.set.Configure = nil
+	if err := h.saveBotSettingsLocked(); err != nil {
+		b.set = previous
+		b.mu.Unlock()
+		return errBotSettingsSave
+	}
+	b.pairLifecycle++
 	b.mu.Unlock()
 	if had {
 		h.auditBot(ctx, botRecord{action: auditBotUnpaired})
 	}
 	_ = h.notifyAssistant(assistantwire.EventFeishuOwner, assistantwire.FeishuOwner{})
+	return nil
 }
 
 var errBotOff = i18n.Err("hub-bots.bot_off")
@@ -616,16 +759,38 @@ func (h *Manager) testFeishuBot(ctx context.Context) error {
 	}
 	l := h.botLang(ctx)
 	body := i18n.T(l, "hub-bots.test_body")
-	card := feishubot.NewCard("", "", i18n.T(l, "hub-bots.test_title")).Markdown(body)
+	card := botcard.NewCard("", "", i18n.T(l, "hub-bots.test_title")).Markdown(body)
 	_, err := h.botPost(ctx, api, set.Owner.ChatID, "", card, body)
 	return err
 }
 
 // updateBot applies the app's changes; new credentials are tried (the bot's info) before they are saved.
-func (h *Manager) updateBot(ctx context.Context, enabled *bool, appID, secret, domain *string, features *BotFeatures) error {
+func (h *Manager) updateBot(ctx context.Context, enabled *bool, appID, secret, domain *string, features *botFeatureUpdate) error {
+	if appID != nil || secret != nil || domain != nil {
+		release, err := h.acquireFeishuBind(ctx)
+		if err != nil {
+			return err
+		}
+		defer release()
+	}
+	return h.applyBotUpdate(ctx, enabled, appID, secret, domain, features, false)
+}
+
+// applyBotUpdate requires the bind gate for credential updates. Only registration's own finish preserves its session.
+func (h *Manager) applyBotUpdate(ctx context.Context, enabled *bool, appID, secret, domain *string, features *botFeatureUpdate, preserveRegistration bool) error {
+	_, err := h.applyBotUpdateWithReceipt(ctx, enabled, appID, secret, domain, features, preserveRegistration)
+	return err
+}
+
+// applyBotUpdateWithReceipt returns the exact committed credentials and pairing lifecycle before post-save work.
+// Credential updates require the binding gate; a caller already holding it must not acquire it again.
+func (h *Manager) applyBotUpdateWithReceipt(ctx context.Context, enabled *bool, appID, secret, domain *string, features *botFeatureUpdate, preserveRegistration bool) (botConfigureReceipt, error) {
 	b := &h.bots
 	b.mu.Lock()
-	h.loadBotsLocked(ctx)
+	if err := h.loadBotsLocked(ctx); err != nil {
+		b.mu.Unlock()
+		return botConfigureReceipt{}, err
+	}
 	next := b.set.copy()
 	b.mu.Unlock()
 	reconnect := false
@@ -644,7 +809,7 @@ func (h *Manager) updateBot(ctx context.Context, enabled *bool, appID, secret, d
 		if next.SecretEnc != "" {
 			var err error
 			if prev, err = h.openKey(next.SecretEnc); err != nil && !newSecret {
-				return err
+				return botConfigureReceipt{}, err
 			}
 		}
 		plain := prev
@@ -657,17 +822,20 @@ func (h *Manager) updateBot(ctx context.Context, enabled *bool, appID, secret, d
 			next.AppID, next.SecretEnc, next.Domain = "", "", ""
 		} else {
 			if plain == "" {
-				return i18n.Err("hub-bots.needs_secret")
+				return botConfigureReceipt{}, i18n.Err("hub-bots.needs_secret")
+			}
+			if !botport.Available() {
+				return botConfigureReceipt{}, botport.ErrUnavailable
 			}
 			vctx, cancel := context.WithTimeout(ctx, 15*time.Second)
-			_, err := feishubot.New(id, plain, dom).BotInfo(vctx)
+			_, err := botport.New(id, plain, dom).BotInfo(vctx)
 			cancel()
 			if err != nil {
-				return errors.New(i18n.T(h.botLang(ctx), "hub-bots.cannot_reach_app", i18n.Args{"error": err.Error()}))
+				return botConfigureReceipt{}, errors.New(i18n.T(h.botLang(ctx), "hub-bots.cannot_reach_app", i18n.Args{"error": err.Error()}))
 			}
 			sealed, err := h.sealKey(plain)
 			if err != nil {
-				return err
+				return botConfigureReceipt{}, err
 			}
 			next.AppID, next.SecretEnc, next.Domain = id, sealed, dom
 		}
@@ -676,10 +844,27 @@ func (h *Manager) updateBot(ctx context.Context, enabled *bool, appID, secret, d
 	b.mu.Lock()
 	// Onto the settings as they are now: the credentials were checked over the network meanwhile, and a pairing may
 	// have come in.
+	if creds && ctx.Err() != nil {
+		b.mu.Unlock()
+		return botConfigureReceipt{}, ctx.Err()
+	}
 	cur := &b.set
+	previous := cur.copy()
+	var merged BotFeatures
+	if features != nil {
+		var err error
+		merged, err = features.apply(cur.Features)
+		if err != nil {
+			b.mu.Unlock()
+			return botConfigureReceipt{}, err
+		}
+	}
 	var records []botRecord
 	if creds {
 		if credsChanged {
+			if !preserveRegistration {
+				cur.Registration, cur.RegistrationDeviceEnc, cur.RegistrationSecretEnc = nil, "", ""
+			}
 			d := map[string]any{"app_id": next.AppID}
 			if next.Domain != "" {
 				d["domain"] = next.Domain
@@ -695,6 +880,7 @@ func (h *Manager) updateBot(ctx context.Context, enabled *bool, appID, secret, d
 		if next.AppID != cur.AppID {
 			cur.Owner, cur.Pairing, cur.TopicChats, cur.AISources = nil, nil, nil, nil
 		}
+		h.clearBotConfigureOnChangeLocked(next)
 		cur.AppID, cur.SecretEnc, cur.Domain = next.AppID, next.SecretEnc, next.Domain
 	}
 	if enabled != nil && *enabled != cur.Enabled {
@@ -703,12 +889,18 @@ func (h *Manager) updateBot(ctx context.Context, enabled *bool, appID, secret, d
 		records = append(records, botRecord{auditBotEnabled, map[string]any{"enabled": *enabled}})
 	}
 	if features != nil {
-		if *features != cur.Features {
-			records = append(records, botRecord{auditBotFeatures, map[string]any{"features": *features}})
+		if merged != cur.Features {
+			records = append(records, botRecord{auditBotFeatures, map[string]any{"features": merged}})
 		}
-		cur.Features = *features
+		cur.Features = merged
 	}
-	h.saveBotSettingsLocked()
+	if err := h.saveBotSettingsLocked(); err != nil {
+		b.set = previous
+		b.mu.Unlock()
+		return botConfigureReceipt{}, errBotSettingsSave
+	}
+	receipt := h.botConfigureReceiptLocked()
+
 	b.mu.Unlock()
 	h.auditBot(ctx, records...)
 	if reconnect {
@@ -725,5 +917,5 @@ func (h *Manager) updateBot(ctx context.Context, enabled *bool, appID, secret, d
 		h.refreshLarkCLIConnector(syncCtx)
 	}
 	h.sendReport()
-	return nil
+	return receipt, nil
 }

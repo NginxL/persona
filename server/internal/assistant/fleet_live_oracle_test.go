@@ -8,6 +8,7 @@ import (
 	"math/rand/v2"
 	"slices"
 	"sort"
+	"strings"
 	"testing"
 	"time"
 
@@ -38,18 +39,29 @@ func oracleNeedsYou(agents []oracleInput, ixs []proto.Interaction, counts func(o
 			byKey[a.Session.MachineID+"/"+a.Session.SessionID] = a
 		}
 	}
+	// An agent every pending card of which its task's supervisor holds (delegating, not a question) is not the user's.
+	held := map[string]bool{}
+	for _, ix := range ixs {
+		key := ix.MachineID + "/" + ix.SessionID
+		if _, seen := held[key]; !seen {
+			held[key] = true
+		}
+		if !ix.Delegating || ix.Kind == proto.IxQuestion {
+			held[key] = false
+		}
+	}
 	var out []oracleNeeder
 	asked := map[string]bool{}
 	for _, ix := range ixs {
 		key := ix.MachineID + "/" + ix.SessionID
-		if a, ok := byKey[key]; ok && !asked[key] && stands(ix) {
+		if a, ok := byKey[key]; ok && !asked[key] && !held[key] && stands(ix) {
 			asked[key] = true
 			out = append(out, oracleNeeder{agent: a, card: &ix})
 		}
 	}
 	for _, a := range agents {
 		key := a.Session.MachineID + "/" + a.Session.SessionID
-		if counts(a) && !asked[key] && a.Session.State == proto.StateNeedsYou && !a.Session.Assistant {
+		if counts(a) && !asked[key] && !held[key] && a.Session.State == proto.StateNeedsYou && !a.Session.Assistant {
 			out = append(out, oracleNeeder{agent: a})
 		}
 	}
@@ -71,7 +83,10 @@ func oracleBuildFleetIn(l i18n.Lang, agents []oracleInput, ixs []proto.Interacti
 		if ix := n.card; ix != nil {
 			item.Kind, item.Detail = ix.Kind, clip(oneLine(interactionDetail(l, *ix)), fleetDetailMax)
 			item.Interaction, item.Since = ix.ID, unixSeconds(ix.CreatedAt)
-			if len(ix.Fields) > 0 {
+			// #12982: no buttons for a permission without a summary or a plan without a title.
+			blind := ix.Kind == proto.IxPermission && strings.TrimSpace(ix.Summary) == "" ||
+				ix.Kind == proto.IxPlan && strings.TrimSpace(planTitle(ix.Plan)) == ""
+			if len(ix.Fields) > 0 || blind {
 				item.Interaction = ""
 			}
 		}

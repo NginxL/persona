@@ -11,7 +11,7 @@ import (
 
 	"github.com/nwverse/persona/server/internal/assistantwire"
 	"github.com/nwverse/persona/server/internal/connector"
-	"github.com/nwverse/persona/server/internal/mail"
+	"github.com/nwverse/persona/server/internal/mailwire"
 	"github.com/nwverse/persona/server/internal/rpc"
 )
 
@@ -94,14 +94,14 @@ func (h *Manager) readMail(ctx context.Context) *assistantwire.InboxMailRead {
 
 // readMailAccount keeps INBOX on the original wire field so an older assistant only processes that mailbox.
 // A failed folder's page is left out. Other pages can be applied while the account reports that it is behind.
-func (h *Manager) readMailAccount(ctx context.Context, a mail.MailAccount) (*assistantwire.InboxMailAccount, error) {
+func (h *Manager) readMailAccount(ctx context.Context, a mailwire.MailAccount) (*assistantwire.InboxMailAccount, error) {
 	boxes, firstErr := h.mail.IntakeMailboxes(ctx, a.ID)
 	if firstErr != nil {
 		boxes = []string{"INBOX"}
 	}
 	acc := &assistantwire.InboxMailAccount{ID: a.ID, Email: a.Email, Messages: []assistantwire.InboxMailSummary{}}
 	for _, box := range boxes {
-		res, err := h.mail.ListMessages(ctx, mail.ListOptions{AccountID: a.ID, Mailbox: box, Limit: 40})
+		res, err := h.mail.ListMessages(ctx, mailwire.ListOptions{AccountID: a.ID, Mailbox: box, Limit: 40})
 		if err != nil {
 			if box == "INBOX" {
 				acc.InboxUnavailable = true
@@ -150,17 +150,17 @@ func (h *Manager) mailHealth() map[string]string {
 // deadline and the network's are timeouts too.
 func mailReadErrorOf(err error) string {
 	var ne net.Error
-	if errors.Is(err, mail.ErrTimedOut) || errors.As(err, &ne) && ne.Timeout() {
+	if errors.Is(err, mailwire.ErrTimedOut) || errors.As(err, &ne) && ne.Timeout() {
 		return assistantwire.ReadTimeout
 	}
 	return readErrorOf(err)
 }
 
-func mailAddress(a mail.Address) assistantwire.MailAddress {
+func mailAddress(a mailwire.Address) assistantwire.MailAddress {
 	return assistantwire.MailAddress{Name: a.Name, Email: a.Email}
 }
 
-func mailAddresses(list []mail.Address) []assistantwire.MailAddress {
+func mailAddresses(list []mailwire.Address) []assistantwire.MailAddress {
 	out := []assistantwire.MailAddress{}
 	for _, a := range list {
 		out = append(out, mailAddress(a))

@@ -15,8 +15,8 @@ import persona.core.contracts.api.SshRoute
 import persona.core.contracts.api.MessageRequest
 import persona.core.contracts.api.MessageTransport
 import persona.core.contracts.api.MessageTransportResult
-import persona.feature.inbox.ReplyRequest
-import persona.feature.inbox.ReplyTarget
+import persona.core.inbox.ReplyRequest
+import persona.core.inbox.ReplyTarget
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob

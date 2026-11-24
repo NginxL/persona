@@ -37,10 +37,12 @@ internal fun KeepAgentReadingPosition(
     paginationFooter: Boolean,
     scope: List<Any?>,
     restoring: Boolean,
+    onProgrammaticScroll: () -> Unit = {},
 ) {
     val currentTree = rememberUpdatedState(tree)
     val hasFooter = rememberUpdatedState(paginationFooter)
     val restoreInProgress = rememberUpdatedState(restoring)
+    val onProgrammaticScrollNow = rememberUpdatedState(onProgrammaticScroll)
     LaunchedEffect(state, scope) {
         var reading: AgentReadingRow? = null
         var settledRows = emptyList<AgentReadingRow>()
@@ -115,6 +117,7 @@ internal fun KeepAgentReadingPosition(
                     if (pending == null) {
                         if (!state.isScrollInProgress) {
                             pendingCorrection = PendingReadingCorrection(request, layout)
+                            onProgrammaticScrollNow.value()
                             state.requestScrollToItem(index, request.offset)
                         }
                         return@collect

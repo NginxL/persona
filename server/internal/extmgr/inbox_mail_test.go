@@ -9,7 +9,7 @@ import (
 
 	"github.com/nwverse/persona/server/internal/assistantwire"
 	"github.com/nwverse/persona/server/internal/connector"
-	"github.com/nwverse/persona/server/internal/mail"
+	"github.com/nwverse/persona/server/internal/mailwire"
 	"github.com/nwverse/persona/server/internal/proto"
 )
 
@@ -18,7 +18,7 @@ import (
 // ran at once.
 type slowMail struct {
 	inboxOnlyMail
-	accounts []mail.MailAccount
+	accounts []mailwire.MailAccount
 	delay    time.Duration
 	release  chan struct{}
 	fail     map[string]bool
@@ -28,9 +28,9 @@ type slowMail struct {
 
 func (*slowMail) Tools() []proto.Tool { return nil } // registering the mail connector lists them
 
-func (m *slowMail) ListAccounts() ([]mail.MailAccount, error) { return m.accounts, nil }
+func (m *slowMail) ListAccounts() ([]mailwire.MailAccount, error) { return m.accounts, nil }
 
-func (m *slowMail) ListMessages(ctx context.Context, opts mail.ListOptions) (*mail.ListResult, error) {
+func (m *slowMail) ListMessages(ctx context.Context, opts mailwire.ListOptions) (*mailwire.ListResult, error) {
 	n := m.running.Add(1)
 	defer m.running.Add(-1)
 	for {
@@ -52,7 +52,7 @@ func (m *slowMail) ListMessages(ctx context.Context, opts mail.ListOptions) (*ma
 	if m.fail[opts.AccountID] {
 		return nil, errors.New("imap: operation timed out")
 	}
-	return &mail.ListResult{Messages: []mail.MailSummary{{Mailbox: "INBOX", UID: 1, Subject: "from " + opts.AccountID}}}, nil
+	return &mailwire.ListResult{Messages: []mailwire.MailSummary{{Mailbox: "INBOX", UID: 1, Subject: "from " + opts.AccountID}}}, nil
 }
 
 func newSlowMailHub(t *testing.T, m *slowMail) *Manager {
@@ -70,7 +70,7 @@ func newSlowMailHub(t *testing.T, m *slowMail) *Manager {
 // and comes back in the accounts' order with the one that failed left out.
 func TestReadMailReadsAccountsInParallel(t *testing.T) {
 	const delay = 300 * time.Millisecond
-	m := &slowMail{delay: delay, fail: map[string]bool{"b": true}, accounts: []mail.MailAccount{
+	m := &slowMail{delay: delay, fail: map[string]bool{"b": true}, accounts: []mailwire.MailAccount{
 		{ID: "a", Email: "a@example.com"}, {ID: "b", Email: "b@example.com"}, {ID: "c", Email: "c@example.com"},
 		{ID: "d", Email: "d@example.com"},
 	}}
@@ -107,7 +107,7 @@ func TestReadMailBoundsParallelReads(t *testing.T) {
 	m := &slowMail{release: make(chan struct{})}
 	for i := 0; i < 3*inboxMailParallel; i++ {
 		id := string(rune('a' + i))
-		m.accounts = append(m.accounts, mail.MailAccount{ID: id, Email: id + "@example.com"})
+		m.accounts = append(m.accounts, mailwire.MailAccount{ID: id, Email: id + "@example.com"})
 	}
 	h := newSlowMailHub(t, m)
 

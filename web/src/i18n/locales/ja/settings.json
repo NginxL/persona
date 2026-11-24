@@ -13,6 +13,8 @@
   "agent_preferences": "エージェントの設定",
   "reply_motion": "返信のアニメーション",
   "reply_motion_hint": "新しい返信を単語ごとにフェードイン表示します。システムの「視差効果を減らす」がオンのときは再生しません。",
+  "starred_messages": "メッセージのスター",
+  "starred_messages_hint": "サイドバーに「スター付き」を表示し、メッセージのメニューにスター／スター解除を表示します。オフでも保存済みのメッセージは残ります。",
   "sidebar_terminals": "サイドバーにターミナルを表示",
   "sidebar_terminals_hint": "エージェントをマシン別にまとめたとき、各コンピューターのエージェントの下にターミナル内の通常のシェルを表示し、クリックすると「ターミナル」ページを開きます。デフォルトはオフで、このブラウザーにだけ適用されます。",
   "avatar": "アバター",
@@ -151,6 +153,9 @@
   "sidebar_pages_up": "「{name}」を上へ",
   "sidebar_pages_down": "「{name}」を下へ",
   "sidebar_pages_show": "「{name}」をサイドバーに表示",
+  "sidebar_more_show": "「その他」を表示",
+  "sidebar_more_hint_on": "収納したページは「その他」から開けます。",
+  "sidebar_more_hint_off": "「その他」は非表示です。中のページは検索や既存のリンクから開けます。オンにすると元に戻ります。",
   "sidebar_groups_new": "新しいグループ",
   "sidebar_groups_name": "グループ名",
   "sidebar_groups_save": "保存",
@@ -186,5 +191,9 @@
   "herdr_tab_name_saving": "セッション名の設定を保存中…",
   "show_botmux_inventory": "コンピュータの「botmux セッションも表示」スイッチで、ハブに届くセッションを設定します。",
   "show_botmux_computers": "コンピュータを開く",
-  "botmux_saving": "保存中…"
+  "botmux_saving": "保存中…",
+  "sort_by_activity": "Agents を最近の更新順に並べる",
+  "sort_by_activity_hint": "オフでは固定の順序。オンでは最新のアクティビティ順で、ポインターがサイドバーの外にあるときだけ並べ替えます。",
+  "show_agents_filter": "Agents リストにフィルターを表示",
+  "show_agents_filter_hint": "Agents リストに「フィルター」ボタンと条件を表示します。オフにすると非表示になり、適用中のフィルターも解除されます。"
 }

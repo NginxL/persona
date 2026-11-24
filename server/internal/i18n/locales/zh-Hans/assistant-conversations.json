@@ -1,12 +1,16 @@
 {
+  "reporting_direction_supervisor": "此方向用于汇报进展。请选择一个 Persona 对话来督办此任务。",
   "archive_main": "主对话不能归档",
   "archive_background_supervisor": "后台督办对话不能归档",
   "supervision_source": "督办",
   "background_supervisor": "后台督办",
-  "background_supervisor_former": "后台督办 · 至 {month}月{day}日",
   "notice_delivery_refused": "此对话拒收了 Persona 关于任务或聊天的一条更新，没有送达，也不会再自动重发。",
   "relay_delivery_failed": "消息未能送达",
   "supervision_delivery_failed": "此对话无法接收任务跟进指令。请打开任务查看最新状态和报告。这台电脑上支持的启动器：{launchers}。",
   "supervision_delivery_refused": "此对话拒收了一条任务跟进消息，不会再自动重发。请打开任务查看最新状态和报告。",
-  "supervision_reviewer_required": "请先选择 Claude Code 或 Codex 督办对话，再启动此任务。"
+  "supervision_reviewer_required": "请先选择 Claude Code 或 Codex 督办对话，再启动此任务。",
+  "started_on": "运行配置为 {run}。",
+  "pick_save_failed": "无法为后续对话保存模型选择：{error}",
+  "pin_requested": "首轮结束后，Persona 会请你确认是否将这段对话设为常驻。",
+  "pin_save_failed": "未能保存将这段对话设为常驻的请求。"
 }

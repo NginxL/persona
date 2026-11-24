@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 )
 
 // GitLabReview asks GET /api/v4/projects/<encoded path>/merge_requests/<iid> (field names as GitLab's REST docs give
@@ -21,14 +22,16 @@ func TestGitLabReview(t *testing.T) {
 	answer := func(state, extra string) string {
 		return `{"iid":17,"state":"` + state + `","web_url":"` + mr + `"` + extra + `}`
 	}
+	terminalAt := time.Date(2026, time.January, 2, 3, 4, 5, 0, time.UTC)
 	for _, tc := range []struct {
 		name, body, token, want, code string
 		status                        int
+		terminalAt                    time.Time
 	}{
 		{name: "opened", body: answer("opened", `,"merge_commit_sha":null`), want: "open"},
 		{name: "locked is still being merged", body: answer("locked", ""), want: "open"},
-		{name: "closed", body: answer("closed", ""), want: "closed"},
-		{name: "merged", body: answer("merged", `,"merge_commit_sha":"abc123","squash_commit_sha":null`), want: "merged", token: "secret-token"},
+		{name: "closed", body: answer("closed", `,"closed_at":"2026-01-02T03:04:05Z"`), want: "closed", terminalAt: terminalAt},
+		{name: "merged", body: answer("merged", `,"merge_commit_sha":"abc123","merged_at":"2026-01-02T03:04:05Z"`), want: "merged", token: "secret-token", terminalAt: terminalAt},
 		{name: "merged by squash", body: answer("merged", `,"merge_commit_sha":null,"squash_commit_sha":"def456"`), want: "merged"},
 		{name: "unknown state", body: answer("draft", ""), code: "inconclusive"},
 		{name: "another merge request", body: `{"iid":18,"state":"merged","web_url":"https://gitlab.example.test/group/sub/project/-/merge_requests/18"}`, code: "inconclusive"},
@@ -62,6 +65,8 @@ func TestGitLabReview(t *testing.T) {
 				t.Fatalf("%+v %v, want %s", got, err, tc.want)
 			case tc.want == "merged" && got.MergeCommit == "":
 				t.Fatalf("merged without its commit: %+v", got)
+			case !got.TerminalAt.Equal(tc.terminalAt):
+				t.Fatalf("terminal time %v, want %v", got.TerminalAt, tc.terminalAt)
 			}
 		})
 	}

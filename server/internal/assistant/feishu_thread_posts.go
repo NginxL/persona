@@ -10,10 +10,11 @@ import (
 	"sync"
 	"time"
 
+	"github.com/nwverse/persona/server/internal/botcard"
 	"github.com/nwverse/persona/server/internal/channel"
 	"github.com/nwverse/persona/server/internal/db"
-	"github.com/nwverse/persona/server/internal/feishubot"
 	"github.com/nwverse/persona/server/internal/i18n"
+	"github.com/nwverse/persona/server/internal/larkhost"
 	"github.com/nwverse/persona/server/internal/proto"
 )
 
@@ -47,13 +48,14 @@ const (
 
 type threadEventKind int
 
+// The kinds are the outbound port's (larkhost.ThreadKind), which core code posts through.
 const (
-	threadDecision threadEventKind = iota
-	threadAgentFinished
-	threadAgentNeeds
-	threadTodoAccepted
-	threadTodoDone
-	threadTodoFailed
+	threadDecision      = threadEventKind(larkhost.ThreadDecision)
+	threadAgentFinished = threadEventKind(larkhost.ThreadAgentFinished)
+	threadAgentNeeds    = threadEventKind(larkhost.ThreadAgentNeeds)
+	threadTodoAccepted  = threadEventKind(larkhost.ThreadTodoAccepted)
+	threadTodoDone      = threadEventKind(larkhost.ThreadTodoDone)
+	threadTodoFailed    = threadEventKind(larkhost.ThreadTodoFailed)
 )
 
 // threadEvent is one thing to tell the topic of a todo; text is what the line quotes (a decision, the agent's name
@@ -177,21 +179,9 @@ func (s *Service) insertDecision(ctx context.Context, st todoStore, row db.TodoD
 		s.parkDecided(context.WithoutCancel(ctx), row) // what a parked task waited for may have come (parked.go)
 	}
 	if err == nil && ok && postable(row) {
-		s.threadPost(row.TodoID, threadEvent{kind: threadDecision, text: decisionLine(row)})
+		s.chat().ThreadPost(row.TodoID, larkhost.ThreadEvent{Kind: larkhost.ThreadDecision, Text: decisionLine(row)})
 	}
 	return ok, err
-}
-
-// decisionLine is a decision as a line quotes it: the question and what was chosen.
-func decisionLine(d db.TodoDecisionRow) string {
-	q, c := clip(oneLine(d.Question), 40), clip(oneLine(d.Choice), 60)
-	switch {
-	case q == "":
-		return c
-	case c == "":
-		return q
-	}
-	return q + " → " + c
 }
 
 // threadPost queues ev for todo id's topic: nothing for a todo bound to none. The line goes out when the minute since
@@ -275,10 +265,10 @@ func (s *Service) threadFlush(id string) {
 	to := feishuTarget{ChatID: th.ChatID, InThread: true, NoDetour: true}
 	// Its own key for every line: the reply's usual key is made of the parent and the words, so two lines that read the
 	// same (two finished turns) under one anchor would be one to Feishu, and the second silently dropped.
-	err = s.appCall(ctx, AppFeishu, FeishuText, to.params(map[string]any{"reply_to": anchor, "text": text, "uuid": s.threadPostKey(id)}), nil)
+	err = s.appCall(ctx, AppFeishu, FeishuText, targetParams(to, map[string]any{"reply_to": anchor, "text": text, "uuid": s.threadPostKey(id)}), nil)
 	switch {
 	case err == nil:
-	case feishubot.MessageGone(err):
+	case botcard.MessageGone(err):
 		// The anchor was withdrawn or deleted: the topic has no such message to reply under. This line is lost (a failed
 		// post is not tried again); the next message the owner writes there is the new anchor.
 		s.logf("todo %s: post to its thread: its anchor message is gone; forgetting it", id)
@@ -444,18 +434,6 @@ func threadName(s string) string {
 		return ""
 	}
 	return s
-}
-
-// threadClosing is what the topic is told when a todo became done (nil when it did not): why, when the hub's judge
-// closed it or its agent never started.
-func threadClosing(becameDone bool, startError, doneReason string) *threadEvent {
-	switch {
-	case !becameDone:
-		return nil
-	case startError != "":
-		return &threadEvent{kind: threadTodoFailed, text: clip(oneLine(startError), 80)}
-	}
-	return &threadEvent{kind: threadTodoDone, text: clip(oneLine(doneReason), 80)}
 }
 
 // activeTodoOf is the open todo the agent machine/session works for, "" when it works for none.

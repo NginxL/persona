@@ -13,6 +13,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
@@ -37,11 +38,18 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
+import persona.core.contracts.Direction
+import persona.core.contracts.DirectionTask
+import persona.core.contracts.DirectionTaskState
+import persona.core.contracts.DirectionTree
 import persona.core.contracts.FeedItem
 import persona.core.contracts.FeedResponse
 import persona.core.contracts.ServerEvent
+import persona.core.contracts.Session
+import persona.core.contracts.Supervision
 import persona.core.contracts.TaskPlan
 import persona.core.contracts.Todo
+import persona.core.contracts.TodoAgent
 import persona.core.contracts.api.ConnectionState
 import persona.core.contracts.api.HubConnection
 import persona.core.contracts.api.TasksApi
@@ -62,7 +70,9 @@ class TodoSeenScreenTest {
     private val now = Instant.parse("2026-11-05T09:30:00Z")
     private val notes = Todo("notes", title = "Write the release notes", notes = "Synthetic release summary",
         origin = "conv", createdAt = "2026-11-05T07:30:00Z", updatedAt = "2026-11-05T09:00:00Z",
-        doneAt = "2026-11-05T09:00:00Z")
+        agents = listOf(TodoAgent(machineId = "m", sessionId = "notes")))
+    private val noteSession = Session(machineId = "m", sessionId = "notes", state = "unread", status = "idle",
+        updatedAt = "2026-11-05T09:00:00Z")
     private val open = Todo("open", title = "Back up the NAS", createdAt = "2026-11-05T08:00:00Z")
 
     private class Api(var rows: List<Todo>, supported: Boolean = true) : TasksApi {
@@ -112,7 +122,8 @@ class TodoSeenScreenTest {
     private var shotHeight by mutableStateOf(900)
     private var detailId by mutableStateOf<String?>(null)
 
-    private fun openList(api: Api, style: AppStyle = AppStyle.Glass, dark: Boolean = false, height: Int = 900) {
+    private fun openList(api: Api, style: AppStyle = AppStyle.Glass, dark: Boolean = false, height: Int = 900,
+                         directions: DirectionTree? = null) {
         store = TasksStore(api, Connection(), CoroutineScope(Dispatchers.Unconfined))
         store.reloadTodos()
         shotStyle = style
@@ -125,9 +136,10 @@ class TodoSeenScreenTest {
                     val todos by store.todos.collectAsState()
                     Box(Modifier.testTag("shot").width(400.dp).height(shotHeight.dp).background(PersonaTheme.palette.background)) {
                         detailId?.let { id ->
-                            TodoDetailScreen(id, todos, emptyList(), emptyList(), store, onBack = {}, onOpenSession = {},
+                            TodoDetailScreen(id, todos, emptyList(), listOf(noteSession), store, onBack = {}, onOpenSession = {},
                                 onHandOff = {}, now = now)
-                        } ?: TodosScreen(todos, emptyList(), store, onBack = {}, onOpenTodo = {}, now = now)
+                        } ?: TodosScreen(todos, listOf(noteSession), store, onBack = {}, onOpenTodo = {}, now = now,
+                            directions = directions)
                     }
                 }
             }
@@ -149,7 +161,7 @@ class TodoSeenScreenTest {
         openList(api)
         rule.onNodeWithText("Got it").performClick()
         rule.waitForIdle()
-        assertTrue("row left Just finished before the hub answered", sectionAbsent("Just finished"))
+        assertTrue("row left Just finished before the hub answered", sectionAbsent("Delivered · awaiting review"))
         assertEquals(listOf("notes" to true), api.sent)
         val (message, undo) = feedback.notices.single()
         assertEquals("Moved to Done", message)
@@ -159,8 +171,19 @@ class TodoSeenScreenTest {
         undo!!.run()
         rule.waitForIdle()
         assertEquals(listOf("notes" to true, "notes" to false), api.sent)
-        assertTrue("Undo restored Just finished", !sectionAbsent("Just finished"))
+        assertTrue("Undo restored Just finished", !sectionAbsent("Delivered · awaiting review"))
         assertTrue(feedback.failures.isEmpty())
+    }
+
+    @Test fun openConcernGotItMovesToOtherOpenWithMatchingFeedback() {
+        val api = Api(listOf(notes.copy(kind = "concern")))
+        openList(api)
+        rule.onNodeWithText("Got it").performClick()
+        rule.waitForIdle()
+        assertEquals(listOf("notes" to true), api.sent)
+        assertEquals("Moved to Other open", feedback.notices.single().first)
+        assertTrue("the open concern left Just finished", sectionAbsent("Delivered · awaiting review"))
+        assertTrue("and joined Other open", !sectionAbsent("Other open"))
     }
 
     @Test fun aRefusedWritePutsTheRowBackAndSaysWhy() {
@@ -168,7 +191,7 @@ class TodoSeenScreenTest {
         openList(api)
         rule.onNodeWithText("Got it").performClick()
         rule.waitForIdle()
-        assertTrue("the refused row is back", !sectionAbsent("Just finished"))
+        assertTrue("the refused row is back", !sectionAbsent("Delivered · awaiting review"))
         assertEquals("hub unavailable", feedback.failures.single().message)
     }
 
@@ -194,6 +217,29 @@ class TodoSeenScreenTest {
         val api = Api(listOf(open))
         openDetail(api, open.id)
         assertTrue(api.sent.isEmpty())
+    }
+
+    @Test fun supervisedDeliveryOffersNoFalseDoneAction() {
+        val supervised = notes.copy(supervision = Supervision(supervisor = "main", state = "pending_review"))
+        val api = Api(listOf(supervised))
+        openDetail(api, notes.id)
+        assertTrue("Seen is not acceptance", sectionAbsent("Got it"))
+        assertEquals(listOf("notes" to true), api.sent)
+        assertTrue("still awaiting review", !sectionAbsent("Delivered · awaiting review"))
+    }
+
+    @Test fun directionGroupingOffersSeenOnlyForAnOrdinaryDelivery() {
+        val supervised = notes.copy(id = "supervised", title = "Supervised delivery",
+            supervision = Supervision(supervisor = "main", state = "pending_review"))
+        val tree = DirectionTree(listOf(Direction("main", secretary = true, tasks = listOf(
+            DirectionTask(notes.id, state = DirectionTaskState.Review),
+            DirectionTask(supervised.id, state = DirectionTaskState.Review),
+        ))))
+        openList(Api(listOf(notes, supervised)), directions = tree)
+        rule.onNodeWithTag("todos-filter").performClick()
+        rule.onNodeWithText("Pinned").performClick()
+        rule.waitForIdle()
+        rule.onAllNodesWithText("Got it").assertCountEquals(1)
     }
 
     @Test fun englishCopy() {

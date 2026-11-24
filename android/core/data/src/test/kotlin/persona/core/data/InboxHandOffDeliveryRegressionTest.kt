@@ -8,6 +8,7 @@ import persona.core.contracts.Item
 import persona.core.contracts.Resolution
 import persona.core.contracts.SessionKey
 import persona.core.contracts.api.ChatComposerService
+import persona.core.contracts.api.ComposerDelivery
 import persona.core.contracts.api.DeliveryState
 import persona.core.contracts.api.InboxAssistantConnection
 import persona.core.contracts.api.InboxAssistantTransport
@@ -18,7 +19,7 @@ import persona.core.contracts.api.MessageRequest
 import persona.core.contracts.api.MessageSender
 import persona.core.contracts.api.MessageTransport
 import persona.core.contracts.api.MessageTransportResult
-import persona.feature.inbox.InboxHandOffRequest
+import persona.core.inbox.InboxHandOffRequest
 import persona.core.hub.HttpChatComposerService
 import persona.core.hub.HubConnectionConfig
 import persona.core.hub.HubNetwork
@@ -469,6 +470,8 @@ class InboxHandOffDeliveryRegressionTest {
                 fixture.store.entries.first { rows -> rows.any { it.clientMessageId == nextId && it.state == OutboxState.Sending } }
             }
             if (transcriptFirst) {
+                // The manual start may repair an older automatic Unknown before the transcript arrives. Its final
+                // Shown result must not be regressed by that older attempt after the HTTP reply completes.
                 fixture.sender.observeTranscript(agent, listOf(
                     Item("retry-echo", 1, role = "user", kind = "text", text = request.text, clientMsgId = retryOp),
                 ))
@@ -499,6 +502,58 @@ class InboxHandOffDeliveryRegressionTest {
             http.close()
             fixture.close()
             owner.coroutineContext[Job]?.cancelAndJoin()
+        }
+    }
+
+    @Test fun staleAutomaticSettlementCannotUndoAComposerCompletion() = runBlocking<Unit> {
+        val owner = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+        val fixture = HandOffFixture(owner, pairing, online = true)
+        val firstReply = CompletableDeferred<Unit>()
+        val secondReply = CompletableDeferred<Unit>()
+        val secondStarted = CompletableDeferred<Unit>()
+        try {
+            fixture.messages.onSend = { request ->
+                if (request.clientMessageId == "first") {
+                    firstReply.await()
+                    MessageTransportResult.Accepted
+                } else {
+                    secondStarted.complete(Unit)
+                    secondReply.await()
+                    MessageTransportResult.NoReceipt
+                }
+            }
+            fixture.sender.send(SessionKey("laptop", "first"), "first", "first", null)
+            firstReply.complete(Unit)
+            fixture.sender.send(SessionKey("laptop", "second"), "second", "second", null)
+            withTimeout(5_000) { secondStarted.await() }
+            val settlementStarted = CompletableDeferred<Unit>()
+            val continueSettlement = CompletableDeferred<Unit>()
+            fixture.store.beforeTransition = { id, from, to ->
+                if (id == "second" && OutboxState.Sending in from && to == OutboxState.Unknown) {
+                    settlementStarted.complete(Unit)
+                    continueSettlement.await()
+                }
+            }
+            secondReply.complete(Unit)
+            withTimeout(5_000) { settlementStarted.await() }
+            val observed = owner.async {
+                fixture.sender.observeTranscript(SessionKey("laptop", "second"), listOf(
+                    Item("second-echo", 1, role = "user", kind = "text", text = "second", clientMsgId = "second"),
+                ))
+            }
+            continueSettlement.complete(Unit)
+            withTimeout(5_000) { observed.await() }
+            withTimeout(5_000) { fixture.store.entries.first {
+                it.single { row -> row.clientMessageId == "second" }.state == OutboxState.Shown
+            } }
+            Unit
+        } finally {
+            firstReply.complete(Unit)
+            secondReply.complete(Unit)
+            fixture.store.beforeTransition = { _, _, _ -> }
+            fixture.close()
+            owner.coroutineContext[Job]?.cancelAndJoin()
+            Unit
         }
     }
 
@@ -748,7 +803,11 @@ class InboxHandOffDeliveryRegressionTest {
 
         suspend fun connect(): ChatComposerService = fixture.sender.connectComposer { transport ->
             HttpChatComposerService(pairing, transport, connection, "test-token",
-                onRetryDelivery = fixture.sender::recordComposerDelivery,
+                onRetryStart = fixture.sender::beginComposerRetry,
+                onRetryDelivery = { id, delivery, opId, result ->
+                    println("composer-retry-delivery: id=$id op=$opId state=${delivery.state} result=$result entry=${fixture.store.entries.value.firstOrNull { it.clientMessageId == id }}")
+                    fixture.sender.recordComposerDelivery(id, delivery, opId, result)
+                },
                 onPairingExpired = {})
         }
 
@@ -857,6 +916,7 @@ class InboxHandOffDeliveryRegressionTest {
     /** RoomOutboxStore's client-id behavior over the shared in-memory store, including main-conversation binding. */
     private class IdempotentOutboxStore : OutboxStore {
         private val delegate = MemoryOutboxStore()
+        var beforeTransition: suspend (String, Set<OutboxState>, OutboxState) -> Unit = { _, _, _ -> }
         override val entries = delegate.entries
 
         fun state(id: String) = delegate.state(id)
@@ -881,7 +941,7 @@ class InboxHandOffDeliveryRegressionTest {
         override suspend fun releaseMainCreation() = delegate.releaseMainCreation()
         override suspend fun forgetMainConversation(session: SessionKey) = delegate.forgetMainConversation(session)
         override suspend fun transition(id: String, from: Set<OutboxState>, to: OutboxState, error: String?) =
-            delegate.transition(id, from, to, error)
+            beforeTransition(id, from, to).let { delegate.transition(id, from, to, error) }
         override suspend fun transition(
             id: String,
             from: Set<OutboxState>,

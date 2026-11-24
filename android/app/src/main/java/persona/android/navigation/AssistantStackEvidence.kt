@@ -18,6 +18,7 @@ import persona.core.navigation.MachineDetailRoute
 import persona.core.navigation.MachinesRoute
 import persona.core.navigation.SettingsPageRoute
 import persona.core.navigation.SettingsRoute
+import persona.core.navigation.StarredMessagesRoute
 import persona.core.navigation.TodoDetailRoute
 import persona.core.navigation.TodosRoute
 import persona.feature.inbox.ConnectorThreadRoute
@@ -26,9 +27,9 @@ import persona.feature.inbox.InboxItemDetailRoute
 import persona.feature.inbox.LarkMomentRoute
 import persona.feature.inbox.LarkRoute
 import persona.feature.inbox.MailRoute
-import persona.feature.knowledge.KnowledgeDetailRoute
-import persona.feature.knowledge.KnowledgeKindRoute
-import persona.feature.knowledge.KnowledgeRoute
+import persona.core.navigation.KnowledgeDetailRoute
+import persona.core.navigation.KnowledgeKindRoute
+import persona.core.navigation.KnowledgeRoute
 
 internal data class AssistantStackEvidence(val route: String, val selectedKey: String?)
 
@@ -36,6 +37,7 @@ internal data class AssistantStackEvidence(val route: String, val selectedKey: S
 internal fun assistantStackEvidence(key: NavKey?, tab: AppTab = AppTab.Persona): AssistantStackEvidence = when (key) {
     null -> AssistantStackEvidence("none", null)
     AssistantRoute -> AssistantStackEvidence("assistant", null)
+    StarredMessagesRoute -> AssistantStackEvidence("starred", null)
     AgentsRoute -> AssistantStackEvidence("agents", null)
     InboxRoute -> AssistantStackEvidence("inbox", null)
     SettingsRoute -> AssistantStackEvidence("settings", null)

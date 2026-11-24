@@ -21,8 +21,8 @@ var movedClusters = []struct {
 	filePrefixes   []string
 }{
 	{"node", "node/clipshare", []string{"clipshare"}},
-	{"node", "node/iphone", []string{"iphone"}},
-	{"node", "node/nodekit", nil}, // helpers shared by the clusters: no file prefix, names only
+	{"node", "modules/phone-extra/nodeiphone", []string{"iphone"}}, // moved on into the phone-extra module (#14258)
+	{"node", "node/nodekit", nil},                                  // helpers shared by the clusters: no file prefix, names only
 	{"assistant", "assistant/chatsearch", []string{"search_text"}},
 	{"assistant", "assistant/saved", []string{"saved_"}},
 	{"assistant", "assistant/kbhistory", []string{"kb_history"}},

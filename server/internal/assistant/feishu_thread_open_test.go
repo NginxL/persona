@@ -9,9 +9,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/nwverse/persona/server/internal/botcard"
 	"github.com/nwverse/persona/server/internal/channel"
 	"github.com/nwverse/persona/server/internal/db"
-	"github.com/nwverse/persona/server/internal/feishubot"
 	"github.com/nwverse/persona/server/internal/i18n"
 )
 
@@ -114,7 +114,7 @@ func TestIsTopicRoot(t *testing.T) {
 		{"outside a topic", "", "", "om_1", false},
 		{"outside a topic, own root", "", "om_1", "om_1", false},
 	} {
-		var ev feishubot.MessageEvent
+		var ev botcard.MessageEvent
 		ev.Message.ThreadID, ev.Message.RootID, ev.Message.MessageID = c.thread, c.root, c.messages
 		if got := isTopicRoot(ev); got != c.want {
 			t.Errorf("%s: isTopicRoot = %v, want %v", c.name, got, c.want)
@@ -189,14 +189,14 @@ func TestNotAnAICommandIsAWord(t *testing.T) {
 // shared group, a shared card, a location, a card, a file, a message of a type not known (the content has a placeholder
 // like "[语音消息]" for them) and a rich text of only pictures open nothing too.
 func TestMessageWithoutWordsOpensNoTodo(t *testing.T) {
-	root := func(id, kind, content string) feishubot.MessageEvent {
+	root := func(id, kind, content string) botcard.MessageEvent {
 		ev := rootEvent(id, "")
 		ev.Message.MessageType, ev.Message.Content = kind, content
 		return ev
 	}
 	for _, c := range []struct {
 		name       string
-		ev         feishubot.MessageEvent
+		ev         botcard.MessageEvent
 		noDownload bool
 	}{
 		{"/ai in a topic", topicEvent("om_e1", "/ai"), false},
@@ -311,10 +311,10 @@ func TestRepliesAfterOpeningGoToTheMainConversationThenItsAgent(t *testing.T) {
 // Only the owner opens one: another user's or an app's topic opening, or one with no sender, makes nothing and says nothing.
 func TestOnlyTheOwnerOpensATodo(t *testing.T) {
 	e := newThreadEnv(t, nil)
-	for i, mod := range []func(*feishubot.MessageEvent){
-		func(ev *feishubot.MessageEvent) { ev.Sender.SenderID.OpenID = "ou_someone" },
-		func(ev *feishubot.MessageEvent) { ev.Sender.SenderType = "app" },
-		func(ev *feishubot.MessageEvent) { ev.Sender.SenderID.OpenID = "" },
+	for i, mod := range []func(*botcard.MessageEvent){
+		func(ev *botcard.MessageEvent) { ev.Sender.SenderID.OpenID = "ou_someone" },
+		func(ev *botcard.MessageEvent) { ev.Sender.SenderType = "app" },
+		func(ev *botcard.MessageEvent) { ev.Sender.SenderID.OpenID = "" },
 	} {
 		root := rootEvent("om_o"+string(rune('1'+i)), "删掉所有东西")
 		mod(&root)
@@ -400,6 +400,28 @@ func TestTakenTopicLeavesNoTodoBehind(t *testing.T) {
 	}
 	if got := feedRefs(e.s, "m1", feedTask); len(got) != len(cardsBefore) {
 		t.Fatalf("task cards %v, were %v", got, cardsBefore)
+	}
+}
+
+func TestThreadOpenStopsWhenSupervisionCannotBeStored(t *testing.T) {
+	database := failingSupervisionStore{DB: todoTestDB(t)}
+	e := newThreadEnv(t, database)
+	cardsBefore := feedRefs(e.s, "m1", feedTask)
+	e.deliver(rootEvent("om_supervision_down", "发版"))
+	if got := todoCount(e.s); got != 0 {
+		t.Fatalf("failed supervision left %d todos in memory", got)
+	}
+	if rows, err := database.ListTodos(context.Background()); err != nil || len(rows) != 0 {
+		t.Fatalf("failed supervision left stored todos %+v, %v", rows, err)
+	}
+	if got := handoffs(e.f); len(got) != 0 {
+		t.Fatalf("thread open was delivered without a supervision ledger: %+v", got)
+	}
+	if got := feedRefs(e.s, "m1", feedTask); len(got) != len(cardsBefore) {
+		t.Fatalf("task cards %v, were %v", got, cardsBefore)
+	}
+	if got := lastNote(t, e.f); !strings.Contains(got, "injected supervision write failure") {
+		t.Fatalf("the topic did not get the supervision failure: %q", got)
 	}
 }
 
@@ -499,8 +521,8 @@ func TestPrivateChatNeverOpensATodoFromATopic(t *testing.T) {
 }
 
 // withMentions puts mentions on ev: the bot as @_user_1 and a colleague as @_user_2 (named), @_user_3 (no name known).
-func withMentions(ev feishubot.MessageEvent) feishubot.MessageEvent {
-	ev.Message.Mentions = []feishubot.Mention{{Key: "@_user_1", Name: "示例机器人"}, {Key: "@_user_2", Name: "小王"}, {Key: "@_user_3"}}
+func withMentions(ev botcard.MessageEvent) botcard.MessageEvent {
+	ev.Message.Mentions = []botcard.Mention{{Key: "@_user_1", Name: "示例机器人", ID: botcard.UserID{OpenID: "ou_bot"}}, {Key: "@_user_2", Name: "小王"}, {Key: "@_user_3"}}
 	return ev
 }
 
@@ -527,6 +549,8 @@ func TestOpeningTakesOffTheBotsMention(t *testing.T) {
 		{"an @ with no name stays as it stands", "text", `{"text":"@_user_1 让 @_user_3 看登录崩溃"}`, true, "让 @_user_3 看登录崩溃"},
 		{"@_user_1 is not the start of @_user_10", "text", `{"text":"@_user_10 看登录崩溃"}`, true, "@_user_10 看登录崩溃"},
 		{"rich text, /ai after the @", postType, postBody, false, "修登录崩溃"},
+		{"rich text, adjacent /ai", postType, strings.Replace(postBody, " /ai", "/ai", 1), false, "修登录崩溃"},
+		{"rich text, adjacent /ai in a root", postType, strings.Replace(postBody, " /ai", "/ai", 1), true, "修登录崩溃"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			e := newThreadEnv(t, nil)

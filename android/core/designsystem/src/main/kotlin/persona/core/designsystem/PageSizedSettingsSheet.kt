@@ -49,11 +49,14 @@ internal class SettingsFocusRestoration {
 @Composable
 fun JPageSizedSettingsSheet(onDismiss: () -> Unit, content: @Composable () -> Unit) {
     val restoration = remember { SettingsFocusRestoration() }
+    val densities = currentTextDensities()
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
-        HardwareShortcutHost(Modifier.fillMaxSize(), requestFocusWhenLarge = false) {
-            Box(Modifier.fillMaxSize().hardwareShortcutDismiss(onDismiss)
-                .dismissKeyboardOnBlankTap { restoration.clearFocus() }) {
-                JSettingsPresentationFrame(SettingsPresentation.PageSized, onDismiss, restoration, content)
+        RetainedTextDensity(densities) {
+            HardwareShortcutHost(Modifier.fillMaxSize(), requestFocusWhenLarge = false) {
+                Box(Modifier.fillMaxSize().hardwareShortcutDismiss(onDismiss)
+                    .dismissKeyboardOnBlankTap { restoration.clearFocus() }) {
+                    JSettingsPresentationFrame(SettingsPresentation.PageSized, onDismiss, restoration, content)
+                }
             }
         }
     }
@@ -79,7 +82,7 @@ internal fun JSettingsPresentationFrame(
     val focusManager = LocalFocusManager.current
     LaunchedEffect(pageSized) {
         if (restoration.shouldRestoreFocus()) {
-            runCatching { focus.requestFocus() }
+            val _ = runCatching { focus.requestFocus() }
             focusManager.moveFocus(FocusDirection.Enter)
         }
     }

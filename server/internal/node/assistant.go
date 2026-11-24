@@ -20,9 +20,11 @@ import (
 
 	"github.com/nwverse/persona/server/internal/assistantskills"
 	"github.com/nwverse/persona/server/internal/assistantwire"
+	"github.com/nwverse/persona/server/internal/cachewarm"
 	"github.com/nwverse/persona/server/internal/compat"
 	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/identity"
+	"github.com/nwverse/persona/server/internal/promptcontent"
 	"github.com/nwverse/persona/server/internal/prompts"
 	"github.com/nwverse/persona/server/internal/proto"
 	"github.com/nwverse/persona/server/internal/shellcmd"
@@ -73,15 +75,16 @@ var errAssistantOriginUnknown = errors.New("manager origin attestation unavailab
 var errAssistantOriginBusy = errors.New("conversation origin changed while the previous assistant process is busy")
 
 type assistantProc struct {
-	id       string
-	agent    string // "claude" (stream-json) or "codex" (app-server, assistant_codex.go)
-	cx       *codexConn
-	launcher string
-	cwd      string
-	cmd      *exec.Cmd
-	stdin    io.WriteCloser
-	exited   chan struct{}
-	born     time.Time
+	cacheProxy *cachewarm.Proxy
+	id         string
+	agent      string // "claude" (stream-json) or "codex" (app-server, assistant_codex.go)
+	cx         *codexConn
+	launcher   string
+	cwd        string
+	cmd        *exec.Cmd
+	stdin      io.WriteCloser
+	exited     chan struct{}
+	born       time.Time
 	// personaMCPOnly is fixed at a Claude or Codex process start. A warm spare must still match
 	// the hub's current capability before it becomes a new conversation.
 	personaMCPOnly bool
@@ -193,6 +196,8 @@ type assistantProc struct {
 	// starts the turn of the message that started the process, already busy, and every later one starts a turn the
 	// node may not have asked for (readAssistant).
 	initSeen bool
+	// staleLooked: when its turn was last checked against Claude Code's own record (assistant_stale_turn.go).
+	staleLooked time.Time
 }
 
 func (p *assistantProc) write(line []byte) error {
@@ -241,7 +246,7 @@ func (n *Node) isAssistantSessionIn(id string, pass *codexListPass) bool {
 	_, ok := n.procs[id]
 	a := n.agents[id]
 	n.mu.Unlock()
-	if ok || n.externalStarts.has(id) {
+	if ok || n.externalStarts.has(id) || n.isRoundFork(id) {
 		return true
 	}
 	// A real host pane is stronger evidence than a working directory: users may resume a terminal session there.
@@ -296,17 +301,29 @@ func serviceTierRefusal(ctx context.Context, code string) error {
 	return refusal(code, i18n.T(i18n.From(ctx), "rpc-errors."+code), nil)
 }
 
+// assistantInputOrigin resolves an existing conversation's origin for both content checks and sends.
+func assistantInputOrigin(st sessionState, requested modelExecution, resume bool) (origin string, known bool) {
+	origin, known = requested.Origin, requested.OriginKnown || st.OriginKnown || !resume
+	if resume && !requested.OriginKnown && (st.OriginKnown || st.Origin != "" || origin == "") {
+		// A persisted decision, including a legacy non-empty Inbox origin, wins over an unattested caller value.
+		origin = st.Origin
+	}
+	return origin, known
+}
+
 // assistantSend delivers a user message, starting or restarting the headless claude when needed.
 // id == "" starts a new conversation and returns its id.
 func (n *Node) assistantSend(ctx context.Context, id, cwd, launcher, text string, images []proto.Image, mode, effort string, options ...modelExecution) (_ string, sendErr error) {
+	if text != "" || len(images) != 0 {
+		n.inputCacheWarm(id)
+	}
 	clientID, _ := ctx.Value(sendTraceKey{}).(string)
 	timing := assistantSendTiming{node: n, id: proto.SendTraceID(clientID), start: time.Now()}
 	timing.mark("assistant_received", true)
 	if launcher != "" && !shellcmd.NameRe.MatchString(launcher) {
 		return "", fmt.Errorf("invalid launcher %q", launcher)
 	}
-	_, _, runtimeKnown := n.runtimes.belongs(id)
-	strictRuntime := executionOption(options).Strict && runtimeKnown
+	strictRuntime := n.strictRuntimeSession(id, executionOption(options).Strict)
 	if id != "" && !validID(id) && !n.runtimeAssistant(id) && !strictRuntime {
 		return "", fmt.Errorf("invalid session id %q", id)
 	}
@@ -390,6 +407,7 @@ func (n *Node) assistantSend(ctx context.Context, id, cwd, launcher, text string
 	}
 	// External authority and the raw runtime must be checked before guest/resume normalization can replace options.
 	requested := executionOption(options)
+	callerModeExplicit := requested.PermissionModeExplicit && mode != ""
 	public := requested.Public // audience belongs to this input, even when launcher normalization replaces execution
 	requestedLauncher := launcherOr(launcher, st.Launcher)
 	if proto.IsExternalLauncher(requestedLauncher) || requested.External != nil {
@@ -441,20 +459,55 @@ func (n *Node) assistantSend(ctx context.Context, id, cwd, launcher, text string
 			n.state.put(id, st)
 		}
 	}
-	requestedOrigin := executionOption(options)
-	origin, originKnown := requestedOrigin.Origin, requestedOrigin.OriginKnown || st.OriginKnown || !resume
-	if resume && !requestedOrigin.OriginKnown && (st.OriginKnown || st.Origin != "" || origin == "") {
-		// An unattested caller origin is not evidence. A persisted decision, including a legacy non-empty Inbox origin,
-		// wins over it; only an explicit origin_known can replace that decision with an ordinary empty origin.
-		origin = st.Origin
-	}
-	if resume && requestedOrigin.OriginDecisionRequired && !originKnown && guest == nil {
+	origin, originKnown := assistantInputOrigin(st, requested, resume)
+	if resume && requested.OriginDecisionRequired && !originKnown && guest == nil {
 		// A pre-upgrade record has no ordinary-origin decision. Neither an older manager's send nor a non-empty caller
 		// origin proves one; wait for the new manager's explicit origin_known instead of starting ordinary built-ins.
 		return "", errAssistantOriginUnknown
 	}
 	if mode == "" && guest == nil {
-		mode = st.AppMode
+		running := false
+		onRuntime := false
+		runtimeAgent := ""
+		if resume {
+			n.mu.Lock()
+			p := n.procs[id]
+			running = p != nil && p.alive()
+			n.mu.Unlock()
+			if row, h, ok := n.runtimes.rowOf(id); ok {
+				onRuntime = true
+				running = row.Status != proto.StatusOffline
+				runtimeAgent = cmp.Or(row.Agent, h.agent())
+			} else {
+				_, _, runtimeOwned := n.runtimes.belongs(id)
+				onRuntime = runtimeOwned || n.runtimeAssistant(id)
+			}
+		}
+		// A deliberate conversation choice wins. For Claude Code, a stopped/new process follows the manager's current
+		// default; legacy AppMode/transcript evidence is used only when an older manager supplied no default. Other
+		// agents always keep that legacy precedence, and a live process keeps its mode until a later stopped resume.
+		if st.AppModeExplicit {
+			mode = st.AppMode
+		}
+		if mode == "" && !running && requested.DefaultPermissionMode != "" {
+			defaultAgent := ""
+			if resume {
+				if onRuntime {
+					defaultAgent = cmp.Or(runtimeAgent, assistantOnRuntime)
+				} else {
+					defaultAgent = n.conversationAgent(id)
+				}
+			}
+			if defaultAgent == "" {
+				defaultAgent, _ = n.assistantAgent(ctx, launcherOr(requestedLauncher, "claude"))
+			}
+			if defaultAgent == "claude" {
+				mode = requested.DefaultPermissionMode
+			}
+		}
+		if mode == "" {
+			mode = st.AppMode
+		}
 		if mode == "" {
 			mode = n.assistantModeOf(id)
 		}
@@ -463,9 +516,26 @@ func (n *Node) assistantSend(ctx context.Context, id, cwd, launcher, text string
 		}
 	}
 	if origin == originInbox && guest == nil {
-		// Plan rejects MCP before consulting allowedTools, which stalls investigation and inbox_suggest. Default keeps
-		// Persona's explicit MCP allowlist effective; the manager/node origin policy remains the outbound boundary.
-		mode = "default"
+		// Only the manager's dedicated field may carry the AI twin's own saved mode. The generic caller mode and an older
+		// manager's missing field stay in default. A live process keeps its mode; a new or stopped process uses the setting.
+		keepCurrent := false
+		if resume {
+			n.mu.Lock()
+			p := n.procs[id]
+			keepCurrent = p != nil && p.alive()
+			n.mu.Unlock()
+		}
+		current := ""
+		if keepCurrent {
+			// The incoming generic mode is caller-controlled, not evidence of what this process runs. Read the live
+			// conversation's actual mode so neither an old nor a current manager can elevate it through that field.
+			current, _ = n.modesOf(id)
+			current = cmp.Or(current, st.AppMode, proto.ModeDefault)
+		}
+		mode = inboxPermissionMode(requested.InboxPermissionMode, current, keepCurrent)
+	}
+	if err := checkFileReferenceAudience(ctx, text, origin, guest != nil, public); err != nil {
+		return "", err
 	}
 	if guest != nil {
 		if refs, err := assistantskills.References(text); err != nil || len(refs) != 0 {
@@ -488,6 +558,9 @@ func (n *Node) assistantSend(ctx context.Context, id, cwd, launcher, text string
 	// A new conversation has no legacy origin to recover. A resumed one gets here only with the manager's explicit
 	// decision or a previously persisted one; internal sends retain the decision already in session state.
 	execution.OriginKnown = originKnown
+	if execution.Source.Role == "" {
+		execution.Source = st.ModelSource
+	}
 	// An agent runtime's launcher, or a conversation one runs (assistant_runtime.go): it keeps its model; the node
 	// keeps the conversation's state, snapshot, mode and memory.
 	rl := launcherOr(launcher, st.Launcher)
@@ -501,9 +574,12 @@ func (n *Node) assistantSend(ctx context.Context, id, cwd, launcher, text string
 			return "", err
 		}
 	}
-	if onRuntime, runs := n.assistantRuntime(rl), n.runtimeAssistant(id) || strictRuntime; guest != nil && (onRuntime != nil || runs) {
+	if onRuntime, runs := n.assistantRuntimeRoute(id, rl, strictRuntime); guest != nil && (onRuntime != nil || runs) {
 		return "", errGuestAgent
 	} else if onRuntime != nil || runs {
+		if refs, err := promptcontent.Files(text); err != nil || len(refs) > 0 {
+			return "", fileRuntimeUnsupported(ctx)
+		}
 		if origin == originInbox {
 			// External runtimes do not yet attest the origin on their first callback. Refuse rather than leave an
 			// unguarded startup window; built-in Claude and Codex carry it in their process and session state.
@@ -512,28 +588,30 @@ func (n *Node) assistantSend(ctx context.Context, id, cwd, launcher, text string
 		if startTier != "" {
 			return "", serviceTierRefusal(ctx, "assistant_service_tier_unsupported")
 		}
-		if refs, err := assistantskills.References(text); err != nil || len(refs) != 0 {
-			return "", skillSelectionError(assistantskills.ErrReference)
-		}
 		if execution.ConfigDir != "" {
 			return "", errors.New(assistantwire.ConfigDirClaudeOnly)
 		}
 		if id != "" && (onRuntime == nil || !runs) && !(runs && launcher == "") { // another kind of agent than its own
 			return "", errors.New("换到另一种 Agent 需要新建对话")
 		}
+		skillCwd := n.runtimeAssistantCwd(id, cwd, st)
+		selected, err := n.selectedSkills(ctx, id, skillCwd, rl, text, execution)
+		if err != nil {
+			return "", err
+		}
 		eff := effort
 		if eff == "" {
 			eff = execution.Effort
 		}
 		superviseRoundFrom(ctx).set(roundKept, roundWhyUnsupported) // a runtime keeps its own context (assistant_round.go)
-		return n.assistantSendRuntime(ctx, onRuntime, id, cwd, rl, text, images, mode, execution.Public, execution.Strict, execution.Model, eff, policy)
+		return n.assistantSendRuntime(ctx, onRuntime, id, cwd, rl, text, images, mode, execution.Public, execution.Strict, callerModeExplicit, selected, execution.Model, eff, policy)
 	}
 	if len(options) == 0 || (execution.Fingerprint == "" && execution.Model == "") {
 		if launcher == "" || launcher == st.Launcher {
 			// What it ran, with this message's claude_interactive: the manager's switch, sent with every message, not a
 			// model pick (assistant_tui.go). Without it a message that picks no model (a supervision message, a relay)
 			// started claude -p, and restarted a conversation that runs interactive Claude Code.
-			execution = modelExecution{Strict: execution.Strict, Model: st.Model, Effort: st.ModelEffort, UseEffort: st.ModelFingerprint != "", Fingerprint: st.ModelFingerprint, SupervisionInstructions: st.SupervisionInstructions, Origin: origin, Interactive: execution.Interactive, FollowsSetting: execution.FollowsSetting || st.FollowsSetting}
+			execution = modelExecution{Source: execution.Source, CacheKeepalive: execution.CacheKeepalive, Strict: execution.Strict, Model: st.Model, Effort: st.ModelEffort, UseEffort: st.ModelFingerprint != "", Fingerprint: st.ModelFingerprint, SupervisionInstructions: st.SupervisionInstructions, Origin: origin, Interactive: execution.Interactive, FollowsSetting: execution.FollowsSetting || st.FollowsSetting}
 		}
 	}
 	if launcher != "" && st.Launcher != "" && launcher != st.Launcher && execution.Fingerprint == "" {
@@ -624,6 +702,19 @@ func (n *Node) assistantSend(ctx context.Context, id, cwd, launcher, text string
 	if proto.IsExternalLauncher(launcher) {
 		execution.StartupContext = ctx
 	}
+	// Validate the file scope before taking a spare or persisting a conversation.
+	fileCwd := cwd
+	if fileCwd == "" {
+		fileCwd = n.storedCwd(st.Cwd)
+	}
+	files, err := n.selectedFiles(ctx, text, fileCwd, launcher, execution.Runtime)
+	if err != nil {
+		return "", err
+	}
+	if len(files) > 0 {
+		// An empty cwd would let a new send adopt a spare in any directory. Require the directory that was checked.
+		cwd = fileCwd
+	}
 	var p *assistantProc
 	if id == "" && guest != nil {
 		// Never the warm spare: it was started with the assistant's tools. Its process reads Guest from the state.
@@ -664,7 +755,7 @@ func (n *Node) assistantSend(ctx context.Context, id, cwd, launcher, text string
 	}
 	timing.mark("preflight_done", true)
 	if cwd == "" {
-		cwd = n.storedCwd(st.Cwd)
+		cwd = fileCwd
 	}
 	selectionSession := id
 	if !resume {
@@ -883,7 +974,7 @@ func (n *Node) assistantSend(ctx context.Context, id, cwd, launcher, text string
 		}
 		n.noteModes(id, mode, effort)
 	}
-	if st, known := n.state.get(id); !known || st.Launcher != launcher || st.Cwd != cwd || st.Model != execution.Model || st.ModelFingerprint != execution.Fingerprint || st.ModelEffort != execution.Effort || st.Origin != origin || st.OriginKnown != execution.OriginKnown || st.IsMain != execution.IsMain || st.MainCompactWindow != execution.MainCompactWindow || st.ConfigDir != execution.ConfigDir || st.FollowsSetting != execution.FollowsSetting || st.SupervisionInstructions != execution.SupervisionInstructions || hasInput && st.TaskExecution != execution.Strict || !resume && !hasInput {
+	if st, known := n.state.get(id); !known || st.Launcher != launcher || st.Cwd != cwd || st.Model != execution.Model || st.ModelFingerprint != execution.Fingerprint || st.ModelEffort != execution.Effort || st.Origin != origin || st.OriginKnown != execution.OriginKnown || st.ModelSource != execution.Source || st.IsMain != execution.IsMain || st.MainCompactWindow != execution.MainCompactWindow || st.ConfigDir != execution.ConfigDir || st.FollowsSetting != execution.FollowsSetting || st.SupervisionInstructions != execution.SupervisionInstructions || hasInput && st.TaskExecution != execution.Strict || !resume && !hasInput {
 		started := st.StartedAt
 		if started.IsZero() {
 			started = time.Now().UTC()
@@ -892,6 +983,7 @@ func (n *Node) assistantSend(ctx context.Context, id, cwd, launcher, text string
 		st.Model, st.ModelFingerprint, st.ModelEffort = execution.Model, execution.Fingerprint, execution.Effort
 		st.Origin = origin
 		st.OriginKnown = execution.OriginKnown
+		st.ModelSource = execution.Source
 		st.IsMain, st.MainCompactWindow = execution.IsMain, execution.MainCompactWindow
 		st.SupervisionInstructions = execution.SupervisionInstructions
 		st.FollowsSetting = execution.FollowsSetting
@@ -905,7 +997,7 @@ func (n *Node) assistantSend(ctx context.Context, id, cwd, launcher, text string
 		n.state.put(id, st)
 	}
 
-	n.persistModes(id, mode, effort) // after saving state, including defaults filled on resume
+	n.persistModes(id, mode, effort, callerModeExplicit && origin != originInbox && guest == nil) // after saving state, including defaults filled on resume
 	if err := n.idleCompactBeforeInput(ctx, p); err != nil {
 		return "", err
 	}
@@ -923,6 +1015,14 @@ func (n *Node) assistantSend(ctx context.Context, id, cwd, launcher, text string
 		return id, nil
 	}
 	if hasInput && (launcher != selectedLauncher || execution != selectedExecution || len(selected) > 0 && p.agent == "claude") {
+		// A new native conversation uses the file scope checked before startup. A resumed one can retain an
+		// existing process's launcher and runtime while a switch waits.
+		if resume && len(files) > 0 {
+			files, err = n.selectedFiles(ctx, text, cwd, launcher, execution.Runtime)
+			if err != nil {
+				return "", err
+			}
+		}
 		// An active process may retain its old environment while a switch waits. Never send selections to that
 		// different environment simply because the display names match. Claude startup can also
 		// reveal a managed-policy cache; recheck before handing exact-file instructions to it.
@@ -930,6 +1030,9 @@ func (n *Node) assistantSend(ctx context.Context, id, cwd, launcher, text string
 		if err != nil {
 			return "", err
 		}
+	}
+	if len(files) > 0 {
+		text += "\n\n" + prompts.RenderAssistantSelectedFiles(files, agentPromptLanguage(ctx))
 	}
 	retryMode, retryEffort := n.modesOf(id) // retain the request before an unconfirmed control can roll it back
 	// Controls do not depend on the live context. Start their acknowledged sync
@@ -1045,8 +1148,12 @@ func (n *Node) assistantSend(ctx context.Context, id, cwd, launcher, text string
 			return "", externalAdapterError(ctx, ctx.Err())
 		}
 		if werr == nil {
+			sentAt := time.Now()
 			werr = p.writeInput(in) // a new id each attempt: a process that died may have written the last one down
 			if werr == nil {
+				if !wasBusy {
+					n.ttft.arm(id, sentAt, "")
+				}
 				n.commitModelChoice(id, execution)
 			}
 			timing.mark("input_written", werr == nil)
@@ -1134,19 +1241,24 @@ func (n *Node) assistantSend(ctx context.Context, id, cwd, launcher, text string
 // in the hub's database), else the assistant directory. A stored folder that is gone (the data directory moved,
 // docs/operations/persona-cutover.md) is the folder of the same name in the data directory when there is one (the assistant
 // directory, the health space, another manager's), else the assistant directory: it is never made again where it was,
-// which would start the conversation in an empty folder without its instructions and memory (#6299).
+// which would start the conversation in an empty folder without its instructions and memory (#6299). On a scoped
+// node the assistant directory is its own (assistantFallbackDir), and a stored built-in one goes back to it
+// (unlistedAssistantDir): resumed outside the scope, the conversation was never listed.
 func (n *Node) storedCwd(stored string) string {
+	if n.unlistedAssistantDir(stored) {
+		stored = ""
+	}
 	if stored != "" {
 		if dirExists(stored) {
 			return stored
 		}
 		if name := filepath.Base(stored); name != "." && name != string(filepath.Separator) {
-			if moved := filepath.Join(identity.DataDir(n.home), name); dirExists(moved) {
+			if moved := filepath.Join(identity.DataDir(n.home), name); dirExists(moved) && !n.unlistedAssistantDir(moved) {
 				return moved
 			}
 		}
 	}
-	return identity.AssistantDir(n.home)
+	return n.assistantFallbackDir()
 }
 
 // readAssistant turns the stream-json output into live deltas and turn-finished signals.
@@ -1173,21 +1285,25 @@ func (n *Node) readAssistant(p *assistantProc, r io.Reader) {
 		}
 		p.printed()
 		var ev struct {
-			Type     string                   `json:"type"`
-			Subtype  string                   `json:"subtype"`
-			Tasks    json.RawMessage          `json:"tasks"`
-			Tools    []string                 `json:"tools"`
-			Version  string                   `json:"claude_code_version"`
-			Response assistantControlResponse `json:"response"`
-			Command  string                   `json:"command_uuid"` // command_lifecycle: the user message it is about
-			State    string                   `json:"state"`        // and what became of it (assistant_queue.go)
-			Event    struct {
+			Type      string                   `json:"type"`
+			Subtype   string                   `json:"subtype"`
+			SessionID string                   `json:"session_id"`
+			Tasks     json.RawMessage          `json:"tasks"`
+			Tools     []string                 `json:"tools"`
+			Version   string                   `json:"claude_code_version"`
+			Response  assistantControlResponse `json:"response"`
+			Command   string                   `json:"command_uuid"` // command_lifecycle: the user message it is about
+			State     string                   `json:"state"`        // and what became of it (assistant_queue.go)
+			Event     struct {
 				Type  string `json:"type"`
 				Delta struct {
-					Type string `json:"type"`
-					Text string `json:"text"`
+					Type        string `json:"type"`
+					Text        string `json:"text"`
+					Thinking    string `json:"thinking"`
+					PartialJSON string `json:"partial_json"`
 				} `json:"delta"`
 				Message struct {
+					ID    string `json:"id"`
 					Model string `json:"model"`
 					Usage struct {
 						Input       int `json:"input_tokens"`
@@ -1208,6 +1324,9 @@ func (n *Node) readAssistant(p *assistantProc, r io.Reader) {
 		if json.Unmarshal(line, &ev) != nil {
 			p.invalidateUpdateTasks()
 			continue
+		}
+		if p.round && ev.SessionID != "" && ev.SessionID != p.id && validID(ev.SessionID) {
+			n.noteRoundFork(ev.SessionID, p.id)
 		}
 		switch {
 		case p.round:
@@ -1251,11 +1370,13 @@ func (n *Node) readAssistant(p *assistantProc, r io.Reader) {
 					n.toolsAtStart(p.id, ev.Tools)
 				}
 				if resumed {
+					n.ttft.arm(p.id, time.Now(), "")
 					n.notifySessionsSoon()
 				}
 				continue
 			}
 			if ev.Subtype == "compact_boundary" {
+				n.forgetCacheWarm(p.id)
 				p.mu.Lock()
 				p.context = ev.Compact.Post
 				manual := p.manual
@@ -1284,9 +1405,15 @@ func (n *Node) readAssistant(p *assistantProc, r io.Reader) {
 		case "control_response":
 			p.controlResponse(ev.Response)
 		case "command_lifecycle":
+			if ev.State == "started" {
+				n.ttft.arm(p.id, time.Now(), ev.Command)
+			}
 			if p.commandLifecycle(ev.Command, ev.State) {
 				n.notifySessionsSoon() // the queue strip shows it, or no longer
 			}
+		case "rate_limit_event":
+			// the account's subscription windows after a reply (#12855, usagewindows_claudestream.go)
+			n.claudeStreamUsage(p.launcher, p.model.ConfigDir, line, time.Now())
 		case "stream_event":
 			if ev.ParentToolUseID != nil && *ev.ParentToolUseID != "" {
 				// A subagent's stream (#4495): its words are not the conversation's live text, its start does not clear
@@ -1299,6 +1426,9 @@ func (n *Node) readAssistant(p *assistantProc, r io.Reader) {
 			}
 			switch ev.Event.Type {
 			case "message_start":
+				if p.cacheProxy != nil {
+					p.cacheProxy.Confirm(ev.Event.Message.ID)
+				}
 				// A turn can start without a message from us: claude takes up a finished background task's
 				// notification on its own, and a message sent meanwhile waits behind it. The result of that turn
 				// cleared busy while claude went on working, so the phone showed the chat as finished. Its init (above)
@@ -1339,6 +1469,9 @@ func (n *Node) readAssistant(p *assistantProc, r io.Reader) {
 					n.emitDelta(p.id, "")
 				}
 			case "content_block_delta":
+				if ev.Event.Delta.Text != "" || ev.Event.Delta.Thinking != "" || ev.Event.Delta.PartialJSON != "" {
+					n.ttft.firstToken(p.id, time.Now(), "")
+				}
 				if ev.Event.Delta.Type != "text_delta" {
 					continue
 				}
@@ -1358,6 +1491,7 @@ func (n *Node) readAssistant(p *assistantProc, r io.Reader) {
 				n.emitDelta(p.id, text)
 			}
 		case "result":
+			n.ttft.clearPending(p.id)
 			var kinds []string
 			if ev.IsError {
 				kinds = n.claudeResultKinds(p.id)
@@ -1582,6 +1716,7 @@ func (n *Node) assistantSessions() []proto.Session {
 	n.mu.Unlock()
 	var out []proto.Session
 	for _, p := range procs {
+		n.reconcileStaleTurn(p) // a turn whose end the node missed is over here, for every reader of the row (#14351)
 		p.mu.Lock()
 		// A registered replacement is still starting until its recovery message is sent. A round's process works until it
 		// settled (assistant_round.go): the manager keeps supervision messages for it queued meanwhile.

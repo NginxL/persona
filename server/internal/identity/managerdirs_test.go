@@ -25,7 +25,9 @@ func TestManagerDirNames(t *testing.T) {
 	home := t.TempDir()
 	in := func(parts ...string) string { return filepath.Join(append([]string{home}, parts...)...) }
 	for p, want := range map[string]bool{in(".persona", "assistant"): true, in(".persona", "assistant-m-0b0b0b"): true,
-		in(".persona", "health-m-0b0b0b"): true, in(".persona", "assistant-bin"): false, in("code", "assistant-m-0b0b0b"): false} {
+		in(".persona", "health-m-0b0b0b"): true, in(".persona", "assistant-bin"): false, in("code", "assistant-m-0b0b0b"): false,
+		in(".persona", "tracks", "qa-plain"): true, in(".persona", "tracks-m-0b0b0b", "qa-plain"): true, in(".persona", "tracks"): false,
+		in(".persona", "tracks", "Bad Slug"): false, in(".persona", "tracks", "qa-plain", "inbox"): false, in("code", "tracks", "qa-plain"): false} {
 		if got := IsAssistantDir(p); got != want {
 			t.Errorf("IsAssistantDir(%s) = %v", p, got)
 		}
@@ -45,9 +47,29 @@ func TestManagerDirNames(t *testing.T) {
 		{in(".persona", "assistant-m-0b0b0b"), "m-0b0b0b", true},
 		{in(".persona", "health-m-0b0b0b"), "m-0b0b0b", true},
 		{in(".persona", "health-m-0b0b0b"), "m-0c0c0c", false},
+		{in(".persona", "tracks", "qa-plain"), "", true},
+		{in(".persona", "tracks-m-0b0b0b", "qa-plain"), "m-0b0b0b", true},
+		{in(".persona", "tracks-m-0b0b0b", "qa-plain"), "", false},
 	} {
 		if got := IsAssistantDirOf(c.path, c.id); got != c.want {
 			t.Errorf("IsAssistantDirOf(%s, %q) = %v", c.path, c.id, got)
+		}
+	}
+	// A track whose template is space keeps its directory in its manager's tracks directory, one level (#13472).
+	for _, c := range []struct {
+		dir, id string
+		want    bool
+	}{
+		{"tracks/qa-plain", "", true},
+		{"tracks-m-0b0b0b/qa-plain", "m-0b0b0b", true},
+		{"tracks/qa-plain", "m-0b0b0b", false},
+		{"tracks/qa-plain/inbox", "", false},
+		{"tracks/health", "", false},
+		{"kept/finance", "", false},
+		{"assistant", "", false},
+	} {
+		if got := TrackDirOf(c.dir, c.id); got != c.want {
+			t.Errorf("TrackDirOf(%q, %q) = %v", c.dir, c.id, got)
 		}
 	}
 }

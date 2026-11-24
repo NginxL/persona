@@ -25,6 +25,7 @@ import persona.core.contracts.AssistantViewEvent
 import persona.core.contracts.FeedItem
 import persona.core.contracts.FeedResponse
 import persona.core.contracts.Session
+import persona.core.contracts.SessionKey
 import persona.core.contracts.PlanTask
 import persona.core.contracts.RuleSuggestion
 import persona.core.contracts.RuleSuggestionMade
@@ -39,6 +40,7 @@ import persona.core.contracts.draftPlaceholder
 import persona.core.contracts.api.AssistantManagerChoice
 import persona.core.contracts.api.ConnectionState
 import persona.core.contracts.api.HubConnection
+import persona.core.contracts.api.LauncherRetryUnsupportedException
 import persona.core.contracts.api.PhoneQuickResults
 import persona.core.contracts.api.RequestManager
 import persona.core.contracts.api.hubCodedFailure
@@ -634,21 +636,40 @@ class TasksStore(
 
     /** The task's agents among [sessions], and its state. */
     fun agentsOf(todo: Todo, sessions: List<Session>): List<Session> =
-        todo.activeAgents.filter { it.dismissedAt == null && it.machineId.isNotBlank() && it.sessionId.isNotBlank() }.map { a ->
-            val listed = sessions.firstOrNull { it.key == a.key }
-            val exact = agentSessions.value[a.key]
-            listOfNotNull(listed, exact).maxByOrNull { it.rev ?: 0L } ?: Session(
-                machineId = a.machineId, sessionId = a.sessionId, title = a.title.orEmpty(), cwd = a.cwd.orEmpty(),
-                agent = a.agent, state = "offline", status = "offline", startError = a.startError,
-            )
+        agentsOf(todo, sessions.associateBy { it.key })
+
+    fun agentsOf(todo: Todo, sessionsByKey: Map<SessionKey, Session>): List<Session> {
+        val exactMap = agentSessions.value
+        return todo.activeAgents.filter { it.dismissedAt == null && it.machineId.isNotBlank() && it.sessionId.isNotBlank() }.map { a ->
+            val listed = sessionsByKey[a.key]
+            val exact = exactMap[a.key]
+            when {
+                listed != null && exact != null -> if ((exact.rev ?: 0L) > (listed.rev ?: 0L)) exact else listed
+                listed != null -> listed
+                exact != null -> exact
+                else -> Session(
+                    machineId = a.machineId, sessionId = a.sessionId, title = a.title.orEmpty(), cwd = a.cwd.orEmpty(),
+                    agent = a.agent, state = "offline", status = "offline", startError = a.startError,
+                )
+            }
         }
+    }
 
     fun stateOf(todo: Todo, sessions: List<Session>): TaskState =
-        agentsOf(todo, sessions).let { a -> TaskState.of(todo, a.map { it.agentState }, a.any { it.interrupted }) }
+        stateOfAgents(todo, agentsOf(todo, sessions))
+
+    fun stateOfAgents(todo: Todo, agents: List<Session>): TaskState {
+        val waiting = agents.size > 1 && agents.any { it.waitsWithoutBackground() && Interruption.of(it)?.invalid != true }
+        val interrupted = agents.any { it.interrupted && (agents.size == 1 || Interruption.of(it)?.invalid == true || !it.waitsWithoutBackground()) }
+        return TaskState.of(todo, agents.map { it.agentState }, interrupted, waiting)
+    }
 
     /** The agent to open first: the one waiting for the user, then one cut off (#1516), then working, then the latest. */
     fun lead(todo: Todo, sessions: List<Session>): Session? =
-        agentsOf(todo, sessions).minWithOrNull(compareBy<Session>({ it.agentState != AgentState.NeedsYou }, { !it.interrupted },
+        leadOfAgents(agentsOf(todo, sessions))
+
+    fun leadOfAgents(agents: List<Session>): Session? =
+        agents.minWithOrNull(compareBy<Session>({ it.agentState != AgentState.NeedsYou }, { !it.interrupted },
             { it.agentState.priority }).thenByDescending { it.updatedAt.orEmpty() })
 
     /** [edits] is "Edit": the plan's tasks as the user changed them, by index (null: as planned). */
@@ -679,9 +700,42 @@ class TasksStore(
      * off (#1516) it is "Continue": the hub tells its agent to go on, once.
      */
     fun retryTask(todo: Todo, onError: (Throwable) -> Unit) = act(retryKey(todo.id), onError) {
-        val t = api.retryTask(todo.id)
+        val t = withManager(todo.manager) { api.retryTask(todo.id) }
         _todos.update { list -> list.map { if (it.id == t.id) t else it } }
         reloadTodos()
+    }
+
+    /** The current plan/feature-backed launcher suggestion, including a taken-over to-do without `plan_id`. */
+    fun launcherForRetry(todo: Todo): String? =
+        persona.core.domain.tasks.retryLauncher(planTaskOf(todo, plans.value), features?.value.orEmpty())
+
+    /** Plain and launcher Retry share one busy key and the same returned-to-do reconciliation. */
+    fun retryTaskOnLauncher(todo: Todo, launcher: String, onError: (Throwable) -> Unit) {
+        if (TASK_RETRY_LAUNCHER_FEATURE !in features?.value.orEmpty()) {
+            onError(LauncherRetryUnsupportedException())
+            return
+        }
+        act(retryKey(todo.id), onError) {
+            val t = withManager(todo.manager) { api.retryTaskOnLauncher(todo.id, launcher) }
+            _todos.update { list -> list.map { if (it.id == t.id) t else it } }
+            reloadTodos()
+        }
+    }
+
+    /**
+     * Answer the failed start's question once under Retry's busy key. Success updates the returned to-do immediately;
+     * a refusal propagates unchanged and leaves the question and the task recoverable. False means one is already running.
+     */
+    suspend fun answerTaskStart(todo: Todo, choice: String): Boolean {
+        val key = retryKey(todo.id)
+        if (key in busy.value) return false
+        busy.update { it + key }
+        try {
+            val t = withManager(todo.manager) { api.answerTaskStart(todo.id, choice) }
+            _todos.update { list -> list.map { if (it.id == t.id) t else it } }
+            reloadTodos()
+            return true
+        } finally { busy.update { it - key } }
     }
 
     /** Removes a task that does not run (one whose agent never started): its todo goes, and any route to it. */

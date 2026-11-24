@@ -27,14 +27,15 @@ type triageFixtureCase struct {
 		IncludeQuiet bool            `json:"include_quiet"`
 	} `json:"input"`
 	Expected struct {
-		Section  string                `json:"section"`
-		Rule     string                `json:"rule"`
-		Last     time.Time             `json:"last"`
-		Sections map[string][][]string `json:"sections"`
-		Open     int                   `json:"open"`
-		Shelved  int                   `json:"shelved"`
-		Finished int                   `json:"finished"`
-		Keys     []string              `json:"keys"`
+		Section   string                `json:"section"`
+		Rule      string                `json:"rule"`
+		Last      time.Time             `json:"last"`
+		Sections  map[string][][]string `json:"sections"`
+		Open      int                   `json:"open"`
+		Shelved   int                   `json:"shelved"`
+		Finished  int                   `json:"finished"`
+		Cancelled int                   `json:"cancelled"`
+		Keys      []string              `json:"keys"`
 	} `json:"expected"`
 }
 
@@ -104,8 +105,9 @@ func TestTriageTodosFollowsTheSharedCases(t *testing.T) {
 					t.Fatalf("section %s: got %v, want %v", s, got, want)
 				}
 			}
-			if r.Open != c.Expected.Open || r.Shelved != c.Expected.Shelved || r.Finished != c.Expected.Finished {
-				t.Fatalf("counts %d/%d/%d, want %d/%d/%d", r.Open, r.Shelved, r.Finished, c.Expected.Open, c.Expected.Shelved, c.Expected.Finished)
+			if r.Open != c.Expected.Open || r.Shelved != c.Expected.Shelved || r.Finished != c.Expected.Finished || r.Cancelled != c.Expected.Cancelled {
+				t.Fatalf("counts open/shelved/finished/cancelled %d/%d/%d/%d, want %d/%d/%d/%d", r.Open, r.Shelved, r.Finished, r.Cancelled,
+					c.Expected.Open, c.Expected.Shelved, c.Expected.Finished, c.Expected.Cancelled)
 			}
 		})
 	}
@@ -139,6 +141,28 @@ func TestTriageDueByUsesUTCWithoutAUserZone(t *testing.T) {
 }
 
 // Dismissed agents are not the apps' (formatTodo leaves them out): one still asking does not make the to-do wait.
+func TestTriageTransientReplacementWithTurnErrorOutranksOldInterruption(t *testing.T) {
+	now := time.Date(2026, 11, 18, 9, 0, 0, 0, time.UTC)
+	td := Todo{ID: "t", CreatedAt: now.Add(-time.Hour), UpdatedAt: now, Agents: []TodoAgent{
+		{MachineID: "m", SessionID: "old"}, {MachineID: "m", SessionID: "replacement"},
+	}}
+	old := proto.Session{MachineID: "m", SessionID: "old", State: proto.StateIdle, Status: proto.StatusDone,
+		TurnError: "Context unavailable", TurnErrorKind: proto.TurnErrorUnrecoverable}
+	replacement := proto.Session{MachineID: "m", SessionID: "replacement", State: proto.StateIdle, Status: proto.StatusIdle,
+		TurnError: "API Error: 503 Service Unavailable", TurnErrorKind: proto.TurnErrorTransient,
+		Work: &proto.WorkState{Phase: proto.WorkBlocked, On: proto.WaitTransient}}
+	staleInvalid := old
+	staleInvalid.Work = &proto.WorkState{Phase: proto.WorkBlocked, On: proto.WaitTransient}
+	invalidOnly := td
+	invalidOnly.Agents = td.Agents[:1]
+	if got := triageStatus(invalidOnly, lookupOf([]proto.Session{staleInvalid}), now); got != "interrupted" {
+		t.Fatalf("permanent error with stale transient work: got %q, want interrupted", got)
+	}
+	if got := triageStatus(td, lookupOf([]proto.Session{old, replacement}), now); got != "waiting" {
+		t.Fatalf("transient replacement with its own recoverable error: got %q, want waiting", got)
+	}
+}
+
 func TestTriageLeavesDismissedAgentsOut(t *testing.T) {
 	now := time.Date(2026, 11, 10, 12, 0, 0, 0, time.UTC)
 	gone := now.Add(-time.Hour)
@@ -175,16 +199,18 @@ func TestTriageWaitingForMergeUsesFreshMatchingPRFacts(t *testing.T) {
 	if got := triageTodo(open, nil, now, time.Time{}, time.UTC, false); got.Section != triagePR || got.Rule != rulePROpen {
 		t.Fatalf("fresh open PR facts lost to the stage: %+v", got)
 	}
-	// Accepted or deployed work stays finished and out of the open count, whatever its PR facts say (#7614 review).
+	// Acceptance closes a task; an unaccepted live delivery still awaits review, whatever its PR facts say.
 	live := withFacts()
 	live.Delivery = &TodoDelivery{State: deliveryLive, At: now}
+	got := triageTodo(live, nil, now, time.Time{}, time.UTC, false)
+	if got.Section != triageJustDone || got.Rule != ruleFinishedUnseen || !triageCountsAsOpen(live.Todo, got) {
+		t.Errorf("unaccepted live task with a fresh open PR: %+v (counts as open: %v)", got, triageCountsAsOpen(live.Todo, got))
+	}
 	accepted := withFacts()
 	accepted.Supervision = &Supervision{Supervisor: "main", State: reviewAccepted, Reviews: []TaskReview{{At: now.Add(-time.Minute), Verdict: reviewAccepted}}}
-	for name, td := range map[string]listedTodo{"deployed": live, "accepted": accepted} {
-		got := triageTodo(td, nil, now, time.Time{}, time.UTC, false)
-		if got.Rule != name || triageCountsAsOpen(td.Todo, got) {
-			t.Errorf("%s task with a fresh open PR: %+v (counts as open: %v)", name, got, triageCountsAsOpen(td.Todo, got))
-		}
+	got = triageTodo(accepted, nil, now, time.Time{}, time.UTC, false)
+	if got.Section != triageDone || got.Rule != ruleAccepted || triageCountsAsOpen(accepted.Todo, got) {
+		t.Errorf("accepted task with a fresh open PR: %+v (counts as open: %v)", got, triageCountsAsOpen(accepted.Todo, got))
 	}
 
 	stale := withFacts()
@@ -286,7 +312,7 @@ func TestPRFactsCannotReopenCompletedTasks(t *testing.T) {
 		open                         bool
 	}{
 		{"accepted", reviewAccepted, deliveryPR, "", false, ruleAccepted, false},
-		{"deployed", "", deliveryLive, "", false, ruleDeployed, false},
+		{"deployed", "", deliveryLive, "", false, ruleFinishedUnseen, true},
 		{"closed", "", deliveryPR, "", true, ruleClosed, false},
 		{"unfinished PR", "", deliveryPR, "", false, rulePROpen, true},
 		{"accepted concern", reviewAccepted, deliveryPR, db.KindConcern, false, "", true},

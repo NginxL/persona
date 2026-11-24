@@ -232,7 +232,7 @@ nonisolated enum ForwardTargets {
     /// Whether `s` can take a forward from the chat `from`: another chat on the same hub that takes messages; an Agent
     /// on an online computer, live or (`ended`) one the send resumes; never Health's conversations.
     static func takes(_ s: Session, from: SessionKey, ended: Bool, online: (MachineRef) -> Bool) -> Bool {
-        guard s.key != from, s.key.group == from.group, s.canSend, !s.isHealth, s.archived != true else { return false }
+        guard s.key != from, s.key.group == from.group, s.canSend, !s.inSpace, s.archived != true else { return false }
         if s.assistant { return true }
         return online(s.machineRef) && (ended || s.state.isLive)
     }
@@ -330,9 +330,9 @@ extension AppModel {
                     r.route = ForwardMessage.route(from: from, to: nil)
                     draft.quotes = (ContextRef.adding(r, to: draft.quotes) ?? draft.quotes)
                 }
-                for img in images.prefix(MessagePhotos.limit) {
-                    if let p = MessagePhotos.payload(img) { draft.held.images.append(p) }
-                }
+                // held to the hub's pictures, the rest as files to the assistant's computer (#12973)
+                let spill = MessagePhotos.spill(into: draft.held.files, machine: hubRef(assistantConfig?.machineID ?? hubMachineID), model: self)
+                for img in images { MessagePhotos.add(img, to: &draft.held.images, model: self, limits: imageLimits(), spill: spill) }
                 selectedTab = .assistant
                 #if os(iOS)
                 if let shell = tabRouter as? ShellState {
@@ -362,7 +362,8 @@ extension AppModel {
             now = ContextRef.adding(r, to: now) ?? now
         }
         composerContexts[key] = now
-        if !images.isEmpty { composerInbox[key, default: []].append(contentsOf: images.prefix(MessagePhotos.limit)) }
+        // the box holds them to the hub's pictures and sends the rest as files (`MessagePhotos.add`, #12973)
+        if !images.isEmpty { composerInbox[key, default: []].append(contentsOf: images) }
         composerFocus = key
     }
 }
@@ -413,7 +414,7 @@ struct ForwardDraft: Identifiable {
     }
 
     /// The forward with the whole text and its pictures, as it goes: several share `ForwardMessage.total`, and their
-    /// pictures the box's limit, the earlier messages' first.
+    /// pictures what a box can take, the hub's pictures and its files (#12973), the earlier messages' first.
     func complete() async throws -> (refs: [ContextRef], images: [UIImage]) {
         let limit = ForwardMessage.limit(count: pieces.count)
         var refs: [ContextRef] = []
@@ -421,7 +422,7 @@ struct ForwardDraft: Identifiable {
         for p in pieces {
             let text = try await p.full?() ?? p.raw
             refs.append(ForwardMessage.ref(text, from: p.source, limit: limit))
-            for path in p.images where pictures.count < MessagePhotos.limit {
+            for path in p.images where pictures.count < ImageLimits.standard.perMessage + FileAttachments.most {
                 if let img = await loadImage(path) { pictures.append(img) }
             }
         }

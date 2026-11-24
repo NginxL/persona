@@ -1,0 +1,59 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "machines.schema.json",
+  "title": "Machine pairing and status",
+  "description": "Requesting a one-time active-mode computer pairing link and checking computer connection status from an extension (#12798): machines.pair_link requires machines.pair in permissions.hub (always creates or re-issues for a pending link computer, which still requires the owner's confirmation), and machines.status requires machines.read or machines.pair. Params are strict: an unknown field is invalid_params. Plugin-side: only the hub and the program speak it.",
+  "x-side": "plugin",
+  "x-methods": {
+    "machines.pair_link": {"from": "program", "params": "MachinesPairLinkParams", "result": "MachinesPairLinkResult"},
+    "machines.status": {"from": "program", "params": "MachinesStatusParams", "result": "MachinesStatusResult"}
+  },
+  "$defs": {
+    "MachinesPairLinkParams": {
+      "description": "machines.pair_link (machines.pair): request a one-time persona://link?... pairing link for a pending link computer.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "machine_id": {"type": "string", "description": "Optional computer id: re-issues a pairing link when an existing pending link machine matches (with name/os/icon omitted), or creates a new pending link machine with this id (defaulting name to machine_id when name is omitted)."},
+        "name": {"type": "string", "description": "Display name for a newly added computer (defaults to machine_id when machine_id is given; required when machine_id is omitted)."},
+        "os": {"type": "string", "enum": ["", "mac", "linux", "windows"], "description": "Target OS hint for install commands."},
+        "icon": {"type": "string", "enum": ["", "server", "laptop", "desktop"], "description": "Optional icon for the computer."}
+      }
+    },
+    "MachinesPairLinkResult": {
+      "type": "object",
+      "properties": {
+        "machine_id": {"type": "string", "description": "The hub machine id assigned to the computer."},
+        "name": {"type": "string", "description": "The display name of the computer."},
+        "link": {"type": "string", "description": "The one-time persona://link?... pairing URL."},
+        "expires_at": {"type": "string", "format": "date-time", "description": "When the pairing link expires."},
+        "pending": {"type": "boolean", "description": "Whether the computer is waiting for the owner's confirmation."},
+        "install_linux": {"type": "string", "description": "Optional one-line Linux install-and-pair command when the hub knows its publication site."}
+      },
+      "required": ["machine_id", "name", "link", "expires_at", "pending"]
+    },
+    "MachinesStatusParams": {
+      "description": "machines.status (machines.read or machines.pair): read one computer's current connection and confirmation state.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "machine_id": {"type": "string", "minLength": 1, "description": "The computer's hub machine id."}
+      },
+      "required": ["machine_id"]
+    },
+    "MachinesStatusResult": {
+      "type": "object",
+      "properties": {
+        "machine_id": {"type": "string"},
+        "name": {"type": "string"},
+        "exists": {"type": "boolean"},
+        "online": {"type": "boolean", "description": "Whether the computer's link/connection is currently up."},
+        "node_online": {"type": "boolean", "description": "Whether the resident node is connected and responding."},
+        "pending": {"type": "boolean", "description": "Whether the computer is waiting for the owner's confirmation."},
+        "last_seen": {"type": "string", "format": "date-time", "x-go-pointer": true, "description": "When the computer was last seen online, if ever."},
+        "error": {"type": "string", "description": "Last connection error, if any."}
+      },
+      "required": ["machine_id", "exists", "online", "node_online", "pending"]
+    }
+  }
+}

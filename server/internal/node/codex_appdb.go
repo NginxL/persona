@@ -171,9 +171,10 @@ func fileStamp(path string) string {
 }
 
 // readCodexAppThreads reads the unarchived rows of ids (validID only: they are put in the query as they are), plus
-// the migrated App's sidebar chats: every unarchived thread the desktop App itself originated, which it writes no
-// legacy sidebar key for (#6388). That second read is a separate query so a schema without the originator column
-// keeps the legacy answer instead of failing it; an exec run's row is not a sidebar chat.
+// the migrated App's sidebar chats and their subagents, which have no legacy sidebar key (#6388). Exec runs are not
+// sidebar chats; subagent rows must stay available so their origin and guardian filters still work once the rollout
+// is gone (#8191). That second read is a separate query so a schema without the originator column keeps the explicit
+// sidebar answer instead of failing it.
 func readCodexAppThreads(ctx context.Context, db string, ids []string) (map[string]codexAppThread, error) {
 	byID := map[string]codexAppThread{}
 	if len(ids) > 0 {
@@ -183,9 +184,14 @@ func readCodexAppThreads(ctx context.Context, db string, ids []string) (map[stri
 		}
 		byID = rows
 	}
-	migrated, err := readCodexThreads(ctx, db, `archived = 0 AND source != '' AND originator IN ('Codex Desktop', 'codex_work_desktop')`)
+	migrated, err := readCodexThreads(ctx, db, `archived = 0 AND source != '' AND source != 'exec' AND originator IN ('Codex Desktop', 'codex_work_desktop')`)
 	if err == nil {
 		for id, t := range migrated {
+			// Subagent metadata is needed for parent folding and guardian suppression. Other inferred sources are not
+			// desktop conversations; explicit sidebar IDs above remain authoritative for legacy rows.
+			if strings.TrimSpace(t.Source) != "vscode" && !t.origin().sub {
+				continue
+			}
 			if _, ok := byID[id]; !ok {
 				byID[id] = t
 			}
@@ -195,7 +201,7 @@ func readCodexAppThreads(ctx context.Context, db string, ids []string) (map[stri
 }
 
 func readCodexThreads(ctx context.Context, db, where string) (map[string]codexAppThread, error) {
-	sqlite, err := exec.LookPath("sqlite3")
+	sqlite, err := codexSQLiteProgram()
 	if err != nil {
 		return nil, err
 	}
@@ -207,10 +213,14 @@ func readCodexThreads(ctx context.Context, db, where string) (map[string]codexAp
 			`COALESCE(updated_at_ms, updated_at * 1000) AS updatedAtMs` + settings + ` FROM threads WHERE ` + where
 	}
 	target := codexDBTarget(db)
-	out, err := exec.CommandContext(cctx, sqlite, "-readonly", "-bail", "-json", "-cmd", ".timeout 2000", target,
-		q(`, COALESCE(model, '') AS model, COALESCE(reasoning_effort, '') AS effort`)).Output()
+	query := func(settings string) ([]byte, error) {
+		cmd := exec.CommandContext(cctx, sqlite, "-readonly", "-bail", "-json", "-cmd", ".timeout 2000", target, q(settings))
+		hideCodexSQLiteWindow(cmd)
+		return cmd.Output()
+	}
+	out, err := query(`, COALESCE(model, '') AS model, COALESCE(reasoning_effort, '') AS effort`)
 	if err != nil { // a schema without those columns: the rest as before
-		out, err = exec.CommandContext(cctx, sqlite, "-readonly", "-bail", "-json", "-cmd", ".timeout 2000", target, q("")).Output()
+		out, err = query("")
 	}
 	if err != nil {
 		return nil, err
@@ -262,13 +272,15 @@ func readCodexAppProjects(home string) map[string]codexAppProject {
 // (read-only, as readCodexThreads; a WAL database nobody has open is read as it is on disk, codexDBTarget): the Codex
 // App's state database, opencode's (usage_opencode.go).
 func querySQLite(ctx context.Context, db, q string, into any) error {
-	sqlite, err := exec.LookPath("sqlite3")
+	sqlite, err := codexSQLiteProgram()
 	if err != nil {
 		return err
 	}
 	cctx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
-	out, err := exec.CommandContext(cctx, sqlite, "-readonly", "-bail", "-json", "-cmd", ".timeout 2000", codexDBTarget(db), q).Output()
+	cmd := exec.CommandContext(cctx, sqlite, "-readonly", "-bail", "-json", "-cmd", ".timeout 2000", codexDBTarget(db), q)
+	hideCodexSQLiteWindow(cmd)
+	out, err := cmd.Output()
 	if err != nil {
 		return err
 	}

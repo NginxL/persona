@@ -2,7 +2,7 @@ Start a new agent in the terminal engine (herdr or Orca) of one of the user's co
 
 The launcher decides the agent. A Claude Code launcher starts Claude Code. A launcher named pi, cursor or agy (or one the machine lists as that agent) starts that agent in a herdr pane with the model you give: pi, the Cursor CLI (cursor-agent) or the Antigravity CLI (agy). pi's first message goes through its Persona extension; cursor's and agy's go through herdr once it recognises the agent. Those three take no permission mode and no ultracode, and their effort is their own.
 
-When the work needs a branch and checkout of its own (work in parallel with what is already open in that repository), give `worktree.branch`: Persona makes the worktree through the machine's engine first (herdr's or Orca's own, so it is listed there and in the app, under the workspace `cwd` is in) and starts the agent in it. Do not tell the agent to run `git worktree add` itself: a worktree made that way is invisible to Orca and to the app. An existing local branch is checked out; a new one starts at the HEAD of the workspace `cwd` is in. A branch already checked out elsewhere is refused.
+For parallel work needing its own checkout, give `worktree.branch`: Persona uses the machine's engine (herdr or Orca) to create and list it under the workspace containing `cwd`, then starts the agent there. Never tell the agent to run `git worktree add`: that hides it from Orca and the app. Existing branches are checked out; new ones start at that workspace's HEAD. A branch checked out elsewhere is refused.
 
 When the agent needs credentials the user keeps in a secret provider (a token in 1Password, say), give `secret_env`: each environment variable it should have, with the reference its value comes from (such as `op://vault/item/field`), never the secret itself. The user approves the hand-off on a card on iPhone or the web before anything starts, and the values reach only that agent's environment, for this run: you never see them, and the answer lists each variable as granted, declined, expired or failed. Only Claude Code agents on a computer this manager connects take them. Tell the agent the variables exist; never ask it to print them.
 
@@ -34,6 +34,10 @@ Give `ultracode: true` for a large task: one that spans many files or needs chec
     "prompt": {
       "type": "string"
     },
+    "skip_project_memory": {
+      "type": "boolean",
+      "description": "default false; true skips project/direction memory; prompt unchanged"
+    },
     "attachments": {
       "type": "array",
       "maxItems": 8,
@@ -52,7 +56,7 @@ Give `ultracode: true` for a large task: one that spans many files or needs chec
     },
     "ultracode": {
       "type": "boolean",
-      "description": "Claude Code multi-agent workflows for substantial steps; default false"
+      "description": "multi-agent workflows; default false"
     },
     "worktree": {
       "type": "object",

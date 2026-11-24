@@ -632,7 +632,13 @@ func (s *Service) withProjectContextForTodo(ctx context.Context, machine, dir, l
 	if strings.TrimSpace(prompt) == "" {
 		return prompt
 	}
-	if background := s.projectHandoffContextForTodo(ctx, machine, dir, lead, t); background != "" {
+	background := s.projectHandoffContextForTodo(ctx, machine, dir, lead, t)
+	// The memory extension's entries the work bears on (memory_extension_source.go); a planned task's carry them in
+	// handOffMemory instead.
+	if memory := s.agentStartMemory(ctx, machine, strings.TrimSpace(t.Title+"\n"+prompt)); memory != "" {
+		background = strings.TrimSpace(background + "\n\n" + memory)
+	}
+	if background != "" {
 		return background + "\n\n" + prompt
 	}
 	return prompt

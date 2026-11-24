@@ -5,6 +5,7 @@
 種類：Lark の個人チャット
 张三：1013 合了吗？
 Lark 会話 id：f2
+画像が必要で lark_image が利用できる場合は、メッセージ ID、またはこの会話の chat_id と指定された account を渡してください。
 
 </persona-context>
 

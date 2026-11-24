@@ -16,6 +16,7 @@ import (
 // review accepted the work, the conclusion card leads with the result and leaves the criteria to the task's page, which
 // keeps each with its result and what was done beyond the brief (#10380).
 func TestReceiptListsTheBriefsCriteria(t *testing.T) {
+	needsLarkLayer(t)
 	s, f, todo, posts, _ := conclusionService(t, false)
 	ctx := context.Background()
 	agentTurn(s, f, proto.StatusWorking, "", 0)

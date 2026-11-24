@@ -17,5 +17,6 @@
   "running_for": "実行時間 {duration}",
   "open_in_background": "{name} をバックグラウンドタスクパネルで開く",
   "workflow_progress_line": "{phase} · {done}/{total} Agent",
-  "workflow_progress_count": "{done}/{total} Agent"
+  "workflow_progress_count": "{done}/{total} Agent",
+  "view_full": "すべて表示"
 }

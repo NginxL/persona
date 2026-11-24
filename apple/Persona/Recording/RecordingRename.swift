@@ -1,4 +1,3 @@
-#if os(iOS) || os(visionOS)
 import SwiftUI
 
 /// Renaming a recording (#8873, docs/apple/recording.md「Titles」): an alert with its title in a field. The owner's title
@@ -47,4 +46,3 @@ extension View {
     /// The Rename alert for the recording `renaming` names (#8873).
     func recordingRename(_ renaming: Binding<UUID?>) -> some View { modifier(RecordingRenameAlert(renaming: renaming)) }
 }
-#endif

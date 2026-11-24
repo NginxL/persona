@@ -39,6 +39,7 @@ import persona.core.designsystem.*
 import persona.core.designsystem.icons.PhIcons
 import persona.core.domain.inbox.InboxItem
 import java.io.File
+import persona.core.inbox.*
 
 /**
  * Settings › Translation in the inbox drawn on the JVM with Robolectric's native graphics, in every style, light and dark: a mail row

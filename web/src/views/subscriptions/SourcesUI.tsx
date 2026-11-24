@@ -14,6 +14,7 @@ import { Icon } from "../../ui/icons";
 import { usePersona } from "../assistant/Persona";
 import { Segmented } from "../assistant/parts";
 import { askAssistant, ExtensionUI } from "../settings/ExtensionView";
+import { InboxForwardSetting } from "../settings/InboxForwardSetting";
 
 // The relationship view and its layout are a chunk of their own, loaded when it is first shown.
 const SourcesGraphView = lazyPage(() => import("./SourcesGraph").then((m) => m.SourcesGraphView));
@@ -45,7 +46,7 @@ export function SourcesUI({ title, state, onGraph }: { title: string; state?: st
       <ExtensionUI key={first ?? ""} extension={SUBSCRIPTIONS_UI} ui="pages" title={title} bare state={first} context={context} onDepth={setDepth} />
     </ExtensionOwnerScope>
   );
-  if (!offered) return pages(state);
+  if (!offered) return <>{pages(state)}{!state && <InboxForwardSetting />}</>;
   if (graph && opened)
     return (
       <div>
@@ -79,7 +80,10 @@ export function SourcesUI({ title, state, onGraph }: { title: string; state?: st
           </Suspense>
         </>
       ) : (
-        pages()
+        <>
+          {pages()}
+          {depth <= 1 && <InboxForwardSetting />}
+        </>
       )}
     </div>
   );

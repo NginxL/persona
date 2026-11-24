@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { backgroundTurn, backgroundWork, taskBackgroundWork, waitingOnSubagents } from "./background-work";
+import { backgroundStall, backgroundTurn, backgroundWork, taskBackgroundWork, waitingOnSubagents } from "./background-work";
 import type { Session } from "./types";
 import type { Todo } from "./todos";
 
@@ -85,5 +85,34 @@ describe("backgroundTurn (#7341)", () => {
     expect(backgroundTurn({ ...session, background: [shell] }, undefined, quiet)).toBeNull();
     expect(backgroundTurn({ ...session, background_working: false, background: [shell] }, undefined, quiet)).toBeNull();
     expect(backgroundTurn(undefined, undefined, quiet)).toBeNull();
+  });
+});
+
+describe("backgroundStall (#13744)", () => {
+  const base = { ...session, state: "working" as const, background_working: true, background_stalled_since: "2026-11-13T01:00:00Z" };
+  const at = (min: number) => Date.parse("2026-11-13T01:00:00Z") + min * 60_000;
+  it("says how long a Working background session has been quiet, in one unit", () => {
+    expect(backgroundStall(base, at(12))?.text).toBe("后台命令 12 分钟没有动静");
+    expect(backgroundStall(base, at(185))?.text).toBe("后台命令 3 小时没有动静");
+    expect(backgroundStall(base, at(60 * 24 * 3))?.text).toBe("后台命令 3 天没有动静");
+    expect(backgroundStall(base, at(12))?.title).toContain("仍按「工作中」计算");
+  });
+  it("shows nothing without a stall, or for a session that is not Working in the background", () => {
+    expect(backgroundStall({ ...base, background_stalled_since: undefined }, at(12))).toBeNull();
+    expect(backgroundStall({ ...base, background_stalled_since: "0001-01-01T00:00:00Z" }, at(12))).toBeNull();
+    expect(backgroundStall({ ...base, state: "idle" }, at(12))).toBeNull();
+    expect(backgroundStall({ ...base, background_working: false }, at(12))).toBeNull();
+    expect(backgroundStall({ ...base, background_waiting: true }, at(12))).toBeNull();
+    expect(backgroundStall(undefined)).toBeNull();
+  });
+});
+
+describe("a stalled background command's status line (#13744)", () => {
+  it("carries the time it went quiet, and only while it is not waiting", () => {
+    const shell = { id: "b1", kind: "shell", description: "pnpm test", started_at: "2026-11-13T00:00:00Z" };
+    const busy = { ...session, background_working: true, background: [shell], background_stalled_since: "2026-11-13T01:00:00Z" };
+    const idle = { streaming: false, outgoing: false, awaiting: false };
+    expect(backgroundTurn(busy, [], idle)).toMatchObject({ kind: "command", line: { what: "pnpm test", stalled: "2026-11-13T01:00:00Z" } });
+    expect(backgroundTurn({ ...busy, background_stalled_since: undefined }, [], idle)?.line?.stalled).toBeUndefined();
   });
 });

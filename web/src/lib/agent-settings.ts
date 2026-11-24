@@ -1,6 +1,7 @@
 // Settings › Claude Code / Codex settings (the node's whitelist of ~/.claude/settings.json and ~/.codex/config.toml keys,
 // iOS ClaudeSettingsView) and Settings › Connectors › Mail's add form (iOS MailAccountForm, docs/extensions/mail.md): the pure part.
 import { hasKey, t } from "../i18n";
+import { effortTitle } from "./session-actions";
 import type { Machine } from "./types";
 
 // ── agent settings ──
@@ -81,16 +82,12 @@ function codexOptions(prefix: string, options: string[]): Record<string, string>
 // config.toml values (#3855) by name.
 const OPTION_KEYS: Record<string, Record<string, string>> = {
   service_tier: { default: "lib-agent-settings.speed_standard", fast: "chat-sessiondialogs.speed_fast", priority: "chat-sessiondialogs.speed_fast" },
-  effortLevel: { low: "lib-session-actions.effort_low", medium: "lib-session-actions.effort_medium", high: "lib-session-actions.effort_high", xhigh: "lib-session-actions.effort_xhigh", max: "lib-session-actions.effort_max" },
   autoUpdatesChannel: { latest: "lib-agent-settings.channel_latest", stable: "lib-agent-settings.channel_stable" },
   // Claude Code's default mode (#3026), named as the session menu names the modes.
   "permissions.defaultMode": {
     default: "lib-session-actions.mode_default", acceptEdits: "lib-session-actions.mode_accept_edits", plan: "lib-session-actions.mode_plan",
     auto: "lib-session-actions.mode_auto", bypassPermissions: "lib-session-actions.mode_bypass_permissions",
   },
-  model_reasoning_effort: Object.fromEntries(
-    ["minimal", "low", "medium", "high", "xhigh", "max", "ultra"].map((o) => [o, `lib-session-actions.codex_effort_${o}`]),
-  ),
   model_reasoning_summary: codexOptions("summary", ["auto", "concise", "detailed", "none"]),
   model_verbosity: codexOptions("verbosity", ["low", "medium", "high"]),
   approval_policy: codexOptions("approval", ["untrusted", "on-failure", "on-request", "never"]),
@@ -99,6 +96,7 @@ const OPTION_KEYS: Record<string, Record<string, string>> = {
 
 /** How an enum option reads; an option with no name (a new one, or another agent's) stays as written. */
 export function optionText(key: string, option: string): string {
+  if (key === "effortLevel" || key === "model_reasoning_effort" || key === "defaultThinkingLevel") return effortTitle(option);
   const k = OPTION_KEYS[key]?.[option];
   return k ? catalogText(k, option) : option;
 }
@@ -317,7 +315,7 @@ export function mailRequest(f: MailForm, gmailAppPassword = false): AddMailAccou
 
 /**
  * Where a QQ / NetEase address typed under Other IMAP makes its authorization code (the provider and its web mail), null for any
- * other. The hub says the same steps for the same domains (server/internal/mail/preset.go, Guide; iOS CodeGuide):
+ * other. The hub says the same steps for the same domains (server/internal/modules/mail/preset.go, Guide; iOS CodeGuide):
  * change them together.
  */
 export function mailCodeGuide(f: Pick<MailForm, "kind" | "email" | "imapHost" | "smtpHost">): { provider: "qq" | "netease"; webMail: string } | null {

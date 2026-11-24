@@ -102,7 +102,7 @@ describe("all work in one panel", () => {
     expect(todoItem(base).lane).toBe("planned"); // no agent attached
     expect(todoItem({ ...base, done_at: "2026-11-09T02:00:00Z" }).lane).toBe("idle");
     expect(todoItem({ ...base, agents, supervision: accepted }, () => session({ state: "unread" })).lane).toBe("idle");
-    expect(todoItem({ ...base, supervision: accepted, ask: { outcome: "decide", verdict: "Choose A or B", asked_at: "2026-11-09T03:00:00Z" } }).lane).toBe("review");
+    expect(todoItem({ ...base, supervision: accepted, ask: { outcome: "decide", verdict: "Choose A or B", asked_at: "2026-11-09T03:00:00Z" } }).lane).toBe("needs_you");
     expect(todoItem({ ...base, agents, supervision: { supervisor: "main", state: "pending_review" as const } }, () => session({ state: "idle" })).lane).toBe("review");
     expect(todoItem({ ...base, ask: { verdict: "Please verify", asked_at: "2026-11-09T02:00:00Z" } }).lane).toBe("review");
     expect(todoItem({ ...base, agents }, () => session({ state: "unread" })).lane).toBe("review");

@@ -1,8 +1,8 @@
-import { useEffect, useRef } from "react";
+import { useEffect } from "react";
 import { t } from "../../i18n";
 import { ASSISTANT_MODEL_PICK_FEATURE, mainChatAgentMismatch } from "../../lib/assistant-models";
 import { launcherTitle } from "../../lib/provider-names";
-import { assistantLaunchers, readAssistantLaunchers, useModelLists } from "../../lib/session-models";
+import { assistantLaunchers, readAssistantLaunchers, useModelLists, useRevisionReread } from "../../lib/session-models";
 import { hubHas, useStore } from "../../lib/store";
 import type { Session } from "../../lib/types";
 import { Button } from "../../ui/atoms";
@@ -20,11 +20,10 @@ export function MainChatAgentNotice({ session, isMain, onNewMain }: { session: S
     if (isMain && mid) void readAssistantLaunchers(mid, { again: true });
   }, [isMain, mid]);
   // A hub-side default change can arrive while this page stays open. Follow the pill: a pushed session revision
-  // re-reads the launchers, and useModelLists redraws this notice with the answer so a stale mismatch cannot linger.
-  const lastRev = useRef<number | undefined>(session.rev);
-  useEffect(() => {
-    if (!isMain || !mid || session.rev === undefined || session.rev === lastRev.current) return;
-    lastRev.current = session.rev;
+  // re-reads the launchers once per turn (useRevisionReread), and useModelLists redraws this notice with the answer so
+  // a stale mismatch cannot linger.
+  useRevisionReread(session, Boolean(isMain && mid), () => {
+    if (!isMain || !mid) return;
     const read = readAssistantLaunchers(mid, { again: true });
     // Only the exact request seen at render can have preceded this revision. If it already settled, this call returned
     // a new promise and needs no trailing read; a request another effect starts for this revision also needs none.
@@ -34,8 +33,7 @@ export function MainChatAgentNotice({ session, isMain, onNewMain }: { session: S
       if (active) void readAssistantLaunchers(mid, { again: true });
     });
     return () => { active = false; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- only a new revision needs this render's request identity.
-  }, [isMain, mid, session.rev]);
+  });
   const mismatch = mainChatAgentMismatch({ session, isMain, kept, config: assistant?.launcher }, info);
   if (!mismatch) return null;
   const named = (launcher: string) => launcherTitle(launcher, info?.launchers);

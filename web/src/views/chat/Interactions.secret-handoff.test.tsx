@@ -126,3 +126,14 @@ describe("the hand-off card", () => {
     expect(calls[0].headers).toBeUndefined();
   });
 });
+
+// Storage reuses the same explicit-card gate, while describing the opposite direction accurately.
+it("shows a secret storage target and fields without claiming the Agent receives values", async () => {
+  await render(card({ always_label: undefined, tool_title: "Store fields in 1Password", summary: "Writer on MacBook: create Test item in Dev (1 field)",
+    tool_input: { store_operation: "create", variables: [{ name: "credential", provider: "onepassword", provider_name: "1Password", title: "Dev › Test item" }], agent: "Writer", machine_name: "MacBook" } }));
+  const text = host.textContent ?? "";
+  expect(text).toContain("create Test item in Dev");
+  expect(text).toContain("credential");
+  expect(text).not.toContain("for this run only");
+  expect(button("Always Allow")).toBeUndefined();
+});

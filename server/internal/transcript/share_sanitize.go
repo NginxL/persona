@@ -166,8 +166,8 @@ func ShareDisplayText(s string) string {
 	return s[:end] + "\n[Display truncated]"
 }
 
-// SanitizeShareArguments normalizes decoded strings and scans the serialized
-// permitted fields as well. Sensitive object keys are retained, values removed.
+// SanitizeShareArguments normalizes decoded strings and redacts sensitive
+// object fields while preserving valid serialized JSON.
 func SanitizeShareArguments(raw json.RawMessage) (string, error) {
 	if len(raw) > ShareMessageLimit {
 		return "", ErrShareComponentLimit
@@ -199,13 +199,13 @@ func SanitizeShareArguments(raw json.RawMessage) (string, error) {
 				if err != nil {
 					return nil, err
 				}
-				if shareSensitiveKey.MatchString(k) {
+				if shareSensitiveKey.MatchString(key) {
 					keep := a == nil
 					switch a.(type) {
 					case json.Number:
-						keep = shareCountKey.MatchString(k)
+						keep = shareCountKey.MatchString(key)
 					case bool:
-						keep = shareFlagKey.MatchString(k)
+						keep = shareFlagKey.MatchString(key)
 					}
 					if !keep {
 						out[key] = "[REDACTED]"
@@ -231,5 +231,8 @@ func SanitizeShareArguments(raw json.RawMessage) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return SanitizeShareText(string(b))
+	if len(b) > ShareMessageLimit {
+		return "", ErrShareComponentLimit
+	}
+	return string(b), nil
 }

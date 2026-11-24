@@ -122,6 +122,7 @@
     <string name="chat_source_no_phone_approval">这个会话不允许在手机上审批，请到电脑上处理。</string>
     <string name="chat_source_read_only_reason">仅查看：%1$s</string>
     <string name="chat_starting_failed">没有启动起来：%1$s</string>
+    <string name="chat_start_failed_title">启动失败</string>
     <string name="chat_starting">正在启动 %1$s，消息会在它就绪后发出</string>
     <string name="chat_tabs_tab_description">%1$s，%2$s</string>
     <string name="chat_tabs_launcher_chip">%1$s 发起</string>

@@ -103,9 +103,7 @@ struct InteractiveAssistantViewCard: View {
             } message: { _ in
                 Text(confirmationText)
             }
-        #if !os(macOS)
         .pluginLinks($openedWeb)
-        #endif
         .sheet(item: $openedFile) { FileViewer(ref: $0) }
         .sheet(item: $openedKnowledge) { entry in
             NavigationStack { KnowledgeDetailView(entry: entry).toolbar { SheetClose { openedKnowledge = nil } } }

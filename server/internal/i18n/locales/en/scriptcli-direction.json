@@ -1,0 +1,10 @@
+{
+  "agent_pair": "--machine and --session must be non-empty and supplied together",
+  "create_usage": "usage: personad create-direction <name> --project <slug> [--machine <machine-id> --session <session-id>]\n  exit: 0 created (leader JSON printed), 1 failed, 2 usage / invalid, 4 unavailable, 130 interrupted",
+  "id_required": "exactly one non-empty direction id",
+  "invalid_flags": "invalid arguments: {reason}",
+  "name_required": "exactly one non-empty name, quoted",
+  "progress_required": "at least one of --reached, --doing and --needs-you is required",
+  "project_required": "--project is required",
+  "write_usage": "usage: personad write-progress <direction-id> [--reached <text>] [--doing <text>] [--needs-you <text>] [--link <url> ...]\n  exit: 0 written (leader JSON printed), 1 failed, 2 usage / invalid, 4 unavailable, 130 interrupted"
+}

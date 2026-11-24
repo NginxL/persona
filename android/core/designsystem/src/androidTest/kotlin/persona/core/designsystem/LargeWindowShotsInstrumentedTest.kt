@@ -62,7 +62,7 @@ class LargeWindowShotsInstrumentedTest {
                         HardwareShortcutHost(Modifier.fillMaxSize(), requestFocusWhenLarge = false) {
                             JSettingsSheet(onDismiss = {}) {
                                 val field = remember { FocusRequester() }
-                                LaunchedEffect(Unit) { runCatching { field.requestFocus() } }
+                                LaunchedEffect(Unit) { val _ = runCatching { field.requestFocus() } }
                                 Column {
                                     Text("Settings", color = PersonaTheme.palette.ink)
                                     BasicTextField("first field", {}, Modifier.testTag("first"), textStyle = TextStyle(color = PersonaTheme.palette.ink))

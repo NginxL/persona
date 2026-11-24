@@ -8,7 +8,7 @@ import (
 	"testing"
 
 	"github.com/nwverse/persona/server/internal/connector"
-	"github.com/nwverse/persona/server/internal/connector/github"
+	"github.com/nwverse/persona/server/internal/githubwire"
 )
 
 func TestGitHubChecksUsesOnlyTheWatchedHost(t *testing.T) {
@@ -18,7 +18,7 @@ func TestGitHubChecksUsesOnlyTheWatchedHost(t *testing.T) {
 	}{
 		{"", true}, {"GITHUB.COM", true}, {"github.example.com", false},
 	} {
-		c := github.New(github.Config{Auth: github.AuthConfig{Host: tc.host}}, "", nil)
+		c := newTestGitHub(t, githubwire.Config{Auth: githubwire.AuthConfig{Host: tc.host}}, "", nil)
 		if got := githubChecksPublicHost(c); got != tc.allowed {
 			t.Errorf("host %q allowed %v, want %v", tc.host, got, tc.allowed)
 		}
@@ -38,7 +38,7 @@ func TestGitHubChecksDoesNotQueryOtherHost(t *testing.T) {
 	defer server.Close()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	c := github.New(github.Config{Auth: github.AuthConfig{Host: "github.example.com", FromMachine: "box"}, APIRoot: server.URL}, "box", func(context.Context, string) (string, error) { return "fake-token", nil })
+	c := newTestGitHub(t, githubwire.Config{Auth: githubwire.AuthConfig{Host: "github.example.com", FromMachine: "box"}, APIRoot: server.URL}, "box", func(context.Context, string) (string, error) { return "fake-token", nil })
 	go c.Run(ctx)
 	waitLong(t, "GitHub connector sign-in", func() bool { return c.Status(ctx).State == connector.StateOK })
 	h := newTestManager(t)

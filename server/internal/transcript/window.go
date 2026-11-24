@@ -252,7 +252,7 @@ func (f *File) seeNotifications(data []byte) {
 	if len(fresh) == 0 {
 		return
 	}
-	fh, err := os.Open(f.Path)
+	fh, err := openTranscript(f.Path)
 	if err != nil {
 		return
 	}
@@ -564,12 +564,12 @@ func (f *File) loadOlder() int64 {
 	if f.base == 0 || f.win == nil {
 		return 0
 	}
-	fh, err := os.Open(f.Path)
+	fh, err := openTranscript(f.Path)
 	if err != nil {
 		return 0
 	}
 	defer fh.Close()
-	if st, err := fh.Stat(); err != nil || (f.ino != 0 && inode(st) != f.ino) {
+	if st, err := statOpenedTranscript(fh); err != nil || (f.ino != 0 && inode(st) != f.ino) {
 		return 0 // replaced: the next Refresh starts over
 	}
 	w := f.win
@@ -668,7 +668,7 @@ func (f *File) findOlder(id string) (proto.Item, bool, error) {
 	if f.base == 0 || f.win == nil || id == "" {
 		return proto.Item{}, false, nil
 	}
-	fh, err := os.Open(f.Path)
+	fh, err := openTranscript(f.Path)
 	if err != nil {
 		return proto.Item{}, false, err
 	}
@@ -812,7 +812,7 @@ func (f *File) fullMeta() Meta {
 
 // parseRange runs the lines in [from, to) of a file (the first numbered n) through ParseLine for their Meta.
 func parseRange(path string, from, to int64, n int, m *Meta) error {
-	fh, err := os.Open(path)
+	fh, err := openTranscript(path)
 	if err != nil {
 		return err
 	}

@@ -77,6 +77,8 @@ export function hunks(ops: Op[], context = 2): Hunk[] {
     if (o.text.startsWith(HEADER)) unit = o.text.slice(HEADER.length);
     unitAt.push(unit);
   }
+  const isHeader = (o: Op) => o.text.startsWith(HEADER);
+  const isSameHeader = (o: Op) => o.kind === "same" && isHeader(o);
   const changed = ops.map((o) => o.kind !== "same");
   let i = 0;
   let last = 0;
@@ -85,21 +87,28 @@ export function hunks(ops: Op[], context = 2): Hunk[] {
       i++;
       continue;
     }
-    const start = Math.max(last, i - context);
+    let start = i;
+    while (start > last && i - start < context && !isSameHeader(ops[start - 1])) start--;
     let end = i;
     while (end < ops.length) {
       if (changed[end]) {
         end++;
         continue;
       }
+      if (isSameHeader(ops[end])) break;
       let j = end;
-      while (j < ops.length && !changed[j] && j - end < context * 2) j++;
-      if (j < ops.length && changed[j] && j - end < context * 2) end = j;
+      while (j < ops.length && !changed[j] && !isSameHeader(ops[j]) && j - end < context * 2) j++;
+      if (j < ops.length && changed[j] && !isSameHeader(ops[j]) && j - end < context * 2) end = j;
       else break;
     }
-    const stop = Math.min(ops.length, end + context);
-    const slice = ops.slice(start, stop).filter((o) => !(o.text.startsWith(HEADER) && o.kind === "same"));
-    out.push({ unit: unitAt[start] || unitAt[i], ops: slice, skippedBefore: start - last });
+    let stop = end;
+    while (stop < ops.length && stop - end < context && !isSameHeader(ops[stop])) stop++;
+    const slice = ops.slice(start, stop).filter((o) => !isSameHeader(o));
+    let skippedBefore = 0;
+    for (let k = last; k < start; k++) {
+      if (!isHeader(ops[k])) skippedBefore++;
+    }
+    out.push({ unit: unitAt[start] || unitAt[i], ops: slice, skippedBefore });
     last = stop;
     i = stop;
   }

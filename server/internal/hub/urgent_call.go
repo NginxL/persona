@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -71,13 +72,15 @@ func (p *Pusher) callRouteOf(d Device) pushRoute {
 	switch {
 	case d.VoIPToken == "":
 		return pushRoute{Route: pushNone, Reason: pushNoToken}
-	case p.direct != nil:
+	case p.direct != nil && p.callable(d):
 		return pushRoute{Route: pushDirect}
+	case p.direct != nil:
+		return pushRoute{Route: pushNone, Reason: pushNoKey} // office network mode: a phone without a push key is not rung
 	case p.callable(d):
 		return pushRoute{Route: pushRelay}
 	case d.VoIPError != "":
 		return pushRoute{Route: pushNone, Reason: pushRelayFailed, Detail: d.VoIPError}
-	case d.RelayURL == "":
+	case d.RelayURL == "" || d.RelayGrant == "":
 		return pushRoute{Route: pushNone, Reason: pushNoRelay}
 	default:
 		return pushRoute{Route: pushNone, Reason: pushRelayFailed, Detail: "no grant"}
@@ -93,15 +96,16 @@ func (p *Pusher) callRouteOfID(id string) (pushRoute, bool) {
 	return p.callRouteOf(d), true
 }
 
-// callable: a ring can reach d (its PushKit token, and the relay's grant for it when the hub has no key).
+// callable: a ring can reach d (its PushKit token, the ordinary relay registration, and the relay's grant for that
+// token when the hub has no key). A relay URL kept only to diagnose a refused ordinary registration is not enough.
 func (p *Pusher) callable(d Device) bool {
 	if d.VoIPToken == "" {
 		return false
 	}
 	if p.direct != nil {
-		return true
+		return !p.privateOnly || d.PushKey != "" // office network mode rings only sealed
 	}
-	return d.RelayURL != "" && d.VoIPGrant != "" && d.PushKey != ""
+	return p.relayed(d) && d.VoIPGrant != ""
 }
 
 // pushTypeVoIP is the APNs push type of a ring (an APNs header, not a message the apps get).
@@ -200,6 +204,9 @@ func (p *Pusher) ringOne(d Device, payload map[string]any, call assistantwire.Ca
 		}
 		sealed = s
 	}
+	if p.privateOnly && sealed == "" {
+		return errors.New("office network mode rings only a phone with a push key")
+	}
 	if p.direct == nil {
 		return p.ringRelay(d, relayproto.PushRequest{Type: pushTypeVoIP, CollapseID: relayCollapseID("call:" + call.ID), Sealed: sealed, TTL: call.TTL})
 	}
@@ -259,6 +266,9 @@ func (p *Pusher) ringRelay(d Device, req relayproto.PushRequest) error {
 
 // renewVoIPGrant registers d's PushKit token with its relay again and keeps the new grant.
 func (p *Pusher) renewVoIPGrant(d Device) (string, error) {
+	if p.privateOnly {
+		return "", errRelayOff
+	}
 	if d.VoIPToken == "" || d.Topic == "" {
 		return "", fmt.Errorf("device has no call token to register")
 	}

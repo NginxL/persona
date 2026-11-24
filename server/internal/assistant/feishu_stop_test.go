@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/nwverse/persona/server/internal/botcard"
 	"github.com/nwverse/persona/server/internal/channel"
-	"github.com/nwverse/persona/server/internal/feishubot"
 	"github.com/nwverse/persona/server/internal/i18n"
 	"github.com/nwverse/persona/server/internal/proto"
 )
@@ -29,8 +29,8 @@ func stopCardHub(t *testing.T, features FeishuFeatures) (*Service, *fakeHub) {
 	return s, f
 }
 
-func stopCardAction(t botTarget) *feishubot.CardAction {
-	var a feishubot.CardAction
+func stopCardAction(t botTarget) *botcard.CardAction {
+	var a botcard.CardAction
 	a.Action.Value = map[string]any{"a": "stop", "k": t.Kind, "m": t.MachineID, "s": t.SessionID}
 	return &a
 }
@@ -57,13 +57,13 @@ func TestProgressCardStopButton(t *testing.T) {
 }
 
 // Pressing the progress card's Stop button interrupts the same conversation with the same device call as /stop in
-// that conversation's thread: both go through stopConversation.
+// that conversation's thread: both use the same interrupt call after their own checks.
 func TestStopCardPressMakesTheSameInterruptCallAsStopCommand(t *testing.T) {
 	s, f := stopCardHub(t, FeishuFeatures{Main: true})
 	ctx := context.Background()
 	target := botTarget{Kind: targetPersona, MachineID: "server", SessionID: "conv0001"}
 
-	r := s.botCardAction(ctx, stopCardAction(target), "")
+	r := s.botCardAction(ctx, currentStopCard(s, target), "")
 	want := i18n.T("", "assistant-feishu_cards.stopped", i18n.Args{"label": s.targetLabel(ctx, target)})
 	if r.Toast == nil || r.Toast.Type != "success" || r.Toast.Content != want {
 		t.Fatalf("press toast %+v, want success %q", r.Toast, want)
@@ -99,7 +99,7 @@ func TestStopCardPressInterruptFailureSaysWhy(t *testing.T) {
 	ctx := context.Background()
 	target := botTarget{Kind: targetPersona, MachineID: "server", SessionID: "conv0001"}
 
-	r := s.botCardAction(ctx, stopCardAction(target), "")
+	r := s.botCardAction(ctx, currentStopCard(s, target), "")
 	want := i18n.T("", "assistant-feishu_cards.not_stopped", i18n.Args{"error": "node is down"})
 	if r.Toast == nil || r.Toast.Type != "error" || r.Toast.Content != want {
 		t.Fatalf("toast %+v, want error %q", r.Toast, want)
@@ -128,9 +128,9 @@ func TestStopCardPressWithNothingToStopSaysSo(t *testing.T) {
 		wantKind  string
 	}{
 		{"agent is gone", botTarget{Kind: targetAgent, MachineID: "box", SessionID: "agone01"}, true,
-			i18n.T("", "assistant-feishu_cards.nothing_running"), "info"},
+			i18n.T("", "assistant-feishu_cards.card_expired"), "info"},
 		{"no conversation yet", botTarget{Kind: targetPersona}, true,
-			i18n.T("", "assistant-feishu_cards.nothing_running"), "info"},
+			i18n.T("", "assistant-feishu_cards.card_expired"), "info"},
 		{"agents feature off", botTarget{Kind: targetAgent, MachineID: "box", SessionID: "agone01"}, false,
 			i18n.T("", "assistant-feishu.agents_off"), "error"},
 	} {
@@ -188,21 +188,25 @@ func TestStopWithNoTurnRunningSaysSo(t *testing.T) {
 					MachineID: "server", SessionID: "main0000", Started: time.Now().UTC()})
 			}
 			ctx := context.Background()
-			target := botTarget{Kind: targetMain}
+			target := botTarget{Kind: targetPersona, MachineID: "server", SessionID: "main0000"}
 			stopped := i18n.T("", "assistant-feishu_cards.stopped", i18n.Args{"label": "主对话"})
 			none := i18n.T("", "assistant-feishu_cards.nothing_running")
 
 			if h, _ := s.botCommand(ctx, FeishuFeatures{Main: true}, "om", "/stop", "", ""); !h {
 				t.Fatal("/stop was not handled")
 			}
-			r := s.botCardAction(ctx, stopCardAction(target), "")
+			a := currentStopCard(s, target)
+			if !c.sent {
+				s.chans.st.Runs[len(s.chans.st.Runs)-1].Seen = true
+			}
+			r := s.botCardAction(ctx, a, "")
 			want := map[bool]int{true: 2, false: 0}[c.runs] // /stop and the press, each with its own call
 			if got := f.interrupted(); len(got) != want {
 				t.Fatalf("interrupts %v, want %d", got, want)
 			}
 			wantNote, wantToast, wantKind := stopped, stopped, "success"
 			if !c.runs {
-				wantNote, wantToast, wantKind = none, none, "info"
+				wantNote, wantToast, wantKind = none, i18n.T("", "assistant-feishu_cards.card_expired"), "info"
 			}
 			if len(notes) != 1 || notes[0] != wantNote {
 				t.Fatalf("/stop answered %v, want [%q]", notes, wantNote)

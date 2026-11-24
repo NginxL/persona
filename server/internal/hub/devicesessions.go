@@ -205,49 +205,83 @@ type deviceSessionFinish struct {
 	interval int
 }
 
-// finishDeviceSession records a connection's end, or keeps it pending until a
-// snapshot's pause is lifted: the row must not change while its database is
-// dumped.
+// finishDeviceSession records a connection's end asynchronously, or keeps it
+// pending until a snapshot's pause is lifted: the row must not change while
+// its database is dumped. Appending before scheduling preserves FIFO order
+// without blocking the disconnect path on database latency.
 func (h *Hub) finishDeviceSession(id int64, at time.Time, reason string, interval int) {
 	if h.store == nil {
 		return
 	}
-	if !h.quiesce.begin() {
-		h.deviceFinishesMu.Lock()
-		h.deviceFinishes = append(h.deviceFinishes, deviceSessionFinish{id: id, at: at, reason: reason, interval: interval})
+	h.deviceFinishesMu.Lock()
+	h.deviceFinishes = append(h.deviceFinishes, deviceSessionFinish{id: id, at: at, reason: reason, interval: interval})
+	h.deviceFinishesMu.Unlock()
+	if hook := h.testAfterFinishAppend; hook != nil {
+		hook()
+	}
+	h.scheduleDeviceSessionFinishes()
+}
+
+// scheduleDeviceSessionFinishes starts at most one tracked worker to flush
+// queued device session ends asynchronously.
+func (h *Hub) scheduleDeviceSessionFinishes() {
+	if h.store == nil {
+		return
+	}
+	h.deviceFinishesMu.Lock()
+	if len(h.deviceFinishes) == 0 || h.deviceFinishesRunning {
 		h.deviceFinishesMu.Unlock()
 		return
 	}
-	defer h.quiesce.end()
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	if err := h.store.FinishDeviceSession(ctx, id, at, reason, interval); err != nil {
-		h.logf("finish device session: %v", err)
-	}
+	h.deviceFinishesRunning = true
+	h.nodeWorkers.Add(1)
+	h.deviceFinishesMu.Unlock()
+	go func() {
+		defer h.nodeWorkers.Done()
+		h.flushDeviceSessionFinishes()
+	}()
 }
 
-// flushDeviceSessionFinishes writes the sessions that ended during the pause,
-// in the order they ended. A resume that finds the pause still on (another
-// snapshot began) leaves them for the next one.
+// flushDeviceSessionFinishes writes the sessions that ended, in the order they
+// ended. Serializing with deviceFinishesFlushMu guarantees FIFO order even if
+// a newly scheduled worker starts while a paused worker is exiting.
 func (h *Hub) flushDeviceSessionFinishes() {
 	if h.store == nil {
 		return
 	}
+	h.deviceFinishesFlushMu.Lock()
+	defer h.deviceFinishesFlushMu.Unlock()
 	for {
 		h.deviceFinishesMu.Lock()
 		if len(h.deviceFinishes) == 0 {
+			h.deviceFinishesRunning = false
 			h.deviceFinishesMu.Unlock()
+			return
+		}
+		h.deviceFinishesMu.Unlock()
+		// Acquire a quiesce turn, or clear deviceFinishesRunning atomically
+		// under quiesce.mu when paused so resume cannot observe running==true
+		// and strand queued entries (quiesce.go).
+		if !h.quiesce.beginOrDefer(func() {
+			h.deviceFinishesMu.Lock()
+			h.deviceFinishesRunning = false
+			h.deviceFinishesMu.Unlock()
+		}) {
+			if hook := h.testAfterFinishRefuse; hook != nil {
+				hook()
+			}
+			return
+		}
+		h.deviceFinishesMu.Lock()
+		if len(h.deviceFinishes) == 0 {
+			h.deviceFinishesRunning = false
+			h.deviceFinishesMu.Unlock()
+			h.quiesce.end()
 			return
 		}
 		next := h.deviceFinishes[0]
 		h.deviceFinishes = h.deviceFinishes[1:]
 		h.deviceFinishesMu.Unlock()
-		if !h.quiesce.begin() {
-			h.deviceFinishesMu.Lock()
-			h.deviceFinishes = append([]deviceSessionFinish{next}, h.deviceFinishes...)
-			h.deviceFinishesMu.Unlock()
-			return
-		}
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		if err := h.store.FinishDeviceSession(ctx, next.id, next.at, next.reason, next.interval); err != nil {
 			h.logf("finish device session: %v", err)

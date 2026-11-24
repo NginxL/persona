@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Session } from "./types";
 
 const fixture = vi.hoisted(() => ({
-  state: { sessions: {} as Record<string, Session[]>, features: [] as string[], loaded: false },
+  state: { sessions: {} as Record<string, Session[]>, features: [] as string[], loaded: false, seen: {} as Record<string, unknown> },
   listeners: new Set<() => void>(),
   events: new Map<string, Set<(msg?: Record<string, unknown>) => void>>(),
   api: vi.fn(),
@@ -37,6 +37,8 @@ vi.mock("./store", async () => {
   };
 });
 import { retryFullAgentSessions, useFullAgentSessions } from "./sessions";
+import { runtimeIdentity } from "./runtime-list";
+import { newMark } from "./seen-outbox";
 import { ApiError } from "./api";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -70,7 +72,7 @@ const resolve = async (request: ReturnType<typeof deferred>, sessions: Session[]
 beforeEach(() => {
   vi.useFakeTimers();
   vi.setSystemTime(new Date("2026-01-01T00:00:00Z"));
-  fixture.state = { sessions: {}, features: pagingFeatures, loaded: true };
+  fixture.state = { sessions: {}, features: pagingFeatures, loaded: true, seen: {} };
   fixture.owner = "first-login";
   fixture.api.mockReset();
   host = document.createElement("div");
@@ -279,7 +281,7 @@ describe("complete session snapshots for the sidebar fallback", () => {
   });
 
   it("keeps an old hub's full store and does not fetch a second list", async () => {
-    fixture.state = { sessions: { demo: [row("legacy"), row("assistant", { assistant: true })] }, features: [], loaded: true };
+    fixture.state = { sessions: { demo: [row("legacy"), row("assistant", { assistant: true })] }, features: [], loaded: true, seen: {} };
     await mount();
     expect(host.textContent).toBe("legacy");
     expect(host.querySelector("output")!.dataset.loaded).toBe("true");
@@ -300,6 +302,17 @@ describe("complete session snapshots for the sidebar fallback", () => {
     expect(host.textContent).toBe(rows.map((s) => s.session_id).join(","));
     expect(host.querySelector("output")!.dataset.loaded).toBe("true");
     expect(fixture.state.sessions.demo).toEqual([row("bounded-page")]);
+  });
+
+  it("draws an agent seen on this page seen in its last read, the store holding no row of it (lib/seen-outbox.ts)", async () => {
+    // a paging hub keeps no complete row in the store: the complete list's own read (pins, By repository) still had the
+    // agent Unread after it was opened, and its quick filters' numbers and groups counted it until the list read again
+    const unread = row("tail", { status: "done", state: "unread", updated_at: "2025-12-31T23:59:00Z", seen_at: "0001-01-01T00:00:00Z" });
+    fixture.api.mockResolvedValue({ sessions: [row("other"), unread] });
+    await mount();
+    expect(host.querySelector("output")!.dataset.states).toBe(",unread");
+    await act(async () => { publish({ seen: { [runtimeIdentity(unread)]: newMark(unread, Date.now())! } }); });
+    expect(host.querySelector("output")!.dataset.states).toBe(",idle");
   });
 
   it("reflects actions on fallback-only rows without replacing newer HTTP rows with old details", async () => {
@@ -666,7 +679,7 @@ describe("a complete copy on a paging hub", () => {
 it("filters hidden rows before folding and restores them when the rule is disabled", async () => {
   const parent = row("parent", { hidden_by_directory: true });
   const child = row("child", { folded_under: "parent" });
-  fixture.state = { sessions: { demo: [parent, child] }, features: [], loaded: true };
+  fixture.state = { sessions: { demo: [parent, child] }, features: [], loaded: true, seen: {} };
   await mount();
   expect(host.textContent).toBe("child");
   await act(async () => publish({ sessions: { demo: [{ ...parent, hidden_by_directory: false }, child] } }));

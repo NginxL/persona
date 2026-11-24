@@ -54,13 +54,25 @@ final class NewAgentAttachments {
     var uploading: Bool { !uploads.items.isEmpty }
     var paths: [String] { files.map(\.path) }
 
-    func add(_ img: UIImage, model: AppModel) {
+    /// img among the first message's photos while it fits the hub's pictures (#12973); past them it is uploaded to `ref`
+    /// as a file with the others (written off the main actor), or turned away with no computer yet.
+    func add(_ img: UIImage, model: AppModel, to ref: MachineRef?) {
         note = nil
-        MessagePhotos.add(img, to: &images, model: model)
+        let spill: ((UIImage) -> Bool)? = ref.map { ref in
+            { [weak self] img in
+                Task { @MainActor in
+                    if let url = await Task.detached(priority: .userInitiated, operation: { MessagePhotos.fileCopy(img) }).value {
+                        self?.upload([url], to: ref, model: model)
+                    }
+                }
+                return true
+            }
+        }
+        MessagePhotos.add(img, to: &images, model: model, limits: model.imageLimits(ref?.group), spill: spill)
     }
 
-    func load(_ items: [PhotosPickerItem], model: AppModel) async {
-        await MessagePhotos.load(items, model: model) { add($0, model: model) }
+    func load(_ items: [PhotosPickerItem], model: AppModel, to ref: MachineRef?) async {
+        await MessagePhotos.load(items, model: model) { add($0, model: model, to: ref) }
     }
 
     /// Uploads urls to the computer one after another; each joins `files` once it is there.

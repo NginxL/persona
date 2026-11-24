@@ -285,3 +285,115 @@ func TestSupervisionFinishVisibility(t *testing.T) {
 		t.Fatal("a user notification or question could be hidden")
 	}
 }
+
+func TestInternalAcceptedReviewDisposition(t *testing.T) {
+	for _, tc := range []struct {
+		name           string
+		verdict        string
+		autoReview     bool
+		autoState      string
+		autoRound      int
+		round          int
+		parent         string
+		userRequested  bool
+		userCheck      bool
+		missingPlan    bool
+		continued      bool
+		wantBackground bool
+	}{
+		{name: "independent clean review", verdict: reviewAccepted, autoReview: true, wantBackground: true},
+		{name: "independent blocking review", verdict: reviewAccepted, autoReview: true, autoState: autoBlocking, wantBackground: true},
+		{name: "running review stays visible", verdict: reviewAccepted, autoReview: true, autoState: autoRunning},
+		{name: "failed review stays visible", verdict: reviewAccepted, autoReview: true, autoState: autoFailed},
+		{name: "cancelled review stays visible", verdict: reviewAccepted, autoReview: true, autoState: autoCancelled},
+		{name: "old-round review stays visible", verdict: reviewAccepted, autoReview: true, autoRound: 1},
+		{name: "rework", verdict: reviewAccepted, round: 1, wantBackground: true},
+		{name: "internal subtask", verdict: reviewAccepted, parent: "todo_parent", wantBackground: true},
+		{name: "continued task uses its current plan", verdict: reviewAccepted, autoReview: true, continued: true, wantBackground: true},
+		{name: "user requested wins over every internal source", verdict: reviewAccepted, autoReview: true, round: 2, parent: "todo_parent", userRequested: true},
+		{name: "owner verification stays visible", verdict: reviewAccepted, autoReview: true, userCheck: true},
+		{name: "needs user stays visible", verdict: reviewNeedsUser, autoReview: true},
+		{name: "ordinary supervised task stays visible", verdict: reviewAccepted},
+		{name: "missing plan fails open", verdict: reviewAccepted, autoReview: true, missingPlan: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			s, _, todo := newSupervisedService(t)
+			planID := "plan_" + todo.ID
+			s.todos.mu.Lock()
+			cur := s.todos.todos[todo.ID]
+			cur.PlanID = planID
+			if tc.autoReview {
+				state := tc.autoState
+				if state == "" {
+					state = autoClean
+				}
+				cur.Supervision.AutoReview = &AutoReview{ID: "rv_test", State: state, Round: tc.autoRound}
+			}
+			cur.Supervision.Round = tc.round
+			s.todos.mu.Unlock()
+			if tc.missingPlan {
+				s.tasks.mu.Lock()
+				for _, plan := range s.tasks.plans {
+					for i := range plan.Tasks {
+						if plan.Tasks[i].TodoID == todo.ID {
+							plan.Tasks[i].TodoID = ""
+						}
+					}
+				}
+				s.tasks.mu.Unlock()
+			}
+			if !tc.missingPlan {
+				now := time.Now().UTC()
+				if err := s.savePlan(ctx, &TaskPlan{ID: planID, Conversation: "conv1", State: planStarted, CreatedAt: now, UpdatedAt: now, Tasks: []PlanTask{{
+					TodoID: todo.ID, Title: todo.Title, UserRequested: tc.userRequested, Parent: tc.parent,
+				}}}); err != nil {
+					t.Fatal(err)
+				}
+				if tc.continued {
+					s.tasks.mu.Lock()
+					for id, plan := range s.tasks.plans {
+						if id == planID {
+							continue
+						}
+						for i := range plan.Tasks {
+							if plan.Tasks[i].TodoID == todo.ID {
+								plan.Tasks[i].TodoID = ""
+							}
+						}
+					}
+					s.tasks.mu.Unlock()
+					s.todos.mu.Lock()
+					s.todos.todos[todo.ID].PlanID = "plan_historical_" + todo.ID
+					s.todos.mu.Unlock()
+					if err := s.savePlan(ctx, &TaskPlan{ID: "plan_historical_" + todo.ID, Conversation: "conv1", State: planStarted, CreatedAt: now, UpdatedAt: now, Tasks: []PlanTask{{
+						Title: todo.Title, UserRequested: true,
+					}}}); err != nil {
+						t.Fatal(err)
+					}
+				}
+			}
+			s.holdPushes(ctx, "conv1")
+			args := map[string]any{"verdict": tc.verdict, "user_check": tc.userCheck}
+			if tc.verdict == reviewNeedsUser {
+				args["reason"] = "Choose whether the internal result should be published"
+				args["recommend"] = "Publish it"
+			}
+			res := reviewTask(t, s, todo.ID, args)
+			var receipt struct {
+				Background bool `json:"background"`
+			}
+			_ = json.Unmarshal([]byte(res), &receipt)
+			if receipt.Background != tc.wantBackground {
+				t.Fatalf("task_review background=%v, want %v: %s", receipt.Background, tc.wantBackground, res)
+			}
+			_, err := s.toolSupervisionFinish(ctx, "conv1", json.RawMessage(`{"visibility":"silent","summary":"Handled internally."}`))
+			if tc.wantBackground && err != nil {
+				t.Fatalf("internal accepted review still promoted the round: %v", err)
+			}
+			if !tc.wantBackground && err == nil {
+				t.Fatal("a user-visible review could be hidden by a silent finish")
+			}
+		})
+	}
+}

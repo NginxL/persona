@@ -208,7 +208,7 @@ data class CoreText(val key: Key, val args: List<Any> = emptyList()) {
         EngineRex("Terminals in Rex"),
         EnginePaseo("Agents in Paseo"),
         EngineCindy("Agents in Cindy"),
-        EngineT3Code("Agents in T3 Code"),
+        EngineT3code("Agents in T3 Code"),
         EngineNone("No terminal engine"),
         EngineNoneDetail("Sessions of the desktop apps only"),
         EngineOffline("Offline, no detection info yet"),

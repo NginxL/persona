@@ -40,9 +40,8 @@ final class DefaultLayoutTests: XCTestCase {
 
     @MainActor func testAppearanceHasOnlySupportedChoices() {
         let app = launch(tab: "settings")
-        let appearance = element("settings-appearance", in: app)
-        XCTAssertTrue(element("settings-list", in: app).waitForExistence(timeout: 30))
-        for _ in 0..<8 where !appearance.isHittable { app.swipeUp() }
+        XCTAssertTrue(app.openSettingsAdvancedPage(), "no Settings › Advanced:\n\(app.debugDescription)")
+        let appearance = app.settingsAdvancedRow("settings-appearance")
         XCTAssertTrue(appearance.exists)
         appearance.tap()
         let style = element("settings-style", in: app)

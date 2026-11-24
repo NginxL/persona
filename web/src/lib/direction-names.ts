@@ -13,14 +13,14 @@
 // /api/v1/assistant/leaders and there are no counts.
 import { useEffect, useSyncExternalStore } from "react";
 import { api } from "./api";
-import { DIRECTION_TREE_PATH, directionTreeNow, readDirectionTreeOnce, refreshDirectionTree, resetDirectionTree, subscribeDirectionTree, type DirectionTree } from "./direction-tree";
+import { DIRECTION_TREE_PATH, directionTreeNow, normalizeExternalDirection, readDirectionTreeOnce, refreshDirectionTree, resetDirectionTree, subscribeDirectionTree, type DirectionTree, type ExternalDirection } from "./direction-tree";
 
 export const LEADERS_PATH = "/assistant/leaders";
 export const TREE_PATH = DIRECTION_TREE_PATH;
 
 /** The tree's directions as leaders: the secretary group left out. */
 export function treeLeaders(tree: DirectionTree | undefined): LeaderInfo[] {
-  return (tree?.directions ?? []).filter((d) => d.id && !d.secretary).map((d) => ({ id: d.id, name: d.name, counts: { running: d.running, needs_you: d.counts.needs_you } }));
+  return (tree?.directions ?? []).filter((d) => d.id && !d.secretary).map((d) => ({ id: d.id, name: d.name, ...normalizeExternalDirection(d), counts: { running: d.running, needs_you: d.counts.needs_you } }));
 }
 
 export interface LeaderInfo {
@@ -29,6 +29,10 @@ export interface LeaderInfo {
   name?: string;
   project?: string;
   ended?: boolean;
+  /** An outside Agent (#8236), with no Persona conversation. The pair is optional and may be incomplete. */
+  external?: boolean;
+  machine_id?: string;
+  session_id?: string;
   counts?: LeaderCounts;
 }
 
@@ -63,6 +67,16 @@ export function leaderCounts(list: readonly LeaderInfo[] | undefined): Map<strin
   return out;
 }
 
+/** The current external directions, by their own opaque direction id (never by the outside session id). */
+export function leaderExternalDirections(list: readonly LeaderInfo[] | undefined): Map<string, ExternalDirection> {
+  const out = new Map<string, ExternalDirection>();
+  for (const l of list ?? []) {
+    const external = normalizeExternalDirection(l);
+    if (l.id && !l.ended && external) out.set(l.id, external);
+  }
+  return out;
+}
+
 /** What a direction's row says at its end: "等你 N" while tasks wait on you, else "". What runs under it is the row's
  *  activity mark alone, never words as well (#6626: one meaning, one expression). */
 export function countsLabel(c: Pick<LeaderCounts, "needs_you"> | undefined, t: (key: string, o: { count: number }) => string): string {
@@ -85,12 +99,14 @@ export function totalCounts(counts: ReadonlyMap<string, LeaderCounts>, ids: read
 const listeners = new Set<() => void>();
 let names: Map<string, string> = new Map();
 let counts: Map<string, LeaderCounts> = new Map();
+let externals: Map<string, ExternalDirection> = new Map();
 let askedFor = "";
 let asked = 0;
 
 function set(list: readonly LeaderInfo[] | undefined) {
   names = directionNames(list);
   counts = leaderCounts(list);
+  externals = leaderExternalDirections(list);
   listeners.forEach((l) => l());
 }
 
@@ -136,6 +152,7 @@ export function resetDirectionNames() {
   asked++;
   names = new Map();
   counts = new Map();
+  externals = new Map();
   toldIds = null;
   resetDirectionTree();
 }
@@ -167,6 +184,12 @@ const countsSnapshot = () => counts;
 export function useLeaderCounts(): ReadonlyMap<string, LeaderCounts> {
   return useSyncExternalStore(subscribe, countsSnapshot, countsSnapshot);
 }
+
+/** The same external metadata the subscribed names and counts carry; their update also redraws the sidebar. */
+export const directionExternal = (id: string): ExternalDirection | undefined => externals.get(id);
+
+/** A permanent external id is already fully described by the tree, not a missing conversation to reread forever. */
+export const isExternalDirection = (id: string): boolean => externals.has(id);
 
 /** Reads the tree (on every hello, `since` the socket opened: a read sent since then serves; with `changed`, on
  *  `directions`, once more after any read out): the leaders' ids in order, or null when it could not be read (an older

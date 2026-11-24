@@ -100,12 +100,15 @@ RUN for p in persona-hub persona-manager; do \
         -ldflags "-s -w -X main.version=$VERSION -X main.channel=docker -X main.image=$IMAGE -X main.updateURL=$UPDATE_URL" -o /out/$p ./cmd/$p || exit 1; \
     done
 
-FROM alpine:3.22
-ARG TARGETARCH
+FROM alpine:3.22 AS sandbox-runtime
 # ssh: machines the hub reaches over ssh (optional with tailcat); su-exec: the entrypoint drops to the persona user.
-RUN apk add --no-cache ca-certificates tzdata openssh-client su-exec \
+# bubblewrap uses unprivileged user namespaces; the Compose seccomp profile permits its setup syscalls.
+RUN apk add --no-cache ca-certificates tzdata openssh-client su-exec bubblewrap \
+ && chmod 0755 /usr/bin/bwrap \
  && adduser -D -h /home/persona -u 1000 persona \
  && mkdir -p /home/persona/.persona && chown persona:persona /home/persona/.persona && chmod 700 /home/persona/.persona
+FROM sandbox-runtime
+ARG TARGETARCH
 COPY --from=build /out/nodes/ /opt/persona/nodes/
 RUN ln -s /opt/persona/nodes/personad-linux-$TARGETARCH /opt/persona/personad && /opt/persona/personad version
 # Next to the binary personad runs as (the link resolves into nodes/), where the hub looks for it.

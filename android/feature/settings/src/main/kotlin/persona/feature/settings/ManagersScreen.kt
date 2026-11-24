@@ -304,13 +304,12 @@ internal fun ManagerDeleteDialog(name: String, installing: Boolean, machines: In
 internal fun NameDialog(
     title: String, confirm: String, initial: String, busy: Boolean, failure: ResText?, onDismiss: () -> Unit, onConfirm: (String) -> Unit,
 ) {
-    var name by remember { mutableStateOf(initial) }
-    val valid = ManagerText.validName(name)
-    JDialog(onDismiss = onDismiss, title = title, confirmEnabled = valid && !busy, confirm = confirm to { onConfirm(name) }) {
-        JTextField(name, { name = it }, Modifier.fillMaxWidth(), placeholder = stringResource(R.string.settings_managers_name_placeholder),
-            singleLine = true, enabled = !busy, isError = failure != null,
-            supportingText = failure?.text() ?: stringResource(R.string.settings_managers_err_name).takeIf { name.isNotEmpty() && !valid })
-    }
+    JManagerNameDialog(
+        title = title, confirm = confirm, initial = initial, busy = busy, failure = failure?.text(),
+        placeholder = stringResource(R.string.settings_managers_name_placeholder),
+        invalidName = stringResource(R.string.settings_managers_err_name),
+        onDismiss = onDismiss, onConfirm = onConfirm,
+    )
 }
 
 /** The code sheet over either page while a code is on screen. */

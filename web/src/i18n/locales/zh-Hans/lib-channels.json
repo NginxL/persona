@@ -24,6 +24,7 @@
   "max_text": "一条最多 {count} 字，长的拆开发",
   "asks_text": "提问和批准回复序号或文字",
   "asks_buttons": "提问和批准点按钮",
+  "reply_only": "仅回复收到的消息",
   "typing": "处理时显示「正在输入」",
   "progress": "处理时显示进度",
   "bind_qr": "扫码绑定",

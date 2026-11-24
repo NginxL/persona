@@ -173,7 +173,7 @@ export function HandoffCard({ handoff }: { handoff: Handoff }) {
       )}
     </>
   ) : failure ? (
-    <span data-handoff-failure className={cx("min-w-0 text-[12px] leading-4 text-red", interactive ? "truncate" : "break-words")}>
+    <span data-handoff-failure className="min-w-0 break-words text-[12px] leading-4 text-red">
       {startFailureCardLine(failure, interactive)}
     </span>
   ) : handoff.ended ? (

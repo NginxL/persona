@@ -63,7 +63,7 @@ the glasses microphone is simply the same input option, with no separate impleme
    so `xcodegen` merges `apple/meta-wearables.yml` into the project: SPM packages `MWDATCore`, `MWDATCamera`, and a post-build script that adds the Info.plist keys required by the SDK
    (`MWDAT`, `UISupportedExternalAccessoryProtocols`, Bluetooth / accessory background modes, Bluetooth and local-network usage descriptions, `NSBonjourServices`) to the built plist.
    Callbacks use the App's already registered `persona://`.
-3. When disabled: neither the package nor these keys is present, `MetaGlasses.isBuiltIn` is false, "Glasses Photo" is absent from the menu, and Xcode 26.0 can still build it.
+3. When disabled: neither the package nor these keys is present, `MetaGlasses.isBuiltIn` is false, so the `glasses` module is off: "Glasses Photo" is absent from the menu, no URL is claimed and nothing runs at launch, and Xcode 26.0 can still build it.
 4. The post-build script merges these keys into the built Info.plist on every build, appending array entries only when absent. The tracked `apple/Persona/Resources/Info.plist` stays unchanged. `Package.resolved` carries the pinned Meta SDK even when the overlay is off, and `release.sh` disables automatic package-resolution rewrites, so enabling the overlay does not dirty the release worktree.
 
 ### Code
@@ -74,6 +74,10 @@ the glasses microphone is simply the same input option, with no separate impleme
 - `apple/Persona/Glasses/GlassesCaptureSheet.swift`: not registered → "Connect Meta Glasses" (switches to Meta AI); no camera permission → "Allow" (also explains the app switch first);
   ready → live preview + "Take Photo" → "Use This Photo" / "Retake". Using a photo adds it to the input bar just like a camera photo; it reaches the Agent only when Send is tapped.
 - The entry point is added only to the chat page's input bar (all three input bars). The assistant main-chat entry point will be added later.
+- `apple/Persona/Glasses/GlassesModule.swift`: glasses are the pilot module (#13432; `docs/apple/ios.md`, "Modules"). The module
+  registers the launch set-up, the callback URL and the composer's Glasses Photo with its sheet; the core reaches them only
+  through `Modules.registry` and never names `MetaGlasses` or `GlassesCaptureSheet`. The module is on when the SDK is built in
+  (`MetaGlasses.isBuiltIn`); DEBUG builds can force it with `-showModules glasses` or `-showModules none`.
 
 ## Out of scope
 

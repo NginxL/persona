@@ -20,9 +20,9 @@ import (
 
 	"github.com/nwverse/persona/server/internal/assistantwire"
 	"github.com/nwverse/persona/server/internal/bus"
-	"github.com/nwverse/persona/server/internal/connector/imessage"
 	"github.com/nwverse/persona/server/internal/devices"
 	"github.com/nwverse/persona/server/internal/extmgr"
+	"github.com/nwverse/persona/server/internal/imessagewire"
 	"github.com/nwverse/persona/server/internal/kb"
 	"github.com/nwverse/persona/server/internal/proto"
 	"github.com/nwverse/persona/server/internal/rpc"
@@ -203,6 +203,7 @@ func newArchiveSwitchRig(t *testing.T, remote, holdReply, oldPeer bool, drop ...
 }
 
 func newArchiveSwitchRigMode(t *testing.T, remote bool, mode string, oldPeer bool, drop ...*archiveDropBegin) *archiveSwitchRig {
+	needsIMessageModule(t)
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
 	node := &archiveSwitchNode{entered: make(chan struct{}), release: make(chan struct{})}
@@ -266,7 +267,7 @@ func newArchiveSwitchRigMode(t *testing.T, remote bool, mode string, oldPeer boo
 	s := New(Options{Hub: bh, Store: func() Store { return store }, KB: &KBOptions{Dir: t.TempDir()}})
 	s.inbox.init()
 	bh.svc = s
-	h := extmgr.New(extmgr.Options{Dir: t.TempDir(), Config: &extmgr.Config{IMessage: &imessage.Config{Machine: "example"}},
+	h := extmgr.New(extmgr.Options{Dir: t.TempDir(), Config: &extmgr.Config{IMessage: &imessagewire.Config{Machine: "example"}},
 		Store: store, Devices: node, Assistant: bh.Answer, AssistantEvent: bh.TellLocal})
 	delayed := &delayedArchiveReply{Extensions: h, mode: mode, returned: make(chan struct{}), release: make(chan struct{})}
 	ext = h

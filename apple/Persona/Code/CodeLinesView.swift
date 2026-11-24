@@ -1,7 +1,5 @@
 import SwiftUI
-#if canImport(UIKit)
 import UIKit
-#endif
 
 /// What `CodeLinesView` shows: lines of monospaced text with a gutter (line numbers, or JSON's fold arrows).
 @MainActor protocol CodeLineSource: AnyObject {
@@ -26,7 +24,6 @@ nonisolated enum CodeMetrics {
     }
 }
 
-#if os(iOS) || os(visionOS)
 /// Lines of code that scroll both ways like an editor, any number of them (docs/apple/ios.md「File viewer」): only the
 /// lines on screen (and a few around) are labels, reused as they scroll, so a file of 100 000 lines opens and scrolls
 /// like one of ten. The gutter stays put while the code scrolls sideways under it. A long press offers the line's
@@ -261,4 +258,3 @@ struct CodeLines: UIViewRepresentable {
         v.source = source
     }
 }
-#endif

@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"sync"
@@ -40,6 +41,8 @@ type fakeHub struct {
 	readHooks          receiptHooks              // around session.items reads and on receipt broadcasts, no lock held
 	itemReads          int                       // session.items reads since the hooks were set
 	onDevicesList      func()                    // runs once, then clears, before the next devices.list; no lock held
+	watcherGets        map[int]string            // index in calls of a session.get a run watcher made -> its goroutine
+	onTell             func()                    // runs after each snapshot or event the service gave the hub was recorded; no lock held
 	// beforeSend runs once, then clears, when session.send is called, before it is answered (what happens on the
 	// agent's computer while the send is out); afterList, by machine, once after that machine's next sessions.list made
 	// with a listHooked context was answered. No lock held. sendHangs: session.send is never answered while the link
@@ -75,6 +78,7 @@ type fakeHub struct {
 	modelExts      []assistantwire.ModelExtension // plugins.models: the extensions granted models (model_rpc.go)
 	needTriage     []string
 	ownModels      bool                         // the test sets hello.Models itself: no fake model
+	infoTagModel   bool                         // the service tags with information categories (Service.noInfoTag off)
 	devices        []Device                     // devices.list answers these when set (else one per machine with sessions)
 	devicesFull    bool                         // devices.list says its list is complete (a machine not in it was removed)
 	devicesOther   []string                     // devices.list's ids kept out of it (pending, leaving, absorbed)
@@ -83,6 +87,8 @@ type fakeHub struct {
 	itemsFail      int                          // session.items fails this many more times (then recovers)
 	itemsFailPlain int                          // one-turn completion reads without lazy_images fail this many times
 	items          []proto.Item                 // session.items answers this
+	sentItems      map[string][]proto.Item      // user transcript items written by successful assistant.send calls, by session_id
+	omitSentItems  bool                         // suppress sentItems writes to simulate RPC success without a transcript item
 	page           func(turns int) []proto.Item // when set, session.items answers with this instead (a real transcript's PageTurns)
 	pageTurns      bool                         // and only the last n turns of it to "turns": n, as the node does (else all of it)
 	itemsPage      int                          // > 0: session.items with after_seq pages them by seq, this many a page
@@ -156,6 +162,13 @@ type fakeHub struct {
 	// were asked; the sessions whose pushes are off, by machine.
 	triage      string
 	triageAsked []modelCall
+	// infoTag answers the information tagging (info_tag.go): {"categories":[]} when empty; infoTagFails fails it.
+	infoTag      string
+	infoTagFails bool
+	infoTagAsked []modelCall
+	// captureSort answers sorting a quick capture (capture_sort.go): it fails when empty.
+	captureSort      string
+	captureSortAsked []modelCall
 	// The Progress row's paraphrase of a report (report_line.go): its answer (none: an error), and what was asked.
 	reportLine      string
 	reportLineAsked []modelCall
@@ -375,6 +388,14 @@ func (f *fakeHub) deviceCall(ctx context.Context, p DeviceCall) (json.RawMessage
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.calls = append(f.calls, p)
+	if p.Method == DeviceSessionGet { // the fake answers on the caller's goroutine: note a run watcher's poll
+		if g, ok := runWatcherGoroutine(); ok {
+			if f.watcherGets == nil {
+				f.watcherGets = map[int]string{}
+			}
+			f.watcherGets[len(f.calls)-1] = g
+		}
+	}
 	if trace, ok := ctx.Value(deviceCallsForTest{}).(*[]DeviceCall); ok {
 		*trace = append(*trace, p)
 	}
@@ -483,6 +504,9 @@ func (f *fakeHub) deviceCall(ctx context.Context, p DeviceCall) (json.RawMessage
 			return json.Marshal(map[string]any{"items": page, "more_after": more})
 		}
 		items := f.items
+		if sid, _ := a["session_id"].(string); sid != "" && len(f.sentItems[sid]) > 0 {
+			items = append(slices.Clone(items), f.sentItems[sid]...)
+		}
 		if n, _ := a["turns"].(float64); f.pageTurns && n > 0 {
 			items = lastTurns(items, int(n))
 		}
@@ -765,6 +789,22 @@ func (f *fakeHub) deviceCall(ctx context.Context, p DeviceCall) (json.RawMessage
 		if f.assistantAnswer != nil {
 			maps.Copy(out, f.assistantAnswer(a))
 		}
+		if !f.omitSentItems && a[holdPushesParam] == true {
+			if text, _ := a["text"].(string); text != "" {
+				target, _ := out["session_id"].(string)
+				if target == "" {
+					target = id
+				}
+				if f.sentItems == nil {
+					f.sentItems = map[string][]proto.Item{}
+				}
+				item := proto.Item{Seq: len(f.sentItems[target]) + 1, Role: "user", Kind: proto.KindText, Text: text, TS: time.Now()}
+				if cid, _ := a["client_msg_id"].(string); cid != "" {
+					item.ClientMsgID = cid
+				}
+				f.sentItems[target] = append(f.sentItems[target], item)
+			}
+		}
 		return json.Marshal(out)
 	}
 	return json.RawMessage(`{}`), nil
@@ -827,7 +867,9 @@ func (f *fakeHub) AppCall(ctx context.Context, p AppCall) (json.RawMessage, erro
 		return json.Marshal(map[string]any{"settings": []Setting{{Key: "inbox.rules", Title: "收件箱分拣规则", About: "the rules",
 			Value: "a string", Actions: []string{"get", "set"}}}})
 	case AppSettings + " " + AppTool:
-		return json.Marshal(proto.TextResult("the hub's: "+string(p.Params), false))
+		if f.apps[p.AppID+" "+p.Method] == nil { // else the test's answer (answerApp), below
+			return json.Marshal(proto.TextResult("the hub's: "+string(p.Params), false))
+		}
 	case AppPlugins + " " + assistantwire.PluginsPresets:
 		return json.Marshal(map[string]any{"presets": f.presets})
 	case AppPlugins + " " + assistantwire.PluginsVoice:
@@ -852,7 +894,7 @@ func (f *fakeHub) NotifyRequest(_ context.Context, p NotifyRequest) (NotifyResul
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	switch p.Notification.Kind {
-	case NotifyPush, assistantwire.NotifyDone, assistantwire.NotifyInput, assistantwire.NotifyReply, assistantwire.NotifyDecide:
+	case NotifyPush, assistantwire.NotifyDone, assistantwire.NotifyInput, assistantwire.NotifyReply, assistantwire.NotifyDecide, assistantwire.NotifyHealthWater:
 	default:
 		return NotifyResult{}, fmt.Errorf("kind %q", p.Notification.Kind)
 	}
@@ -915,8 +957,12 @@ func (f *fakeHub) InboxChanged(ctx context.Context, c assistantwire.InboxChanged
 
 func (f *fakeHub) Snapshot(_ context.Context, s Snapshot) (SnapshotResult, error) {
 	f.mu.Lock()
-	defer f.mu.Unlock()
 	f.snaps = append(f.snaps, s)
+	hook := f.onTell
+	f.mu.Unlock()
+	if hook != nil {
+		hook()
+	}
 	return SnapshotResult{OK: true, Seq: s.Seq}, nil
 }
 
@@ -1010,6 +1056,30 @@ func (f *fakeHub) itemsReadAfter(from int) bool {
 	return false
 }
 
+// watcherReadAfter is the goroutine ("goroutine N") of the first run watcher (watchScheduledRun, through
+// waitTurnEnd's poll) that read sid's session after the first `from` calls, or "" when none did yet. Calls are logged
+// under the lock the sessions are, so that read saw every change made before `from` was taken.
+func (f *fakeHub) watcherReadAfter(from int, sid string) string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for i := min(from, len(f.calls)); i < len(f.calls); i++ {
+		var a map[string]any
+		_ = json.Unmarshal(f.calls[i].Params, &a)
+		if g := f.watcherGets[i]; g != "" && f.calls[i].Method == DeviceSessionGet && a["session_id"] == sid {
+			return g
+		}
+	}
+	return ""
+}
+
+// runWatcherGoroutine is the calling goroutine ("goroutine N") when it runs a scheduled run's watcher.
+func runWatcherGoroutine() (string, bool) {
+	buf := make([]byte, 1<<14)
+	stack := string(buf[:runtime.Stack(buf, false)])
+	header, _, _ := strings.Cut(stack, " [")
+	return header, strings.Contains(stack, ".watchScheduledRun(")
+}
+
 func (f *fakeHub) callCount() int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -1026,9 +1096,10 @@ func (f *fakeHub) eventTypes() string {
 // in memory, as Service does with no store).
 type memStore struct {
 	noPlans
-	mu   sync.Mutex
-	vals map[string][]byte
-	puts int
+	mu      sync.Mutex
+	vals    map[string][]byte
+	outside map[string]db.OutsideDirection
+	puts    int
 	// failSetting: what reading a setting fails with (nil: it reads; set through setFailSetting).
 	failSetting error
 	// failPut: what writing settings fails with (nil: it writes); nothing is written then.
@@ -1062,6 +1133,12 @@ func (m *memStore) failKey(key string, err error) {
 
 // noPlans is a store without the task_plans and assistant_feed tables.
 type noPlans struct{}
+
+func (m *memStore) PutPlacement(ctx context.Context, p db.PlacementRow) error {
+	return m.PutSetting(ctx, "placement."+p.ID, p.Decision)
+}
+
+func (noPlans) PutPlacement(context.Context, db.PlacementRow) error { return nil }
 
 func (noPlans) CreateTaskPlan(context.Context, db.TaskPlanRow) error {
 	return errors.New("no task_plans here")
@@ -1186,6 +1263,53 @@ func (m *memStore) PutSettings(ctx context.Context, values map[string]any) error
 	return nil
 }
 
+func (m *memStore) OutsideDirections(_ context.Context) (map[string]db.OutsideDirection, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.failSetting != nil {
+		return nil, m.failSetting
+	}
+	out := make(map[string]db.OutsideDirection, len(m.outside))
+	for id, ref := range m.outside {
+		out[id] = ref
+	}
+	return out, nil
+}
+
+func (m *memStore) CreateOutsideDirection(ctx context.Context, id string, ref db.OutsideDirection, values map[string]any) error {
+	encoded := make(map[string][]byte, len(values))
+	for key, value := range values {
+		b, err := json.Marshal(value)
+		if err != nil {
+			return err
+		}
+		encoded[key] = b
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if m.failPut != nil {
+		return m.failPut
+	}
+	if _, exists := m.outside[id]; exists {
+		return errors.New("outside direction already exists")
+	}
+	if m.vals == nil {
+		m.vals = map[string][]byte{}
+	}
+	if m.outside == nil {
+		m.outside = map[string]db.OutsideDirection{}
+	}
+	for key, b := range encoded {
+		m.vals[key] = b
+	}
+	m.outside[id] = ref
+	m.puts += len(encoded) + 1
+	return nil
+}
+
 // newTestService is an assistant on f with an in-memory store.
 // testLogf is t.Logf until the test ends, nothing after: the service's goroutines (a run's watcher, a snapshot being
 // published) can still log when the test is over, and t.Logf then panics and fails the whole package.
@@ -1278,9 +1402,16 @@ func withSettings(t testing.TB, f *fakeHub, s *Service) *Service {
 	// These tests are about what a plan does once it exists; what task_plan requires of a brief is task_brief_test.go's,
 	// which turns this off.
 	s.briefsOptional = true
+	// And they start the main conversation's plans from their cards: that a supervisor's plan starts at once is
+	// plan_owner_step_test.go's, which turns this off.
+	s.mainPlansWait = true
 	// And about what a supervisor does with its tasks, told to the main conversation: the background supervisor that
 	// takes them by default is supervise_background_test.go's, which turns this off.
 	s.noBackground = true
+	// And with each report told at once, not held for its Agent's stop (reportStopHold): supervise_slim_test.go's.
+	s.noReportHold = true
+	// And with no information tagging (info_tag.go), as before it: its tests turn it on (f.infoTagModel).
+	s.noInfoTag = !f.infoTagModel
 	if f.settings != nil {
 		setSettings(t, s, func(v *Settings) { *v = *f.settings })
 	}
@@ -1453,8 +1584,12 @@ func (f *fakeHub) Tell(event string, params any) error {
 		return err
 	}
 	f.mu.Lock()
-	defer f.mu.Unlock()
 	f.told = append(f.told, told{event, b})
+	hook := f.onTell
+	f.mu.Unlock()
+	if hook != nil {
+		hook()
+	}
 	return nil
 }
 
@@ -1508,6 +1643,12 @@ func (f *fakeHub) fakeModel(t testing.TB) {
 		case in.System == tabName:
 			f.tabAsked = append(f.tabAsked, in.System+"\n---\n"+user)
 			reply = f.tabReply
+		case strings.HasPrefix(in.System, "You tag a piece of text"): // information tagging (info_tag.go)
+			f.infoTagAsked = append(f.infoTagAsked, modelCall{in.System, user})
+			reply, fail = cmp.Or(f.infoTag, `{"categories":[]}`), f.infoTagFails
+		case strings.HasPrefix(in.System, "You sort a note the owner jotted down"): // quick capture (capture_sort.go)
+			f.captureSortAsked = append(f.captureSortAsked, modelCall{in.System, user})
+			reply, fail = f.captureSort, f.captureSort == ""
 		case strings.Contains(in.System, "起一个待办标题"): // a task's todo (todo_titles.go): none unless the test gives one
 			f.todoTitleAsked = append(f.todoTitleAsked, modelCall{in.System, user})
 			reply, fail = f.todoTitleReply, f.todoTitleErr != nil

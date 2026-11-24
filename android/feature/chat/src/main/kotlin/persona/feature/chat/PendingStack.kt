@@ -59,6 +59,21 @@ internal object PendingStack {
         val mine = if (other == null) room else max(room / 2f, room - if (other > Tokens.Space.flush) other else room / 2f)
         return max(Tokens.MinTouch.android, if (keyboard) mine else min(half, mine))
     }
+
+    /**
+     * Shortest-to-tallest resize range for a lone unfolded pending card when the keyboard is hidden (iOS `FooterRoom.resizeRange`,
+     * #12306). Keeps [floor] of conversation visible above the card and leaves [other]'s measured room when a sibling card
+     * shares the footer; returns null before the footer is measured or when no room remains above the touch floor.
+     */
+    fun resizeRange(page: Dp, rest: Dp, header: Dp, floor: Dp, other: Dp? = null): ClosedRange<Dp>? {
+        if (rest <= Tokens.Space.flush) return null
+        val room = page - header - rest - floor
+        val tallest = if (other == null) room else room - if (other > Tokens.Space.flush) other else room / 2f
+        val top = max(Tokens.MinTouch.android, tallest)
+        if (tallest <= Tokens.MinTouch.android) return null
+        val bottom = min(Tokens.Size.box150, top)
+        return bottom..top
+    }
 }
 
 /**

@@ -20,7 +20,7 @@ func TestInboxNoOutputConversationStopDoesNotSpendItsRetry(t *testing.T) {
 			items[0].Text = prompt
 			f.setItems(items...)
 			f.setSessions("box", turnRow(proto.StatusWorking, 10, ""))
-			s.taskWorking(ctx, "box", "s1")
+			s.taskWorking(ctx, "box", "s1", startRow{})
 			s.noteStopped("box", "s1", s.taskStretch(todo))
 			row := turnRow(proto.StatusDone, 11, "")
 			f.setSessions("box", row)

@@ -140,6 +140,36 @@ chosen by a `runtime` in the main chat's model binding. Each pair keeps working:
 | Session rows | `runtime` and `runtime_fallback` are no longer produced, and the hub drops them from an older node's report. Clients read their absence as the CLI. |
 | The runtime package | The Agent SDK runtime package (`persona-agent-sdk-runtime`, under its older `jarvis-` name too) is no longer carried. An older node that looks for it finds none and runs the CLI, its existing fallback. Copies already unpacked under a node's `runtime-packages/` are unused and not cleaned up. |
 
+### Inbox AI-twin permission mode (#13245)
+
+The AI twin's own saved mode is authorization metadata, not a caller's model choice. The manager sends it as
+`inbox_permission_mode` on `assistant.send`, `session.send` and `assistant.model`, separately from the ordinary
+`permission_mode`. The dedicated field needs no version negotiation and does not raise the protocol floor:
+
+| Pair | What happens |
+| --- | --- |
+| New manager, new node | The node applies the AI twin's own supported mode to new chats and stopped-process resumes. Plan, unknown values and an unsupported resolved mode stay in `default`; a live process keeps its current mode. |
+| New manager, older node | The older node ignores the dedicated field and retains its previous `default` clamp. The setting takes effect after the node is updated. |
+| Older manager, new node | The dedicated field is absent, so the node stays in `default` even if the older manager supplied an ordinary caller `permission_mode`. That caller value never elevates Inbox. |
+| Rollback after an explicit bypass | A live process keeps the mode it started with. If an older manager or node drives its next stopped-process resume without the dedicated field, that resume returns to `default`. |
+
+Origin attestation, the Inbox MCP/tool gate and Lark outbound policy are unchanged in every combination.
+
+### Ordinary assistant permission defaults on resume (#13653)
+
+The manager sends its current default as `default_permission_mode` and marks a deliberate generic choice with
+`permission_mode_explicit` on `assistant.send`, `session.send` and `assistant.model`. The node persists that explicit
+provenance as `app_mode_explicit` in the existing `node_model` JSON. Neither field changes the model fingerprint, the
+public client API or the Inbox/guest policy.
+
+| Pair or state | What happens |
+| --- | --- |
+| New manager, new node | A new or stopped Claude Code process uses the explicit conversation mode first, then the current manager default, then legacy state/transcript evidence. A live process keeps its current mode. |
+| New manager, older node | The older node ignores both fields and retains its legacy resume behavior until updated. Initial starts still receive the ordinary `permission_mode`. |
+| Older manager, new node | Both fields are absent, so the node retains the legacy `AppMode` / in-memory / transcript precedence and built-in `bypassPermissions` fallback. |
+| Non-Claude launcher | The manager omits the resume default and the node keeps legacy `AppMode` / in-memory / transcript precedence, even when the declared mode list contains that default. An explicit generic `permission_mode` follows its existing path. |
+| Legacy Claude state without `app_mode_explicit` | Its `AppMode` is treated as inherited when a current manager supplies a default. An explicit choice made after the upgrade persists with the marker and wins thereafter. |
+
 ### Node connection lanes (#10660)
 
 A manager and a node built since #10660 frame their connection on four lanes (protocol.md "Lanes"); any older end
@@ -225,6 +255,22 @@ The records are the node's own (the hub keeps its copy, as for any start), of th
 writes for a start with a creation identity, plus `engine_runtime` in the model settings the hub keeps with each one
 (no table changes), so rolling the node back leaves them to be read as those, the mark ignored. Nothing else is
 stored: rolling either side back or forward changes only what the next resume does.
+
+### Outside reporting directions (#8236)
+
+The manager migration `20261120081453_outside_directions.sql` adds only `assistant_outside_directions`; existing
+settings, directions, conversations and to-do ownership are not rewritten. A new manager on an older database therefore
+starts with no outside bindings until one is created. The table is separate because an older settings writer does not
+know the outside marker and would otherwise discard it.
+
+An older manager or hub has neither new write route nor `leaders.write`; those calls keep its previous 404 / 403
+behavior. A new CLI talking to an older node receives its legacy `unknown kind` answer and exits unavailable without
+retrying. `leaders.read` keeps its existing routes and events. On rollback, an older manager does not read the outside
+binding table or emit `external` / Agent-target metadata, and its legacy direction code may treat the stored opaque id
+as a conversation id; outside directions are therefore not a supported rollback interface. Existing
+conversation-backed directions keep their old behavior. Rolling forward again rejoins bindings that remain in the
+table to the surviving direction records; an owner or older manager removing a direction from `assistant.leaders`
+still ends its current membership as before.
 
 ### Launcher default models (#4663)
 

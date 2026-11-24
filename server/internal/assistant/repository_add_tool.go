@@ -83,8 +83,9 @@ func providerRepositoryCard(binding RepositoryBinding) json.RawMessage {
 		Aliases      []string `json:"aliases"`
 		Purpose      string   `json:"purpose"`
 		CloneURL     string   `json:"clone_url"`
+		TaskWorkflow string   `json:"task_workflow,omitempty"`
 	}{binding.CanonicalURL, binding.Provider, binding.ProviderName, binding.Name, binding.Aliases, binding.Purpose,
-		cmp.Or(binding.CloneURL, binding.CanonicalURL)})
+		cmp.Or(binding.CloneURL, binding.CanonicalURL), binding.TaskWorkflow})
 	return shown
 }
 

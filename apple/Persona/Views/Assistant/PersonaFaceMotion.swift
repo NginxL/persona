@@ -1,4 +1,3 @@
-#if os(iOS) || os(visionOS)
 import QuartzCore
 import SwiftUI
 import UIKit
@@ -608,4 +607,3 @@ enum PersonaMotionAnimations {
         return animation
     }
 }
-#endif

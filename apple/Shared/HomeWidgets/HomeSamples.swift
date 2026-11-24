@@ -89,6 +89,20 @@ enum HomeSamples {
         ]
         s.health = .init(steps: 6842, stepsAverage: 7900, sleepHours: 7.2, restingHeartRate: 58, activeEnergy: 412,
                          week: [9120, 7340, 10480, 6210, 8890, 7210, 6842])
+        s.health?.sleepAverage = 7.5
+        #if os(iOS)
+        let calendar = HomeIntakeClock.calendar("UTC")
+        s.intake = .init(supported: true, day: HomeIntakeClock.key(now, zone: "UTC"), zone: "UTC",
+                         nextDay: HomeIntakeClock.nextDay(after: now, zone: "UTC").timeIntervalSince1970,
+                         water: .init(today: 1250, goal: 2000), protein: .init(today: 42, goal: 60),
+                         days: (0..<7).map { i in
+                             .init(date: HomeDays.key(calendar.date(byAdding: .day, value: i - 6, to: now) ?? now, calendar: calendar),
+                                   water: [1800.0, 2100, 1600, 2000, 2250, 1750, 1250][i],
+                                   protein: [58.0, 62, 45, 60, 72, 55, 42][i])
+                         })
+        s.activity = .init(date: now.timeIntervalSince1970, move: 320, moveGoal: 500,
+                           exercise: 25, exerciseGoal: 30, stand: 8, standGoal: 12)
+        #endif
         s.inbox = .init(needsYou: 3, unread: 9, latest: [
             .init(id: "m1", sender: "Alex", summary: t("Can you confirm the venue for Friday?", "周五的场地你能确认一下吗？"), at: at(12, 42), needsYou: true),
             .init(id: "m2", sender: t("Team chat", "项目群"), summary: t("The release went out; two follow-ups for you", "版本发出去了，有两件事要你跟进"), at: at(11, 10), needsYou: true),

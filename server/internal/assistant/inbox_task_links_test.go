@@ -280,7 +280,7 @@ func TestInboxTaskURLRoutingKeepsTheTwinsAgeLimit(t *testing.T) {
 	}
 }
 
-func TestInboxTaskURLRoutingDoesNotReplayStoredLinks(t *testing.T) {
+func TestInboxTaskURLRoutingRestoresOnlyPendingLinks(t *testing.T) {
 	ctx := context.Background()
 	h := agentHub(t)
 	turnInboxSignalsOn(t, h.Service)
@@ -319,8 +319,10 @@ func TestInboxTaskURLRoutingDoesNotReplayStoredLinks(t *testing.T) {
 		t.Fatal("reload lost the supervised task or its forwarding setting")
 	}
 	again.handPass(ctx)
-	if g, ok := pendingInbox(again, todo.ID); ok {
-		t.Fatalf("restart replayed stored content: %+v", g.Inbox)
+	// The already raised, undelivered signal survives (#5732), but the stored inbox row is not replayed as new content:
+	// there is still this one signal, for the same message and with the same count.
+	if g, ok := pendingInbox(again, todo.ID); !ok || g.Inbox.Count != 1 || g.Key != it.ID+"@1" {
+		t.Fatalf("restart lost the pending link or replayed stored content: %+v, %v", g.Inbox, ok)
 	}
 	loaded := again.inbox.items[it.ID]
 	again.inbox.mu.Lock()
@@ -329,11 +331,11 @@ func TestInboxTaskURLRoutingDoesNotReplayStoredLinks(t *testing.T) {
 	again.inbox.noteReceived(loaded, prev, nil)
 	again.inbox.mu.Unlock()
 	again.handPass(ctx)
-	if g, ok := pendingInbox(again, todo.ID); !ok || g.Inbox.Count != 2 || g.Key != it.ID+"@2" {
-		t.Fatalf("new messages after restart were not counted once: %+v, %v", g.Inbox, ok)
+	if g, ok := pendingInbox(again, todo.ID); !ok || g.Inbox.Count != 3 || g.Key != it.ID+"@2" {
+		t.Fatalf("new messages after restart were not combined with the pending one exactly once: %+v, %v", g.Inbox, ok)
 	}
 	again.handPass(ctx)
-	if g, ok := pendingInbox(again, todo.ID); !ok || g.Inbox.Count != 2 {
+	if g, ok := pendingInbox(again, todo.ID); !ok || g.Inbox.Count != 3 {
 		t.Fatalf("repeated pass duplicated new content: %+v, %v", g.Inbox, ok)
 	}
 	checkNoTwinWork(t, h)

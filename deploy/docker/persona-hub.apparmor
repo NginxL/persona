@@ -1,0 +1,82 @@
+# SPDX-FileCopyrightText: Copyright The Moby Authors
+# SPDX-License-Identifier: Apache-2.0
+# Derived from moby/profiles apparmor/template.go at
+# 9ee3204f0d0cfa19ca2c6a7b0fcf5a2b353954ae. Changes: named profile,
+# unprivileged user namespaces, and only bubblewrap's mount operations/pivot_root.
+# Requires AppArmor 4.x userspace for the userns rule. Never loaded by the container.
+abi <abi/4.0>,
+#include <tunables/global>
+
+profile persona-hub flags=(attach_disconnected,mediate_deleted) {
+  #include <abstractions/base>
+  userns,
+  network,
+  network unix,
+  # Disallow obsolete socket families removed from the Linux kernel.
+  # AF_DECnet has no AppArmor family name, so it cannot be denied here.
+  deny network ax25,
+  deny network ipx,
+  deny network appletalk,
+  deny network netrom,
+  deny network rose,
+  deny network econet,
+  deny network atmsvc,
+  deny network irda,
+  deny network wanpipe,
+  deny network isdn,
+  deny network caif,
+  # Disallow AF_ALG (Linux kernel crypto API); see https://copy.fail/
+  deny network alg,
+  # Disallow AF_VSOCK to prevent host/guest communication.
+  deny network vsock,
+  capability,
+  file,
+  umount,
+  # Host (privileged) processes may send signals to container processes.
+  signal (receive) peer=unconfined,
+  # runc may send signals to container processes (for "docker stop").
+  signal (receive) peer=runc,
+  # crun may send signals to container processes (for "docker stop" when used with crun OCI runtime).
+  signal (receive) peer=crun,
+  # dockerd may send signals to container processes (for "docker kill").
+  signal (receive) peer=unconfined,
+  # Container processes may send signals amongst themselves.
+  signal (send,receive) peer=persona-hub,
+
+  deny @{PROC}/* w,   # deny write for all files directly in /proc (not in a subdir)
+  # deny write to files not in /proc/<number>/** or /proc/sys/**
+  deny @{PROC}/{[^1-9/],[^1-9/][^0-9/],[^1-9s/][^0-9y/][^0-9s/],[^1-9/][^0-9/][^0-9/][^0-9/]*}/** w,
+  deny @{PROC}/sys/[^k]** w,  # deny /proc/sys except /proc/sys/k* (effectively /proc/sys/kernel)
+  deny @{PROC}/sys/kernel/{?,??,[^s][^h][^m]**} w,  # deny everything except shm* in /proc/sys/kernel/
+  deny @{PROC}/sysrq-trigger rwklx,
+  deny @{PROC}/kcore rwklx,
+
+  # Only bubblewrap's anonymous filesystems, bind mounts, propagation changes,
+  # remounts of existing mounts and root switch. Other mounts remain denied.
+  mount fstype=tmpfs options=(rw,nosuid,nodev) -> /**,
+  mount fstype=proc options=(rw,nosuid,nodev,noexec) -> /**,
+  mount fstype=devpts options=(rw,nosuid,noexec) -> /**,
+  mount options=(rw,bind) -> /**,
+  mount options=(rw,bind,silent) -> /**,
+  mount options=(rw,rbind) -> /**,
+  mount options=(rw,rbind,silent) -> /**,
+  mount options=(rw,rslave) -> /,
+  mount options=(rw,rslave,silent) -> /,
+  mount options=(rw,rprivate) -> /**,
+  mount options=(rw,rprivate,silent) -> /**,
+  remount options in (ro,rw,bind,remount,nosuid,nodev,noexec,sync,async,dirsync,mand,noatime,nodiratime,relatime,strictatime,silent) /**,
+  pivot_root,
+
+  deny /sys/[^f]*/** wklx,
+  deny /sys/f[^s]*/** wklx,
+  deny /sys/fs/[^c]*/** wklx,
+  deny /sys/fs/c[^g]*/** wklx,
+  deny /sys/fs/cg[^r]*/** wklx,
+  deny /sys/firmware/** rwklx,
+  deny /sys/devices/virtual/powercap/** rwklx,
+  deny /sys/kernel/security/** rwklx,
+
+  # allow processes within the container to trace each other,
+  # provided all other LSM and yama setting allow it.
+  ptrace (trace,tracedby,read,readby) peer=persona-hub,
+}

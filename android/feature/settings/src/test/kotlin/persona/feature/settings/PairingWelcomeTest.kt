@@ -10,6 +10,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.text.TextLayoutResult
+import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasText
@@ -82,8 +83,17 @@ class PairingWelcomeTest {
         rule.onNodeWithText("personad hub pair").assertDoesNotExist()
     }
 
+    @Config(qualifiers = "en-w360dp-h480dp-mdpi")
+    @Test fun scanAndAlternativeMethodsAreVisibleOnAShortPhone() {
+        show { PairingScreen(FakePairing(), sessions, onReady = {}, onDiagnostics = {}, gettingStartedUrl = guide) }
+        button(R.string.settings_pairing_scan).assertIsDisplayed()
+        button(R.string.settings_pairing_other_ways).assertIsDisplayed()
+    }
+
     @Test fun withoutABuildAddressThereIsNoGuideLink() {
         show { PairingScreen(FakePairing(), sessions, onReady = {}, onDiagnostics = {}, gettingStartedUrl = null) }
+        tap(R.string.settings_pairing_help)
+        rule.onNodeWithText(text(R.string.settings_pairing_connect_body)).assertExists()
         rule.onNodeWithText(text(R.string.settings_pairing_welcome_guide)).assertDoesNotExist()
     }
 
@@ -91,6 +101,7 @@ class PairingWelcomeTest {
     @Test fun theGuideOpensInTheAppsLinkCardAndNeverInTheSystemBrowser() {
         show { PairingScreen(FakePairing(), sessions, onReady = {}, onDiagnostics = {}, gettingStartedUrl = guide) }
         rule.onNodeWithTag("chat_link_card").assertDoesNotExist()
+        tap(R.string.settings_pairing_help)
         tap(R.string.settings_pairing_welcome_guide)
         rule.waitUntil(5_000) { rule.onAllNodesWithTag("chat_link_card").fetchSemanticsNodes().isNotEmpty() }
         assertNull(shadowOf(rule.activity).nextStartedActivity)
@@ -200,10 +211,10 @@ class PairingWelcomeTest {
     /** The three buttons of the first screen stay on one line at twice the font size, in each language. */
     private fun welcomeButtonsStayOnOneLine() {
         show(fontScale = 2f) { PairingScreen(FakePairing(), sessions, onReady = {}, onDiagnostics = {}, gettingStartedUrl = guide) }
-        for (id in listOf(R.string.settings_pairing_scan, R.string.settings_pairing_welcome_guide, R.string.settings_pairing_other_ways)) {
+        for (id in listOf(R.string.settings_pairing_scan, R.string.settings_pairing_help, R.string.settings_pairing_other_ways)) {
             val results = mutableListOf<TextLayoutResult>()
             val node = rule.onNodeWithText(text(id), useUnmergedTree = true).fetchSemanticsNode()
-            node.config[SemanticsActions.GetTextLayoutResult].action?.invoke(results)
+            val _ = node.config[SemanticsActions.GetTextLayoutResult].action?.invoke(results)
             assertEquals(text(id), 1, results.single().lineCount)
         }
     }

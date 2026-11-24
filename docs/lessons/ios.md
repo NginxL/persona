@@ -31,6 +31,25 @@ of the app on its main thread: 55–70 ms each with the `assistant` perf suite's
 app switching on a cue (`FrameProbe.switchPages`, `testTabSwitchAssistantAgentsByCue`) and the test only sleeping; keep
 the tapping test for the tap's own path.
 
+## An inactive scene opens no hub socket, so no hello arrives (2026-11-24, #13849)
+
+A simulator app driven by `personactl` with a system prompt up (Photos, notifications) or no visible Simulator window
+stays `inactive` (`personactl state` shows `appState`). It reads the hub over HTTP, so pages fill in and the runtime CLI
+says `online`, but it never opens its WebSocket, so no hello arrives and nothing gated on hello features changes:
+the mock's log has no `GET /api/v1/ws` from the app. Answer the prompts (or grant them with `simctl privacy` before the
+launch) and check `appState` is `active` before taking a screenshot of hello-gated UI, such as a module the hub turns
+off (`MOCK_HUB_MODULES`).
+
+## CI's temporary distribution keychain must be in Xcode's search domain (#14263)
+
+`security find-identity <temporary-keychain>` proves only that the protected identity imported into that file. It does
+not make it visible to `xcodebuild -exportArchive`, which searches the default keychain domain. A candidate reached
+`** ARCHIVE SUCCEEDED **` and then failed export with `No signing certificate "iOS Distribution" found` even though the
+export options correctly selected `Apple Distribution`. Add the temporary keychain with `security list-keychains -s`
+while retaining every existing path; pass each printed path as one argument, not a whitespace-split list, so paths with
+spaces cannot select another identity. Never fall back to an ad-hoc, Debug or alternate certificate. Verify the formal
+archive **and** export, then entitlements, and keep TestFlight processing as a separate result.
+
 ## What a development build redid with nothing changed (2026-11-19, #10713)
 
 `scripts/app/sim.sh` rebuilt more than the change it was run for (`docs/operations/testing.md`, "Development builds"):
@@ -521,6 +540,14 @@ pushing on that stack. Mac also needs an attached presenter for `detailTask`, no
 full task cards with compact dispatch links, stop filtering hand-offs as though the removed card still drew its
 instruction list, or Persona's messages silently disappear. Keep those messages as folded feed lines.
 
+## A fallback response can arrive after the authoritative one (#8236)
+
+Two endpoints that describe the same object need an arrival-order rule, not last-response-wins for the merged object. The
+flat `/assistant/leaders` answer supplies outside-direction names and targets but no counts; a slower flat answer landing
+after `/assistant/directions/tree` replaced the tree entry and intermittently removed the row's counts and running mark.
+Merge newly announced fallback rows with the held tree rows, and let the tree win per direction. Test the inverted order
+with a gated FakeHub response: a fixed sleep makes this race look random and misses the actual state transition.
+
 ## Example-domain labels must be generic too (#3593)
 
 An `example.com` suffix does not make its hostname label anonymous: the label can still match a configured private machine value and block both app and web prebuild privacy scans. Use neutral fixture labels and change the expected route together, preserving trimming, encoding and forwarding assertions. Do not exempt a private value just because it appears in test data.
@@ -552,6 +579,16 @@ wrapper before doing any work. An `upload_started` checkpoint with no remote bui
 or is not visible yet: retry that same commit and build number. An already visible build is only processed and checked,
 never uploaded a second time. A locked login screen can leave extension `codesign` waiting indefinitely for keychain
 authorization; that is not archive success or a TestFlight upload.
+
+## App Review wants HealthKit named Apple Health where it is used (2026-11-22, #13118)
+
+Guideline 2.5.1 rejected 1.0.0: "The app uses the HealthKit or CareKit APIs but does not clearly identify the HealthKit
+and CareKit functionality in the app's user interface." The app called the source only "Health" in Settings › Connectors
+› This iPhone and said "Apple Health" in Health's Data Sources, below the chats and memory; the reviewer, on an iPad in
+Demo Mode, found neither. Name it **Apple Health** with the Health app's icon (`Theme.Brand.iosHealth`) wherever the
+data is read or saved, near the top of the page that uses it, and tell App Review in the review notes where to look (the
+Health page's Works with Apple Health row, then the switch it opens). The rejection itself is readable only in App Store
+Connect's Resolution Center (the web, or `asc web review show` with a web session), not through the API key.
 
 ## Device names in Siri intent descriptions (#3113)
 
@@ -2174,6 +2211,12 @@ Screenshots miss user-reported instability and probes can report false jumps; fr
 - Sidebar `NavigationLink(value:)` does not populate bound `path` on iOS 26: when `NavigationSplitView` pushes into detail, `NavigationColumnState.ejectAll` clears `path`,
   leaving the opened page absent. `RootView` width-switching between shell and tabs cannot restore from `path`;
   reopen from separately recorded `dev.openChat`. Shared model paths also fail because the incoming split tree clears them too.
+- The page such a link opens cannot push either (#12035): on the iPad's Settings sheet Appearance & Display opened, `settingsPath` stayed empty, and none of its
+  rows opened anything (the iPhone's one stack was fine). A list in a split opens its pages through `path` (`splitOpen`) with buttons, as the Agents list does
+  (`SettingsListLink`). Two ways of keeping the system's highlight on the open row failed: plain rows with a `tag` in a `List(selection:)` were not
+  selectable in the sheet's list column (VoiceOver read them as text); links of `AnyHashable(page)` in a `List(selection: AnyHashable?)` selected natively,
+  but then the split cleared every path a link or a launch switch set, so those pages opened and went at once (`testLegacySettingsPathsStillOpen` on an
+  iPad). Pushed onto the path, a first page inherits the root's title mode: Settings' root asks for large titles.
 
 ## PiP sources must survive their window, be normally sized, and start on user taps (2026-11-05, #1839)
 
@@ -2801,7 +2844,7 @@ The watch only prunes by age. Segments the phone has not confirmed stay up to `u
   `setDeactivatedKeyboard … reason: setDisableBecomeFirstResponder`). The page got taller, the rail's `ViewThatFits` picked a roomier
   child, and since each child is its own subtree, the `Menu`'s button was replaced while the menu morphed out of it.
 - Anything that picks views by the space the keyboard leaves (`ViewThatFits` by height, `if` on a measured height, a size class) must not
-  hold a `Menu`, or must keep it the same view. The VNC rails (`fittingRail` in `apple/Persona/Screen/VNCPage.swift`) measure hidden copies
+  hold a `Menu`, or must keep it the same view. The VNC rails (`fittingRail` in `apple/Modules/ScreenShare/VNCPage.swift`) measure hidden copies
   of their ways in a `ViewThatFits`. The copy shown says which one it is (`onAppear`), and the visible rail is one set of views that only
   changes its spacing, which buttons it shows and whether it scrolls (a `ScrollView` always there, `scrollDisabled` when it fits).
 - The crash needs the menu's morph (iOS 26 and later) and a layout that changes when the keyboard goes. Upright, the VNC top row's
@@ -3231,3 +3274,58 @@ The lens then jumped on by 33–50 ms of its 0.65 s glide in one frame, by up to
   Cancel the loser by its owner, so a late completion cannot install a route or close the next recovery's tunnel.
 - Test a server that accepts TCP but never sends its SSH greeting, and use controlled route continuations. Killing
   an established test sshd session alone does not exercise pending-dial cancellation or foreground request ordering.
+
+## The To-dos foot toolbar and its list (2026-11-22, #10465)
+
+- **A list row's traits belong on its outermost view.** The To-dos rows set `listRowInsets` inside their cell view,
+  under `.swipeActions` and `.contextMenu`, with `.onAppear`, `.onGeometryChange` and `.id` added outside it by the list.
+  The list never read them: every row kept the system's margins on every side, 20 to 30 pt taller than drawn on paper
+  and, on iOS 18 and 27, 20 pt inside the card instead of 16 (iOS 26.3's own 16 hid it sideways). Set last, after the
+  `.id`, the rows came out at the spec's height (a two-line row 101 → 71 pt). The fold line, a `Button` with the
+  modifier on it directly, had honored it all along, which is how the difference showed: measure a row against a
+  line whose insets are known. `TodosV1ListTests.testTheRowsAreCompact` checks the cell's height against its words.
+- **A bottom-bar item whose label changes kind can draw empty.** One `ToolbarItem(placement: .bottomBar)` whose label
+  switched from a `Label` (the Filter at rest) to an `HStack` of the glyph and a `Text` (a choice on) was drawn empty on
+  iOS 26.3. Two items, one per form, chosen on the view, draw both.
+- **A list row does not say it went under a bar.** `onScrollVisibilityChange` never reported the guard line as gone
+  while the navigation bar covered it. Compare the row's `frame(in: .scrollView)` with the list's top inset from
+  `onScrollGeometryChange` instead; a reused cell reports nothing more once off screen, so the last value stands.
+- **Menus on iOS 26 and later carry no accessibility identifiers on their items.** A UI test finds an item of a menu
+  with a fixed order (`.menuOrder(.fixed)`) by its place in the menu's collection view, its identifier first where the
+  OS keeps it.
+- **iOS 18 sets a row's insets only all four at once** (`listRowInsets(.horizontal, …)` is iOS 26):
+  `SystemCompat.listRowHorizontalInsets` leaves iOS 18's headers at the system's.
+- **Back from a page without the foot toolbar, a list at its very end sat lower** (iOS 27.2, 52 pt in the UI test):
+  while the pushed page is in front the list's foot inset loses the toolbar, the list is held to that shorter end, and
+  the toolbar's inset comes back without moving it up again. `TodoListView.backToTheEnd` scrolls a list that rested at
+  its end to its last row's top for a second after the pop, which the list cannot reach, so it stops at its end;
+  `testTheListStaysWhereItRested` swipes to the end and fails without it. Where the list rested is read when a scroll
+  phase ends; a move the page makes itself (`scrollTo`, a search narrowing the list) ends none, so it clears the value
+  (`TodoListSight.moved`), or Back would pull a list the page had moved to its end.
+- **A section header's id scrolls its rows to the top, not the header.** `ScrollViewProxy.scrollTo(<header id>,
+  anchor: .top)` in an inset grouped `List` left the header under the navigation bar. To put a list at its top, scroll
+  its first row to the foot of what is in sight (`anchor: .bottom`): the list cannot go that far up and stops at its top.
+- **Under an inline title, iOS 18's search drawer starts hidden** until a pull (the placement `pageSearchable` picks),
+  so a calm list showed no way to search. `.navigationBarDrawer(displayMode: .always)` keeps it shown.
+
+## Deleting a never-compiled branch moves the source-reading tests (2026-11-23, #13399)
+
+- The tests and scripts that read Swift source as text count lines inside every `#if` branch, compiled or not:
+  `TokenRatchetTests` (literal design values), `ContinuousMotionTests` (its loop registry) and the perf and isolation
+  baselines. So deleting dead `os(macOS)` branches lowered a file's `rawSymbol` count and left a registry entry whose
+  only loop was the Mac's: both tests fail until the baseline or registry is lowered in the same PR. `SheetCloseTests`
+  is the one that already skipped Mac-only branches (`iPhoneSource`).
+- A mechanical deletion can still leave a compiler warning behind: a `var` that only the removed branch mutated
+  (`ExtensionPageView.updateVisibility`). Read the build's warnings for the changed files, not only its errors.
+- `scripts/test/test_apple_no_macos_branches.py` keeps new `os(macOS)` and `canImport(AppKit)` branches and
+  `import AppKit` out of the app targets, `Shared/` and the tests. Packages whose `Package.swift` declares a macOS
+  platform are left out: the Persona Link helper builds `PersonaScreenCore` for macOS, so a branch there is live.
+- A condition is decided by the platforms its folder builds for, not by the platforms Apple has: `apple/Persona/` builds
+  for iOS and visionOS only (the Vision app compiles it too), `Shared/` for those and watchOS, the tests for iOS. So
+  `#if os(iOS) || os(visionOS)` in `apple/Persona/` is always true and its `#else` never compiles, and
+  `canImport(UIKit)` is true everywhere; write no such branch. Check a folder's platforms in `apple/project.yml`
+  (every target's `sources`) before assuming: `LiveActivity/`, `PersonaShare/` and `PersonaNotify/` build for visionOS
+  too.
+- Members a deletion leaves constant (a `Bool { false }`, a modifier that returns `self`, a parameter only ever passed
+  its default) go with it, or the next reader keeps working around a Mac that is not there (#13399's last PR removed
+  `MacHover`, `MacSelectingList`, `DeferredDefaults`, `StyleSpec.MacChrome` and `kbOpenEntry`, which nothing set).

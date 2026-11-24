@@ -172,6 +172,7 @@ func TestTodoToolsFailedStart(t *testing.T) {
 // (agents work on it) is confirmed too; the user's own to-do is not.
 func TestTodoToolsConfirm(t *testing.T) {
 	todoStores(t, func(t *testing.T, e *todoEnv, _ *db.DB) {
+		e.f.hello.Assistant.AutoApproveReversibleSettings = true
 		res, err := e.tool("todo_create", map[string]any{"title": "Pay the rent"})
 		if err != nil {
 			t.Fatal(err)

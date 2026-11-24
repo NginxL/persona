@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- What an extension may read of personal information (#13500), as the web's settings-extensioninfoaccess.json. -->
+<resources>
+    <string name="settings_info_access_title">Personal information it may read</string>
+    <string name="settings_info_access_owner">This is my own extension</string>
+    <string name="settings_info_access_owner_hint">Lets it read everything, health and money included. Turn on only for an extension you trust like the app itself, such as your own memory extension.</string>
+    <string name="settings_info_access_owner_footer">It reads all your information, personal matters included.</string>
+    <string name="settings_info_access_footer">Turned off, it never sees that kind of personal information. Everything else it may read as before.</string>
+    <string name="settings_info_access_save_failed">Couldn\'t change what it may read: %1$s</string>
+</resources>

@@ -374,3 +374,38 @@ func TestQuickMetaRewoundTurnInTheTailThenARecap(t *testing.T) {
 		}
 	}
 }
+
+func TestQuickMetaLateCodexCommandDoesNotMoveTurnActivity(t *testing.T) {
+	for _, gap := range []bool{false, true} {
+		t.Run(fmt.Sprintf("closed turn outside tail=%t", gap), func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "rollout.jsonl")
+			lines := []string{
+				`{"timestamp":"2026-11-04T01:00:00Z","type":"event_msg","payload":{"type":"task_started","turn_id":"t1"}}`,
+				`{"timestamp":"2026-11-04T01:00:01Z","type":"event_msg","payload":{"type":"item_completed","turn_id":"t1","item":{"type":"UserMessage","id":"u1","content":[{"type":"text","text":"Check the file"}]}}}`,
+				`{"timestamp":"2026-11-04T01:00:05Z","type":"event_msg","payload":{"type":"item_completed","turn_id":"t1","item":{"type":"AgentMessage","id":"m1","content":[{"type":"Text","text":"The file is ready."}]}}}`,
+				`{"timestamp":"2026-11-04T01:00:06Z","type":"event_msg","payload":{"type":"task_complete","turn_id":"t1"}}`,
+			}
+			before := readQuickMeta(path, writeLines(t, path, lines))
+			if gap {
+				lines = append(lines, `{"timestamp":"2026-11-04T01:02:00Z","type":"response_item","payload":{"type":"function_call_output","output":"`+strings.Repeat("x", quickTail)+`"}}`)
+			}
+			lines = append(lines, `{"timestamp":"2026-11-04T01:04:00Z","type":"event_msg","payload":{"type":"item_completed","turn_id":"t1","item":{"type":"CommandExecution","id":"c1","status":"completed","aggregated_output":"ok"}}}`)
+			st := writeLines(t, path, lines)
+			for name, m := range map[string]quickMeta{"cold": readQuickMeta(path, st), "warm": readQuickMetaSince(path, st, before)} {
+				if at := lastUsed(m, st); !at.Equal(secondAnswer) || !m.turnClosed || m.turnOpen {
+					t.Errorf("%s: updated at %v, open %v, closed %v; want the same closed turn at %v", name, at, m.turnOpen, m.turnClosed, secondAnswer)
+				}
+			}
+			lines = append(lines,
+				`{"timestamp":"2026-11-04T01:05:00Z","type":"event_msg","payload":{"type":"task_started","turn_id":"t2"}}`,
+				`{"timestamp":"2026-11-04T01:05:05Z","type":"event_msg","payload":{"type":"item_completed","turn_id":"t2","item":{"type":"CommandExecution","id":"c2","status":"completed","aggregated_output":"new output"}}}`,
+				`{"timestamp":"2026-11-04T01:05:06Z","type":"event_msg","payload":{"type":"task_complete","turn_id":"t2"}}`,
+			)
+			st = writeLines(t, path, lines)
+			want := time.Date(2026, 11, 4, 1, 5, 5, 0, time.UTC)
+			if got := lastUsed(readQuickMeta(path, st), st); !got.Equal(want) {
+				t.Fatalf("updated at %v after the new turn, want %v", got, want)
+			}
+		})
+	}
+}

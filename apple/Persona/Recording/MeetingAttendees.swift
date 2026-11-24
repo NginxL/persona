@@ -176,7 +176,7 @@ import Foundation
         if s.permissionMode == "bypassPermissions" { return false }
         if model.machine(s.machineRef)?.trust == "work" { return false }
         if s.assistant {
-            if s.isHealth { return false }
+            if s.inSpace { return false }
             if let origin = s.origin, ["lark_agent", "channel", "extension", "inbox"].contains(origin) { return false }
             if let opener = s.openedBy, !opener.isEmpty { return false }
         }

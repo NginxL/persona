@@ -2,9 +2,15 @@
   "environment": "Environment",
   "worktree": "Worktree",
   "subagents": "Subagents",
+  "group_running": "Running · {count}",
+  "group_ended": "Ended · {count}",
   "running_count": "{count} running",
   "ended": "Ended",
   "ended_count": "{count} ended",
+  "status_needs_you": "Needs you",
+  "status_failed": "Failed",
   "finished_count": "{count} finished",
-  "show_in_chat": "Show in chat"
+  "show_in_chat": "Show in chat",
+  "open_as_page": "Open as page",
+  "stop": "Stop"
 }

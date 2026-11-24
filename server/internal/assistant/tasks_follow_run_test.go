@@ -69,7 +69,7 @@ func TestReceiptNamesItsRun(t *testing.T) {
 				}
 				f.setSessions("box", proto.Session{SessionID: "s1", MachineID: "box", Cwd: "/code/app", Agent: "claude",
 					Status: proto.StatusWorking, State: proto.StateWorking, UpdatedAt: time.Now()})
-				s.taskWorking(ctx, "box", "s1")
+				s.taskWorking(ctx, "box", "s1", startRow{})
 				f.setSessions("box", ended)
 				s.taskTurnEnded(ctx, "box", "s1")
 

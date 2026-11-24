@@ -52,6 +52,30 @@ final class TodoProjectsUITests: XCTestCase {
         shot(app, "todos-by-project")
     }
 
+    @MainActor func testCancelledTasksUseTheirOwnFold() throws {
+        guard todo("todo_cut_login")["cancelled_at"] != nil else {
+            throw XCTSkip("needs MOCK_INTERRUPTS=1")
+        }
+        let appearance = ProcessInfo.processInfo.environment["PERSONA_SHOTS_APPEARANCE"] ?? "light"
+        let app = launch(["-tab", "assistant", "-openAssistantPage", "todos", "-todos.view", "list",
+                          "-todos.filter", "all", "-todos.sort", "recent", "-todos.grouping", "project",
+                          "-ui.scheme", appearance])
+        let fold = app.descendants(matching: .any)["todos.section.cancelled"]
+        let list = app.collectionViews.firstMatch
+        XCTAssertTrue(list.waitForExistence(timeout: 60), app.debugDescription)
+        for _ in 0..<24 where !fold.exists { list.swipeUp() }
+        XCTAssertTrue(fold.exists, "no Cancelled fold in project grouping:\n\(app.debugDescription)")
+        let row = app.buttons["todos.row.todo_cut_login"]
+        XCTAssertFalse(row.exists, "a cancelled task is folded, not an open project row")
+        for _ in 0..<8 where !fold.isHittable { list.swipeUp() }
+        XCTAssertTrue(fold.isHittable, app.debugDescription)
+        shot(app, "todos-by-project-cancelled-folded")
+        fold.tap()
+        for _ in 0..<8 where !row.exists { list.swipeUp() }
+        XCTAssertTrue(row.exists, "opening Cancelled did not reveal its task")
+        shot(app, "todos-by-project-cancelled-open")
+    }
+
     @MainActor func testADeletedProjectComesBackWithUndo() throws {
         let app = launch(["-tab", "assistant", "-openAssistantPage", "knowledge"])
         let row = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "读书笔记")).firstMatch // i18n-ignore

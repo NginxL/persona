@@ -97,7 +97,19 @@ reload and a second browser draw the same, and Reset puts Overview back. Light a
 was, the edit state and 进行中的任务 moved first, at 1440 × 1300 and 390 × 1600, and `results-sections.json`, go to the
 artifact directory; a 300-second watchdog ends the run.
 
-## Sidebar groups (#9071)
+## Sidebar More (#13798)
+
+```sh
+MOCK_EXTENSIONS=1 MOCK_EXTENSION_COLUMNS=1 PORT=<port> python3 scripts/mock/mock_hub.py &
+(cd web && PERSONA_HUB_URL=http://127.0.0.1:<port> npx vite --port <web port> --strictPort &)
+node web/e2e/sidebar-more.mjs <loopback-web-origin> <artifact-directory> [Chromium executable]
+```
+
+Against an exclusively owned mock-backed web server, in Simplified Chinese. More starts visible with a put-away page. Its
+settings switch hides the row at once, the hub keeps `more: false` with that page's choice, a second browser and a reload
+keep it hidden, and the rail has no More menu. Turning it back on brings the page back. A direct link still opens while More
+is hidden. Light and dark screenshots of the wide sidebar, phone drawer and setting, plus the rail and large text, and
+`results.json`, go to the artifact directory; a 180-second watchdog ends the run.
 
 ```sh
 MOCK_EXTENSIONS=1 MOCK_EXTENSION_COLUMNS=1 MOCK_SIDEBAR_GROUPS=1 PORT=<port> python3 scripts/mock/mock_hub.py &

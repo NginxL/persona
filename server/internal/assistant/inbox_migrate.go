@@ -27,7 +27,7 @@ import (
 const migratedConnectorID = "lark"
 
 // migratedThread is the thread of a Feishu item by its block: "chat:<feed>" ("chat:<account>:<feed>" for an account
-// other than the primary one), "doc:<notice>", "moment:<post>"; "" for anything else.
+// other than the primary one), "doc:<notice>" or "doc:<account>:<notice>", "moment:<post>"; "" for anything else.
 func migratedThread(it *InboxItem) string {
 	var buf [64]byte
 	return string(appendMigratedThread(buf[:0], it))
@@ -42,6 +42,16 @@ func appendMigratedThread(b []byte, it *InboxItem) []byte {
 		}
 		return append(b, it.Lark.FeedID...)
 	case it.Doc != nil:
+		account := it.Doc.AccountID
+		if account == 0 {
+			account = migratedDocumentIDAccount(it)
+		}
+		if account > 0 {
+			b = append(b, "doc:"...)
+			b = strconv.AppendInt(b, int64(account), 10)
+			b = append(b, ':')
+			return append(b, it.Doc.NoticeID...)
+		}
 		return append(append(b, "doc:"...), it.Doc.NoticeID...)
 	case it.Moment != nil:
 		return append(append(b, "moment:"...), it.Moment.PostID...)
@@ -60,6 +70,156 @@ func appendMigratedKey(b []byte, it *InboxItem) []byte {
 	return appendMigratedThread(append(append(b, it.Source...), 0), it)
 }
 
+// migratedDocumentIDAccount recovers the account key already present in an old doc:<account>:<notice>:<last> id.
+// Unqualified legacy ids and manager-generated hashes return zero; the latter are adopted by applyMigrated's exact
+// fallback-id lookup instead.
+func migratedDocumentIDAccount(it *InboxItem) int {
+	parts := strings.Split(it.ID, ":")
+	if len(parts) != 4 || parts[0] != "doc" || it.Doc == nil || parts[2] != it.Doc.NoticeID {
+		return 0
+	}
+	account, err := strconv.Atoi(parts[1])
+	if err != nil || account <= 0 {
+		return 0
+	}
+	return account
+}
+
+// adoptMigratedDocumentAccount upgrades rows written before document blocks retained their account key. An old
+// legacy id names its account directly; an old manager hash is recognized by recomputing it from the account-qualified
+// thread and each stored row's own Last. The first upgraded collection may carry a newer version, so migration covers
+// the notice's whole retained history, not just the current thing. Open history then converges on its newest activity.
+func (b *inboxBook) adoptMigratedDocumentAccount(id string, t connector.InboxThing, now time.Time) []*InboxItem {
+	if t.Extra == nil || len(t.Extra.Doc) == 0 {
+		return nil
+	}
+	var block struct {
+		NoticeID  string `json:"notice_id"`
+		AccountID int    `json:"account_id"`
+	}
+	if json.Unmarshal(t.Extra.Doc, &block) != nil || block.AccountID <= 0 || block.NoticeID == "" ||
+		t.Thread != fmt.Sprintf("doc:%d:%s", block.AccountID, block.NoticeID) {
+		return nil
+	}
+	source := id
+	if t.Extra.Source != "" {
+		source = t.Extra.Source
+	}
+	var found []*InboxItem
+	var changed []*InboxItem
+	for _, it := range b.items {
+		if it.Source != source || it.Doc == nil || it.Doc.NoticeID != block.NoticeID || it.Last == "" {
+			continue
+		}
+		if it.Doc.AccountID != 0 {
+			if it.Doc.AccountID == block.AccountID {
+				found = append(found, it)
+			}
+			continue
+		}
+		sum := sha1.Sum([]byte(t.Thread + "\n" + it.Last))
+		fallbackID := id + ":" + hex.EncodeToString(sum[:8])
+		if migratedDocumentIDAccount(it) != block.AccountID &&
+			!(it.ID == t.Extra.LegacyID && it.Last == t.Last) && it.ID != fallbackID {
+			continue
+		}
+		b.roundWrite(it)
+		it.Doc.AccountID = block.AccountID
+		changed = append(changed, it)
+		found = append(found, it)
+	}
+	// Convergence belongs to the collection that actually adopts pre-account rows. Already qualified rows may include
+	// an older item its owner explicitly reopened; an ordinary later collection must leave that open history alone.
+	if len(changed) == 0 {
+		return nil
+	}
+	return b.mergeMigratedDocumentHistory(found, now, changed)
+}
+
+// mergeMigratedDocumentHistory keeps one survivor for the whole recovered notification history. Newer activity wins;
+// within one version a handled row wins, then the extension's legacy id. Every other open row is filed directly into
+// that survivor, so cross-version duplicates cannot remain open or form a chain of orphaned merges. Done history stays.
+func (b *inboxBook) mergeMigratedDocumentHistory(found []*InboxItem, now time.Time, changed []*InboxItem) []*InboxItem {
+	if len(found) < 2 {
+		return changed
+	}
+	better := func(a, b *InboxItem) bool {
+		if !a.UpdatedAt.Equal(b.UpdatedAt) {
+			return a.UpdatedAt.After(b.UpdatedAt)
+		}
+		if (a.DoneAt != nil) != (b.DoneAt != nil) {
+			return a.DoneAt != nil // the user's handled state wins over a duplicate open row of the same version
+		}
+		if a.DoneAt != nil && !a.DoneAt.Equal(*b.DoneAt) {
+			return a.DoneAt.After(*b.DoneAt)
+		}
+		aLegacy, bLegacy := migratedDocumentIDAccount(a) > 0, migratedDocumentIDAccount(b) > 0
+		if aLegacy != bLegacy {
+			return aLegacy
+		}
+		return a.ID < b.ID
+	}
+	var survivor *InboxItem
+	for _, it := range found {
+		if it.MergedInto != "" {
+			continue
+		}
+		if survivor == nil || better(it, survivor) {
+			survivor = it
+		}
+	}
+	if survivor == nil {
+		return changed
+	}
+	for _, it := range found {
+		if it == survivor || !it.open() {
+			continue
+		}
+		changed = b.mergeMigratedDocumentInto(survivor, it, now, changed)
+	}
+	return changed
+}
+
+// mergeMigratedDocumentInto files one old open row into survivor and moves any members it already had to the same
+// survivor. The rows remain available as merged history rather than being deleted.
+func (b *inboxBook) mergeMigratedDocumentInto(survivor, it *InboxItem, now time.Time, changed []*InboxItem) []*InboxItem {
+	b.roundWrite(it)
+	b.roundWrite(survivor)
+	addRef := func(ref InboxMergeRef) {
+		for _, old := range survivor.MergedFrom {
+			if old.ID == ref.ID {
+				return
+			}
+		}
+		survivor.MergedFrom = append(survivor.MergedFrom, ref)
+	}
+	for _, ref := range it.MergedFrom {
+		member := b.items[ref.ID]
+		if member == nil || member.MergedInto != it.ID {
+			continue
+		}
+		b.roundWrite(member)
+		member.MergedInto = survivor.ID
+		addRef(ref)
+		if !containsItem(changed, member) {
+			changed = append(changed, member)
+		}
+	}
+	it.MergedFrom = nil
+	it.MergedInto = survivor.ID
+	if it.DoneAt == nil {
+		b.file(it, now, "superseded")
+	}
+	addRef(InboxMergeRef{ID: it.ID, Source: it.Source, AccountName: it.AccountName, Title: it.Title})
+	if !containsItem(changed, it) {
+		changed = append(changed, it)
+	}
+	if !containsItem(changed, survivor) {
+		changed = append(changed, survivor)
+	}
+	return changed
+}
+
 // inMigratedThread says whether an item's migratedKey is key, without making the string: openFor asks it of each item
 // filed under a thread it looks up.
 func inMigratedThread(it *InboxItem, key string) bool {
@@ -70,6 +230,9 @@ func inMigratedThread(it *InboxItem, key string) bool {
 // applyMigrated is applyConnector for the things with Extra of a migrated connector, under b.mu.
 func (b *inboxBook) applyMigrated(id string, things []connector.InboxThing, now time.Time) []*InboxItem {
 	var changed []*InboxItem
+	for _, t := range things {
+		changed = append(changed, b.adoptMigratedDocumentAccount(id, t, now)...)
+	}
 	index := b.threads(func(it *InboxItem) (string, bool) {
 		if it.Connector != nil {
 			return "", false
@@ -255,7 +418,7 @@ func sameDoc(a, b *InboxDoc) bool {
 	if a == nil || b == nil {
 		return a == b
 	}
-	return a.URL == b.URL && a.Link == b.Link && a.Type == b.Type && a.Notice == b.Notice && a.NoticeID == b.NoticeID && a.Quote == b.Quote &&
+	return a.URL == b.URL && a.Link == b.Link && a.Type == b.Type && a.Notice == b.Notice && a.NoticeID == b.NoticeID && a.AccountID == b.AccountID && a.Quote == b.Quote &&
 		a.Error == b.Error && sameTime(a.ReadAt, b.ReadAt) && (a.Reply == nil) == (b.Reply == nil) &&
 		(a.Reply == nil || *a.Reply == *b.Reply) && sameList(a.Rows, b.Rows, sameRow)
 }

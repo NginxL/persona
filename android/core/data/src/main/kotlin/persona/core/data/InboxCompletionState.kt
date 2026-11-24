@@ -7,8 +7,8 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.serialization.json.*
-import persona.feature.inbox.InboxRecord
-import persona.feature.inbox.InboxSnapshot
+import persona.core.inbox.InboxRecord
+import persona.core.inbox.InboxSnapshot
 
 /** Writes do not hold the full-list network lock. Generations keep an older list from undoing them. */
 internal class InboxCompletionState(private val current: MutableStateFlow<InboxSnapshot>) {

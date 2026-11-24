@@ -9,7 +9,7 @@ import (
 	"testing"
 
 	"github.com/nwverse/persona/server/internal/connector"
-	"github.com/nwverse/persona/server/internal/connector/github"
+	"github.com/nwverse/persona/server/internal/githubwire"
 )
 
 // auditRow is one plugin_audit row as auditingStore keeps it.
@@ -209,8 +209,8 @@ func TestGitHubSourceIsAudited(t *testing.T) {
 	st := newAuditingStore()
 	h.store = st
 	h.connectors = connector.NewRegistry(nil)
-	gh := github.New(github.Config{Auth: github.AuthConfig{FromMachine: "mac"}}, "Example Mac", func(context.Context, string) (string, error) {
-		return "", github.ErrOffline
+	gh := newTestGitHub(t, githubwire.Config{Auth: githubwire.AuthConfig{FromMachine: "mac"}}, "Example Mac", func(context.Context, string) (string, error) {
+		return "", githubwire.ErrOffline
 	})
 	gh.UseSecrets(h.secretsFor("github"))
 	if err := h.addConnector(gh); err != nil {

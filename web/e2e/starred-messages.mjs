@@ -78,6 +78,7 @@ async function device(theme, phone = false, { width = phone ? 390 : 1440, large 
   await ctx.route("**/*", (route) => allowed.has(new URL(route.request().url()).origin) ? route.continue() : route.abort());
   await ctx.addInitScript(({ theme, large }) => {
     localStorage.setItem("persona.language", "en");
+    localStorage.setItem("persona.starredMessages", "1");
     localStorage.setItem("persona.theme", theme);
     if (large) localStorage.setItem("persona.text-size", "large");
   }, { theme, large });
@@ -284,6 +285,7 @@ try {
   const startup = await device("light");
   await startup.page.addInitScript(() => {
     localStorage.setItem("persona.token", "mock");
+    localStorage.setItem("persona.starredMessages", "1");
     localStorage.setItem("persona.startPage", "starred");
   });
   let allowIndex;

@@ -1,5 +1,165 @@
 [
   {
+    "name": "resource_status",
+    "description": "登録済みランナー、キュー、重複、同期時刻を読み取ります。不明または古い情報は成功を意味しません。",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "resource": {
+          "type": "string"
+        }
+      },
+      "required": []
+    }
+  },
+  {
+    "name": "resource_acquire",
+    "description": "プロジェクト、完全なコミット、グループで CI リースを申請します。granted の所有者だけが実行し、joined は既存の結果を待ちます。",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "resource": {
+          "type": "string"
+        },
+        "project": {
+          "type": "string"
+        },
+        "commit": {
+          "type": "string"
+        },
+        "groups": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "lease_id": {
+          "type": "string"
+        },
+        "holder": {
+          "type": "object",
+          "properties": {
+            "label": {
+              "type": "string"
+            },
+            "pid": {
+              "type": "integer"
+            }
+          }
+        }
+      },
+      "required": [
+        "resource",
+        "project",
+        "commit",
+        "groups"
+      ]
+    }
+  },
+  {
+    "name": "resource_get",
+    "description": "このセッションが所有または参加したリースを読み取ります。待機中に再送信しないでください。",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "resource": {
+          "type": "string"
+        },
+        "lease_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "resource",
+        "lease_id"
+      ]
+    }
+  },
+  {
+    "name": "resource_renew",
+    "description": "このセッションの待機中または所有中のリースを更新します。待機中はトークン 0、許可後はフェンシングトークンを使い、fenced の場合はクライアントを停止します。",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "resource": {
+          "type": "string"
+        },
+        "lease_id": {
+          "type": "string"
+        },
+        "token": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "resource",
+        "lease_id",
+        "token"
+      ]
+    }
+  },
+  {
+    "name": "resource_release",
+    "description": "フェンシングトークンで所有リースの終了コードと結果を記録します。",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "resource": {
+          "type": "string"
+        },
+        "lease_id": {
+          "type": "string"
+        },
+        "token": {
+          "type": "integer"
+        },
+        "outcome": {
+          "type": "object",
+          "properties": {
+            "exit": {
+              "type": "integer"
+            },
+            "run": {
+              "type": "string"
+            },
+            "output": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "exit",
+            "run"
+          ]
+        }
+      },
+      "required": [
+        "resource",
+        "lease_id",
+        "token",
+        "outcome"
+      ]
+    }
+  },
+  {
+    "name": "resource_cancel",
+    "description": "このセッションの待機リースを取り消します。参加者は所有者の作業を取り消せません。",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "resource": {
+          "type": "string"
+        },
+        "lease_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "resource",
+        "lease_id"
+      ]
+    }
+  },
+  {
     "name": "report_to_supervisor",
     "description": "Report to the Persona assistant that handed you this task and reviews it (your supervisor), not to the user: a decision you need from it (question), that you are stuck (blocked), that you finished with the evidence for each acceptance criterion (done), or where you are in a long task (progress). It reads it within minutes, and answers or redirects you by message. Only for a task Persona supervises; elsewhere nobody receives it and it says so. Don't use it for every small step, and keep asking the user what only the user can decide the usual way. A question that does not hold you up (you can go on with other work, and a late answer costs nothing: which name to prefer, a style choice) can be sent with `urgent: false`: nobody is woken for it, and the owner sees it in their next morning or evening briefing, under \"Can wait\", and answers you in your chat. If no briefing is switched on it goes as an urgent question, and the answer says so. Ask what blocks you without it. `urgent` is for kind `question` only.\n\nReport individual done_when entries as they change with `criteria`: `number` is the one-based position in the task's ordered done_when, `state` is pending / met / not_met, and evidence is required for met and not_met (a command plus output, a link or the gap). Omitted entries keep their previous state; pending resets an entry. This persists immediately and updates the task's count, but is an agent report, not the supervisor's acceptance. The supervisor receives the entries and evidence in its supervision message and still reviews the task itself.\n\nタイトル、理由、完了条件、メッセージなど、新たに生成するユーザー向けの引数は、ユーザーが別の言語を求める場合や元の表現が必要な項目を除き、日本語で書いてください。引用した原文、識別子、ツール名と引数名、列挙値、コマンドの接頭辞はそのまま保持してください。言語によって承認要件や権限の範囲が変わることはありません。\n\nFor a to-do handoff, copy handoff_receipt from the request and report the head you checked. Use done with the result and evidence, or blocked for a failed check. The report goes to the originating to-do’s supervisor.",
     "input_schema": {

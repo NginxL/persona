@@ -146,7 +146,7 @@ func (i *Index) CountMatchingState(options Options, state string, ids []string) 
 		}
 		n := 0
 		for _, e := range s.result.events {
-			if e.value != nil && want[e.value.item.ID] && f.matches(e.value) && stateOf(e.value.item, f.Roots) == state {
+			if e.value != nil && want[e.value.item.ID] && f.matches(e.value) && stateOf(e.value.item, f.Roots, f.CrossMachineHierarchy) == state {
 				n++
 			}
 		}
@@ -154,7 +154,7 @@ func (i *Index) CountMatchingState(options Options, state string, ids []string) 
 	}
 	n := 0
 	for id := range want {
-		if r := i.items[id]; r != nil && f.matches(r) && stateOf(r.item, f.Roots) == state {
+		if r := i.items[id]; r != nil && f.matches(r) && stateOf(r.item, f.Roots, f.CrossMachineHierarchy) == state {
 			n++
 		}
 	}
@@ -180,8 +180,9 @@ func (f filters) matches(r *record) bool {
 	todo := v.todo()
 	return (f.ID != "" || f.IncludeHidden || !v.HiddenByDirectory) && (f.ID == "" || f.ID == v.ID) && (!f.NoPrivate || !v.Private) &&
 		(!f.AgentsOnly || (!v.Assistant && !v.Private)) &&
-		(!f.Roots || v.root() == "") && (f.Under == "" || f.Under == v.root()) &&
-		(f.State == "" || f.State == stateOf(v, f.Roots)) &&
+		(!f.Roots || !v.hiddenByRoots(f.CrossMachineHierarchy)) &&
+		(f.Under == "" || v.matchesUnder(f.UnderMachine, f.Under)) &&
+		(f.State == "" || f.State == stateOf(v, f.Roots, f.CrossMachineHierarchy)) &&
 		(f.Machine == "" || f.Machine == v.Machine) &&
 		(f.Project == "" || f.Project == v.Project) &&
 		(f.Places == "" || inPlaces(f.Places, v.Machine, v.Project)) &&
@@ -190,8 +191,8 @@ func (f filters) matches(r *record) bool {
 		(f.Source == "" || f.Source == v.Source) &&
 		(f.PaneSource == "" || f.PaneSource == v.PaneSource) &&
 		(f.ExcludePaneSource == "" || f.ExcludePaneSource != v.PaneSource) &&
-		(f.Waiting == "" || (f.Waiting == "1") == waitingOf(v, f.Roots)) &&
-		(f.JustFinished == "" || (f.JustFinished == "1") == justFinishedOf(v, f.Roots)) &&
+		(f.Waiting == "" || (f.Waiting == "1") == waitingOf(v, f.Roots, f.CrossMachineHierarchy)) &&
+		(f.JustFinished == "" || (f.JustFinished == "1") == justFinishedOf(v, f.Roots, f.CrossMachineHierarchy)) &&
 		(f.Manager == "" || f.Manager == r.owner) &&
 		(f.Provider == "" || f.Provider == v.Provider) &&
 		(f.Providers == "" || inProviders(f.Providers, v.Provider)) &&
@@ -242,30 +243,42 @@ func emptyCounts(revision string, roots bool) Counts {
 	return counts
 }
 
-// stateOf is the state v is filtered and counted by: its folded state for Options.Roots (Fold.State, its own state
-// when the adapter gives none).
-func stateOf(v Item, roots bool) string {
-	if roots && v.Fold != nil && v.Fold.State != "" {
-		return v.Fold.State
+// stateOf is the state v is filtered and counted by: its folded state for Options.Roots (Fold.State, or
+// Fold.LegacyState for legacy roots=1 queries without cross_machine_hierarchy=1 so cross-machine children that
+// stay listed separately are not double-counted on their parent).
+func stateOf(v Item, roots, crossMachine bool) string {
+	if roots && v.Fold != nil {
+		if !crossMachine && v.Fold.HasLegacyFold && v.Fold.LegacyState != "" {
+			return v.Fold.LegacyState
+		}
+		if v.Fold.State != "" {
+			return v.Fold.State
+		}
 	}
 	return v.State
 }
 
 // waitingOf is whether v only waits in the background, as it is filtered and counted: by its folded state for
-// Options.Roots (Fold.BackgroundWaiting), its own when it folds none.
-func waitingOf(v Item, roots bool) bool {
-	return v.BackgroundWaiting && (!roots || v.Fold == nil || v.Fold.BackgroundWaiting)
+// Options.Roots (Fold.BackgroundWaiting, or Fold.LegacyBackgroundWaiting for legacy roots=1), its own when it folds none.
+func waitingOf(v Item, roots, crossMachine bool) bool {
+	if !v.BackgroundWaiting || !roots || v.Fold == nil {
+		return v.BackgroundWaiting
+	}
+	if !crossMachine && v.Fold.HasLegacyFold {
+		return v.Fold.LegacyBackgroundWaiting
+	}
+	return v.Fold.BackgroundWaiting
 }
 
 // justFinishedOf is whether v is Just finished, as it is filtered and counted: only while it shows idle (by its folded
 // state for Options.Roots: a parent whose children work is not).
-func justFinishedOf(v Item, roots bool) bool {
-	return v.JustFinished && stateOf(v, roots) == "idle"
+func justFinishedOf(v Item, roots, crossMachine bool) bool {
+	return v.JustFinished && stateOf(v, roots, crossMachine) == "idle"
 }
 
-func addCount(c *Counts, v Item, roots bool, delta int) {
+func addCount(c *Counts, v Item, roots, crossMachine bool, delta int) {
 	c.Total += delta
-	state := stateOf(v, roots)
+	state := stateOf(v, roots, crossMachine)
 	if roots && !v.Assistant && state != "offline" {
 		c.ActiveAgentsByMachine[v.Machine] += delta
 		if c.ActiveAgentsByMachine[v.Machine] == 0 {
@@ -278,10 +291,10 @@ func addCount(c *Counts, v Item, roots bool, delta int) {
 			delete(c.PaneSource, v.PaneSource)
 		}
 	}
-	if waitingOf(v, roots) {
+	if waitingOf(v, roots, crossMachine) {
 		c.BackgroundWaiting += delta
 	}
-	if justFinishedOf(v, roots) {
+	if justFinishedOf(v, roots, crossMachine) {
 		c.JustFinished += delta
 	}
 	for _, pair := range []struct {
@@ -302,7 +315,7 @@ func addCount(c *Counts, v Item, roots bool, delta int) {
 func (i *Index) exactResult(f filters) *result {
 	r := &result{counts: emptyCounts(i.revisionToken(), f.Roots), ordered: true}
 	if item := i.items[f.ID]; f.matches(item) {
-		addCount(&r.counts, item.item, f.Roots, 1)
+		addCount(&r.counts, item.item, f.Roots, f.CrossMachineHierarchy, 1)
 		r.events = []event{{id: f.ID, updated: item.item.UpdatedAt, value: item}}
 	}
 	return r
@@ -326,7 +339,7 @@ func (i *Index) countsResult(f filters) *result {
 		counts = emptyCounts(i.revisionToken(), f.Roots)
 		for _, item := range i.items {
 			if f.matches(item) {
-				addCount(&counts, item.item, f.Roots, 1)
+				addCount(&counts, item.item, f.Roots, f.CrossMachineHierarchy, 1)
 			}
 		}
 	}

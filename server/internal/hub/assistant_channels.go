@@ -66,6 +66,10 @@ func (h *Hub) sendOnce(ctx context.Context, m *Machine, method string, p map[str
 	delete(p, assistantwire.ClarificationProofParam)
 	delete(p, assistantwire.ClarificationInteractionParam)
 	if h.store != nil {
+		if !h.quiesce.begin() {
+			return i18n.Err("hub-selfupdate.err_quiesced")
+		}
+		defer h.quiesce.end()
 		state, err := h.store.ClaimSend(ctx, id, m.cfg.ID, sid)
 		switch {
 		case err != nil:

@@ -33,6 +33,15 @@ describe("addresses", () => {
     expect(badAddresses("a@example.com, lucy, b@example")).toEqual(["lucy", "b@example"]);
     expect(badAddresses("示例 <c@example.com>")).toEqual([]);
   });
+
+  it("keeps commas, semicolons and escaped quotes inside quoted display names", () => {
+    const raw = '"Wang, Lucy" <lucy@example.com>; "Ops; \\"Core\\"" <ops@example.com>';
+    expect(parseAddresses(raw)).toEqual([
+      { name: "Wang, Lucy", email: "lucy@example.com" },
+      { name: 'Ops; "Core"', email: "ops@example.com" },
+    ]);
+    expect(badAddresses(raw)).toEqual([]);
+  });
 });
 
 describe("replyDraft", () => {

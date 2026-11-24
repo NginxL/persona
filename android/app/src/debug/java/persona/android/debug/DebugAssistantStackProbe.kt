@@ -112,7 +112,7 @@ object DebugAssistantStackProbe : AssistantStackProbeBackend {
         target.parentFile?.mkdirs()
         val snapshot = DebugStackProbeSnapshot(STACK_PROBE_VERSION, session, Process.myPid(), now(), route, selectedKey, pages.toMap())
         val atomic = AtomicFile(target)
-        runCatching {
+        val _ = runCatching {
             val output = atomic.startWrite()
             try {
                 output.write(JsonCodec.encodeToString(snapshot).toByteArray(Charsets.UTF_8))

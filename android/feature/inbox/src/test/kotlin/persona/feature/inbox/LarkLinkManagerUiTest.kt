@@ -41,6 +41,7 @@ import persona.core.domain.inbox.InboxItem
 import persona.core.navigation.AppTab
 import persona.core.navigation.InboxItemUiRoute
 import persona.core.navigation.Navigator
+import persona.core.inbox.*
 
 /**
  * The views a chat's or an inbox item's links open read through its manager (docs/assistant/managers.md "Clients"): a

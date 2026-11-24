@@ -42,14 +42,16 @@ const flush = async () => {
 };
 
 const iso = (agoMs: number) => new Date(Date.now() - agoMs).toISOString();
-const notes: Todo = { id: "notes", title: "Write the release notes", origin: "conv", created_at: iso(7_200_000), updated_at: iso(3_600_000), done_at: iso(3_600_000), agents: [] } as Todo;
+const notes: Todo = { id: "notes", title: "Write the release notes", origin: "conv", created_at: iso(7_200_000), updated_at: iso(3_600_000), done_at: null,
+  agents: [{ machine_id: "m", session_id: "notes" }] } as Todo;
+const noteSession = { machine_id: "m", session_id: "notes", state: "unread", status: "idle", updated_at: iso(3_600_000) };
 const nas: Todo = { id: "nas", title: "Back up the NAS", created_at: iso(7_200_000), updated_at: iso(3_600_000), done_at: null, agents: [] } as Todo;
 
 const seed = (patch: Record<string, unknown>) => Object.assign(getState() as unknown as Record<string, unknown>, patch);
 const before = { ...getState() };
 
-async function render(features: string[], selectedId?: string) {
-  seed({ todos: [notes, nas], todosLoaded: true, sessions: {}, interactions: [], answered: {}, features });
+async function render(features: string[], selectedId?: string, items: Todo[] = [notes, nas]) {
+  seed({ todos: items, todosLoaded: true, sessions: { m: [noteSession] }, interactions: [], answered: {}, features });
   await act(async () => root.render(<><TodosView selectedId={selectedId} /><Toasts /></>));
   await flush();
 }
@@ -58,7 +60,10 @@ beforeEach(() => {
   api.mockReset();
   api.mockImplementation(async (path: string, init?: unknown) => {
     const method = (init as { method?: string } | undefined)?.method;
-    if (path === "/todos/notes/seen") return { todo: { ...notes, seen_at: method === "PUT" ? new Date().toISOString() : undefined } };
+    if (path === "/todos/notes/seen") {
+      const current = getState().todos.find((x) => x.id === "notes") ?? notes;
+      return { todo: { ...current, seen_at: method === "PUT" ? new Date().toISOString() : undefined } };
+    }
     return {};
   });
   host = document.createElement("div");
@@ -176,6 +181,19 @@ describe("seen to-dos (#5707)", () => {
     await act(async () => root.render(<><TodosView /><Toasts /></>));
     await flush();
     expect(seenCalls("PUT")).toHaveLength(1);
+  });
+
+  it("never offers to file a supervised delivery that still needs acceptance", async () => {
+    const supervised = { ...notes, supervision: { supervisor: "main", state: "pending_review" } } as Todo;
+    await render(["todo_seen"], "notes", [supervised, nas]);
+    expect(section("just_done")?.querySelector("[data-id=notes]")).not.toBeNull();
+    // Got it would promise "Moved to Done", but Seen is not acceptance (#5732).
+    expect(section("just_done")?.querySelector("[data-testid=todo-seen]")).toBeNull();
+    await act(async () => root.render(<><TodosView /><Toasts /></>));
+    await flush();
+    expect(seenCalls("PUT")).toHaveLength(1);
+    expect(section("just_done")?.querySelector("[data-id=notes]")).not.toBeNull();
+    expect(section("done")).toBeNull();
   });
 
   it("offers nothing when the hub keeps no seen marks", async () => {

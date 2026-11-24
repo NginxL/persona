@@ -1,6 +1,6 @@
 package persona.core.data
 
-import persona.feature.inbox.ReplyTarget
+import persona.core.inbox.ReplyTarget
 import kotlinx.serialization.json.*
 import java.security.MessageDigest
 import java.util.Base64

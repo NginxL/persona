@@ -19,7 +19,7 @@ import { ExtensionOwnerScope } from "../../lib/extension-owner";
 // The extension page is its own chunk (#1794): App.tsx reaches this file for the sidebar's and the nav page's icons and
 // titles, and the first screen draws no extension UI. A page, a card and a section each wait under their own Suspense
 // (the page keeps its top bar) with the Loading that ExtensionUI shows while it asks for its view.
-const ExtensionUI = lazyPage(() => import("../settings/ExtensionView").then((m) => m.ExtensionUI));
+const ExtensionUI = lazyPage(() => import("../settings/ExtensionView").then((m) => m.ExtensionUI), { routes: ["extension"] });
 // Arranging Overview (#9745, #10905) is its own chunk too: the first screen draws the cards and the sections, never
 // their editor (its heading, each card's controls and each section's bar, and the drag).
 const OverviewArrange = lazyPage(() => import("./OverviewArrange").then((m) => m.OverviewArrange));

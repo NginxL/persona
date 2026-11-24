@@ -12,6 +12,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/nwverse/persona/server/internal/compat"
 	"github.com/nwverse/persona/server/internal/host"
 	"github.com/nwverse/persona/server/internal/orcart"
 	"github.com/nwverse/persona/server/internal/orcart/orcarttest"
@@ -184,15 +185,15 @@ func TestWindowsPaneShellDecisionGitBashNames(t *testing.T) {
 	}
 }
 
-// Actual origin/main output (plus the Agent mark PERSONA_AGENT=1 after PERSONA_HOME, #10111, and #10365's startup
-// variables in the host bash file's unset), not branch-derived; the direct golden uses a Windows node directory and
+// Actual origin/main output (plus the Agent mark PERSONA_AGENT=1 after PERSONA_HOME, #10111, #10365's startup
+// variables and #13472's PERSONA_TRACK_KIND in the host bash file's unset), not branch-derived; the direct golden uses a Windows node directory and
 // omits its prefix.
 const (
 	r3MainDirect       = `claude --session-id 0e000000-0000-4000-8000-0000000000aa --settings 'C:'\\'Users'\\'u'\\'settings.json' --mcp-config 'C:'\\'node dir/mcp.json' --allowedTools 'mcp__persona__report_to_supervisor,mcp__jarvis__report_to_supervisor,mcp__persona__todo_decisions,mcp__jarvis__todo_decisions,mcp__persona__todo_decision_add,mcp__jarvis__todo_decision_add,mcp__persona__todo_bind_thread,mcp__jarvis__todo_bind_thread,mcp__persona__task_plan,mcp__jarvis__task_plan,mcp__persona__task_review,mcp__jarvis__task_review'`
 	r3MainStartPath    = `C:\node dir\agent start.sh`
 	r3MainAnchor       = "session id"
 	r3MainHostBashFile = `command rm -f -- 'C:'\\'node dir'\\'agent start.sh'
-unset PERSONA_ASSISTANT JARVIS_ASSISTANT PERSONA_ASSISTANT_BIN JARVIS_ASSISTANT_BIN PERSONA_SESSION_ID JARVIS_SESSION_ID PERSONA_SPACE JARVIS_SPACE PERSONA_GUEST JARVIS_GUEST CLAUDE_CODE_AUTO_COMPACT_WINDOW ENABLE_TOOL_SEARCH CLAUDECODE CLAUDE_CODE_ENTRYPOINT CLAUDE_CODE_EXECPATH CLAUDE_CODE_SESSION_ID CLAUDE_CODE_CHILD_SESSION CLAUDE_CODE_SESSION_ATTENDED CLAUDE_CODE_MESSAGING_SOCKET CLAUDE_CODE_MESSAGING_TOKEN CLAUDE_EFFORT CLAUDE_PID CLAUDE_PLUGIN_DATA DISABLE_AUTO_UPDATE DISABLE_UPDATE_PROMPT ZSH_DISABLE_COMPFIX POWERLEVEL9K_DISABLE_CONFIGURATION_WIZARD && PERSONA_HOME='C:'\\'node dir' PERSONA_AGENT=1 claude
+unset PERSONA_ASSISTANT JARVIS_ASSISTANT PERSONA_ASSISTANT_BIN JARVIS_ASSISTANT_BIN PERSONA_SESSION_ID JARVIS_SESSION_ID PERSONA_SPACE JARVIS_SPACE PERSONA_TRACK_KIND JARVIS_TRACK_KIND PERSONA_GUEST JARVIS_GUEST CLAUDE_CODE_AUTO_COMPACT_WINDOW ENABLE_TOOL_SEARCH CLAUDECODE CLAUDE_CODE_ENTRYPOINT CLAUDE_CODE_EXECPATH CLAUDE_CODE_SESSION_ID CLAUDE_CODE_CHILD_SESSION CLAUDE_CODE_SESSION_ATTENDED CLAUDE_CODE_MESSAGING_SOCKET CLAUDE_CODE_MESSAGING_TOKEN CLAUDE_EFFORT CLAUDE_PID CLAUDE_PLUGIN_DATA DISABLE_AUTO_UPDATE DISABLE_UPDATE_PROMPT ZSH_DISABLE_COMPFIX POWERLEVEL9K_DISABLE_CONFIGURATION_WIZARD && PERSONA_HOME='C:'\\'node dir' PERSONA_AGENT=1 claude
 `
 	r3MainHostBashTyped = `. 'C:'\\'node dir'\\'agent start.sh' && true 'session id'`
 	r3MainResume        = `claude --resume 0e000000-0000-4000-8000-0000000000aa --settings "C:\\Users\\u\\settings.json" --mcp-config "C:\\node dir/mcp.json" --allowedTools mcp__persona__report_to_supervisor,mcp__jarvis__report_to_supervisor,mcp__persona__todo_decisions,mcp__jarvis__todo_decisions,mcp__persona__todo_decision_add,mcp__jarvis__todo_decision_add,mcp__persona__todo_bind_thread,mcp__jarvis__todo_bind_thread,mcp__persona__task_plan,mcp__jarvis__task_plan,mcp__persona__task_review,mcp__jarvis__task_review`
@@ -241,11 +242,23 @@ func TestWindowsUnchangedDirectStartsUseMainBytes(t *testing.T) {
 	}
 }
 
-func TestWindowsHostNamedBashUsesMainBytes(t *testing.T) {
+func TestWindowsHostNamedBashKeepsMainBytesAndClearsModelSource(t *testing.T) {
 	n := &Node{dir: `C:\node dir`}
 	shells := windowsPaneShellDecision(false, "bash", nil, "")
 	payload := n.agentStartCommand("claude", shellQuote, shells...)
-	if got := startScript(r3MainStartPath, payload); got != r3MainHostBashFile {
+	got := startScript(r3MainStartPath, payload)
+	// Clear inherited attribution before applying this Agent's source. Apart from
+	// these additional unset fields, preserve the established Windows shell bytes.
+	for _, key := range []string{modelSourceEnv, modelSourceBinEnv} {
+		current, legacy := compat.EnvNames(key)
+		for _, name := range []string{current, legacy} {
+			if !strings.Contains(got, " "+name+" ") {
+				t.Fatalf("start file retained inherited %s", name)
+			}
+			got = strings.Replace(got, name+" ", "", 1)
+		}
+	}
+	if got != r3MainHostBashFile {
 		t.Fatalf("start file = %q, want main %q", got, r3MainHostBashFile)
 	}
 	if !n.typesStartFile(&herdrHost{}, shells...) {

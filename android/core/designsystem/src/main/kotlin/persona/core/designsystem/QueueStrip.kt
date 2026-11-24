@@ -116,7 +116,7 @@ private fun GlassQueueStrip(
     val active = enabled && !busy
     val line = type.micro.copy(fontWeight = FontWeight.SemiBold)
     Column(
-        modifier.fillMaxWidth().padding(horizontal = 10.dp.dense, vertical = Tokens.Space.xs)
+        modifier.fillMaxWidth().padding(horizontal = 10.dp.dense, vertical = Tokens.Space.xxs)
             .floatingSurface(RoundedCornerShape(Tokens.Radius.panel)).animateContentSize(PersonaTheme.motion.size()),
     ) {
         Row(
@@ -136,13 +136,15 @@ private fun GlassQueueStrip(
             // The cap bounds the owner's own rows; the relayed block stays outside the scroll so its rows are always
             // reachable, and its own summary line folds them (#6394).
             val cap = queueListCap(rowsHeight, items.size.coerceAtLeast(1))?.let { with(LocalDensity.current) { it.toDp() } }
+            val hasRelayed = relayedItems.isNotEmpty() && relayedSummary != null
             Box(
-                Modifier.fillMaxWidth().padding(bottom = Tokens.Space.m).then(if (cap != null) Modifier.heightIn(max = cap) else Modifier)
+                Modifier.fillMaxWidth().padding(bottom = if (hasRelayed) Tokens.Space.xs else Tokens.Space.s)
+                    .then(if (cap != null) Modifier.heightIn(max = cap) else Modifier)
                     .verticalScroll(rememberScrollState()),
             ) {
                 Column(
                     Modifier.fillMaxWidth().padding(horizontal = Tokens.Space.m).onSizeChanged { rowsHeight = it.height },
-                    verticalArrangement = Arrangement.spacedBy(Tokens.Space.sm),
+                    verticalArrangement = Arrangement.spacedBy(Tokens.Space.xs),
                 ) {
                     val itemActions = stringResource(R.string.designsystem_queue_actions)
                     items.forEachIndexed { index, text ->
@@ -153,10 +155,10 @@ private fun GlassQueueStrip(
                         val spoken = if (said == null) stringResource(R.string.designsystem_queue_item, index + 1, text)
                             else stringResource(R.string.designsystem_queue_item_note, index + 1, text, said)
                         Row(
-                            Modifier.fillMaxWidth().clip(RoundedCornerShape(Tokens.Radius.card)).background(palette.sunken)
+                            Modifier.fillMaxWidth().heightIn(min = JChipTokens.height).clip(RoundedCornerShape(Tokens.Radius.card)).background(palette.sunken)
                                 .clickable(enabled = active, role = Role.Button, onClickLabel = itemActions) { onItem(index) }
                                 .semantics(mergeDescendants = true) { contentDescription = spoken }
-                                .padding(horizontal = Tokens.Space.m, vertical = Tokens.Space.s),
+                                .padding(horizontal = Tokens.Space.m, vertical = Tokens.Space.sm),
                             verticalAlignment = Alignment.Top, horizontalArrangement = Arrangement.spacedBy(Tokens.Space.s),
                         ) {
                             QueueNumber(index + 1)
@@ -194,34 +196,35 @@ private fun PlainQueueStrip(
     val style = PersonaTheme.style
     val shape = RoundedCornerShape(if (style == AppStyle.Brief) 20.dp.corner else 8.dp.corner)
     val outer = when (style) {
-        AppStyle.Brief -> Modifier.padding(horizontal = 12.dp.dense, vertical = 4.dp.dense).clip(shape).background(palette.surface)
-        else -> Modifier.padding(horizontal = 10.dp.dense, vertical = 4.dp.dense).clip(shape).background(palette.surface).border(1.dp, palette.line, shape)
+        AppStyle.Brief -> Modifier.padding(horizontal = Tokens.Space.m, vertical = Tokens.Space.xxs).clip(shape).background(palette.surface)
+        else -> Modifier.padding(horizontal = 10.dp.dense).padding(top = Tokens.Space.xxs, bottom = Tokens.Space.xs)
+            .clip(shape).background(palette.surface).border(1.dp, palette.line, shape)
     }
     val active = enabled && !busy
-    Column(modifier.fillMaxWidth().then(outer).padding(top = 10.dp.dense, bottom = 4.dp.dense)) {
-        Row(Modifier.fillMaxWidth().padding(horizontal = 14.dp.dense), verticalAlignment = Alignment.CenterVertically) {
+    Column(modifier.fillMaxWidth().then(outer).padding(top = Tokens.Space.sm, bottom = Tokens.Space.xxs)) {
+        Row(Modifier.fillMaxWidth().padding(horizontal = Tokens.Space.m), verticalAlignment = Alignment.CenterVertically) {
             JIcon(PhIcons.Tray, null, size = 16.dp, tint = palette.ink2)
-            Spacer(Modifier.width(8.dp.dense))
+            Spacer(Modifier.width(Tokens.Space.s))
             Text(title, style = PersonaTheme.type.caption, color = palette.ink2, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
             if (busy) JSpinner(Modifier.size(14.dp), stroke = 1.8.dp)
         }
-        Column(Modifier.fillMaxWidth().heightIn(max = 184.dp).verticalScroll(rememberScrollState()).padding(top = 4.dp.dense)) {
+        Column(Modifier.fillMaxWidth().heightIn(max = 184.dp).verticalScroll(rememberScrollState()).padding(top = Tokens.Space.xxs)) {
             val itemActions = stringResource(R.string.designsystem_queue_actions)
             items.forEachIndexed { index, text ->
                 val note = notes.getOrNull(index)
                 val spoken = if (note == null) stringResource(R.string.designsystem_queue_item, index + 1, text)
                     else stringResource(R.string.designsystem_queue_item_note, index + 1, text, note)
-                if (index > 0) JDivider(Modifier.padding(start = 50.dp.dense, end = 14.dp.dense))
+                if (index > 0) JDivider(Modifier.padding(start = Tokens.Space.m + Tokens.Size.icon + Tokens.Space.s, end = Tokens.Space.m))
                 Row(
-                    Modifier.fillMaxWidth().heightIn(min = 44.dp.row)
+                    Modifier.fillMaxWidth().heightIn(min = Tokens.Size.slimBar)
                         .clickable(enabled = active, role = Role.Button, onClickLabel = itemActions) { onItem(index) }
                         .semantics(mergeDescendants = true) { contentDescription = spoken }
-                        .padding(horizontal = 14.dp.dense, vertical = 8.dp.dense),
-                    verticalAlignment = Alignment.Top,
+                        .padding(horizontal = Tokens.Space.m, vertical = Tokens.Space.sm),
+                    verticalAlignment = Alignment.CenterVertically,
                 ) {
                     QueueNumber(index + 1)
-                    Spacer(Modifier.width(12.dp.dense))
-                    val words = Modifier.weight(1f).padding(top = 1.dp.dense)
+                    Spacer(Modifier.width(Tokens.Space.s))
+                    val words = Modifier.weight(1f)
                     if (note == null) Text(text, style = PersonaTheme.type.callout, color = palette.ink, maxLines = 2, overflow = TextOverflow.Ellipsis,
                         modifier = words)
                     else Column(words, verticalArrangement = Arrangement.spacedBy(Tokens.Space.xxs)) {
@@ -229,8 +232,8 @@ private fun PlainQueueStrip(
                         Text(note, style = PersonaTheme.type.caption, color = palette.ink2)
                     }
                     if (enabled) {
-                        Spacer(Modifier.width(8.dp.dense))
-                        JIcon(PhIcons.DotsThree, null, size = 18.dp, tint = palette.ink3, modifier = Modifier.padding(top = 2.dp.dense))
+                        Spacer(Modifier.width(Tokens.Space.s))
+                        JIcon(PhIcons.DotsThree, null, size = 18.dp, tint = palette.ink3)
                     }
                 }
             }
@@ -255,11 +258,11 @@ private fun RelayedBlock(
 ) {
     if (relayedItems.isEmpty() || relayedSummary == null) return
     val palette = PersonaTheme.palette
-    Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.sm)) {
+    Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.xs)) {
         Row(
-            Modifier.fillMaxWidth().clip(RoundedCornerShape(Tokens.Radius.card)).clickable(role = Role.Button) { onToggle(!expanded) }
+            Modifier.fillMaxWidth().heightIn(min = JChipTokens.height).clip(RoundedCornerShape(Tokens.Radius.card)).clickable(role = Role.Button) { onToggle(!expanded) }
                 .semantics { contentDescription = relayedSummary }
-                .padding(horizontal = Tokens.Space.m, vertical = Tokens.Space.s),
+                .padding(horizontal = Tokens.Space.m, vertical = Tokens.Space.sm),
             verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Tokens.Space.s),
         ) {
             JIcon(PhIcons.Tray, null, size = Tokens.Space.l, tint = palette.ink2, decorative = true)
@@ -272,11 +275,11 @@ private fun RelayedBlock(
                 val index = ownCount + pos
                 val spoken = stringResource(R.string.designsystem_queue_item, index + 1, text)
                 Row(
-                    Modifier.fillMaxWidth().clip(RoundedCornerShape(Tokens.Radius.card)).background(palette.sunken)
+                    Modifier.fillMaxWidth().heightIn(min = JChipTokens.height).clip(RoundedCornerShape(Tokens.Radius.card)).background(palette.sunken)
                         .clickable(role = Role.Button) { onRelayedItem(index) }
                         .semantics(mergeDescendants = true) { contentDescription = spoken }
-                        .padding(horizontal = Tokens.Space.m, vertical = Tokens.Space.s),
-                    verticalAlignment = Alignment.Top, horizontalArrangement = Arrangement.spacedBy(Tokens.Space.s),
+                        .padding(horizontal = Tokens.Space.m, vertical = Tokens.Space.sm),
+                    verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Tokens.Space.s),
                 ) {
                     QueueNumber(index + 1)
                     Text(text, style = PersonaTheme.type.callout, color = palette.ink, maxLines = 2, overflow = TextOverflow.Ellipsis,

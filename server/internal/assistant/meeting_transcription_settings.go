@@ -169,11 +169,9 @@ func (s *Service) transcriptionReadinessChanged() {
 	c.stale = true
 	c.wakeLocked()
 	c.mu.Unlock()
-	s.hubTr.wg.Add(1)
-	go func() { // never under the registry's callback
-		defer s.hubTr.wg.Done()
-		s.transcriptionJobsCheck(s.runCtx())
-	}()
+	if s.rec != nil {
+		s.rec.TranscriptionChanged() // never under the registry's callback
+	}
 }
 
 // transcriptionReadinessReset: the transcribers changed (SetExtensions): no answer stands until one is probed.
@@ -197,7 +195,9 @@ func (s *Service) transcriptionSettingsChanged(ctx context.Context) {
 		c.resetLocked(choice)
 	}
 	c.mu.Unlock()
-	s.transcriptionJobsCheck(ctx)
+	if s.rec != nil {
+		s.rec.TranscriptionJobsCheck(ctx)
+	}
 }
 
 // resetLocked drops the answer: none stands for choice until a probe publishes one (an older probe never does).

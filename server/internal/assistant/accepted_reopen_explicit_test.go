@@ -67,7 +67,7 @@ func longTurn(s *Service, f *fakeHub, status, text string) {
 	ctx := context.Background()
 	longRow(f, status, text)
 	if status == proto.StatusWorking {
-		s.taskWorking(ctx, "box", longAgent)
+		s.taskWorking(ctx, "box", longAgent, startRow{})
 	} else {
 		s.taskTurnEnded(ctx, "box", longAgent)
 	}
@@ -109,24 +109,25 @@ func acceptedPlanTask(t *testing.T, st Store) (*Service, *fakeHub, Todo) {
 	return s, f, accepted
 }
 
-// acceptedByBackground is plannedTask with the background supervisor on (as by default), its agent's work done and
-// accepted by the background supervisor bg for the main conversation (the ledger still names conv1), the clock past
-// the acceptance.
+// acceptedByBackground is plannedTask with a real pre-#5732 notice delivered to an existing legacy background
+// supervisor bg. That supervisor accepts the old task for the main conversation (the ledger still names conv1), and
+// the clock moves past the acceptance. No replacement background conversation is created.
 func acceptedByBackground(t *testing.T) (s *Service, f *fakeHub, accepted Todo, bg string) {
 	t.Helper()
 	s, f, todo := plannedTask(t, nil)
-	s.noBackground = false // on, as by default (newBackgroundService)
-	f.mu.Lock()
-	f.made = 100
-	f.mu.Unlock()
+	s.noBackground = false
+	bg = "bg1"
+	f.known[bg] = true
+	f.setSessions("server",
+		proto.Session{SessionID: "conv1", MachineID: "server", Assistant: true, Status: proto.StatusIdle},
+		proto.Session{SessionID: bg, MachineID: "server", Assistant: true, Status: proto.StatusIdle})
+	setSettings(t, s, func(v *Settings) { v.BackgroundSupervisor, v.BackgroundSupervisorMachineID = bg, "server" })
 	longTurn(s, f, proto.StatusWorking, "")
 	longTurn(s, f, proto.StatusDone, "Fixed it: PR https://github.com/o/r/pull/77 is merged")
-	bg = backgroundID(t, s)
-	listBackground(t, s, f, bg)
-	waitFor(t, "the background supervisor's review message", func() bool { return len(f.noticesTo(bg)) == 1 })
+	tellLegacyBackground(t, s, f, todo.ID, bg)
 	if _, err := runJSON(t, s, bg, "task_review", map[string]any{"todo_id": todo.ID, "verdict": reviewAccepted,
 		"note": "Checked the PR and the screenshots", "checks": completeReviewChecks(todoNow(s, todo.ID))}); err != nil {
-		t.Fatalf("the background supervisor's accept: %v", err)
+		t.Fatalf("the legacy background supervisor's accept: %v", err)
 	}
 	settleService(t, s)
 	accepted = todoNow(s, todo.ID)
@@ -232,9 +233,9 @@ func sessionSends(f *fakeHub) int {
 	return n
 }
 
-// The background supervisor accepts the main conversation's plan-started task (its ledger keeps the main conversation
-// as the supervisor), then sends its agent more: the task opens again, and the work it asked for is judged and waits
-// for its review again. Another conversation's send before it leaves the task closed.
+// The legacy background supervisor accepts the main conversation's old plan-started task (its ledger keeps the main
+// conversation as the supervisor), then sends its agent more: the task opens again, and the work it asked for is
+// judged and waits for main's review under #5732. Another conversation's send before it leaves the task closed.
 func TestBackgroundSupervisorReopensATaskItAccepted(t *testing.T) {
 	for _, tool := range []string{"agent_send", "agent_interrupt"} {
 		t.Run(tool, func(t *testing.T) {
@@ -249,7 +250,7 @@ func TestBackgroundSupervisorReopensATaskItAccepted(t *testing.T) {
 			longTurn(s, f, proto.StatusDone, "The other dashboard looks fine")
 			closedUnchanged(t, s, accepted)
 
-			told := len(f.noticesTo(bg))
+			told := len(f.noticesTo("conv1"))
 			if err := sendTo(t, s, tool, bg, "Add the landscape case to the tests"); err != nil {
 				t.Fatalf("%s from the background supervisor: %v", tool, err)
 			}
@@ -259,7 +260,7 @@ func TestBackgroundSupervisorReopensATaskItAccepted(t *testing.T) {
 			}
 			longTurn(s, f, proto.StatusDone, "Landscape covered: PR https://github.com/o/r/pull/78 is merged")
 			waitFor(t, "the review again", func() bool { return todoNow(s, todo.ID).Supervision.State == reviewPending })
-			waitFor(t, "the background supervisor's next review message", func() bool { return len(f.noticesTo(bg)) > told })
+			waitFor(t, "main's next review message", func() bool { return len(f.noticesTo("conv1")) > told })
 		})
 	}
 }
@@ -874,9 +875,9 @@ func TestARefusedSendIsForgottenWhenItsCleanupWriteFails(t *testing.T) {
 }
 
 // A turn of the agent starts while a send of more for its accepted task is out, and is held for the send's answer;
-// before the turn ends, the agent goes to another task, an open one. The turn's end is that task's (taken and judged:
-// done), not put off for the answer, and nothing stays kept for the accepted task; the answer, unknown, leaves the
-// accepted task closed.
+// before the turn ends, the agent goes to another task, a legacy open one. The turn's end is that task's (taken and
+// judged: delivered, waiting for main's review rather than automatically closed), not put off for the answer, and
+// nothing stays kept for the accepted task; the answer, unknown, leaves the accepted task closed.
 func TestAHeldTurnOfAnAgentThatWentToAnotherTaskIsThatTasks(t *testing.T) {
 	ctx := context.Background()
 	database := taskRecoveryDatabase(t)
@@ -903,8 +904,8 @@ func TestAHeldTurnOfAnAgentThatWentToAnotherTaskIsThatTasks(t *testing.T) {
 	}
 	note.sent(ctx, context.DeadlineExceeded)
 	closedUnchanged(t, s, accepted)
-	if got := todoNow(s, other.ID); got.DoneAt == nil || got.DoneBy != db.DoneByAuto {
-		t.Fatalf("the other task's turn end was not judged: %+v", got)
+	if got := todoNow(s, other.ID); got.DoneAt != nil || got.Supervision == nil || got.Supervision.State != reviewPending || got.Check == nil {
+		t.Fatalf("the other task's turn end was not judged for main review: %+v", got)
 	}
 }
 

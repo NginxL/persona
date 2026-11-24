@@ -7,7 +7,7 @@ import UIKit
 /// the composer has left, else as one PDF with a page per scanned page.
 @MainActor struct DocumentScannerTests {
     @Test func pagesThatFitGoAsPhotos() {
-        #expect(DocumentScanner.delivery(pages: 1, room: MessagePhotos.limit) == .photos)
+        #expect(DocumentScanner.delivery(pages: 1, room: ImageLimits.standard.perMessage) == .photos)
         #expect(DocumentScanner.delivery(pages: 4, room: 4) == .photos)
         #expect(DocumentScanner.delivery(pages: 2, room: 3) == .photos)
     }

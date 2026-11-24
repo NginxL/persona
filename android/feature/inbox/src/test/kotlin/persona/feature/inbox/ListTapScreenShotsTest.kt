@@ -17,8 +17,10 @@ import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
+import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasAnyDescendant
 import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.isDialog
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.longClick
 import androidx.compose.ui.test.onAllNodesWithText
@@ -49,6 +51,7 @@ import persona.core.domain.inbox.InboxItem
 import persona.core.navigation.AppTab
 import persona.core.navigation.Navigator
 import java.io.File
+import persona.core.inbox.*
 
 /**
  * The real Inbox (#9600), Glass, phone and foldable. One bulk Mark as done, start / mid / end.
@@ -80,8 +83,7 @@ class ListTapScreenShotsTest {
                 width = formWidth
             }
             rule.waitForIdle()
-            // Opens on Needs you (#9053). All is the stacked page these shots were taken on
-            // (InboxView.swift:828-830). A choice swaps at once (choose, :969).
+            // The section capsule uses Tab; the source/kind strip and any filter sheet do not (#13243).
             sectionChip("All").performClick()
             rule.waitForIdle()
             rule.onNodeWithText("Weekly report").performTouchInput { longClick() }
@@ -111,6 +113,9 @@ class ListTapScreenShotsTest {
                 // The title appears first and shifts the list at once. The removal spring is the move after that.
                 if (afterTitle == null && abs(y - start) > 4f) afterTitle = y
                 val removal = afterTitle?.let { abs(y - it) > 4f } == true
+                // Idle rows hold no GraphicsLayer until armed; mirror Choreographer's per-frame draw on the armed
+                // frame before removal so Robolectric populates the newly allocated fadeOut GraphicsLayer.
+                if (afterTitle != null && !removal) rule.onNodeWithTag("shot").captureToImage()
                 if (!savedMid && removal) {
                     save("$stem-mid")
                     savedMid = true
@@ -215,18 +220,20 @@ class ListTapScreenShotsTest {
     }
 
     /**
-     * The section bar chip (Glass [JChip], a checkbox). The section header repeats "Needs you" or "FYI" as a button.
+     * The Glass section capsule is a Tab; the source/kind strip and dialog choices are not (AgentFilterCapsule).
      */
+    private fun sectionChips(label: String) = rule.onAllNodes(
+        SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.Tab) and hasAnyDescendant(hasText(label)) and !hasAnyAncestor(isDialog()),
+        useUnmergedTree = true,
+    ).fetchSemanticsNodes()
+
     private fun sectionChip(label: String) = rule.onNode(
-        SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.Checkbox) and hasAnyDescendant(hasText(label)),
+        SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.Tab) and hasAnyDescendant(hasText(label)) and !hasAnyAncestor(isDialog()),
         useUnmergedTree = true,
     )
 
     private fun assertChip(label: String) {
-        val nodes = rule.onAllNodes(
-            SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.Checkbox) and hasAnyDescendant(hasText(label)),
-            useUnmergedTree = true,
-        ).fetchSemanticsNodes()
+        val nodes = sectionChips(label)
         val onScreen = nodes.filter { node ->
             val bounds = node.boundsInRoot
             bounds.width > 0f && bounds.height > 0f && bounds.bottom > 0f && bounds.top < 900f

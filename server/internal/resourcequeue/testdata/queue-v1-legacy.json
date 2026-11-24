@@ -1,0 +1,74 @@
+{
+  "v": 1,
+  "slots": 3,
+  "now": "2026-11-22T13:43:00Z",
+  "running": [
+    {
+      "ticket": "",
+      "slot": 1,
+      "project": "example",
+      "ref": "main",
+      "commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "tag": "",
+      "groups": [
+        "web"
+      ],
+      "started_at": "2026-11-22T13:30:00Z",
+      "run": "example-build-one"
+    },
+    {
+      "ticket": "",
+      "slot": 2,
+      "project": "example",
+      "ref": "topic",
+      "commit": "",
+      "tag": "",
+      "groups": [
+        "web"
+      ],
+      "started_at": "2026-11-22T13:31:00Z",
+      "run": "example-build-two"
+    },
+    {
+      "ticket": "",
+      "slot": 3,
+      "project": "example",
+      "ref": "topic",
+      "commit": "",
+      "tag": "",
+      "groups": [
+        "web"
+      ],
+      "started_at": "2026-11-22T13:32:00Z",
+      "run": "example-build-three"
+    }
+  ],
+  "waiting": [
+    {
+      "ticket": "000000000034",
+      "position": 1,
+      "project": "example",
+      "ref": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "tag": "",
+      "groups": [
+        "web"
+      ],
+      "enqueued_at": "2026-11-22T13:40:00Z",
+      "run": "example-build-four"
+    },
+    {
+      "ticket": "000000000035",
+      "position": 2,
+      "project": "example",
+      "ref": "",
+      "commit": "",
+      "tag": "",
+      "groups": [
+        "all"
+      ],
+      "enqueued_at": "2026-11-22T13:41:00Z",
+      "run": "example-bundle-five"
+    }
+  ]
+}

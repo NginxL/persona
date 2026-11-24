@@ -99,6 +99,7 @@ export function MessageActions({
   onDelete,
   usage,
   usageMs,
+  ttftMs,
   translationSource,
   starSource,
   children,
@@ -122,9 +123,10 @@ export function MessageActions({
   photos?: string[];
   /** A message only on this device (a failed send): "Delete" ends its menus (#4626). */
   onDelete?: () => void;
-  /** With `bar`: what the exchange used (lib/turn-usage.ts usageKey) and its work time, after the time (#5426). */
+  /** With `bar`: what the exchange used (lib/turn-usage.ts usageKey), its work time, and streaming TTFT (ms) (#5426, #13054). */
   usage?: string;
   usageMs?: number;
+  ttftMs?: number;
   /** A hub-paged reply must load all its words before translation, without changing its in-flight identity. */
   translationSource?: ReplyTranslationSource;
   /** The persisted source item, separate from the Forward / Rewind identifiers. */
@@ -243,7 +245,7 @@ export function MessageActions({
       {canTranslate && translation.error && <p role="alert" className="mt-1 text-xs text-red">{translation.error}</p>}
       {picking ? null : bar ? (
         <Suspense fallback={<div data-reply-bar="loading" className="mt-1.5 hidden h-6 [@media(hover:hover)]:block" />}>
-          <ReplyBar text={text} ts={ts} pinned={latest} itemId={itemId} more={actions} star={starAvailable ? starSource : undefined} loadStar={translationSource?.load} usage={usage} usageMs={usageMs} persona={chat?.assistant} translation={canTranslate ? translation : undefined} />
+          <ReplyBar text={text} ts={ts} pinned={latest} itemId={itemId} more={actions} star={starAvailable ? starSource : undefined} loadStar={translationSource?.load} usage={usage} usageMs={usageMs} ttftMs={ttftMs} persona={chat?.assistant} translation={canTranslate ? translation : undefined} />
         </Suspense>
       ) : (side || corner) && (
       <div
@@ -312,7 +314,7 @@ export function MessageActions({
           {latest && ts && <span data-latest-time className="-ml-3 text-[12px] whitespace-nowrap text-ink-3 tabular-nums">{clock(ts)}</span>}
           {usage && (
             <Suspense fallback={null}>
-              <TurnUsage usage={usage} ms={usageMs} persona={chat?.assistant} touch />
+              <TurnUsage usage={usage} ms={usageMs} ttftMs={ttftMs} persona={chat?.assistant} touch />
             </Suspense>
           )}
         </div>

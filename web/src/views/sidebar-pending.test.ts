@@ -79,4 +79,16 @@ describe("sidebarPending", () => {
     expect(rows).toHaveLength(1);
     expect(rows[0].cards.map((ix) => ix.id)).toEqual(["newer", "older"]);
   });
+
+  it("leaves out a card the task's supervisor holds and its agent waiting only on it; keeps an unheld one", () => {
+    const held: Interaction = { id: "held", machine_id: "one", session_id: "session", kind: "screen", delegating: true };
+    expect(sidebarPending([session("one")], [held], {})).toEqual([]);
+    const mixed = sidebarPending([session("one")], [held, card("mine", "one")], {});
+    expect(mixed.map((r) => r.cards.map((ix) => ix.id))).toEqual([["mine"]]);
+    const plain = sidebarPending([session("one")], [{ ...held, delegating: undefined }], {});
+    expect(plain.map((r) => r.cards.map((ix) => ix.id))).toEqual([["held"]]);
+    // a question the assistant is still looking at stays as before
+    const asking = sidebarPending([session("one")], [{ ...held, kind: "question" }], {});
+    expect(asking.map((r) => r.cards.map((ix) => ix.id))).toEqual([["held"]]);
+  });
 });

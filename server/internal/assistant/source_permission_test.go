@@ -20,6 +20,9 @@ type sourcePermissionExtension struct {
 	got proto.SourcePermission
 }
 
+// ConnectorTool: none of its tools is a connector's.
+func (e *sourcePermissionExtension) ConnectorTool(string) bool { return false }
+
 func (e *sourcePermissionExtension) CallTool(ctx context.Context, machine, session, name string, args json.RawMessage, assistant bool) (proto.ToolResult, bool) {
 	e.got = devicewire.SourcePermissionFrom(ctx)
 	return proto.TextResult("captured", false), true

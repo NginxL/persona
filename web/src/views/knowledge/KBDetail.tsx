@@ -5,16 +5,9 @@ import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore
 import { api, ApiError, credentialOwner, enc, errorText, getToken, isAbort, subscribeCredentialOwner } from "../../lib/api";
 import { MANAGER_HEADER, shownManager, useChosenManager, useKnownDefault } from "../../lib/manager-choice";
 import { ConfirmedFacts } from "./ConfirmedFacts";
-import { RecordingMinutes } from "./RecordingMinutes";
-import { RecordingDayRecap } from "./RecordingDayRecap";
-import { RecordingAsks } from "./RecordingAsks";
-import { MeetingPrivate, RecordingConversation, useRecordingMeeting } from "./RecordingConversation";
-import { RecordingPhotos } from "./RecordingPhotos";
-import { RecordingLiveView } from "./RecordingLiveView";
-import { namedBy, RecordingRenameDialog } from "./RecordingRename";
-import { RecordingHandoffDialog, RecordingHandoffRow, useRecordingHandoff, type MeetingHandoff } from "./RecordingHandoff";
-import { hasMaterial, meetingRunning } from "../../lib/meeting-thread";
-import { scrollBehavior } from "../../ui/stream/motion";
+// A meeting's and an all-day recording's own sections come from the recording module through the `kb.detail` slot.
+import { ModuleKBDetail, useKBKindShown } from "../../core/ModuleKBDetail";
+import type { ModuleKBDetailParts } from "../../core/module-host";
 import { Relationships } from "./Relationships";
 import { TopicPoints } from "./TopicPoints";
 import { ProjectLessons, projectLessonsDeps } from "./ProjectLessons";
@@ -35,22 +28,18 @@ import {
   parseRecent,
   profile,
   projectInfo,
-  recordingView,
   shortWhen,
   statusLabel,
   timeline,
-  transcriptLineId,
   type KBDetailResponse,
   type KBEntry,
   type KBMatch,
   type KBMomentRef,
-  type RecordingView,
 } from "../../lib/kb";
 import { machineWithHub } from "../../lib/mesh";
 import { openPanel } from "../../lib/panel";
-import { href, onLinkClick, type Route } from "../../lib/router";
+import { href, onLinkClick } from "../../lib/router";
 import { openedFromHere } from "../../lib/handoff";
-import { conversationRoute } from "../../lib/inbox";
 import { getState, onHubEvent, useStore } from "../../lib/store";
 import type { Session } from "../../lib/types";
 import { Button, Collapse, copyText, cx, IconButton, Loading, StatePill, toast } from "../../ui/atoms";
@@ -129,9 +118,6 @@ function OwnedEntryDetail({ kind, id, query, reloadKey, onToggleSidebar, onBack,
   const [reloadError, setReloadError] = useState("");
   const [retry, setRetry] = useState(0);
   const [editing, setEditing] = useState(false);
-  const [renaming, setRenaming] = useState(false);
-  // Hand to Agent (#8852): open, with the failed hand-off tried again when it came from its row.
-  const [handing, setHanding] = useState<{ again?: MeetingHandoff } | null>(null);
   const [asking, setAsking] = useState(false);
   const [allLog, setAllLog] = useState(false);
   const [allMatches, setAllMatches] = useState(false);
@@ -140,21 +126,8 @@ function OwnedEntryDetail({ kind, id, query, reloadKey, onToggleSidebar, onBack,
   const [day, setDay] = useState<{ day: string; focus?: number; query?: string } | null>(null);
   const [moment, setMoment] = useState<KBMomentRef | null>(null);
   const scroller = useRef<HTMLDivElement>(null);
-  const [highlighted, setHighlighted] = useState("");
-  const highlightTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-  useEffect(() => () => clearTimeout(highlightTimer.current), []);
-
-  const jumpToTranscript = (lineId: string) => {
-    const line = document.getElementById(lineId);
-    const page = scroller.current;
-    if (!line || !page?.contains(line)) return;
-    // Only move the detail's scroller, not the Knowledge list or outer app shell.
-    page.scrollTo({ top: page.scrollTop + line.getBoundingClientRect().top - page.getBoundingClientRect().top - page.clientHeight / 3, behavior: scrollBehavior() });
-    line.focus({ preventScroll: true });
-    clearTimeout(highlightTimer.current);
-    setHighlighted(lineId);
-    highlightTimer.current = setTimeout(() => setHighlighted(""), 2000);
-  };
+  // An entry of a kind only a module draws (a recording) is not there while that module is off.
+  const shown = useKBKindShown(kind);
 
   const load = useCallback(async (signal?: AbortSignal) => {
     const version = ++request.current;
@@ -215,20 +188,7 @@ function OwnedEntryDetail({ kind, id, query, reloadKey, onToggleSidebar, onBack,
   // A recording that stands for an imported meeting too (#8872): its own notes there, one tap away.
   const imported = importedMeetingOf(d);
   const importedBrand = imported ? connectorBrand(imported.source ?? "") : undefined;
-  const rec = d ? recordingView(d.kind, d.meta, d.segments) : null;
-  // The meeting conversation (#3862): its private mark, room and follow-up, on a hub that lists meeting_conversation;
-  // its photos too where the hub lists meeting_photos (after a change of the photos the minutes may have lost a deleted
-  // photo's items or be made again: read them, and again on the next poll, reconnect or event if that read fails).
-  const reloadDetail = useCallback(() => load(), [load]);
-  const meeting = useRecordingMeeting(d, rec, auth, current, manager, reloadDetail);
-  // Hand to Agent (#8852): a meeting or note that is over and has something to hand, for someone with an Agent to take
-  // it; its latest hand-off shows at the top of the page whether or not another can be made now.
-  const handoff = useRecordingHandoff(d?.meta);
-  const canHand = !!d && !!rec && !rec.allDay && handoff.hasAgents && !meetingRunning(d.meta, meeting.room) && hasMaterial(d);
   const log = timeline(d?.log);
-  // A topic's summary is its points as Markdown (for search and Persona): the page shows the points themselves. An
-  // all-day recording's is its recap's summary, which the recap shows.
-  const prof = d?.kind === "topics" || (rec?.allDay && d?.recap) ? "" : profile(d?.summary, e.one_line, e.name);
   const dirs = dirsOf(d?.meta);
   const recent = d?.kind === "chats" ? parseRecent(d.recent) : [];
   const into = typeof d?.meta?.merged_into === "string" ? d.meta.merged_into : "";
@@ -237,7 +197,7 @@ function OwnedEntryDetail({ kind, id, query, reloadKey, onToggleSidebar, onBack,
   // An entry the hub has no such entry for: the shared empty state and the way back, as a page or a personal Agent's
   // conversation that isn't there (NotFound, AgentsView), not the entry's page with its id, disabled buttons and a red
   // box (web usability audit item 42). The header names the list it would be in.
-  if (gone && !d)
+  if ((gone && !d) || !shown)
     return (
       <div className="flex min-h-0 flex-1 flex-col">
         <header className="flex h-14 shrink-0 items-center gap-1.5 border-b border-line px-3 sm:px-4">
@@ -256,368 +216,307 @@ function OwnedEntryDetail({ kind, id, query, reloadKey, onToggleSidebar, onBack,
       </div>
     );
 
-  return (
-    <div className="flex min-h-0 flex-1 flex-col">
-      <header className="flex h-14 shrink-0 items-center gap-1.5 border-b border-line px-3 sm:px-4">
-        <IconButton icon="sidebar" label={t("knowledge-kbdetail.sidebar")} onClick={onToggleSidebar} className="lg:hidden" />
-        <IconButton icon="chevronLeft" label={t("knowledge-kbdetail.back")} onClick={onBack} className="@3xl:hidden" />
-        <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-ink-2">{kindTitle(kind)}</span>
-        <Button tone="secondary" onClick={() => setEditing(true)} disabled={!d}>
-          <KBIcon name="tag" size={14} stroke={2.1} />
-          {t("knowledge-kbdetail.tag")}
-        </Button>
-      </header>
+  // The page, with the parts a module adds for this kind (core/ModuleKBDetail.tsx): none for most kinds.
+  const page = (parts: ModuleKBDetailParts) => {
+    // A topic's summary is its points as Markdown (for search and Persona): the page shows the points themselves. A
+    // module that shows the summary itself (an all-day recording's recap) leaves it out too.
+    const prof = d?.kind === "topics" || parts.hideProfile ? "" : profile(d?.summary, e.one_line, e.name);
+    return (
+      <div className="flex min-h-0 flex-1 flex-col">
+        <header className="flex h-14 shrink-0 items-center gap-1.5 border-b border-line px-3 sm:px-4">
+          <IconButton icon="sidebar" label={t("knowledge-kbdetail.sidebar")} onClick={onToggleSidebar} className="lg:hidden" />
+          <IconButton icon="chevronLeft" label={t("knowledge-kbdetail.back")} onClick={onBack} className="@3xl:hidden" />
+          <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-ink-2">{kindTitle(kind)}</span>
+          <Button tone="secondary" onClick={() => setEditing(true)} disabled={!d}>
+            <KBIcon name="tag" size={14} stroke={2.1} />
+            {t("knowledge-kbdetail.tag")}
+          </Button>
+        </header>
 
-      <div ref={scroller} className="min-h-0 flex-1 overflow-y-auto">
-        <div className="mx-auto w-full max-w-[720px] px-4 pt-6 pb-20 sm:px-8">
-          {/* Header: what it is at a glance, and the way out (handing it to Persona). */}
-          <div>
-            <div className="flex items-center gap-3.5">
-              <Tile entry={e} size={48} />
-              <div className="min-w-0 flex-1">
-                <h1 className="line-clamp-3 text-[20px] font-semibold leading-snug tracking-tight text-ink">{e.name}</h1>
-                <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
-                  <Badges entry={e} status={status} asProject />
+        <div ref={scroller} className="min-h-0 flex-1 overflow-y-auto">
+          <div className="mx-auto w-full max-w-[720px] px-4 pt-6 pb-20 sm:px-8">
+            {/* Header: what it is at a glance, and the way out (handing it to Persona). */}
+            <div>
+              <div className="flex items-center gap-3.5">
+                <Tile entry={e} size={48} />
+                <div className="min-w-0 flex-1">
+                  <h1 className="line-clamp-3 text-[20px] font-semibold leading-snug tracking-tight text-ink">{e.name}</h1>
+                  <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+                    <Badges entry={e} status={status} asProject />
+                  </div>
                 </div>
               </div>
+              {e.one_line && <p className="mt-3.5 text-[14px] leading-relaxed text-ink">{e.one_line}</p>}
+              {e.tags && e.tags.length > 0 && (
+                <div className="mt-3 flex flex-wrap gap-1.5">
+                  {e.tags.map((t) => (
+                    <TonePill key={t}>#{t}</TonePill>
+                  ))}
+                </div>
+              )}
+              <div className="mt-4 flex flex-wrap gap-2">
+                <Button tone="accent" icon="spark" busy={asking} disabled={!d} onClick={ask} title={t("knowledge-kbdetail.ask_title")}>
+                  {t("knowledge-kbdetail.ask")}
+                </Button>
+                {parts.actions}
+                {kind === "projects" && (
+                  <Button
+                    tone="secondary"
+                    icon="plus"
+                    disabled={!d}
+                    onClick={() => openNewAgent(agentPreset(kind, e, d, getState().machines.filter((m) => m.online).map((m) => m.id)))}
+                    title={t("knowledge-kbdetail.new_agent_title")}
+                  >
+                    {t("knowledge-kbdetail.new_agent")}
+                  </Button>
+                )}
+              </div>
             </div>
-            {e.one_line && <p className="mt-3.5 text-[14px] leading-relaxed text-ink">{e.one_line}</p>}
-            {e.tags && e.tags.length > 0 && (
-              <div className="mt-3 flex flex-wrap gap-1.5">
-                {e.tags.map((t) => (
-                  <TonePill key={t}>#{t}</TonePill>
-                ))}
+
+            {!d && !error && (
+              <div className="py-12">
+                <Loading />
               </div>
             )}
-            <div className="mt-4 flex flex-wrap gap-2">
-              <Button tone="accent" icon="spark" busy={asking} disabled={!d} onClick={ask} title={t("knowledge-kbdetail.ask_title")}>
-                {t("knowledge-kbdetail.ask")}
-              </Button>
-              {/* A meeting or note (#8877): renamed here, kept over the phone's next upload. Not an all-day recording,
-                  named by its day. */}
-              {kind === "recordings" && d && !rec?.allDay && (
-                <Button tone="secondary" icon="pencil" onClick={() => setRenaming(true)}>
-                  {t("knowledge-kbdetail.rename")}
-                </Button>
-              )}
-              {canHand && (
-                <Button tone="secondary" icon="send" onClick={() => setHanding({})} testId="handoff-open">
-                  {t("knowledge-handoff.open_dialog")}
-                </Button>
-              )}
-              {kind === "projects" && (
-                <Button
-                  tone="secondary"
-                  icon="plus"
-                  disabled={!d}
-                  onClick={() => openNewAgent(agentPreset(kind, e, d, getState().machines.filter((m) => m.online).map((m) => m.id)))}
-                  title={t("knowledge-kbdetail.new_agent_title")}
-                >
-                  {t("knowledge-kbdetail.new_agent")}
-                </Button>
-              )}
-            </div>
-          </div>
+            {(d ? reloadError : error) && (
+              <div className="mt-6">
+                <ErrorBox text={d ? reloadError : error} onRetry={() => setRetry((x) => x + 1)} />
+              </div>
+            )}
 
-          {!d && !error && (
-            <div className="py-12">
-              <Loading />
-            </div>
-          )}
-          {(d ? reloadError : error) && (
-            <div className="mt-6">
-              <ErrorBox text={d ? reloadError : error} onRetry={() => setRetry((x) => x + 1)} />
-            </div>
-          )}
-
-          {d && (
-            <div className="mt-7 flex flex-col gap-6" style={{ animation: "fade-in 200ms ease-out both" }}>
-              {rec && handoff.latest && (
-                <RecordingHandoffRow
-                  handoff={handoff.latest}
-                  onRetry={canHand ? () => setHanding({ again: handoff.latest ?? undefined }) : undefined}
-                />
-              )}
-              {facts && (
-                <section>
-                  <Card>
-                    {facts.at && (
-                      <div className="flex items-center gap-3 px-4 py-2.5 text-[13px]">
-                        <span className="flex-1 text-ink-2">{facts.whenLabel}</span>
-                        <span className="whitespace-nowrap text-ink tabular-nums">{formatAt(facts.at)}</span>
-                      </div>
-                    )}
-                    {facts.url && (
-                      <button type="button" onClick={() => openPanel({ kind: "link", url: facts.url!, title: e.name })} className="flex w-full items-center gap-2 whitespace-nowrap px-4 py-2.5 text-left text-[13px] font-medium text-accent-ink hover:bg-hover">
-                        <Icon name="external" size={14} />
-                        {facts.openLabel}
-                      </button>
-                    )}
-                  </Card>
-                </section>
-              )}
-              {imported && (
-                <section>
-                  <Card>
-                    <button type="button" onClick={() => openPanel({ kind: "link", url: imported.url, title: importedNotesLabel(imported.source) })} className="flex w-full items-center gap-2 whitespace-nowrap px-4 py-2.5 text-left text-meta font-medium text-accent-ink hover:bg-hover">
-                      {importedBrand ? <BrandMark brand={importedBrand} size={16} fit="badge" /> : <Icon name="external" size={14} />}
-                      {importedNotesLabel(imported.source)}
-                    </button>
-                  </Card>
-                </section>
-              )}
-
-              {rec && <RecordingFacts rec={rec} roomMeeting={meeting.roomMeeting} />}
-              {rec && <MeetingPrivate meeting={meeting} />}
-              {/* An all-day recording (#4741) has a recap instead of minutes. */}
-              {rec && (rec.allDay ? <RecordingDayRecap
-                detail={d}
-                rec={rec}
-                auth={auth}
-                current={current}
-                refresh={load}
-                onSaved={onSaved}
-                onJump={jumpToTranscript}
-                onOpen={onOpen}
-              /> : <RecordingMinutes
-                detail={d}
-                rec={rec}
-                auth={auth}
-                current={current}
-                refresh={load}
-                onSaved={onSaved}
-                onJump={jumpToTranscript}
-                photos={meeting.photos}
-              />)}
-              {/* While a room meeting records (phase 2): its topics and newest live lines, above its conversation. */}
-              {rec && <RecordingLiveView rec={rec} meeting={meeting} />}
-              {rec && <RecordingConversation detail={d} rec={rec} meeting={meeting} auth={auth} current={current} manager={manager} />}
-              {/* A room meeting's questions are in its thread; a #2981 meeting's stay here. */}
-              {rec && !meeting.roomMeeting && <RecordingAsks
-                detail={d}
-                rec={rec}
-                auth={{ token, tokenOwner: owner, headers: { [MANAGER_HEADER]: manager } }}
-                current={current}
-              />}
-              {rec && <RecordingPhotos rec={rec} photos={meeting.photos} highlighted={highlighted} />}
-
-              {query && resp?.matches && (
-                <Matches
-                  matches={resp.matches}
-                  query={query}
-                  all={allMatches}
-                  onToggle={() => setAllMatches((x) => !x)}
-                  onOpenDay={d.kind === "chats" ? (m) => setDay({ day: m.day!, focus: m.n, query }) : undefined}
-                />
-              )}
-
-              {resp?.agents && resp.agents.length > 0 && <Agents agents={resp.agents} />}
-
-              {log.length > 0 && (
-                <section>
-                  <SectionTitle title={t("knowledge-kbdetail.timeline")} count={log.length} />
-                  <Card>
-                    <ol className="px-4 pt-1.5 pb-1">
-                      {(allLog ? log : log.slice(0, LOG_SHOWN)).map((l, i, shown) => {
-                        const first = i === 0;
-                        const last = i === shown.length - 1 && (allLog || log.length <= LOG_SHOWN);
-                        return (
-                          <li key={i} className="relative flex gap-3">
-                            {/* The rail joins the dots: none above the newest, none below the oldest shown. */}
-                            <span aria-hidden className="relative w-3 shrink-0">
-                              {!first && <span className="absolute top-0 left-1/2 h-4 w-px -translate-x-1/2 bg-line-strong" />}
-                              {!last && <span className="absolute top-4 bottom-0 left-1/2 w-px -translate-x-1/2 bg-line-strong" />}
-                              <span className={cx("absolute top-[13px] left-1/2 size-2 -translate-x-1/2 rounded-full", first ? "bg-accent" : "bg-ink-3 opacity-60")} />
-                            </span>
-                            <div className="min-w-0 flex-1 py-2">
-                              {(l.when || l.source) && (
-                                <div className={cx("flex min-w-0 items-baseline gap-2 text-[11.5px]", first ? "text-accent-ink" : "text-ink-3")}>
-                                  {l.when && <span className="shrink-0 font-semibold tabular-nums">{shortWhen(l.when)}</span>}
-                                  {l.source && <span className="truncate">{l.source}</span>}
-                                </div>
-                              )}
-                              <p className="mt-0.5 text-[13px] leading-relaxed text-ink">{l.text}</p>
-                            </div>
-                          </li>
-                        );
-                      })}
-                    </ol>
-                    {log.length > LOG_SHOWN && <MoreRow open={allLog} label={t("knowledge-kbdetail.show_all_entries", { count: log.length })} onClick={() => setAllLog((x) => !x)} />}
-                  </Card>
-                </section>
-              )}
-
-              {d.kind === "projects" && <ProjectLessons key={id} deps={lessonsDeps} current={current} />}
-
-              {isKind(kind) && <ConfirmedFacts
-                kind={kind}
-                id={id}
-                value={typeof d.meta?.pinned === "string" ? d.meta.pinned : ""}
-                auth={auth}
-                current={current}
-                refresh={load}
-                onSaved={onSaved}
-              />}
-
-              {d.kind === "topics" && <TopicPoints detail={d} onOpen={onOpen} />}
-
-              {prof && (
-                <section>
-                  <SectionTitle title={t("knowledge-kbdetail.profile")} />
-                  <Card>
-                    <div className="px-4 py-3.5">
-                      <Markdown text={prof} small />
-                    </div>
-                  </Card>
-                </section>
-              )}
-
-              {into && (
-                <section>
-                  <Card>
-                    <a
-                      href={href({ name: "kb", kind: "projects", id: into })}
-                      onClick={(ev) => onPlainClick(ev, () => onOpen({ kind: "projects", id: into, name: into, relevance: 0 }))}
-                      className="flex items-center gap-2 whitespace-nowrap px-4 py-2.5 text-[13px] font-medium text-accent-ink hover:bg-hover"
-                    >
-                      <Icon name="link" size={14} />
-                      {t("knowledge-kbdetail.merged")}
-                      <span className="flex-1" />
-                      <Icon name="chevronRight" size={12} stroke={2.2} className="text-ink-3" />
-                    </a>
-                  </Card>
-                  <p className="mt-1.5 px-1 text-[11.5px] leading-relaxed text-ink-3">{t("knowledge-kbdetail.merged_hint")}</p>
-                </section>
-              )}
-
-              {moments.length > 0 && (
-                <section>
-                  <SectionTitle title={t("knowledge-kbdetail.moments")} count={moments.length} />
-                  <Card>
-                    {(allMoments ? moments : moments.slice(0, LINKS_SHOWN)).map((m) => (
-                      <button key={m.id} type="button" onClick={() => setMoment(m)} className="block w-full px-4 py-2.5 text-left transition-colors hover:bg-hover">
-                        <span className="flex items-center gap-2 text-[11.5px]">
-                          <span className="truncate font-semibold text-ink">{m.author}</span>
-                          {ago(m.at) && <span className="shrink-0 text-ink-3">{ago(m.at)}</span>}
-                          <span className="flex-1" />
-                          {m.comments > 0 && (
-                            <span className="flex shrink-0 items-center gap-1 text-ink-3 tabular-nums" aria-label={t("knowledge-kbdetail.comments", { count: m.comments })}>
-                              <Icon name="chat" size={12} />
-                              {m.comments}
-                            </span>
-                          )}
-                        </span>
-                        {m.note && <span className="mt-0.5 block truncate text-[12.5px] font-medium text-accent-ink">{m.note}</span>}
-                        <span className="mt-0.5 line-clamp-2 text-[12.5px] leading-snug text-ink-2">{m.text}</span>
-                      </button>
-                    ))}
-                    {moments.length > LINKS_SHOWN && <MoreRow open={allMoments} label={t("knowledge-kbdetail.all_entries", { count: moments.length })} onClick={() => setAllMoments((x) => !x)} />}
-                  </Card>
-                </section>
-              )}
-
-              <Relationships
-                detail={d}
-                name={e.name}
-                auth={auth}
-                current={current}
-                onOpen={onOpen}
-                onRefreshed={(r) => {
-                  if (!current()) return;
-                  request.current++;
-                  remember(r.detail.links ?? []);
-                  setResp(r);
-                  setError("");
-                }}
-                onSaved={onSaved}
-              />
-
-              {dirs.length > 0 && <Dirs dirs={dirs} />}
-
-              {rec && <Transcript rec={rec} query={query} highlighted={highlighted} />}
-
-              {recent.length > 0 && (
-                <section>
-                  <Card>
-                    <button type="button" onClick={() => setShowRecent((x) => !x)} aria-expanded={showRecent} className="flex h-10 w-full items-center gap-2 px-4 text-left transition-colors hover:bg-hover">
-                      <Icon name="chat" size={14} className="text-ink-3" />
-                      <span className="flex-1 whitespace-nowrap text-[13px] text-ink">{t("knowledge-kbdetail.last_7_days")}</span>
-                      <span className="text-[12px] text-ink-3 tabular-nums">{recent.reduce((n, x) => n + x.messages.length, 0)}</span>
-                      <Icon name="chevronRight" size={12} stroke={2.2} className={cx("text-ink-3 transition-transform duration-200", showRecent && "rotate-90")} />
-                    </button>
-                    <Collapse open={showRecent}>
-                      {showRecent && (
-                        <div className="border-t border-line px-4 pt-2 pb-3">
-                          {recent.map((g, i) => (
-                            <div key={g.day ?? i} className="mt-2 first:mt-0">
-                              {g.day && (
-                                <div className="mb-1 flex items-center gap-2">
-                                  <span className="text-[11.5px] font-semibold text-ink-3">{dayTitle(g.day)}</span>
-                                  <span className="flex-1" />
-                                  <button type="button" onClick={() => setDay({ day: g.day! })} className="whitespace-nowrap rounded-[6px] px-1.5 py-0.5 text-[11.5px] font-medium text-accent-ink hover:bg-hover">
-                                    {t("knowledge-kbdetail.view_day")}
-                                  </button>
-                                </div>
-                              )}
-                              <div className="flex flex-col gap-2">
-                                {g.messages.map((m, j) => (
-                                  <MessageView key={j} m={m} />
-                                ))}
-                              </div>
-                            </div>
-                          ))}
+            {d && (
+              <div className="mt-7 flex flex-col gap-6" style={{ animation: "fade-in 200ms ease-out both" }}>
+                {parts.lead}
+                {facts && (
+                  <section>
+                    <Card>
+                      {facts.at && (
+                        <div className="flex items-center gap-3 px-4 py-2.5 text-[13px]">
+                          <span className="flex-1 text-ink-2">{facts.whenLabel}</span>
+                          <span className="whitespace-nowrap text-ink tabular-nums">{formatAt(facts.at)}</span>
                         </div>
                       )}
-                    </Collapse>
+                      {facts.url && (
+                        <button type="button" onClick={() => openPanel({ kind: "link", url: facts.url!, title: e.name })} className="flex w-full items-center gap-2 whitespace-nowrap px-4 py-2.5 text-left text-[13px] font-medium text-accent-ink hover:bg-hover">
+                          <Icon name="external" size={14} />
+                          {facts.openLabel}
+                        </button>
+                      )}
+                    </Card>
+                  </section>
+                )}
+                {imported && (
+                  <section>
+                    <Card>
+                      <button type="button" onClick={() => openPanel({ kind: "link", url: imported.url, title: importedNotesLabel(imported.source) })} className="flex w-full items-center gap-2 whitespace-nowrap px-4 py-2.5 text-left text-meta font-medium text-accent-ink hover:bg-hover">
+                        {importedBrand ? <BrandMark brand={importedBrand} size={16} fit="badge" /> : <Icon name="external" size={14} />}
+                        {importedNotesLabel(imported.source)}
+                      </button>
+                    </Card>
+                  </section>
+                )}
+
+                {parts.sections}
+
+                {query && resp?.matches && (
+                  <Matches
+                    matches={resp.matches}
+                    query={query}
+                    all={allMatches}
+                    onToggle={() => setAllMatches((x) => !x)}
+                    onOpenDay={d.kind === "chats" ? (m) => setDay({ day: m.day!, focus: m.n, query }) : undefined}
+                  />
+                )}
+
+                {resp?.agents && resp.agents.length > 0 && <Agents agents={resp.agents} />}
+
+                {log.length > 0 && (
+                  <section>
+                    <SectionTitle title={t("knowledge-kbdetail.timeline")} count={log.length} />
+                    <Card>
+                      <ol className="px-4 pt-1.5 pb-1">
+                        {(allLog ? log : log.slice(0, LOG_SHOWN)).map((l, i, shown) => {
+                          const first = i === 0;
+                          const last = i === shown.length - 1 && (allLog || log.length <= LOG_SHOWN);
+                          return (
+                            <li key={i} className="relative flex gap-3">
+                              {/* The rail joins the dots: none above the newest, none below the oldest shown. */}
+                              <span aria-hidden className="relative w-3 shrink-0">
+                                {!first && <span className="absolute top-0 left-1/2 h-4 w-px -translate-x-1/2 bg-line-strong" />}
+                                {!last && <span className="absolute top-4 bottom-0 left-1/2 w-px -translate-x-1/2 bg-line-strong" />}
+                                <span className={cx("absolute top-[13px] left-1/2 size-2 -translate-x-1/2 rounded-full", first ? "bg-accent" : "bg-ink-3 opacity-60")} />
+                              </span>
+                              <div className="min-w-0 flex-1 py-2">
+                                {(l.when || l.source) && (
+                                  <div className={cx("flex min-w-0 items-baseline gap-2 text-[11.5px]", first ? "text-accent-ink" : "text-ink-3")}>
+                                    {l.when && <span className="shrink-0 font-semibold tabular-nums">{shortWhen(l.when)}</span>}
+                                    {l.source && <span className="truncate">{l.source}</span>}
+                                  </div>
+                                )}
+                                <p className="mt-0.5 text-[13px] leading-relaxed text-ink">{l.text}</p>
+                              </div>
+                            </li>
+                          );
+                        })}
+                      </ol>
+                      {log.length > LOG_SHOWN && <MoreRow open={allLog} label={t("knowledge-kbdetail.show_all_entries", { count: log.length })} onClick={() => setAllLog((x) => !x)} />}
+                    </Card>
+                  </section>
+                )}
+
+                {d.kind === "projects" && <ProjectLessons key={id} deps={lessonsDeps} current={current} />}
+
+                {isKind(kind) && <ConfirmedFacts
+                  kind={kind}
+                  id={id}
+                  value={typeof d.meta?.pinned === "string" ? d.meta.pinned : ""}
+                  auth={auth}
+                  current={current}
+                  refresh={load}
+                  onSaved={onSaved}
+                />}
+
+                {d.kind === "topics" && <TopicPoints detail={d} onOpen={onOpen} />}
+
+                {prof && (
+                  <section>
+                    <SectionTitle title={t("knowledge-kbdetail.profile")} />
+                    <Card>
+                      <div className="px-4 py-3.5">
+                        <Markdown text={prof} small />
+                      </div>
+                    </Card>
+                  </section>
+                )}
+
+                {into && (
+                  <section>
+                    <Card>
+                      <a
+                        href={href({ name: "kb", kind: "projects", id: into })}
+                        onClick={(ev) => onPlainClick(ev, () => onOpen({ kind: "projects", id: into, name: into, relevance: 0 }))}
+                        className="flex items-center gap-2 whitespace-nowrap px-4 py-2.5 text-[13px] font-medium text-accent-ink hover:bg-hover"
+                      >
+                        <Icon name="link" size={14} />
+                        {t("knowledge-kbdetail.merged")}
+                        <span className="flex-1" />
+                        <Icon name="chevronRight" size={12} stroke={2.2} className="text-ink-3" />
+                      </a>
+                    </Card>
+                    <p className="mt-1.5 px-1 text-[11.5px] leading-relaxed text-ink-3">{t("knowledge-kbdetail.merged_hint")}</p>
+                  </section>
+                )}
+
+                {moments.length > 0 && (
+                  <section>
+                    <SectionTitle title={t("knowledge-kbdetail.moments")} count={moments.length} />
+                    <Card>
+                      {(allMoments ? moments : moments.slice(0, LINKS_SHOWN)).map((m) => (
+                        <button key={m.id} type="button" onClick={() => setMoment(m)} className="block w-full px-4 py-2.5 text-left transition-colors hover:bg-hover">
+                          <span className="flex items-center gap-2 text-[11.5px]">
+                            <span className="truncate font-semibold text-ink">{m.author}</span>
+                            {ago(m.at) && <span className="shrink-0 text-ink-3">{ago(m.at)}</span>}
+                            <span className="flex-1" />
+                            {m.comments > 0 && (
+                              <span className="flex shrink-0 items-center gap-1 text-ink-3 tabular-nums" aria-label={t("knowledge-kbdetail.comments", { count: m.comments })}>
+                                <Icon name="chat" size={12} />
+                                {m.comments}
+                              </span>
+                            )}
+                          </span>
+                          {m.note && <span className="mt-0.5 block truncate text-[12.5px] font-medium text-accent-ink">{m.note}</span>}
+                          <span className="mt-0.5 line-clamp-2 text-[12.5px] leading-snug text-ink-2">{m.text}</span>
+                        </button>
+                      ))}
+                      {moments.length > LINKS_SHOWN && <MoreRow open={allMoments} label={t("knowledge-kbdetail.all_entries", { count: moments.length })} onClick={() => setAllMoments((x) => !x)} />}
+                    </Card>
+                  </section>
+                )}
+
+                <Relationships
+                  detail={d}
+                  name={e.name}
+                  auth={auth}
+                  current={current}
+                  onOpen={onOpen}
+                  onRefreshed={(r) => {
+                    if (!current()) return;
+                    request.current++;
+                    remember(r.detail.links ?? []);
+                    setResp(r);
+                    setError("");
+                  }}
+                  onSaved={onSaved}
+                />
+
+                {dirs.length > 0 && <Dirs dirs={dirs} />}
+
+                {parts.tail}
+
+                {recent.length > 0 && (
+                  <section>
+                    <Card>
+                      <button type="button" onClick={() => setShowRecent((x) => !x)} aria-expanded={showRecent} className="flex h-10 w-full items-center gap-2 px-4 text-left transition-colors hover:bg-hover">
+                        <Icon name="chat" size={14} className="text-ink-3" />
+                        <span className="flex-1 whitespace-nowrap text-[13px] text-ink">{t("knowledge-kbdetail.last_7_days")}</span>
+                        <span className="text-[12px] text-ink-3 tabular-nums">{recent.reduce((n, x) => n + x.messages.length, 0)}</span>
+                        <Icon name="chevronRight" size={12} stroke={2.2} className={cx("text-ink-3 transition-transform duration-200", showRecent && "rotate-90")} />
+                      </button>
+                      <Collapse open={showRecent}>
+                        {showRecent && (
+                          <div className="border-t border-line px-4 pt-2 pb-3">
+                            {recent.map((g, i) => (
+                              <div key={g.day ?? i} className="mt-2 first:mt-0">
+                                {g.day && (
+                                  <div className="mb-1 flex items-center gap-2">
+                                    <span className="text-[11.5px] font-semibold text-ink-3">{dayTitle(g.day)}</span>
+                                    <span className="flex-1" />
+                                    <button type="button" onClick={() => setDay({ day: g.day! })} className="whitespace-nowrap rounded-[6px] px-1.5 py-0.5 text-[11.5px] font-medium text-accent-ink hover:bg-hover">
+                                      {t("knowledge-kbdetail.view_day")}
+                                    </button>
+                                  </div>
+                                )}
+                                <div className="flex flex-col gap-2">
+                                  {g.messages.map((m, j) => (
+                                    <MessageView key={j} m={m} />
+                                  ))}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </Collapse>
+                    </Card>
+                  </section>
+                )}
+
+                <section>
+                  <SectionTitle title={t("knowledge-kbdetail.directory")} />
+                  <Card>
+                    <div className="flex items-center gap-2 px-4 py-2">
+                      <span className="min-w-0 flex-1 font-mono text-[12px] break-all text-ink-2 select-all">{d.path}</span>
+                      <IconButton icon="copy" label={t("knowledge-kbdetail.copy_directory")} onClick={() => void copyText(d.path)} />
+                    </div>
                   </Card>
+                  <p className="mt-1.5 px-1 text-[11.5px] leading-relaxed text-ink-3">{t("knowledge-kbdetail.directory_hint")}</p>
                 </section>
-              )}
-
-              <section>
-                <SectionTitle title={t("knowledge-kbdetail.directory")} />
-                <Card>
-                  <div className="flex items-center gap-2 px-4 py-2">
-                    <span className="min-w-0 flex-1 font-mono text-[12px] break-all text-ink-2 select-all">{d.path}</span>
-                    <IconButton icon="copy" label={t("knowledge-kbdetail.copy_directory")} onClick={() => void copyText(d.path)} />
-                  </div>
-                </Card>
-                <p className="mt-1.5 px-1 text-[11.5px] leading-relaxed text-ink-3">{t("knowledge-kbdetail.directory_hint")}</p>
-              </section>
-            </div>
-          )}
+              </div>
+            )}
+          </div>
         </div>
-      </div>
 
-      {d && <TagEditor entry={e} auth={auth} open={editing} onClose={() => setEditing(false)} onSaved={onSaved} />}
-      {handing && d && rec && (
-        <RecordingHandoffDialog
-          id={d.id}
-          hasTranscript={!rec.trimmedAt && rec.lines.some((l) => !l.bookmark)}
-          auth={auth}
-          again={handing.again}
-          onClose={() => setHanding(null)}
-          onDone={(h) => {
-            handoff.setMade(h);
-            void load().catch(() => {});
-          }}
-        />
-      )}
-      {renaming && d && (
-        <RecordingRenameDialog
-          id={id}
-          name={e.name}
-          source={namedBy(d.meta)}
-          auth={auth}
-          onClose={() => setRenaming(false)}
-          onDone={() => {
-            void load().catch(() => {});
-            onSaved();
-          }}
-        />
-      )}
-      {d?.kind === "chats" && <DayDialog chat={d.id} chatName={e.name} auth={auth} day={day?.day ?? null} focus={day?.focus} query={day?.query} onClose={() => setDay(null)} />}
-      <MomentDialog moment={moment} auth={auth} onClose={() => setMoment(null)} />
-    </div>
+        {d && <TagEditor entry={e} auth={auth} open={editing} onClose={() => setEditing(false)} onSaved={onSaved} />}
+        {parts.dialogs}
+        {d?.kind === "chats" && <DayDialog chat={d.id} chatName={e.name} auth={auth} day={day?.day ?? null} focus={day?.focus} query={day?.query} onClose={() => setDay(null)} />}
+        <MomentDialog moment={moment} auth={auth} onClose={() => setMoment(null)} />
+      </div>
+    );
+  };
+
+  return (
+    <ModuleKBDetail kind={kind} id={id} query={query} detail={d} entry={e} auth={auth} current={current} manager={manager} reload={load} onSaved={onSaved} onOpen={onOpen} scroller={scroller}>
+      {page}
+    </ModuleKBDetail>
   );
 }
 
@@ -699,95 +598,6 @@ function Agents({ agents }: { agents: Session[] }) {
             </a>
           );
         })}
-      </Card>
-    </section>
-  );
-}
-
-/** A recording's when, how long, where it was made; and whether its transcript is still coming. A room meeting (#3862) is
- *  attended by its own room, which its Conversation section shows, not by a session named here. */
-function RecordingFacts({ rec, roomMeeting }: { rec: RecordingView; roomMeeting: boolean }) {
-  const rows: [string, string][] = [];
-  // An all-day recording says so, with its day (and part, past the first), and its times on its own clock.
-  if (rec.allDay) {
-    const date = rec.allDay.day ? dayTitle(rec.allDay.day) : "";
-    rows.push([t("knowledge-kbdetail.recording_all_day"), rec.allDay.part > 1 ? t("knowledge-kbdetail.recording_day_part", { date, part: rec.allDay.part }) : date]);
-  }
-  if (rec.startedAt) rows.push([t("knowledge-kbdetail.recording_started"), formatAt(rec.startedAt, undefined, rec.tz)]);
-  if (rec.duration) rows.push([t("knowledge-kbdetail.recording_duration"), rec.duration]);
-  rows.push([t("knowledge-kbdetail.recording_device"), rec.device]);
-  if (rec.language) rows.push([t("knowledge-kbdetail.recording_language"), rec.language]);
-  if (rec.attendance) rows.push([t("knowledge-kbdetail.recording_persona"), t(rec.attendance === "participant" ? "knowledge-kbdetail.recording_participant" : "knowledge-kbdetail.recording_listener")]);
-  return (
-    <section>
-      <Card>
-        {rows.map(([k, v]) => (
-          <div key={k} className="flex items-center gap-3 px-4 py-2.5 text-[13px]">
-            <span className="flex-1 text-ink-2">{k}</span>
-            <span className="whitespace-nowrap text-ink tabular-nums">{v}</span>
-          </div>
-        ))}
-        {rec.attendance && !roomMeeting && (
-          <div className="flex items-center gap-3 px-4 py-2.5 text-[13px]">
-            <span className="flex-1 whitespace-nowrap text-ink-2">{t("knowledge-kbdetail.recording_attending")}</span>
-            <AttendingSession session={rec.attendingSession} />
-          </div>
-        )}
-      </Card>
-      {rec.partial && <p className="mt-1.5 px-1 text-[11.5px] leading-relaxed text-ink-3">{t("knowledge-kbdetail.recording_partial")}</p>}
-    </section>
-  );
-}
-
-/** The session attending a meeting, opening its chat: a Persona conversation, an Agent, or the main chat when none was
- *  named (docs/assistant/meeting-minutes.md "Attendance fields"). */
-function AttendingSession({ session }: { session?: RecordingView["attendingSession"] }) {
-  const sessions = useStore((s) => s.sessions);
-  const assistant = useStore((s) => s.assistant);
-  const machines = useStore((s) => s.machines);
-  let to: Route | null = null;
-  let label = t("knowledge-kbdetail.recording_main_chat");
-  if (session) {
-    const { machineId: mid, sessionId: sid } = session;
-    const row = (sessions[mid] ?? []).find((x) => x.session_id === sid)
-      ?? (assistant?.machine_id === mid ? assistant.conversations.find((c) => c.session_id === sid) : undefined);
-    to = conversationRoute(mid, sid, sessions, assistant);
-    label = row ? sessionTitle(row) : t("knowledge-kbdetail.recording_attending_on", { machine: machineWithHub(mid, machines) });
-  } else if (assistant?.main) {
-    to = { name: "persona", sid: assistant.main };
-  }
-  if (!to) return <span className="min-w-0 truncate text-ink">{label}</span>;
-  const route = to;
-  return (
-    <a href={href(route)} onClick={(ev) => onLinkClick(ev, route)} title={label} className="min-w-0 truncate font-medium text-accent-ink hover:underline">
-      {label}
-    </a>
-  );
-}
-
-/** The whole transcript, a line per segment at its clock time; bookmarks inline. */
-function Transcript({ rec, query, highlighted }: { rec: RecordingView; query?: string; highlighted: string }) {
-  return (
-    <section>
-      <SectionTitle title={t("knowledge-kbdetail.transcript")} count={rec.lines.filter((l) => !l.bookmark).length} />
-      <Card>
-        {/* Trimmed: the bookmarks (in its metadata) are all that is left of it. */}
-        {(rec.trimmedAt || !rec.lines.length) && <p className="px-4 py-2.5 text-[12.5px] text-ink-3">{t(rec.trimmedAt ? "knowledge-kbdetail.transcript_expired" : "knowledge-kbdetail.transcript_empty")}</p>}
-        <ol className="px-4 py-1.5">
-          {rec.lines.map((l, i) => (
-            <li key={i} id={transcriptLineId(l.seconds, l.bookmark)} tabIndex={-1} className={cx("flex gap-3 rounded-control py-1.5 text-[13px] leading-relaxed transition-colors", highlighted === transcriptLineId(l.seconds, l.bookmark) && "bg-accent-tint")}>
-              <span className={cx("w-[60px] shrink-0 pt-px text-[11.5px] tabular-nums", l.bookmark ? "font-semibold text-accent-ink" : "text-ink-3")}>{l.clock}</span>
-              {l.bookmark ? (
-                <span className="min-w-0 flex-1 font-medium text-accent-ink">
-                  {t("knowledge-kbdetail.bookmark")}
-                  {l.text ? ` · ${l.text}` : ""}
-                </span>
-              ) : (
-                <span className="min-w-0 flex-1 text-ink select-text">{query ? <Marked text={l.text} query={query} /> : l.text}</span>
-              )}
-            </li>
-          ))}
-        </ol>
       </Card>
     </section>
   );

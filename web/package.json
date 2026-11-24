@@ -16,11 +16,13 @@
     "build": "tsc -b && vite build && vite build --config vite.public.config.ts",
     "prebuild:development": "npm run check:privacy && npm run pake:build",
     "build:development": "tsc -b && vite build --mode development-update && vite build --config vite.public.config.ts",
+    "build:core-only": "PERSONA_WEB_MODULES=none vite build --outDir node_modules/.cache/persona-core-only --emptyOutDir",
+    "test:core-only": "PERSONA_WEB_MODULES=none node scripts/process-group.mjs -- node scripts/run-tests.mjs",
     "build:public": "vite build --config vite.public.config.ts",
     "dev:public": "vite --config vite.public.config.ts",
     "typecheck": "tsc -b",
-    "lint": "eslint src/lib/session-list.ts src/lib/runtime-list.ts src/lib/store.ts src/lib/sessions.ts src/lib/agents.ts src/lib/agent-groups.ts src/lib/workflows.ts src/lib/types.ts src/lib/runtime-session.ts src/ui/SessionDetailNotice.tsx src/views/chat/ModelPill.tsx src/views/chat/ChatView.tsx src/App.tsx src/ui/list-metrics.ts src/views/Sidebar.tsx src/views/SidebarParts.tsx src/views/SidebarRows.tsx src/views/SidebarTree.tsx src/views/SidebarRail.tsx src/views/DirectionMarks.tsx src/views/SidebarDirections.tsx src/lib/direction-tree.ts src/lib/direction-agent-tree.ts src/lib/direction-names.ts src/views/agents/PagedSessionList.tsx src/views/agents/GroupedSessions.tsx src/views/agents/use-session-groups.ts src/lib/session-groups.ts src/views/SidebarSection.tsx src/views/WindowedRows.tsx src/lib/fold-all.ts src/views/agents/AgentsView.tsx src/features/todos src/sharing public-share vite.public.config.ts",
-    "test": "node --test e2e/extension-mirrors-cleanup.node-test.mjs && vitest run"
+    "lint": "eslint src/lib/session-list.ts src/lib/runtime-list.ts src/lib/store.ts src/lib/sessions.ts src/lib/agents.ts src/lib/agent-groups.ts src/lib/workflows.ts src/lib/types.ts src/lib/runtime-session.ts src/ui/SessionDetailNotice.tsx src/views/chat/ModelPill.tsx src/views/chat/ChatView.tsx src/App.tsx src/ui/list-metrics.ts src/views/Sidebar.tsx src/views/SidebarParts.tsx src/views/SidebarRows.tsx src/views/SidebarTree.tsx src/views/SidebarRail.tsx src/views/DirectionMarks.tsx src/views/SidebarDirections.tsx src/lib/direction-tree.ts src/lib/direction-agent-tree.ts src/lib/direction-names.ts src/views/agents/PagedSessionList.tsx src/views/agents/GroupedSessions.tsx src/views/agents/use-session-groups.ts src/lib/session-groups.ts src/views/SidebarSection.tsx src/views/WindowedRows.tsx src/lib/fold-all.ts src/views/agents/AgentsView.tsx src/features/todos src/sharing src/core src/modules public-share vite.public.config.ts eslint.modules.config.mjs && eslint -c eslint.modules.config.mjs src",
+    "test": "node scripts/process-group.mjs -- node scripts/run-tests.mjs"
   },
   "dependencies": {
     "@codemirror/commands": "^6.11.1",

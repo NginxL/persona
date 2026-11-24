@@ -50,6 +50,26 @@ describe("background rounds in the main conversation", () => {
     }
   });
 
+  it("folds an internal PR notice with its source and keeps the next queued owner message separate", () => {
+    const text = 'The delivery PR for the closed task "Release" was merged: https://github.com/example/app/pull/7';
+    const notice: Item = { id: "notice#0", seq: 1, role: "user", kind: "text", text: source({ kind: "notice" }) + text };
+    const next = mine(3, "Review the change log", { queued: true });
+    const lines = chatLines([notice, { ...answer(2, "No response requested."), kind: "thinking" }, next, answer(4)], on);
+    expect(kinds(lines)).toEqual(["supervision", "segment"]);
+    expect(lines[0]).toMatchObject({ source: { kind: "notice" } });
+    expect(users(lines)).toMatchObject([
+      { text, source: { kind: "notice" }, contexts: [], sourceInTrace: true },
+      { text: next.text, client_msg_id: next.client_msg_id },
+    ]);
+    expect(users(chatLines([notice], { main: true }))[0]).toMatchObject({ text, source: { kind: "notice" } });
+  });
+
+  it("preserves an actionable notice's user-facing reply", () => {
+    const notice: Item = { id: "notice#0", seq: 1, role: "user", kind: "text", text: "The delivery PR has a merge conflict.", source: { kind: "notice" } };
+    const tell = call(2, "notify_user");
+    expect(kinds(chatLines([notice, tell, result(3, tell)], on))).toEqual(["segment"]);
+  });
+
   it("shows final replies from scheduled runs under the default fold setting", () => {
     for (const input of [scheduled(1, "daily"), scheduled(1, "once")]) {
       const reply = answer(2, "The new release is ready.");

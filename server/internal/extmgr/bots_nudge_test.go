@@ -10,6 +10,7 @@ import (
 // nudge_after (bots_nudge.go, #6084): minutes a card waits unanswered before the one nudge under it, 0 off, 60 when
 // never set. The app sets it with PUT /api/v1/bots/feishu, reads it with GET, and the assistant reads it in feishu.status.
 func TestBotNudgeAfterSetting(t *testing.T) {
+	needsLarkModule(t)
 	w := newBotWorld(t)
 	w.pair(t)
 	st := w.h.store.(*botStore)
@@ -57,6 +58,7 @@ func TestBotNudgeAfterSetting(t *testing.T) {
 
 // The setting is recorded when it changes, by whoever changed it, and not when it is sent again as it was.
 func TestBotNudgeAfterIsAudited(t *testing.T) {
+	needsLarkModule(t)
 	w := newBotWorld(t)
 	st := w.h.store.(*botStore)
 	st.takeAudit()

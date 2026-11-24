@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"os"
 	"reflect"
 	"strings"
@@ -169,7 +170,7 @@ func TestTaskReceipt(t *testing.T) {
 		f.setSessions("box", proto.Session{SessionID: "s1", MachineID: "box", Cwd: "/code/app", Agent: "claude", Status: status, LastText: text,
 			UpdatedAt: time.Now()})
 		if status == proto.StatusWorking {
-			s.taskWorking(ctx, "box", "s1")
+			s.taskWorking(ctx, "box", "s1", startRow{})
 		} else {
 			s.taskTurnEnded(ctx, "box", "s1")
 		}
@@ -211,7 +212,7 @@ func TestTaskReceiptWaitsForWorkflow(t *testing.T) {
 	run := proto.Workflow{TaskID: "w1", RunID: "wf_1", Name: "parity-audit", Status: proto.WorkflowRunning, Running: true}
 	f.setSessions("box", proto.Session{SessionID: "s1", MachineID: "box", Cwd: "/code/app", Agent: "claude", Status: proto.StatusWorking,
 		State: proto.StateWorking, UpdatedAt: time.Now()})
-	s.taskWorking(ctx, "box", "s1")
+	s.taskWorking(ctx, "box", "s1", startRow{})
 	f.setSessions("box", proto.Session{SessionID: "s1", MachineID: "box", Cwd: "/code/app", Agent: "claude", Status: proto.StatusDone,
 		State: proto.StateWorking, LastText: "审计在后台跑，等它的结果", UpdatedAt: time.Now(), Workflows: []proto.Workflow{run},
 		Background: []proto.BackgroundTask{{ID: "w1", Kind: "workflow", RunID: "wf_1"}}})
@@ -516,29 +517,34 @@ func TestAutoFinishLeavesAReopenedTask(t *testing.T) {
 	if todoNow(s, "todo_r").DoneAt != nil || todoNow(s, "todo_h").DoneAt != nil || f.judged != 0 {
 		t.Fatalf("closed: %+v %+v, %d judgments", todoNow(s, "todo_r"), todoNow(s, "todo_h"), f.judged)
 	}
-	// Work after the reopen is judged, and closes it.
+	// Work after the reopen is judged and delivered for review, not closed again (#5732).
 	s.autoFinishTask(todoNow(s, "todo_r"), time.Now(), true)
-	if got := todoNow(s, "todo_r"); got.DoneAt == nil || got.DoneBy != db.DoneByAuto || f.judged != 1 {
-		t.Fatalf("not closed after new work: %+v, %d judgments", got, f.judged)
+	if got := todoNow(s, "todo_r"); got.DoneAt != nil || got.Check == nil || got.Check.Verdict != verdictDone || f.judged != 1 {
+		t.Fatalf("not judged after new work: %+v, %d judgments", got, f.judged)
 	}
 }
 
-// The agent of a task the judge closed is sent more (agent_send resumes it) and works again: the task is open again
-// while it does, and the turn's end is followed as ever — cut off by the model service, an interrupted receipt; a
-// finished one, a done receipt and the judge, which may close it again (#5892).
+// The agent of a task the supervisor accepted is sent more on its card and works again: the task is open again while
+// again while it does, and the turn's end is followed as ever — cut off by the model service, an interrupted receipt; a
+// finished one, a done receipt and a new delivery judgment, still without automatic closure (#5892, #5732).
 func TestClosedTaskReopensWhenItsAgentWorksAgain(t *testing.T) {
 	s, f := newTaskService(t)
+	setSettings(t, s, func(v *Settings) { v.Main = "conv1" })
 	todo := startedTask(t, s, f)
 	ctx := context.Background()
 	agentTurn(s, f, proto.StatusWorking, "", 0)
 	agentTurn(s, f, proto.StatusDone, "设计稿写好了", 0)
-	if ok, err := s.autoDoneTodo(ctx, todo.ID, "做完了", time.Now().Add(-time.Minute)); err != nil || !ok {
-		t.Fatalf("auto done: %v %v", ok, err)
+	raw, _ := json.Marshal(map[string]any{"todo_id": todo.ID, "verdict": "accepted", "note": "做完了"})
+	if _, err := s.runTool(ctx, "server", "conv1", "task_review", raw); err != nil {
+		t.Fatalf("accept before more work: %v", err)
 	}
 	if _, ok := s.taskOf(ctx, "box", "s1"); ok {
 		t.Fatal("a closed task still follows its agent")
 	}
 	time.Sleep(5 * time.Millisecond)
+	if _, err := s.routeToTask(ctx, "conv1", todo.ID, "Please continue with the remaining cases"); err != nil {
+		t.Fatalf("send more after acceptance: %v", err)
+	}
 	agentTurn(s, f, proto.StatusWorking, "", 0)
 	got := todoNow(s, todo.ID)
 	if got.DoneAt != nil || got.ReopenedAt == nil || got.DoneBy != "" || got.DoneReason != "" {
@@ -578,7 +584,7 @@ func TestClosedTaskReopensWhenItsAgentWorksAgain(t *testing.T) {
 	if rb := lastReceipt(); rb.State != "done" {
 		t.Fatalf("a finished turn of the reopened task: receipt = %+v", rb)
 	}
-	if got := todoNow(s, todo.ID); got.DoneAt == nil || got.DoneBy != db.DoneByAuto {
+	if got := todoNow(s, todo.ID); got.DoneAt != nil || got.Check == nil || got.Check.Verdict != verdictDone {
 		t.Fatalf("the work after the reopen is not judged: %+v", got)
 	}
 }
@@ -683,7 +689,7 @@ func TestAcceptedTaskReopensOnlyForItsOwnWork(t *testing.T) {
 		f.setSessions("box", proto.Session{SessionID: sid, MachineID: "box", Cwd: "/code/app", Agent: "claude", Status: status,
 			State: state, UpdatedAt: time.Now()})
 		if state == proto.StateWorking {
-			s.taskWorking(ctx, "box", sid)
+			s.taskWorking(ctx, "box", sid, startRow{})
 		}
 	}
 	accept := func() {
@@ -1460,18 +1466,38 @@ func TestWithdrawnPlanIsNoOwnerAnswer(t *testing.T) {
 	}
 }
 
-// A task opened from a side conversation (not quiet; supervised by the main conversation since #4669) pushes a
-// failure notification when its agent cannot start, with reason and next steps, unless muted (#5081).
+// A task opened from a side conversation that nobody supervises (no main conversation) pushes a failure notification
+// when its agent cannot start, with reason and next steps, unless muted (#5081). One the main conversation supervises
+// pushes nothing: its failed start is the supervisor's to retry or remedy, and the owner hears only what it passes up.
 func TestSideConversationTaskFailedToStartPushes(t *testing.T) {
 	ctx := context.Background()
+
+	// 0. Supervised by the main conversation: no push.
+	s0, f0 := newTaskService(t)
+	s0.taskRetry = 10 * time.Millisecond
+	f0.hello.Assistant.MachineID = "box"
+	f0.hello.Assistant.Machines = []string{"box"}
+	setSettings(t, s0, func(v *Settings) { v.Main, v.MachineID = "main1", "box" })
+	f0.failStart = errors.New("Failed to authenticate")
+	if _, err := s0.toolTaskPlan(ctx, "side1", planArgs(true)); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "the supervised task to fail", func() bool { return onlyTodo(s0).StartError != "" })
+	if v := onlyTodo(s0).Supervision; v == nil || v.Supervisor != "main1" {
+		t.Fatalf("the side task is not supervised by main: %+v", v)
+	}
+	if got := f0.pushed(); len(got) != 0 {
+		t.Fatalf("a supervised failed start was pushed to the owner: %+v", got)
+	}
+
 	s, f := newTaskService(t)
 	s.taskRetry = 10 * time.Millisecond
 	f.hello.Assistant.MachineID = "box"
 	f.hello.Assistant.Machines = []string{"box"}
-	setSettings(t, s, func(v *Settings) { v.Main, v.MachineID = "main1", "box" })
+	setSettings(t, s, func(v *Settings) { v.Main, v.MachineID = "", "box" })
 	f.failStart = errors.New("Failed to authenticate")
 
-	// 1. Normal failure push from side conversation.
+	// 1. Normal failure push from an unsupervised side conversation.
 	if _, err := s.toolTaskPlan(ctx, "side1", planArgs(true)); err != nil {
 		t.Fatal(err)
 	}
@@ -1496,7 +1522,7 @@ func TestSideConversationTaskFailedToStartPushes(t *testing.T) {
 	s2, f2 := newTaskService(t)
 	f2.hello.Assistant.MachineID = "box"
 	f2.hello.Assistant.Machines = []string{"box"}
-	setSettings(t, s2, func(v *Settings) { v.Main, v.MachineID = "main1", "box" })
+	setSettings(t, s2, func(v *Settings) { v.Main, v.MachineID = "", "box" })
 	f2.failStart = errors.New("Failed to authenticate")
 	s2.fleet.mutesMu.Lock()
 	s2.fleet.mutes = &Pins{Sessions: []string{"box/side_muted"}}
@@ -1514,7 +1540,7 @@ func TestSideConversationTaskFailedToStartPushes(t *testing.T) {
 	s3, f3 := newTaskService(t)
 	f3.hello.Assistant.MachineID = "box"
 	f3.hello.Assistant.Machines = []string{"box"}
-	setSettings(t, s3, func(v *Settings) { v.Main, v.MachineID = "main1", "box" })
+	setSettings(t, s3, func(v *Settings) { v.Main, v.MachineID = "", "box" })
 	f3.setSessions("box", proto.Session{SessionID: "health1", Space: SpaceHealth})
 	f3.failStart = errors.New("Failed to authenticate")
 	if _, err := s3.toolTaskPlan(ctx, "health1", planArgs(true)); err != nil {
@@ -1572,4 +1598,63 @@ func TestSnapshotShowsTheAgentsPlan(t *testing.T) {
 		Unread:  []prompts.SnapshotAgent{{Label: "整理文档", Machine: "mac-a", Session: "a9b8c7d6", Plan: idle}},
 		Working: []prompts.SnapshotAgent{{Label: "修横屏崩溃", Plan: planned.Plan}, {Label: "没有计划"}},
 		Tasks:   []prompts.SnapshotTask{planned, older, newer, none}}))
+}
+
+// Don't Start on a card that is no longer open (withdrawn by its conversation, or started meanwhile) answers 200 with
+// the plan as it is: a client that missed the event shows what happened. It used to answer 409, and an iOS app that
+// held the card from an old read kept it in Needs You, refusing every tap, until it was restarted.
+func TestTaskPlanDismissOfAPlanNoLongerOpen(t *testing.T) {
+	s, _ := newTaskService(t)
+	ctx := context.Background()
+	setSettings(t, s, func(v *Settings) { v.Main, v.MachineID = "main1", "box" })
+	plan := func() string {
+		t.Helper()
+		if _, err := s.toolTaskPlan(ctx, "main1", planArgs(false)); err != nil {
+			t.Fatal(err)
+		}
+		items, _, _ := s.feed(ctx, "main1", time.Time{})
+		return items[len(items)-1].Ref
+	}
+	dismiss := func(id string) (int, TaskPlan) {
+		t.Helper()
+		w := request(s, http.MethodPost, "/api/v1/task-plans/"+id+"/dismiss", "")
+		var out struct {
+			Plan TaskPlan `json:"plan"`
+		}
+		if w.Code == http.StatusOK {
+			if err := json.Unmarshal(w.Body.Bytes(), &out); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return w.Code, out.Plan
+	}
+
+	withdrawn := plan()
+	if _, err := runJSON(t, s, "main1", "task_plan_withdraw", map[string]any{"plan_id": withdrawn, "reason": "done elsewhere"}); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 2; i++ { // tapped again: the same answer
+		if code, p := dismiss(withdrawn); code != http.StatusOK || p.ID != withdrawn || p.State != planDismissed {
+			t.Fatalf("dismissing a withdrawn plan: %d %+v", code, p)
+		}
+	}
+
+	started := plan()
+	if _, err := s.startPlan(ctx, started, nil, false); err != nil {
+		t.Fatal(err)
+	}
+	if code, p := dismiss(started); code != http.StatusOK || p.State != planStarted {
+		t.Fatalf("dismissing a started plan: %d %+v", code, p)
+	}
+	if cur, err := s.loadPlan(ctx, started); err != nil || cur.State != planStarted {
+		t.Fatalf("the started plan moved: %+v %v", cur, err)
+	}
+
+	if code, _ := dismiss("plan_nope"); code != http.StatusNotFound {
+		t.Fatalf("an unknown plan: %d", code)
+	}
+	open := plan()
+	if code, p := dismiss(open); code != http.StatusOK || p.State != planDismissed {
+		t.Fatalf("dismissing an open plan: %d %+v", code, p)
+	}
 }

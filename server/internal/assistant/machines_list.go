@@ -61,6 +61,27 @@ func connectionReason(err string) string {
 	return "unknown"
 }
 
+// machineSilentAfter: a node samples every proto.MetricEvery; with a link that looks up but nothing reported for this
+// long (18 samples), it is not answering (a half-open connection), whatever the link says.
+const machineSilentAfter = 3 * time.Minute
+
+// silentNode reports a machine whose link is up but whose node has sent no sample for machineSilentAfter, counted from
+// the later of its last sample and its current connection (a fresh reconnect is not silent yet), and for how long.
+// A machine that never sampled is not judged: there is nothing to compare with.
+func (s *Service) silentNode(d Device, sample *proto.MetricSample, now time.Time) (bool, time.Duration) {
+	if !d.Reachable || sample == nil {
+		return false, 0
+	}
+	last := time.Unix(sample.T, 0)
+	if s.devs != nil {
+		if c := s.devs.ConnectedAt(d.ID); c.After(last) {
+			last = c
+		}
+	}
+	silent := now.Sub(last)
+	return silent > machineSilentAfter, silent
+}
+
 func (s *Service) toolMachinesList(ctx context.Context) (string, error) {
 	var listed struct {
 		Devices  []Device `json:"devices"`
@@ -83,7 +104,11 @@ func (s *Service) toolMachinesList(ctx context.Context) (string, error) {
 			MemoryAvailableBytes: unknown("sample_not_reported"), Swap: unknown("sample_not_reported"), DiskFreeBytes: unknown("sample_not_reported"),
 			SampleAgeSeconds: unknown("sample_not_reported"), WorkingAgents: unknown("connection_not_available"),
 			FailingLaunchers: unknown("health_not_available"), NodeOutdated: unknown("connection_not_available")}
-		if d.Reachable {
+		if stale, silent := s.silentNode(d, sample, now); stale {
+			row.State = "unresponsive"
+			row.StateReason = known(map[string]any{"category": "no_recent_report", "last_report_age_seconds": int64(silent.Seconds()),
+				"detail": fmt.Sprintf("the link is up but the node has reported nothing for %s", silent.Round(time.Second))})
+		} else if d.Reachable {
 			row.State, row.StateReason = "online", unknown("not_applicable")
 		} else if m == nil {
 			row.StateReason = unknown("manager_snapshot_unavailable")

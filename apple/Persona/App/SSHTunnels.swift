@@ -2,9 +2,7 @@ import Foundation
 import Observation
 import PersonaSSH
 import PersonaWire
-#if canImport(UIKit)
 import UIKit
-#endif
 
 /// This device's SSH key (docs/operations/network.md「Connecting to hub through SSH」): one Ed25519 key per device, made the first time it is
 /// needed, its private half only in this device's keychain (never synced, never restored onto another device, never

@@ -129,7 +129,6 @@ struct OrphanedLine: View {
     var state: TaskState
 
     var body: some View {
-        #if !os(macOS)
         if state != .needsYou, let line = todo.orphanedLine {
             // Not a `Label`: in a list row its icon takes the row's icon column, far from the words.
             HStack(alignment: .firstTextBaseline, spacing: Theme.Space.xs) {
@@ -141,6 +140,5 @@ struct OrphanedLine: View {
             .accessibilityElement(children: .combine)
             .accessibilityIdentifier("task-orphaned-line")
         }
-        #endif
     }
 }

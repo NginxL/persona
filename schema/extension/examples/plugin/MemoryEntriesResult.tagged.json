@@ -1,0 +1,10 @@
+{
+  "entries": [
+    {"id": "e-001", "text": "Weekly reports use short bullet points.", "facet": "workflow", "status": "active", "standing": true, "rank": 900},
+    {"id": "e-002", "text": "Quarterly budget envelopes are reviewed in the first week.", "facet": "world", "status": "active", "origin_space": "money", "categories": ["finance"], "rank": 400, "subjects": ["budget envelope"]},
+    {"id": "e-003", "text": "Prefers trains over flights for trips under four hours.", "facet": "persona", "status": "candidate"}
+  ],
+  "tagged": true,
+  "has_more": true,
+  "after": "page-2"
+}

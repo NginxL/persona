@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "module.schema.json",
+  "title": "Persona module manifest",
+  "description": "module.json of a Persona Core feature module (docs/architecture/core-and-modules.md, #13430 section 4). One manifest concept with the same field names on every platform: the server reads it as modapi.Info (server/internal/modapi), the clients as their own typed registration. Each list names what the module adds through one kind of slot; a module adds nothing it does not declare. A host that does not serve a slot yet does not load a module that fills it. Built-in modules and extensions share this shape (origin).",
+  "$ref": "#/$defs/Module",
+  "$defs": {
+    "ID": {"description": "A module id: lower case, words joined by -.", "type": "string", "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*$", "maxLength": 40},
+    "Name": {"description": "A name a slot knows (a key, a route pattern, a tool, a template, a kind).", "type": "string", "minLength": 1, "maxLength": 200},
+    "Names": {"type": "array", "items": {"$ref": "#/$defs/Name"}, "uniqueItems": true},
+    "Module": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "api", "origin"],
+      "properties": {
+        "$schema": {"description": "The path of this schema, for editors.", "type": "string"},
+        "id": {"$ref": "#/$defs/ID"},
+        "api": {"description": "The version of the module contract the module was written for; a host serving another version does not load it.", "type": "integer", "minimum": 1},
+        "origin": {"description": "builtin: compiled into the app or the manager; extension: installed at run time.", "type": "string", "enum": ["builtin", "extension"]},
+        "title": {"description": "A short English label for logs and settings; clients localize by id.", "type": "string", "maxLength": 80},
+        "needs": {"description": "Module ids that must be loaded for this one to load.", "type": "array", "items": {"$ref": "#/$defs/ID"}, "uniqueItems": true},
+        "wants": {"description": "Module ids this one uses when they are loaded.", "type": "array", "items": {"$ref": "#/$defs/ID"}, "uniqueItems": true},
+        "feature": {"description": "The wire feature flag announced while the module is loaded: module.<id>. The reserved modules marker lets clients distinguish an older hub from one with every module off.", "type": "string", "pattern": "^module\\.[a-z][a-z0-9]*(-[a-z0-9]+)*$", "maxLength": 47},
+        "hub_routes": {"description": "HTTP routes, as \"METHOD /api/v1/...\" patterns.", "$ref": "#/$defs/Names"},
+        "mcp_tools": {"description": "Assistant tool names.", "$ref": "#/$defs/Names"},
+        "prompt_sections": {"description": "Prompt template names.", "$ref": "#/$defs/Names"},
+        "settings": {"description": "Settings keys (persona_settings).", "$ref": "#/$defs/Names"},
+        "shell_places": {"description": "Client navigation places.", "$ref": "#/$defs/Names"},
+        "chat_card_kinds": {"description": "Chat item and card kinds.", "$ref": "#/$defs/Names"},
+        "composer_actions": {"description": "Composer buttons and sources.", "$ref": "#/$defs/Names"},
+        "chat_accessories": {"description": "Views around the chat.", "$ref": "#/$defs/Names"},
+        "background_jobs": {"description": "Loops the module runs.", "$ref": "#/$defs/Names"},
+        "schedules": {"description": "Scheduler contributions (#13402); facts: the facts a scheduled routine with facts on opens with.", "$ref": "#/$defs/Names"},
+        "db_migrations": {"description": "Database migration file names the module owns.", "$ref": "#/$defs/Names"},
+        "i18n_namespaces": {"description": "Localization namespaces.", "$ref": "#/$defs/Names"},
+        "node_programs": {"description": "Programs a computer's node runs for the module.", "$ref": "#/$defs/Names"},
+        "channel_kinds": {"description": "Channel kinds the module adds.", "$ref": "#/$defs/Names"},
+        "frame_handlers": {"description": "Hub frame and hello hooks.", "$ref": "#/$defs/Names"},
+        "push_categories": {"description": "Notification categories.", "$ref": "#/$defs/Names"}
+      }
+    }
+  }
+}

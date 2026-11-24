@@ -90,29 +90,33 @@ func (s *Service) toolDirectionName(ctx context.Context, self string, args json.
 	return fmt.Sprintf("Direction %s is called “%s” now (the app and the work-log extension show it).", a.ID, clip(oneLine(a.Name), directionNameMost)), nil
 }
 
-// toolLeaderProgress is leader_progress: a leader reports its direction's progress at the goal level.
-func (s *Service) toolLeaderProgress(ctx context.Context, self string, args json.RawMessage) (string, error) {
-	var a struct {
-		Reached  string   `json:"reached"`
-		Doing    string   `json:"doing"`
-		NeedsYou string   `json:"needs_you"`
-		Links    []string `json:"links"`
-	}
-	if err := json.Unmarshal(args, &a); err != nil {
-		return "", fmt.Errorf("arguments: %v", err)
-	}
-	if !s.isLeader(ctx, self) {
-		return "", errors.New("only a leader conversation (assistant.leaders) reports its direction's progress: tell the user in your reply instead")
-	}
+// normalizeLeaderProgress applies the same normalization to MCP, HTTP and node CLI reports.
+func normalizeLeaderProgress(a directionProgressInput, at time.Time) (leaderProgress, error) {
 	p := leaderProgress{Reached: clip(oneLine(a.Reached), progressPartMost), Doing: clip(oneLine(a.Doing), progressPartMost),
-		NeedsYou: clip(oneLine(a.NeedsYou), progressPartMost), At: time.Now().UTC()}
+		NeedsYou: clip(oneLine(a.NeedsYou), progressPartMost), At: at}
 	for _, l := range a.Links {
 		if l = strings.TrimSpace(l); l != "" && !slices.Contains(p.Links, l) && len(p.Links) < progressLinksMost {
 			p.Links = append(p.Links, clip(l, 500))
 		}
 	}
 	if p.Reached == "" && p.Doing == "" && p.NeedsYou == "" {
-		return "", errors.New("say at least one of reached, doing and needs_you")
+		return leaderProgress{}, errors.New("say at least one of reached, doing and needs_you")
+	}
+	return p, nil
+}
+
+// toolLeaderProgress is leader_progress: a leader reports its direction's progress at the goal level.
+func (s *Service) toolLeaderProgress(ctx context.Context, self string, args json.RawMessage) (string, error) {
+	var a directionProgressInput
+	if err := json.Unmarshal(args, &a); err != nil {
+		return "", fmt.Errorf("arguments: %v", err)
+	}
+	if !s.isLeader(ctx, self) {
+		return "", errors.New("only a leader conversation (assistant.leaders) reports its direction's progress: tell the user in your reply instead")
+	}
+	p, err := normalizeLeaderProgress(a, time.Now().UTC())
+	if err != nil {
+		return "", err
 	}
 	told, err := s.leaderProgressReport(ctx, self, p)
 	if err != nil {
@@ -134,13 +138,23 @@ func (s *Service) leaderProgressReport(ctx context.Context, lead string, p leade
 		return false, errors.New("the directions could not be read")
 	}
 	d := b.m[lead]
-	if d == nil { // a leader the sync has not recorded yet
+	created := d == nil
+	if created { // a leader the sync has not recorded yet
 		d = &direction{MachineID: s.settings(ctx).MachineID, By: directionByAssistant, At: p.At}
 		b.m[lead] = d
 	}
+	previous := d.Progress
 	cp := p
 	d.Progress = &cp
-	s.saveDirectionsLocked(ctx)
+	if err := s.saveDirectionsCheckedLocked(ctx); err != nil {
+		if created {
+			delete(b.m, lead)
+		} else {
+			d.Progress = previous
+		}
+		b.mu.Unlock()
+		return false, err
+	}
 	b.mu.Unlock()
 	if !s.todoEventsOn() {
 		return false, nil

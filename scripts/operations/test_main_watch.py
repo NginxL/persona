@@ -22,7 +22,7 @@ def check(name="Go vet", ok=False, output="undefined: Example"):
 class ConfigTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
-        self.root = Path(self.temp.name)
+        self.root = Path(self.temp.name).resolve()
         self.checkout = self.root / "checkout"
         self.checkout.mkdir()
 
@@ -88,7 +88,7 @@ class ConfigTests(unittest.TestCase):
 class MainWatchTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
-        self.root = Path(self.temp.name)
+        self.root = Path(self.temp.name).resolve()
         self.checkout = self.root / "checkout"
         self.checkout.mkdir()
         self.config = {"repository": "owner/repository", "checkout": str(self.checkout),

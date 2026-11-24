@@ -119,9 +119,11 @@ func keepSections(stored, list []overviewPlace) []overviewPlace {
 // order ("" is the built-in Pages group, a user's own is "u:<id>", any other an extension's nav_page group) with the
 // title the user gave (none: the group's own); the group a page was moved to; and the extensions' groups removed.
 type sidebarPages struct {
-	Order   []string          `json:"order"`
-	Shown   []string          `json:"shown"`
-	Hidden  []string          `json:"hidden"`
+	Order  []string `json:"order"`
+	Shown  []string `json:"shown"`
+	Hidden []string `json:"hidden"`
+	// More is an explicit visibility choice for the More entry. Nil and true leave it shown.
+	More    *bool             `json:"more,omitempty"`
 	Groups  []sidebarGroup    `json:"groups,omitempty"`
 	Assign  map[string]string `json:"assign,omitempty"`
 	Removed []string          `json:"removed,omitempty"`

@@ -75,6 +75,7 @@ func TestPersonReplyPersistsAndRecovers(t *testing.T) {
 		return reply, nil
 	})
 	again.sweepDeploys(now.Add(time.Minute))
+	wokeBy := wakeBound(now.Add(time.Minute))
 	cur := todoNow(again, task.ID)
 	if reads != 1 || cur.DoneAt != nil || cur.Supervision.State != reviewPending ||
 		cur.Supervision.Supervisor != before.Supervision.Supervisor ||
@@ -95,8 +96,13 @@ func TestPersonReplyPersistsAndRecovers(t *testing.T) {
 	if !ok || source["id"] != reply["reply"].(map[string]any)["id"] || receipt["request"] == nil || receipt["watch"] == nil {
 		t.Fatalf("receipt identity missing: %s", raw)
 	}
-	delete(reviews[0], "reply")
-	unchanged, _ := json.Marshal(reviews)
+	endedRaw, _ := json.Marshal(requireParkEnded(t, before.Supervision, cur.Supervision.Reviews, wokeBy))
+	var rest []map[string]any
+	if err := json.Unmarshal(endedRaw, &rest); err != nil || len(rest) != 1 {
+		t.Fatalf("stored reply: %s, %v", endedRaw, err)
+	}
+	delete(rest[0], "reply")
+	unchanged, _ := json.Marshal(rest)
 	var old []map[string]any
 	oldRaw, _ := json.Marshal(before.Supervision.Reviews)
 	if err := json.Unmarshal(oldRaw, &old); err != nil {

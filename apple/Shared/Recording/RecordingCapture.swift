@@ -1,4 +1,3 @@
-#if os(iOS) || os(visionOS) || os(watchOS)
 import AVFoundation
 import Observation
 #if os(iOS) || os(visionOS)
@@ -1609,10 +1608,9 @@ struct RecordingSession {
         #endif
     }
 }
-#endif
 
 /// Why an all-day recording stopped recording without the user (`RecordingCapture.onDayHalted`), for what the watch
-/// tells them. Outside the platform check above: the watch's alert policy, in `Shared/`, compiles for the Mac too.
+/// tells them. Outside the platform check above: the watch's alert policy, in `Shared/`, compiles for the watch too.
 nonisolated enum RecordingDayHalt: String, Sendable {
     /// A call, Siri or another app took the microphone.
     case interrupted

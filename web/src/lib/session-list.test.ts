@@ -1380,6 +1380,33 @@ describe("counts read with the page (sessions_page_counts, #4858)", () => {
     expect(aggregates.mock.calls.map(([path]) => Object.fromEntries(params(path)))).toEqual([{ counts: "1" }, { counts: "1" }]);
   });
 
+  it("shows a page's counts with its rows, never before them, and not at all when the rest of its read fails", async () => {
+    // a list's rows and the counts read with them go on screen together: the page counts an agent seen there by those
+    // rows (lib/seen-outbox.ts heldCounts), and a newer count beside older rows counted it twice (one too few Unread)
+    const list = make(undefined, { pageCounts: () => true });
+    pages.mockResolvedValueOnce(withCounts(rows(10)));
+    await list.load();
+    const second = deferred<ListPage<Row>>();
+    pages
+      .mockResolvedValueOnce(withCounts([row("a", 20_000)], { revision: "next", has_more: true, next_cursor: "delta/two" }, "next"))
+      .mockReturnValueOnce(second.promise);
+    const loading = list.load();
+    await tick();
+    await tick();
+    expect(list.getSnapshot().counts).toEqual(counts("page"));
+    second.reject(new Error("offline"));
+    await expect(loading).rejects.toThrow("offline");
+    expect(list.getSnapshot().counts).toEqual(counts("page"));
+    expect(ids(list)).not.toContain("a");
+    pages.mockResolvedValueOnce(withCounts([row("a", 20_000)], { revision: "next" }, "next"));
+    const seen: Array<{ counts: string | undefined; a: boolean }> = [];
+    const off = list.subscribe(() => seen.push({ counts: list.getSnapshot().counts?.revision, a: ids(list).includes("a") }));
+    await list.retry();
+    off();
+    expect(seen.filter((x) => x.counts === "next").every((x) => x.a)).toBe(true);
+    expect(list.getSnapshot().counts).toEqual(counts("next"));
+  });
+
   it("keeps a failed page's checkpoint so the retry sees the same changes", async () => {
     const list = make(undefined, { pageCounts: () => true });
     pages.mockResolvedValueOnce(withCounts(rows(10)));

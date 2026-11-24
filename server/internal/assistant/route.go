@@ -68,21 +68,22 @@ func (s *Service) askRouteModel(ctx context.Context, system, input string, out a
 	return s.purposeModel("assistant.route").JSONMax(ctx, system, input, routeMaxTokens, out)
 }
 
-// routeLeaders are the current leaders with their titles and projects.
+// routeLeaders lists the conversation-backed directions a new Agent can be assigned to.
 func (s *Service) routeLeaders(ctx context.Context) []routeLeader {
 	cfg := s.settings(ctx)
 	titles, _ := s.conversationTitles()
-	views, _ := s.directionViews(ctx)
 	var out []routeLeader
 	for _, id := range cfg.Leaders {
 		if id == "" || id == cfg.Main {
 			continue
 		}
-		ld := routeLeader{ID: id, Title: titles[id].title}
-		if d := views[id]; d != nil {
-			ld.Project = d.Project
+		d, _, loaded := s.directionSnapshot(ctx, id)
+		if !loaded {
+			return nil
 		}
-		out = append(out, ld)
+		if d.Outside == nil {
+			out = append(out, routeLeader{ID: id, Title: titles[id].title, Project: d.Project})
+		}
 	}
 	return out
 }

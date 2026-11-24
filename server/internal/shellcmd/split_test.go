@@ -21,8 +21,22 @@ func TestSplit(t *testing.T) {
 		// A redirection's target ends before the blanks after it, the ones only Unicode calls blanks too.
 		{"x >a\v >b\u00a0", []Segment{{Words: []string{"x"}, Text: "x >a\v >b", Redirect: ">a >b"}}, true},
 		{`echo 'open`, nil, false},
+		{`echo $(printf ")`, nil, false},
 		{`(cd x)`, nil, false},
 		{`cat <<EOF`, nil, false},
+		{`echo $(printf ")") hi`, []Segment{{Words: []string{"echo", `$(printf ")")`, "hi"}, Text: `echo $(printf ")") hi`,
+			Subst: true, ArgSubst: true, Nested: []string{`printf ")"`}}}, true},
+		{`echo "$(printf ")")"`, []Segment{{Words: []string{"echo", `$(printf ")")`}, Text: `echo "$(printf ")")"`,
+			Subst: true, ArgSubst: true, Nested: []string{`printf ")"`}}}, true},
+		{`echo $(printf ")"; send-mail --to alice) # "`, []Segment{{Words: []string{"echo", `$(printf ")"; send-mail --to alice)`},
+			Text: `echo $(printf ")"; send-mail --to alice) # "`, Subst: true, ArgSubst: true,
+			Nested: []string{`printf ")"; send-mail --to alice`}}}, true},
+		{`echo $(printf "%s" "$(send-mail)")`, []Segment{{Words: []string{"echo", `$(printf "%s" "$(send-mail)")`},
+			Text: `echo $(printf "%s" "$(send-mail)")`, Subst: true, ArgSubst: true,
+			Nested: []string{"send-mail", `printf "%s" "$(send-mail)"`}}}, true},
+		{"echo $(\n# )\nsend-mail\n)", []Segment{{Words: []string{"echo", "$(\n# )\nsend-mail\n)"},
+			Text: "echo $(\n# )\nsend-mail\n)", Subst: true, ArgSubst: true,
+			Nested: []string{"\n# )\nsend-mail\n"}}}, true},
 	} {
 		got, ok := Split(c.cmd)
 		if ok != c.ok || !reflect.DeepEqual(got, c.want) {

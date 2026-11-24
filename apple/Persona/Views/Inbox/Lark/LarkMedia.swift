@@ -4,9 +4,7 @@ import ImageIO
 import QuickLook
 import SwiftUI
 import PersonaWire
-#if canImport(UIKit)
 import UIKit
-#endif
 
 /// Loads Feishu media through the hub (`/api/v1/lark/media/...`, bearer auth) or straight from a CDN URL.
 /// Media keys never change content, so decoded images live in memory and the raw bytes on disk.
@@ -115,11 +113,7 @@ final class LarkMedia {
         let opts: [CFString: Any] = [kCGImageSourceCreateThumbnailFromImageAlways: true, kCGImageSourceCreateThumbnailWithTransform: true,
                                      kCGImageSourceThumbnailMaxPixelSize: maxPixel, kCGImageSourceShouldCacheImmediately: true]
         guard let cg = CGImageSourceCreateThumbnailAtIndex(src, 0, opts as CFDictionary) else { return UIImage(data: data) }
-        #if os(iOS) || os(visionOS)
         return UIImage(cgImage: cg)
-        #else
-        return NSImage(cgImage: cg, size: NSSize(width: cg.width, height: cg.height)) // AppKit's own init: callable off the main actor
-        #endif
     }
 
     private func cacheKey(_ url: String, size: Int?) -> String { Self.cacheKey(url, size: size) }

@@ -237,7 +237,7 @@ async function copyQuietly(text: string): Promise<boolean> {
  *  Select have their own controls); no ⋯ without any others. `pinned`: the
  *  chat's last message, whose time stays shown without the pointer. `usage`: what the exchange used (lib/turn-usage.ts
  *  usageKey), `usageMs` its work time, `persona` a Persona conversation's plain cost. */
-export function ReplyBar({ text, ts, itemId, more: actions, pinned, usage, usageMs, persona, translation, star, loadStar }: { star?: StarOrigin; loadStar?: () => Promise<string>; text: string; ts?: string; itemId?: string; more: Action[]; pinned?: boolean; usage?: string; usageMs?: number; persona?: boolean; translation?: ReplyTranslation }) {
+export function ReplyBar({ text, ts, itemId, more: actions, pinned, usage, usageMs, ttftMs, persona, translation, star, loadStar }: { star?: StarOrigin; loadStar?: () => Promise<string>; text: string; ts?: string; itemId?: string; more: Action[]; pinned?: boolean; usage?: string; usageMs?: number; ttftMs?: number; persona?: boolean; translation?: ReplyTranslation }) {
   const chat = useChatActions();
   const branch = moreActions(itemId, chat?.fork, chat?.assistant)[0];
   const starActions = useStarAction(star, text, ts, false, loadStar);
@@ -347,10 +347,10 @@ export function ReplyBar({ text, ts, itemId, more: actions, pinned, usage, usage
         (pinned ? (
           // a pinned reply's time stays; what it cost comes with the pointer, as the buttons do
           <span data-usage-fade className={cx("flex items-center transition-opacity", fade)} style={fadeStyle}>
-            <TurnUsage usage={usage} ms={usageMs} persona={persona} onOpen={setCard} />
+            <TurnUsage usage={usage} ms={usageMs} ttftMs={ttftMs} persona={persona} onOpen={setCard} />
           </span>
         ) : (
-          <TurnUsage usage={usage} ms={usageMs} persona={persona} onOpen={setCard} />
+          <TurnUsage usage={usage} ms={usageMs} ttftMs={ttftMs} persona={persona} onOpen={setCard} />
         ))}
       {menu && <Menu anchor={menu} onClose={() => setMenu(null)} items={more} width={more.some((a) => a.hint) ? 200 : 184} />}
     </div>

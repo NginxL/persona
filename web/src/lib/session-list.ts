@@ -25,7 +25,7 @@ const validCounts = (counts: ListCounts | undefined): counts is ListCounts => !!
 // todo: `sessions_todo` (#6662), a to-do's id or "none"; waiting, pane_source and exclude_pane_source: the sidebar's
 // quick filters (`sessions_quick_filters`, #6662); just_finished: the Just finished rows or the other seen ones
 // (`sessions_just_finished`, #9751)
-const FILTER_KEYS = ["state", "machine_id", "project", "group", "source", "provider", "q", "parent_session_id", "todo", "waiting", "pane_source", "exclude_pane_source", "just_finished"] as const;
+const FILTER_KEYS = ["state", "machine_id", "project", "group", "source", "provider", "q", "parent_session_id", "parent_machine_id", "todo", "waiting", "pane_source", "exclude_pane_source", "just_finished"] as const;
 /** The filters that take several values, each a machine and value pair spelled as a JSON array (`sessions_catalog`,
  * docs/protocol/protocol.md "Projects and spaces"): the rows at any of the places, in any of the spaces. */
 const PAIR_KEYS = ["place", "space"] as const;
@@ -64,6 +64,9 @@ export interface ListCounts {
   just_finished?: number;
   /** How many of `state.needs_you` only wait on held non-interrupting cards (P1/P2) for push grading. */
   held_needs?: number;
+  /** How many of `state.needs_you` only wait on cards a task's supervisor holds (lib/supervisor-held.ts), apart from
+   *  `held_needs`: the lists count them Working, in neither Needs you nor the badge. Absent from an older hub. */
+  supervisor_held?: number;
   revision: string;
 }
 export interface ListPage<T> {
@@ -112,6 +115,9 @@ export interface SessionListOptions<T> {
   /** Read the list without the child sessions folded under a listed one (`roots=1`, `sessions_hierarchy`, #5120): rows,
    * totals and counts then hold each parent once, counted by its folded state. Only for a hub that advertises it. */
   roots?: boolean;
+  /** Opt into cross-machine folding and orphan `is_subagent` filtering (`cross_machine_hierarchy=1`,
+   * `sessions_cross_machine_hierarchy`). Only for a hub that advertises it. */
+  crossMachineHierarchy?: boolean;
   /** false: the list's counts are never read (its snapshot's `counts` stays null). For a list that only shows rows,
    * as one group's section does: its group's numbers come from the read that named the groups. */
   counts?: boolean;
@@ -121,7 +127,7 @@ export interface SessionListOptions<T> {
  *  the one it reaches, and the rows changed in between as `[machine_id, session_id]`. */
 export interface ListChangeHint { revision?: unknown; since?: unknown; changed?: unknown }
 
-type PreparedDelta<T> = { overlay: Map<string, T | null>; changes: Map<string, T | null>; added?: Set<string>; revision: string; total: number };
+type PreparedDelta<T> = { overlay: Map<string, T | null>; changes: Map<string, T | null>; added?: Set<string>; revision: string; total: number; counts?: ListCounts };
 type Work = { generation: number; load: boolean; more: boolean; kind: "load" | "more" | null; promise?: Promise<void> };
 class Rebaseline extends Error {}
 
@@ -152,6 +158,7 @@ export class SessionList<T> {
   private lastFailure: "load" | "more" = "load";
   private summary: boolean;
   private roots: boolean;
+  private crossMachineHierarchy: boolean;
   private onDelta?: (upsert: T[], remove: string[]) => void;
   private pageCounts: () => boolean;
   private counted: boolean;
@@ -175,6 +182,7 @@ export class SessionList<T> {
     this.presentation = options.presentation;
     this.summary = options.summary ?? true;
     this.roots = options.roots ?? false;
+    this.crossMachineHierarchy = options.crossMachineHierarchy ?? false;
     this.onDelta = options.onDelta;
     this.pageCounts = options.pageCounts ?? (() => false);
     this.counted = options.counts ?? true;
@@ -183,13 +191,17 @@ export class SessionList<T> {
   isSummary(): boolean { return this.summary; }
   /** Whether every read sends `roots=1`: a list or counts read over the same collection sends it too. */
   isRoots(): boolean { return this.roots; }
+  /** Whether every read sends `cross_machine_hierarchy=1`. */
+  isCrossMachineHierarchy(): boolean { return this.crossMachineHierarchy; }
   /** For a list over the same collection, e.g. a filtered copy of this one. */
   usesPageCounts(): boolean { return this.pageCounts(); }
 
   /** Give an already shared root the same stable presentation as its filtered copies, without replacing its baseline. */
-  setPresentation(presentation: SessionListPresentation<T>): void {
+  setPresentation(presentation: SessionListPresentation<T> | undefined): void {
     if (this.presentation === presentation) return;
     this.presentation = presentation;
+    // another order starts from the transport's rows: what the last one retained says nothing of it
+    this.presented = [];
     if (!this.snapshot.loaded) return;
     const rows = this.snapshot.supported === false ? this.complete(this.snapshot.rows) : this.visible();
     this.publish({ rows });
@@ -206,6 +218,13 @@ export class SessionList<T> {
   setRoots(value: boolean): void {
     if (this.roots === value) return;
     this.roots = value;
+    this.reset();
+  }
+
+  /** Enabling or disabling cross-machine hierarchy changes bound cursors and row visibility: like setRoots. */
+  setCrossMachineHierarchy(value: boolean): void {
+    if (this.crossMachineHierarchy === value) return;
+    this.crossMachineHierarchy = value;
     this.reset();
   }
 
@@ -356,10 +375,11 @@ export class SessionList<T> {
   private query(extra: Record<string, string>): string {
     const [path, existing = ""] = this.path.split("?");
     const params = new URLSearchParams(existing);
-    for (const key of [...FILTER_KEYS, ...PAIR_KEYS, "summary", "limit", "counts", "with_counts", "cursor", "since", "roots"]) params.delete(key);
+    for (const key of [...FILTER_KEYS, ...PAIR_KEYS, "summary", "limit", "counts", "with_counts", "cursor", "since", "roots", "cross_machine_hierarchy"]) params.delete(key);
     for (const key of FILTER_KEYS) if (this.filters[key]) params.set(key, this.filters[key]!);
     for (const key of PAIR_KEYS) for (const pair of this.filters[key] ?? []) params.append(key, pair);
     if (this.roots) params.set("roots", "1");
+    if (this.crossMachineHierarchy) params.set("cross_machine_hierarchy", "1");
     for (const [key, value] of Object.entries(extra)) params.set(key, value);
     return `${path}?${params}`;
   }
@@ -412,10 +432,13 @@ export class SessionList<T> {
     }
   }
 
-  /** The counts that came with a page (`with_counts`), or the separate read when they did not. */
-  private async pageCountsOrRead(generation: number, page: ListPage<T>): Promise<void> {
-    if (validCounts(page.counts)) this.publish({ counts: page.counts });
-    else await this.readCounts(generation);
+  /** The counts that came with a page (`with_counts`), to be published with the page's rows: rows and counts read
+   *  together are shown together, so nothing on screen counts one read's rows by another's (lib/seen-outbox.ts
+   *  heldCounts compares them). The separate read when they did not come, published when it answers. */
+  private async pageCountsOrRead(generation: number, page: ListPage<T>): Promise<ListCounts | undefined> {
+    if (validCounts(page.counts)) return page.counts;
+    await this.readCounts(generation);
+    return undefined;
   }
 
   private async refresh(generation: number, retry = true): Promise<void> {
@@ -445,7 +468,7 @@ export class SessionList<T> {
   private async readFirst(generation: number, withCounts = false): Promise<void> {
     const page = await this.page(generation, withCounts ? { with_counts: "1" } : {});
     if (!page || !this.current(generation)) return;
-    if (withCounts) await this.pageCountsOrRead(generation, page);
+    const counts = withCounts ? await this.pageCountsOrRead(generation, page) : undefined;
     if (!this.current(generation)) return;
     this.frozen = new Map(page.sessions.map((row) => [this.identity(row), row]));
     this.overlay = new Map();
@@ -453,7 +476,7 @@ export class SessionList<T> {
     this.cursor = page.has_more ? page.next_cursor : undefined;
     this.frozenRevision = page.revision;
     this.checkpoint = page.revision;
-    this.publish({ rows: this.visible(true), loaded: true, supported: this.snapshot.supported !== false, total: page.total, hasMore: !!this.cursor });
+    this.publish({ rows: this.visible(true), loaded: true, supported: this.snapshot.supported !== false, total: page.total, hasMore: !!this.cursor, ...(counts ? { counts } : {}) });
   }
 
   private async readDelta(generation: number, withCounts = false): Promise<PreparedDelta<T> | null> {
@@ -465,12 +488,13 @@ export class SessionList<T> {
     let target = since;
     let first = true;
     let total = this.snapshot.total;
+    let counts: ListCounts | undefined;
     const cursors = new Set<string>();
     do {
       const page = await this.page(generation, { since, ...(cursor ? { cursor } : {}), ...(first && withCounts ? { with_counts: "1" } : {}) });
       if (!page || !this.current(generation)) return null;
       if (first && withCounts) {
-        await this.pageCountsOrRead(generation, page);
+        counts = await this.pageCountsOrRead(generation, page);
         if (!this.current(generation)) return null;
       }
       if (!first && target !== page.revision) throw new Error(t("paged-agents.inconsistent_delta"));
@@ -496,7 +520,7 @@ export class SessionList<T> {
       if (cursor && cursors.has(cursor)) throw new Error(t("paged-agents.repeated_cursor"));
       if (cursor) cursors.add(cursor);
     } while (cursor);
-    return { overlay, changes, added, revision: target, total };
+    return { overlay, changes, added, revision: target, total, counts };
   }
 
   private commitDelta(generation: number, delta: PreparedDelta<T>): void {
@@ -505,7 +529,7 @@ export class SessionList<T> {
     this.overlay = delta.overlay;
     this.checkpoint = delta.revision;
     const rows = this.visible(false, delta.added);
-    this.publish({ rows, total: delta.total, hasMore: !!this.cursor || this.candidateCount() > this.prefixSize });
+    this.publish({ rows, total: delta.total, hasMore: !!this.cursor || this.candidateCount() > this.prefixSize, ...(delta.counts ? { counts: delta.counts } : {}) });
     // Publishing may synchronously reset/switch the list through onRows or a subscriber.
     if (!this.current(generation) || !this.onDelta) return;
     const upsert: T[] = [];

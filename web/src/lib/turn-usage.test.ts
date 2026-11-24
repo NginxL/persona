@@ -225,6 +225,25 @@ describe("the card's lines", () => {
       "Time 1m 5s",
       "Model: Opus 5.5",
     ]);
+    expect(usageLines(one, { total: 0.1234, models: [{ model: OPUS, cost: 0.1234 }] }, 65_000, 342)).toEqual([
+      "Request details",
+      "Token value this turn: $0.12",
+      "Tokens: 1.2M total · input 2 · output 3.4k",
+      "Cache breakdown: read 1.2M · write 9.0k · hit rate 99.3%",
+      "Time 1m 5s",
+      "First token 342 ms",
+      "Model: Opus 5.5",
+    ]);
+  });
+
+  it("captures first observed non-negative ttft_ms on a Segment", () => {
+    const segs = segOf(chatLines([
+      u(1, "go"),
+      { ...think(2), ttft_ms: -5 },
+      { ...call(3, "c3"), ttft_ms: 0 },
+      { ...a(4, "done"), ttft_ms: 420 },
+    ]));
+    expect(segs[0].ttftMs).toBe(0);
   });
 
   it("with two priced models: each one's cost instead of the model", () => {

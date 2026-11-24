@@ -25,6 +25,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asAndroidBitmap
+import androidx.compose.ui.layout.onPlaced
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
@@ -32,16 +33,23 @@ import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.unit.dp
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
+import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
+import android.os.Looper
 import java.io.File
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 import kotlin.math.abs
 
 /**
@@ -1099,7 +1107,14 @@ class ListTapMotionTest {
         settle()
         seen[0] = 0
         val before = redPixels()
+        // Arm one frame before removing the row (as InboxScreen.animateChange / markAll and AgentsViewModel do)
+        // so exitFade attaches fadeOutSpec while idle rows keep null animateItem specs with zero GraphicsLayer overhead.
+        // Trigger a frame draw via redPixels() on the arm frame (on a device Choreographer draws every vsync;
+        // Robolectric advanceTimeByFrame() only runs composition and layout).
         motion.arm(ListTapMotionKind.State)
+        Snapshot.sendApplyNotifications()
+        rule.mainClock.advanceTimeByFrame()
+        assertTrue("row disappeared before removal", redPixels() > 20)
         rows = listOf("B")
         Snapshot.sendApplyNotifications()
         rule.mainClock.advanceTimeByFrame()
@@ -1111,6 +1126,527 @@ class ListTapMotionTest {
         assertEquals("removing the row recomposed it", 0, seen[0])
         assertTrue("nothing red to fade ($before)", before > 20)
         assertTrue("the row popped ($before -> $early -> $mid -> $late)", early > 10 && mid > 10 && late < early / 2)
+    }
+
+    @Test fun idleRemoveAndReinsertLeavesNoGhostAndRemainsVisible() {
+        rule.mainClock.autoAdvance = false
+        var rows by mutableStateOf(listOf("A", "B", "C"))
+        val motion = ListTapMotion()
+        rule.setContent {
+            PersonaTheme(darkTheme = false, reduceMotion = false, style = AppStyle.Glass) {
+                BindListTapMotion(motion, rows)
+                LazyColumn(Modifier.width(120.dp).height(160.dp).background(Color.White).testTag("shot")) {
+                    with(ListTapLazyScope(this, motion)) {
+                        items(rows, key = { it }) { title ->
+                            Box(
+                                Modifier
+                                    .height(40.dp)
+                                    .fillMaxWidth()
+                                    .background(if (title == "A") Color.Red else Color.Blue)
+                                    .testTag("row-$title"),
+                            )
+                        }
+                    }
+                }
+            }
+        }
+        settle()
+        assertNull(motion.kind)
+        assertTrue("A was not drawn initially", redPixels() > 20)
+
+        // Idle removal (e.g. reconnect/sync flicker) must not allocate a disappearing layer.
+        rows = listOf("B", "C")
+        Snapshot.sendApplyNotifications()
+        rule.mainClock.advanceTimeByFrame()
+        assertEquals("idle removal left disappearing red pixels", 0, redPixels())
+
+        // Re-inserting the same key on the next frame must render at full alpha (never stuck at alpha = 0).
+        rows = listOf("B", "A", "C")
+        Snapshot.sendApplyNotifications()
+        rule.mainClock.advanceTimeByFrame()
+        val reinserted = redPixels()
+        assertTrue("re-inserted row stayed invisible ($reinserted)", reinserted > 20)
+        assertEquals("re-inserted row stayed at old slot", 40f, top("row-A"), 2f)
+
+        // Removing it again while idle leaves zero ghost pixels behind.
+        rows = listOf("B", "C")
+        Snapshot.sendApplyNotifications()
+        rule.mainClock.advanceTimeByFrame()
+        assertEquals("second idle removal left ghost pixels", 0, redPixels())
+    }
+
+    @Test fun rowMoveNodeKeyReassignmentResetsStalePlacementShift() {
+        rule.mainClock.autoAdvance = false
+        val motion = ListTapMotion()
+        val heldScope = kotlinx.coroutines.CoroutineScope(object : kotlinx.coroutines.CoroutineDispatcher() {
+            override fun dispatch(context: kotlin.coroutines.CoroutineContext, block: Runnable) = Unit
+        })
+        motion.noteComposed(listOf("Old", "Other"))
+        motion.notePlaced("Old", 160f, heldScope, motion.liveFade)
+        motion.notePlaced("Other", 200f, heldScope, motion.liveFade)
+        motion.arm(ListTapMotionKind.State)
+        motion.capture(listOf("Other", "Old"))
+        motion.notePlaced("Old", 0f, heldScope, motion.liveFade)
+        assertEquals("Old should hold an active shift", 160, motion.shiftPx("Old"))
+
+        var activeKey by mutableStateOf("Old")
+        var attached by mutableStateOf(true)
+        rule.setContent {
+            PersonaTheme(darkTheme = false, reduceMotion = false, style = AppStyle.Glass) {
+                Box(Modifier.width(120.dp).height(300.dp)) {
+                    if (attached) {
+                        Box(
+                            Modifier
+                                .then(RowMoveElement(motion, activeKey, heldScope, pin = null, stick = false))
+                                .height(40.dp)
+                                .fillMaxWidth()
+                                .testTag("slot"),
+                        )
+                    }
+                }
+            }
+        }
+        rule.mainClock.advanceTimeByFrame()
+        assertEquals("slot did not apply Old's active shift", 160f, top("slot"), 2f)
+
+        // Reassigning the same RowMoveNode to a key with 0 shift must re-observe and invalidate placement immediately.
+        activeKey = "New"
+        Snapshot.sendApplyNotifications()
+        rule.mainClock.advanceTimeByFrame()
+        assertEquals("RowMoveNode kept stale shift after key reassignment", 0f, top("slot"), 2f)
+
+        // Detach + reattach on a key whose shift cleared while detached must place cleanly at 0.
+        activeKey = "Old"
+        Snapshot.sendApplyNotifications()
+        rule.mainClock.advanceTimeByFrame()
+        assertEquals(160f, top("slot"), 2f)
+        attached = false
+        Snapshot.sendApplyNotifications()
+        rule.mainClock.advanceTimeByFrame()
+        motion.cancelAllShifts()
+        attached = true
+        Snapshot.sendApplyNotifications()
+        rule.mainClock.advanceTimeByFrame()
+        assertEquals("RowMoveNode kept stale shift across reattach", 0f, top("slot"), 2f)
+    }
+
+    @Test fun pruneRetainedWakesObserverAndResetsShiftToZero() {
+        rule.mainClock.autoAdvance = false
+        var rows by mutableStateOf(listOf("A", "B", "C", "D"))
+        val motion = ListTapMotion()
+        rule.setContent {
+            PersonaTheme(darkTheme = false, reduceMotion = false, style = AppStyle.Glass) {
+                BindListTapMotion(motion, rows)
+                LazyColumn(Modifier.width(411.dp).height(400.dp)) {
+                    with(ListTapLazyScope(this, motion)) {
+                        items(rows, key = { it }) { title ->
+                            Box(Modifier.height(60.dp).fillMaxWidth().testTag("row-$title"))
+                        }
+                    }
+                }
+            }
+        }
+        settle()
+        motion.arm(ListTapMotionKind.State)
+        rows = listOf("A", "D")
+        Snapshot.sendApplyNotifications()
+        repeat(2) { rule.mainClock.advanceTimeByFrame() }
+        assertTrue("expected D to hold a live shift", abs(motion.shiftPx("D")) > 10)
+        val displaced = top("row-D")
+        assertTrue("expected D to be displaced below its resting slot 60 ($displaced)", displaced > 70f)
+
+        // Dropping D via pruneRetained while its node is still attached must cancel the shift and wake placement to 0.
+        motion.pruneRetained(setOf("A"))
+        Snapshot.sendApplyNotifications()
+        rule.mainClock.advanceTimeByFrame()
+        assertEquals(0, motion.shiftPx("D"))
+        assertEquals("pruneRetained failed to reset row-D placement to resting slot", 60f, top("row-D"), 2f)
+    }
+
+    @Test fun programmaticScrollDuringArmedTapCancelsShiftsAndPreventsOverlap() {
+        rule.mainClock.autoAdvance = false
+        var rows by mutableStateOf((0 until 25).map { "r$it" })
+        val state = LazyListState(firstVisibleItemIndex = 12)
+        val motion = ListTapMotion()
+        var jumpToTop by mutableStateOf(false)
+        rule.setContent {
+            PersonaTheme(darkTheme = false, reduceMotion = false, style = AppStyle.Glass) {
+                BindListTapMotion(motion, rows)
+                LaunchedEffect(jumpToTop) {
+                    if (jumpToTop) {
+                        motion.onProgrammaticScroll()
+                        state.scrollToItem(0)
+                    }
+                }
+                LazyColumn(
+                    Modifier
+                        .width(411.dp)
+                        .height(320.dp)
+                        .nestedScroll(listTapScroll(motion)),
+                    state = state,
+                ) {
+                    with(ListTapLazyScope(this, motion, state)) {
+                        items(rows, key = { it }) { title ->
+                            Box(Modifier.height(56.dp).fillMaxWidth().testTag("row-$title"))
+                        }
+                    }
+                }
+            }
+        }
+        settle()
+
+        // Concurrent tap + programmatic scroll jump + list mutation (simulating reading-position correction / restore).
+        motion.arm(ListTapMotionKind.State)
+        jumpToTop = true
+        rows = listOf("r12", "r13", "r0", "r1", "r2", "r3", "r4") + rows.drop(5)
+        Snapshot.sendApplyNotifications()
+        repeat(4) { rule.mainClock.advanceTimeByFrame() }
+
+        assertEquals(0, motion.shiftPx("r12"))
+        assertEquals(0, motion.shiftPx("r13"))
+        assertEquals(0, motion.shiftPx("r0"))
+        val b0 = rule.onNodeWithTag("row-r12").getUnclippedBoundsInRoot()
+        val b1 = rule.onNodeWithTag("row-r13").getUnclippedBoundsInRoot()
+        val b2 = rule.onNodeWithTag("row-r0").getUnclippedBoundsInRoot()
+        assertTrue("r12 overlapped r13 ($b0 vs $b1)", b0.bottom <= b1.top + 1.dp)
+        assertTrue("r13 overlapped r0 ($b1 vs $b2)", b1.bottom <= b2.top + 1.dp)
+    }
+
+    @Test fun notePlacedIgnoresLiveFadeWhenReduceMotionOrDisarmed() {
+        rule.mainClock.autoAdvance = false
+        var reduce by mutableStateOf(true)
+        val rows = listOf("A", "B")
+        val motion = ListTapMotion()
+        val heldScope = kotlinx.coroutines.CoroutineScope(object : kotlinx.coroutines.CoroutineDispatcher() {
+            override fun dispatch(context: kotlin.coroutines.CoroutineContext, block: Runnable) = Unit
+        })
+        rule.setContent {
+            PersonaTheme(darkTheme = false, reduceMotion = reduce, style = AppStyle.Glass) {
+                BindListTapMotion(motion, rows)
+                Box(Modifier.size(10.dp))
+            }
+        }
+        settle()
+
+        // Under Reduce Motion, even passing liveFade explicitly must not launch a shift.
+        motion.notePlaced("B", 120f, heldScope, motion.liveFade)
+        motion.arm(ListTapMotionKind.State)
+        motion.capture(listOf("B", "A"))
+        motion.notePlaced("B", 0f, heldScope, motion.liveFade)
+        assertEquals(0, motion.shiftPx("B"))
+        assertFalse("Reduce Motion launched a shift", motion.hasActiveShifts())
+
+        // After disarm(), passing liveFade must not launch a shift either.
+        reduce = false
+        Snapshot.sendApplyNotifications()
+        settle()
+        motion.notePlaced("B", 120f, heldScope, motion.liveFade)
+        motion.arm(ListTapMotionKind.State)
+        motion.capture(listOf("B", "A"))
+        motion.disarm()
+        motion.notePlaced("B", 0f, heldScope, motion.liveFade)
+        assertEquals(0, motion.shiftPx("B"))
+        assertFalse("disarmed motion launched a shift", motion.hasActiveShifts())
+    }
+
+    @Test fun backgroundThreadScopeCancellationCleansUpShiftSafelyOnMainThread() {
+        val motion = ListTapMotion()
+        val parentJob = kotlinx.coroutines.SupervisorJob()
+        val entered = CountDownLatch(1)
+        // A real dispatcher whose launch suspends on the test frame clock (never completes on its own)
+        // so cancelling parentJob from a background thread immediately transitions the child Job to Completed
+        // and runs invokeOnCompletion on that background thread.
+        val scope = kotlinx.coroutines.CoroutineScope(
+            parentJob + kotlinx.coroutines.Dispatchers.Default +
+                object : androidx.compose.runtime.MonotonicFrameClock {
+                    override suspend fun <R> withFrameNanos(onFrame: (Long) -> R): R =
+                        kotlinx.coroutines.suspendCancellableCoroutine { entered.countDown() }
+                },
+        )
+        motion.noteComposed(listOf("A", "B"))
+        motion.notePlaced("B", 120f, scope, motion.liveFade)
+        motion.arm(ListTapMotionKind.State)
+        motion.capture(listOf("B", "A"))
+        motion.notePlaced("B", 0f, scope, motion.liveFade)
+        assertEquals(120, motion.shiftPx("B"))
+        assertTrue("shift coroutine never reached frame suspension", entered.await(5, TimeUnit.SECONDS))
+
+        val done = CountDownLatch(1)
+        val worker = Thread {
+            runBlocking { parentJob.cancelAndJoin() }
+            done.countDown()
+        }
+        worker.start()
+        assertTrue(done.await(5, TimeUnit.SECONDS))
+        // Drain the main-looper cleanup posted by the worker thread's completion callback.
+        shadowOf(Looper.getMainLooper()).idle()
+
+        assertEquals(0, motion.shiftPx("B"))
+        assertFalse("background cancellation left an active shift", motion.hasActiveShifts())
+    }
+
+    @Test fun perKeyTicksDoNotInvalidateUnrelatedRows() {
+        rule.mainClock.autoAdvance = false
+        var rows by mutableStateOf(listOf("Stay", "Drop", "Move"))
+        val motion = ListTapMotion()
+        val stayPlaced = intArrayOf(0)
+        val movePlaced = intArrayOf(0)
+        rule.setContent {
+            PersonaTheme(darkTheme = false, reduceMotion = false, style = AppStyle.Glass) {
+                BindListTapMotion(motion, rows)
+                LazyColumn(Modifier.width(411.dp).height(400.dp)) {
+                    with(ListTapLazyScope(this, motion)) {
+                        items(rows, key = { it }) { title ->
+                            Box(
+                                Modifier
+                                    .height(60.dp)
+                                    .fillMaxWidth()
+                                    .onPlaced {
+                                        if (title == "Stay") stayPlaced[0]++
+                                        if (title == "Move") movePlaced[0]++
+                                    }
+                                    .testTag("row-$title"),
+                            )
+                        }
+                    }
+                }
+            }
+        }
+        settle()
+        motion.arm(ListTapMotionKind.State)
+        rows = listOf("Stay", "Move")
+        Snapshot.sendApplyNotifications()
+        // Advance past the initial list-change layout pass, then count per-frame spring ticks only.
+        repeat(2) { rule.mainClock.advanceTimeByFrame() }
+        assertTrue("Move should be mid-spring", abs(motion.shiftPx("Move")) > 4)
+        stayPlaced[0] = 0
+        movePlaced[0] = 0
+        repeat(6) { rule.mainClock.advanceTimeByFrame() }
+        assertTrue("animating row did not re-place during spring (${movePlaced[0]})", movePlaced[0] >= 4)
+        assertEquals("unrelated stationary row was invalidated by another row's tick", 0, stayPlaced[0])
+    }
+
+    @Test fun readingPositionCorrectionPreservesPendingTapAwaitingEpoch() {
+        rule.mainClock.autoAdvance = false
+        var rows by mutableStateOf((0 until 20).map { "r$it" })
+        var epoch by mutableStateOf(0)
+        val state = LazyListState(firstVisibleItemIndex = 8)
+        val motion = ListTapMotion()
+        rule.setContent {
+            PersonaTheme(darkTheme = false, reduceMotion = false, style = AppStyle.Glass) {
+                BindListTapMotion(motion)
+                LazyColumn(
+                    Modifier
+                        .width(411.dp)
+                        .height(320.dp)
+                        .nestedScroll(listTapScroll(motion)),
+                    state = state,
+                ) {
+                    val tap = ListTapLazyScope(this, motion, state, epoch = epoch)
+                    with(tap) {
+                        items(rows, key = { it }) { title ->
+                            Box(Modifier.height(56.dp).fillMaxWidth().testTag("row-$title"))
+                        }
+                    }
+                    tap.commit()
+                }
+            }
+        }
+        settle()
+
+        // User taps while scrolled down; waiting for throttled tapEpoch = 2.
+        motion.arm(ListTapMotionKind.State, awaitPage = true, epoch = 2)
+        // Before epoch 2 lands, an older hub page (epoch 1) inserts a row above the viewport and
+        // KeepAgentReadingPosition corrects the scroll offset without disarming the pending tap.
+        rows = listOf("Hub") + rows
+        epoch = 1
+        Snapshot.sendApplyNotifications()
+        rule.mainClock.advanceTimeByFrame()
+        rule.runOnIdle {
+            motion.cancelShiftsAndResetBaseline()
+            state.requestScrollToItem(9, 0)
+        }
+        Snapshot.sendApplyNotifications()
+        repeat(3) { rule.mainClock.advanceTimeByFrame() }
+
+        assertEquals("reading correction disarmed pending tap awaiting epoch 2", ListTapMotionKind.State, motion.kind)
+        assertFalse("stale epoch should not have captured the tap", motion.captured)
+        assertEquals(0, motion.shiftPx("r10"))
+
+        val beforeTap = top("row-r10")
+        // Now the tap's own epoch 2 lands, removing r8 above r10.
+        rows = rows.filterNot { it == "r8" }
+        epoch = 2
+        Snapshot.sendApplyNotifications()
+        motion.land(2)
+        val trace = (1..8).map {
+            rule.mainClock.advanceTimeByFrame()
+            top("row-r10")
+        }
+        rule.mainClock.advanceTimeBy(400)
+        val afterTap = top("row-r10")
+        val low = minOf(beforeTap, afterTap) - 2f
+        val high = maxOf(beforeTap, afterTap) + 2f
+        assertTrue(
+            "r10 did not spring smoothly after pending tap survived reading correction ($beforeTap -> $afterTap via $trace)",
+            abs(beforeTap - afterTap) > 8f &&
+                trace.all { it in low..high } &&
+                trace.any { y -> (y - beforeTap) * (y - afterTap) < 0f && abs(y - beforeTap) > 4f && abs(y - afterTap) > 4f },
+        )
+
+        // Contrast: once a tap diff IS already captured, cancelShiftsAndResetBaseline cancels shifts AND disarms.
+        motion.arm(ListTapMotionKind.State, awaitPage = true, epoch = 3)
+        rows = rows.filterNot { it == "r9" }
+        epoch = 3
+        Snapshot.sendApplyNotifications()
+        motion.land(3)
+        repeat(2) { rule.mainClock.advanceTimeByFrame() }
+        assertTrue("expected epoch 3 tap to be captured", motion.captured)
+        motion.cancelShiftsAndResetBaseline()
+        assertNull("captured tap should disarm on reading-position correction", motion.kind)
+        assertFalse(motion.hasActiveShifts())
+    }
+
+    @Test fun noOpTapAfterStaleRebaseDisarmsImmediately() {
+        rule.mainClock.autoAdvance = false
+        var rows by mutableStateOf(listOf("A", "B", "C", "D"))
+        var epoch by mutableStateOf(0)
+        val state = LazyListState()
+        val motion = ListTapMotion()
+        rule.setContent {
+            PersonaTheme(darkTheme = false, reduceMotion = false, style = AppStyle.Glass) {
+                BindListTapMotion(motion)
+                LazyColumn(Modifier.width(411.dp).height(320.dp), state = state) {
+                    val tap = ListTapLazyScope(this, motion, state, epoch = epoch)
+                    with(tap) {
+                        items(rows, key = { it }) { title ->
+                            Box(Modifier.height(48.dp).fillMaxWidth().testTag("row-$title"))
+                        }
+                    }
+                    tap.commit()
+                }
+            }
+        }
+        settle()
+
+        // Pending tap awaits epoch 2 (e.g., Expand All on an already-expanded list).
+        motion.arm(ListTapMotionKind.State, awaitPage = true, epoch = 2)
+        // Stale epoch 1 hub page arrives and rebases armedBaseline.
+        rows = listOf("Hub", "A", "B", "C", "D")
+        epoch = 1
+        Snapshot.sendApplyNotifications()
+        repeat(2) { rule.mainClock.advanceTimeByFrame() }
+        motion.cancelShiftsAndResetBaseline()
+
+        // Tap's epoch 2 lands with no diff relative to the rebased epoch 1 list -> must disarm promptly.
+        epoch = 2
+        Snapshot.sendApplyNotifications()
+        motion.land(2)
+        repeat(4) { rule.mainClock.advanceTimeByFrame() }
+        assertNull("no-op tap after stale rebase stayed armed", motion.kind)
+        assertFalse(motion.captured)
+
+        // A subsequent unrelated hub update reusing epoch 2 must snap rather than animating.
+        val beforeD = top("row-D")
+        rows = listOf("Hub2", "Hub", "A", "B", "C", "D")
+        Snapshot.sendApplyNotifications()
+        rule.mainClock.advanceTimeByFrame()
+        assertEquals(0, motion.shiftPx("D"))
+        assertTrue("hub insert did not move D", top("row-D") > beforeD + 20f)
+    }
+
+    @Test fun prepareExitFadeDoesNotLetHubPushInPrepFrameStealLocalFold() {
+        rule.mainClock.autoAdvance = false
+        var rows by mutableStateOf(listOf("A", "B", "C"))
+        val motion = ListTapMotion()
+        rule.setContent {
+            PersonaTheme(darkTheme = false, reduceMotion = false, style = AppStyle.Glass) {
+                BindListTapMotion(motion)
+                LazyColumn(Modifier.width(160.dp).height(320.dp).background(Color.White).testTag("shot")) {
+                    val tap = ListTapLazyScope(this, motion)
+                    with(tap) {
+                        items(rows, key = { it }) { title ->
+                            Box(
+                                Modifier
+                                    .height(48.dp)
+                                    .fillMaxWidth()
+                                    .background(if (title == "B") Color.Red else Color.Blue)
+                                    .testTag("row-$title"),
+                            )
+                        }
+                    }
+                    tap.commit()
+                }
+            }
+        }
+        settle()
+
+        // Prep frame attaches fadeOutSpec without arming placement.
+        motion.prepareExitFade()
+        Snapshot.sendApplyNotifications()
+        rule.mainClock.advanceTimeByFrame()
+        // A hub push arrives during the prep frame -> must NOT consume the tap or animate.
+        rows = listOf("Hub", "A", "B", "C")
+        Snapshot.sendApplyNotifications()
+        rule.mainClock.advanceTimeByFrame()
+        assertNull("prep frame should not arm placement kind", motion.kind)
+        assertFalse("hub push in prep frame captured tap", motion.captured)
+        assertEquals(0, motion.shiftPx("C"))
+        // Draw the prep frame (mirroring Choreographer's per-frame draw) so B's fadeOut GraphicsLayer is populated.
+        assertTrue("B should be visible before fold", redPixels() > 20)
+
+        val beforeHub = top("row-Hub")
+        val beforeC = top("row-C")
+        // Next frame: local fold arms placement and removes B.
+        motion.arm(ListTapMotionKind.State)
+        rows = listOf("Hub", "A", "C")
+        Snapshot.sendApplyNotifications()
+        rule.mainClock.advanceTimeByFrame()
+        val earlyFadeRed = redPixels()
+        val traceC = (1..8).map {
+            rule.mainClock.advanceTimeByFrame()
+            top("row-C")
+        }
+        rule.mainClock.advanceTimeBy(500)
+        val afterC = top("row-C")
+        val lateFadeRed = redPixels()
+
+        assertTrue("removed row B did not fade out ($earlyFadeRed -> $lateFadeRed)", earlyFadeRed > 10 && lateFadeRed < earlyFadeRed / 2)
+        assertEquals("hub row moved during fold", beforeHub, top("row-Hub"), 1f)
+        assertTrue(
+            "row C did not spring after hub push during prep frame ($beforeC -> $afterC via $traceC)",
+            abs(beforeC - afterC) > 8f && traceC.any { y -> (y - beforeC) * (y - afterC) < 0f && abs(y - beforeC) > 4f && abs(y - afterC) > 4f },
+        )
+    }
+
+    @Test fun staleShiftSafetyNetClearsAfterDisarm() {
+        rule.mainClock.autoAdvance = false
+        var rows by mutableStateOf(listOf("A", "B"))
+        val motion = ListTapMotion()
+        val heldScope = kotlinx.coroutines.CoroutineScope(object : kotlinx.coroutines.CoroutineDispatcher() {
+            override fun dispatch(context: kotlin.coroutines.CoroutineContext, block: Runnable) = Unit
+        })
+        rule.setContent {
+            PersonaTheme(darkTheme = false, reduceMotion = false, style = AppStyle.Glass) {
+                BindListTapMotion(motion, rows)
+                Box(Modifier.size(10.dp))
+            }
+        }
+        settle()
+        // Detach hostScope temporarily so launchShift uses the stalled scope whose animateTo never completes.
+        motion.hostScope = null
+        motion.notePlaced("B", 120f, heldScope, motion.liveFade)
+        motion.arm(ListTapMotionKind.State)
+        rows = listOf("B", "A")
+        Snapshot.sendApplyNotifications()
+        rule.mainClock.advanceTimeByFrame()
+        motion.hostScope = null
+        motion.notePlaced("B", 0f, heldScope, motion.liveFade)
+        assertEquals(120, motion.shiftPx("B"))
+
+        rule.mainClock.advanceTimeBy(Tokens.Motion.State.duration.toLong() + MAX_SHIFT_DURATION_MS + 100L)
+        assertEquals("post-disarm safety net failed to clear stalled shift", 0, motion.shiftPx("B"))
+        assertFalse(motion.hasActiveShifts())
     }
 
     @Test fun pinningExpandedHierarchyAcrossViewportDisposeNeverLeavesRowsStuckOverlappingOnScroll() {

@@ -5,6 +5,7 @@
   "resize_title": "ドラッグして幅を調整",
   "files": "ファイル",
   "link": "リンク",
+  "back": "戻る",
   "close": "パネルを閉じる",
   "preview": "プレビュー",
   "review": "レビュー",
@@ -13,5 +14,6 @@
   "background": "バックグラウンドタスク",
   "task": "タスク",
   "agent": "エージェント",
-  "sides": "子セッション"
+  "sides": "子セッション",
+  "subagent": "サブエージェント"
 }

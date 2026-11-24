@@ -1,7 +1,7 @@
 # screen-link
 
 The live screen's session wire (#6398, `docs/extensions/computer-use.md` "Live screen routes (#6398)"): the messages
-the phone and the node's `internal/screenlink` exchange on every transport of a screen session. Both sides read the
+the phone and the node's `internal/modules/screen-share/screenlink` exchange on every transport of a screen session. Both sides read the
 same cases, so the iPhone's client and the node frame every message alike.
 
 ## Rules
@@ -31,5 +31,5 @@ All values are made up; addresses are from documentation and shared ranges.
 
 ## Checked by
 
-- Go: `server/internal/screenlink` `TestTheWireMatchesTheSharedCases` (`go test ./internal/screenlink`).
+- Go: `server/internal/modules/screen-share/screenlink` `TestTheWireMatchesTheSharedCases` (`go test ./internal/screenlink`).
 - iOS: `apple/Packages/PersonaScreenKit` `ScreenLinkWireTests` (`swift test` in that package).

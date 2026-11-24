@@ -391,6 +391,33 @@ internal fun latestPlan(steps: List<WorkItem>): LinePlan? = steps.asReversed().f
     }
 }
 
+/**
+ * The chat's newest non-failed plan across all items (including collapsed work lines and hub-folded snapshots, mirroring
+ * iOS `ChatPlan.latest`), so Glass can show its floating `PlanPill` above the composer even while work lines are folded.
+ */
+internal fun latestChatPlan(items: List<Item>): LinePlan? {
+    val failed = mutableSetOf<String>()
+    for (item in items.asReversed()) {
+        val snap = item.fold?.tasks?.lastOrNull { it.replace == "todo" && it.entries.size >= 2 }
+        if (snap != null) {
+            val todos = snap.entries.mapNotNull { entry ->
+                val content = entry.subject?.takeIf { it.isNotBlank() } ?: return@mapNotNull null
+                val rawStatus = entry.status
+                if (rawStatus == "deleted") return@mapNotNull null
+                val status = if (rawStatus == "completed" || rawStatus == "in_progress") rawStatus else "pending"
+                TodoEntry(content, status, entry.description)
+            }
+            if (todos.size >= 2) return LinePlan(snap.sourceItemId, todos, failed = false)
+        }
+        if (item.kind == "tool_result" && item.isError == true) item.toolUseId?.let(failed::add)
+        if (item.kind == "tool_use" && item.toolName == "TodoWrite" && item.toolUseId !in failed) {
+            val todos = todoEntries(item)?.takeIf { it.size >= 2 }
+            if (todos != null) return LinePlan(item.id, todos, failed = false)
+        }
+    }
+    return null
+}
+
 /** Where the newest plan card is drawn: its line ([lineId]) and the plan. */
 internal data class PlanAnchor(val lineId: String, val plan: LinePlan)
 

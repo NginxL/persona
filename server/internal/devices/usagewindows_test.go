@@ -64,6 +64,92 @@ func TestMergeUsageAccountsStillDedupesClaudeByWindow(t *testing.T) {
 	}
 }
 
+func TestUsageWindowsReconcilesAntigravitySources(t *testing.T) {
+	now := time.Unix(1_800_000_000, 0).UTC()
+	five, week := now.Add(time.Hour), now.Add(3*24*time.Hour)
+	gemini5, gemini7 := uw("5h", 300, 3, five), uw("7d", 10080, 38, week)
+	claude5, claude7 := uw("5h", 300, 0, five), uw("7d", 10080, 0, week)
+	gemini5.Model, gemini7.Model = "Gemini Models", "Gemini Models"
+	claude5.Model, claude7.Model = "Claude and GPT models", "Claude and GPT models"
+	node := proto.UsageAccount{Provider: "agy", Name: "Antigravity", Local: true, Origin: "computer/0",
+		Machines: []string{"Computer"}, SampledAt: now, Windows: []proto.UsageWindow{gemini5, gemini7, claude5, claude7}}
+	gemini := proto.UsageAccount{Provider: "antigravity", Name: "Antigravity · Gemini", Pass: true, Origin: "external#0",
+		Sources: []string{"External"}, SampledAt: now.Add(-time.Minute), Headline: "Quota details",
+		Windows: []proto.UsageWindow{uw("5h", 300, 2, five), uw("7d", 10080, 36, week.Add(time.Millisecond))}}
+	gemini.Windows[1].Title = "Weekly Gemini quota"
+	protection := 90.0
+	gemini.Windows[1].ProtectPercent = &protection
+	claude := proto.UsageAccount{Provider: "antigravity", Name: "Antigravity · Claude/GPT", Pass: true, Origin: "external#1",
+		Sources: []string{"External"}, SampledAt: now, Windows: []proto.UsageWindow{uw("5h", 300, 0, five), uw("7d", 10080, 0, week)}}
+	codex := proto.UsageAccount{Provider: "codex", Name: "Codex Pro", SampledAt: now, Windows: []proto.UsageWindow{uw("7d", 10080, 23, week)}}
+	merged := mergeUsageAccounts([]proto.UsageAccount{node, gemini, claude, codex}, now)
+	got := usageWindowsAnswer(merged, nil, now)["accounts"].([]proto.UsageAccount)
+	if len(got) != 3 || got[0].Name != "Codex Pro" || got[1].Name != gemini.Name || got[2].Name != claude.Name {
+		t.Fatalf("want Codex and two distinct external Antigravity quota groups: %+v", got)
+	}
+	g := got[1]
+	if g.ID != usageRowID("antigravity", "extension|external#0") || g.Headline != gemini.Headline ||
+		!g.Local || !slices.Equal(g.Machines, node.Machines) || !slices.Equal(g.Sources, gemini.Sources) ||
+		!g.SampledAt.Equal(now) || g.StaleAt == nil || !g.StaleAt.Equal(now.Add(usageHubStaleAfter)) {
+		t.Fatalf("external row identity, sources or sample time lost: %+v", g)
+	}
+	if len(g.Windows) != 2 || g.Windows[0].UsedPercent != 3 || g.Windows[1].UsedPercent != 38 ||
+		g.Windows[1].Title != gemini.Windows[1].Title || g.Windows[1].ProtectPercent != &protection {
+		t.Fatalf("Gemini needs the newest percentages and the external window metadata: %+v", g.Windows)
+	}
+	if c := got[2]; len(c.Windows) != 2 || mostUsed(c) != 0 || !c.Local {
+		t.Fatalf("Claude/GPT has a separate quota even with the same resets: %+v", c)
+	}
+	if len(merged) != 4 || merged[0].Provider != "antigravity" || merged[0].ID != usageAccountID(node) ||
+		len(merged[0].Windows) != 4 || merged[2].Windows[1].UsedPercent != 36 || gemini.Windows[1].UsedPercent != 36 {
+		t.Fatalf("the display merge changed the poll's cached samples or the local row ID: %+v", merged)
+	}
+}
+
+func TestUsageWindowsKeepsDistinctAntigravityWindows(t *testing.T) {
+	now := time.Unix(1_800_000_000, 0).UTC()
+	week := now.Add(24 * time.Hour)
+	gemini := uw("7d", 10080, 38, week)
+	gemini.Model = "Gemini Models"
+	claude := uw("7d", 10080, 16, week)
+	claude.Model = "Claude and GPT models"
+	local := proto.UsageAccount{Provider: "agy", Name: "Antigravity", Local: true, Origin: "computer/0",
+		SampledAt: now.Add(-time.Minute), Windows: []proto.UsageWindow{claude, gemini}}
+	remote := proto.UsageAccount{Provider: "antigravity", Name: "Antigravity · Gemini", Ref: "source:gemini",
+		Sources: []string{"External"}, SampledAt: now, Windows: []proto.UsageWindow{uw("7d", 10080, 39, week)}}
+	answer := func(accounts ...proto.UsageAccount) []proto.UsageAccount {
+		return usageWindowsAnswer(mergeUsageAccounts(accounts, now), nil, now)["accounts"].([]proto.UsageAccount)
+	}
+	got := answer(local, remote)
+	if len(got) != 2 || mostUsed(got[0]) != 39 || len(got[1].Windows) != 1 || got[1].Windows[0].Model != claude.Model {
+		t.Fatalf("want the newer Gemini reading and the unmatched Claude/GPT window: %+v", got)
+	}
+	otherSeat := remote
+	otherSeat.Ref = "source:other-seat"
+	if got := answer(local, remote, otherSeat); len(got) != 3 || len(got[2].Windows) != 2 {
+		t.Fatalf("matching resets on multiple gateway seats cannot identify the local subscription: %+v", got)
+	}
+	for _, remoteWindow := range []proto.UsageWindow{
+		uw("7d", 10080, 39, week.Add(time.Second)),
+		uw("5h", 300, 39, week),
+		{Label: "7d", WindowMinutes: 10080, UsedPercent: 39},
+	} {
+		remote.Windows = []proto.UsageWindow{remoteWindow}
+		if got := answer(local, remote); len(got) != 2 || len(got[1].Windows) != 2 {
+			t.Fatalf("window %+v must leave both local quotas intact: %+v", remoteWindow, got)
+		}
+	}
+
+	remote.Name = "Gateway seat"
+	remote.Windows = []proto.UsageWindow{uw("7d", 10080, 39, week)}
+	remote.Windows[0].Model = "gemini"
+	remote.Stale, remote.Problem = true, "unreachable"
+	if got := answer(local, remote); len(got) != 2 || mostUsed(got[0]) != 38 || got[0].Stale || got[0].Problem != "" ||
+		got[0].Windows[0].Model != "gemini" || len(got[1].Windows) != 1 || got[1].Windows[0].Model != claude.Model {
+		t.Fatalf("an older fresh reading should replace the stale model-scoped window: %+v", got)
+	}
+}
+
 // A local sample is not a bridge between two different accounts of one gateway (#7324).
 func TestMergeUsageAccountsDoesNotBridgeGatewayAccounts(t *testing.T) {
 	now := time.Now().Truncate(time.Second)

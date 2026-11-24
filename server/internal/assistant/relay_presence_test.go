@@ -603,6 +603,32 @@ func TestReplacedQueuedMessageKeepsItsWait(t *testing.T) {
 	}
 }
 
+func TestUnresolvedSupervisionHeadBlocksLaterReplacement(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		doubtful  bool
+		withdrawn bool
+	}{{"doubtful", true, false}, {"withdrawn", false, true}} {
+		t.Run(tc.name, func(t *testing.T) {
+			s, _ := newQuietService(t)
+			head := relayMsg{From: superviseTool, Tool: superviseTool, Text: "original", Withdrawn: tc.withdrawn}
+			if tc.doubtful {
+				head.DoubtedAt = time.Now().UTC()
+			}
+			s.queueRelay("conv1", head)
+			s.queueRelay("conv1", relayMsg{From: superviseTool, Tool: superviseTool, Text: "later"})
+			before := append([]relayMsg(nil), s.relays.st.Queue["conv1"]...)
+			if s.replaceQueuedSupervise("conv1", relayMsg{From: superviseTool, Tool: superviseTool, Text: "merged replacement"}) {
+				t.Fatal("a later message was replaced while the original send's outcome stayed unresolved")
+			}
+			got := s.relays.st.Queue["conv1"]
+			if len(got) != len(before) || got[0] != before[0] || got[1] != before[1] {
+				t.Fatalf("queue changed while the original send's outcome stayed unresolved: %+v", got)
+			}
+		})
+	}
+}
+
 // The queue wait (#4924) of a message held for the owner in an idle conversation is the whole hold: from when it
 // queued to when it went in.
 func TestQueueWaitOfAHeldMessage(t *testing.T) {

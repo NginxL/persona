@@ -235,7 +235,9 @@ it("retries only the optional M3 launch after failure while retaining the acknow
     launchId = launchAgent({ machineId: preset.workspace!.machineId, cwd: preset.workspace!.cwd, host: preset.workspace!.host,
       workspaceId: preset.workspace!.workspaceId, launcher: "custom-codex", model: "chosen-model", effort: "high", text: "First message", attachments: [] });
   });
-  await mount(); await click(t("worktree-composer.create")); await click(t("worktree-composer.start_agent")); await flush();
+  await mount(); await click(t("worktree-composer.create")); await click(t("worktree-composer.start_agent"));
+  // launchAgent loads delivery on intent; wait for the refused start to settle before asserting or retrying it.
+  await act(async () => vi.waitFor(() => expect(getState().launches[launchId]?.phase).toBe("failed")));
   expect(getState().launches[launchId].phase).toBe("failed");
   failLaunch = false; await act(async () => deliverLaunch(launchId)); await flush();
   expect(getState().launches[launchId].phase).toBe("ready");

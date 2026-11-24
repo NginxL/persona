@@ -1,4 +1,4 @@
-"""GitHub's own routes in the mock hub (server/internal/connector/github), a domain of scripts/mock/mock_domains.py that
+"""GitHub's own routes in the mock hub (server/internal/modules/github), a domain of scripts/mock/mock_domains.py that
 moved out of mock_hub.py (#11543): the sign-in (GET / PUT /api/v1/connectors/github/auth, POST …/login and …/logout) and
 the thread page of MOCK_GITHUB_INBOX=1's pull request (GET …/thread and …/media, POST …/thread/reply), whose people's
 pictures it also draws on the hub's shared avatars route (GET /api/v1/avatars/github/…, #10923).
@@ -16,7 +16,7 @@ import mock_domains
 
 HUB = None  # mock_hub.py's globals (mock_domains.Hub), from register
 
-# MOCK_GITHUB=device: GitHub signed in neither way, its device-flow sign-in from the app (connector/github/login.go):
+# MOCK_GITHUB=device: GitHub signed in neither way, its device-flow sign-in from the app (modules/github/login.go):
 # straight to the code ABCD-1234 (the hub uses the GitHub CLI's client ID); it is entered after two asks (one second
 # apart).
 GITHUB_DEVICE = {"polls": 0}
@@ -70,7 +70,7 @@ def set_github_auth(body):
     return True
 
 
-# GitHub's thread page (connector/github/thread.go, MOCK_GITHUB_INBOX=1): the made-up pull request
+# GitHub's thread page (modules/github/thread.go, MOCK_GITHUB_INBOX=1): the made-up pull request
 # example-org/example-repo#12 as the hub reads it — header, description, comments, reviews, comments on a line, checks
 # and events; a reply is added as a comment of mine. Other threads (a CI run) cannot be opened, as on the hub.
 GH_AVATAR_COLORS = {"alice": (214, 120, 160), "bob": (90, 150, 220), "sam": (110, 180, 120), "ci-bot[bot]": (140, 140, 150)}

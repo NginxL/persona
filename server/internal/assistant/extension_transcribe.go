@@ -28,6 +28,7 @@ import (
 	"github.com/nwverse/persona/server/internal/extwire"
 	"github.com/nwverse/persona/server/internal/kb"
 	"github.com/nwverse/persona/server/internal/rpc"
+	"github.com/nwverse/persona/server/internal/transcribejob"
 )
 
 const (
@@ -37,6 +38,16 @@ const (
 	extTranscribeChunkMost = 256 << 10
 	// extTranscribeLabelMost is how much of a job's label the log keeps (runes).
 	extTranscribeLabelMost = 40
+	// replayFrame is how much audio one binary frame carries (one second, under the 64 KiB a frame may be).
+	replayFrame = kb.AudioRate * 2
+)
+
+// The times of a job, as a meeting's final pass has them (the recording module's meeting_transcribe.go); tests
+// shorten them.
+var (
+	jobReadyWait = 30 * time.Second // a job answers ready within this, else it counts as upstream_unavailable
+	jobDoneWait  = 5 * time.Minute  // a job sends done within this of the manager's end
+	replayAhead  = time.Minute      // the most audio sent ahead of a job's last ack
 )
 
 // extTranscribeIdle: a job with no call for this long is cancelled (the extension went away); tests shorten it.
@@ -59,11 +70,11 @@ type extJob struct {
 
 	calls sync.Mutex // one of the job's calls at a time: its audio goes in order
 
-	mu       sync.Mutex // the fields below
-	jc       *jobConn   // nil while it starts
-	sent     int64      // samples sent
-	acked    int64      // samples the contribution took
-	heard    time.Time  // when the contribution last sent anything
+	mu       sync.Mutex          // the fields below
+	jc       *transcribejob.Conn // nil while it starts
+	sent     int64               // samples sent
+	acked    int64               // samples the contribution took
+	heard    time.Time           // when the contribution last sent anything
 	segments []assistantwire.TranscriptionSegment
 	cur      []assistantwire.TranscriptionSegment // the open window's
 	gaps     []assistantwire.TranscriptionGap
@@ -156,7 +167,7 @@ func (s *Service) extTranscribeStart(ctx context.Context, call assistantwire.Ext
 
 // extTranscribeDial opens a replay job on the chosen contribution and waits for it to be ready; every way it cannot is
 // transcription_unavailable.
-func (s *Service) extTranscribeDial(ctx context.Context, language string) (*jobConn, error) {
+func (s *Service) extTranscribeDial(ctx context.Context, language string) (*transcribejob.Conn, error) {
 	unavailable := func(why string, args ...any) error {
 		return transcriptionError(assistantwire.CodeTranscriptionUnavailable, "transcription.start: "+why, args...)
 	}
@@ -186,12 +197,12 @@ func (s *Service) extTranscribeDial(ctx context.Context, language string) (*jobC
 	}
 	start := extwire.TranscriptionFrame{Type: extwire.TFStart, Mode: extwire.TranscriptionReplay, Speed: 4, Language: language,
 		At: extwire.F(0.0)}
-	if err := jc.send(rctx, start); err != nil {
-		jc.close()
+	if err := jc.Send(rctx, start); err != nil {
+		jc.Close()
 		return nil, unavailable("%v", err)
 	}
-	if _, err := jc.awaitReady(rctx); err != nil {
-		jc.close()
+	if _, err := jc.AwaitReady(rctx); err != nil {
+		jc.Close()
 		return nil, unavailable("%v", err)
 	}
 	return jc, nil
@@ -203,7 +214,7 @@ func (s *Service) extTranscribeRead(job *extJob) {
 	jc := job.jc
 	job.mu.Unlock()
 	for {
-		f, err := jc.read(job.ctx)
+		f, err := jc.Read(job.ctx)
 		job.mu.Lock()
 		if err != nil {
 			job.endLocked(err)
@@ -236,7 +247,7 @@ func (s *Service) extTranscribeRead(job *extJob) {
 			s.logf("extension %s: transcription warning %s", job.ext, f.Code)
 		case extwire.TFError:
 			if f.Fatal {
-				job.endLocked(&jobError{code: f.Code})
+				job.endLocked(&transcribejob.Error{Code: f.Code})
 				job.mu.Unlock()
 				return
 			}
@@ -273,10 +284,10 @@ func (j *extJob) signalLocked() {
 
 // failed is the error a call answers once the contribution's side ended with err.
 func (j *extJob) failed(method string, err error) error {
-	var je *jobError
+	var je *transcribejob.Error
 	if errors.As(err, &je) {
-		data, _ := json.Marshal(map[string]string{"code": je.code})
-		return &rpc.Error{Code: assistantwire.CodeTranscriptionFailed, Message: method + ": the transcription failed the job (" + je.code + ")", Data: data}
+		data, _ := json.Marshal(map[string]string{"code": je.Code})
+		return &rpc.Error{Code: assistantwire.CodeTranscriptionFailed, Message: method + ": the transcription failed the job (" + je.Code + ")", Data: data}
 	}
 	return transcriptionError(assistantwire.CodeTranscriptionFailed, "%s: the transcription's connection ended", method)
 }
@@ -354,7 +365,7 @@ func (s *Service) extTranscribeAudio(ctx context.Context, call assistantwire.Ext
 		job.mu.Lock()
 		jc := job.jc
 		job.mu.Unlock()
-		if err := jc.sendAudio(job.ctx, pcm[:n]); err != nil {
+		if err := jc.SendAudio(job.ctx, pcm[:n]); err != nil {
 			return nil, s.extTranscribeFailed(job, method, err)
 		}
 		job.mu.Lock()
@@ -422,7 +433,7 @@ func (s *Service) extTranscribeFailed(job *extJob, method string, err error) err
 	}
 	t.Stop()
 	job.mu.Lock()
-	var je *jobError
+	var je *transcribejob.Error
 	if errors.As(job.err, &je) {
 		err = job.err
 	}
@@ -448,7 +459,7 @@ func (s *Service) extTranscribeFinish(ctx context.Context, call assistantwire.Ex
 	}
 	jc := job.jc
 	job.mu.Unlock()
-	if err := jc.send(job.ctx, extwire.TranscriptionFrame{Type: extwire.TFEnd}); err != nil {
+	if err := jc.Send(job.ctx, extwire.TranscriptionFrame{Type: extwire.TFEnd}); err != nil {
 		return nil, s.extTranscribeFailed(job, method, err)
 	}
 	for {
@@ -523,7 +534,7 @@ func (s *Service) endExtJob(job *extJob, how string) {
 	job.mu.Unlock()
 	job.stop()
 	if jc != nil {
-		jc.close()
+		jc.Close()
 	}
 	if jc == nil && how == "unavailable" {
 		return // nothing ran: the caller has the reason

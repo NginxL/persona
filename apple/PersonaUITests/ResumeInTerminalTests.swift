@@ -60,16 +60,17 @@ final class ResumeInTerminalTests: XCTestCase {
             if compact.exists && compact.isHittable { compact.tap(); sleep(1) }
         }
         // At the largest text size a tap now and then lands while the header still settles, and only stops it: tap again.
-        // There the menu scrolls and only its first items exist, so any of them says it opened (Terminal: not the
-        // stopped line's own button; a session still running elsewhere has no Terminal, and its menu is short).
+        // Any of the top level's first items says it opened (Rename Agent…, Pin; a session still running elsewhere
+        // has Interrupt first).
         let opened = app.buttons.matching(NSPredicate(
-            format: "label BEGINSWITH %@ OR label BEGINSWITH %@ OR label BEGINSWITH %@ OR (label == %@ AND identifier != %@)",
-            "拷贝目录", "重命名", "文件", "终端", "chat.stopped.terminal")).firstMatch
+            format: "label BEGINSWITH %@ OR label IN %@", "重命名", ["置顶", "取消置顶", "中断"])).firstMatch
         for _ in 0..<3 where !opened.exists {
             more.tap()
             _ = opened.waitForExistence(timeout: 5)
         }
         XCTAssertTrue(opened.exists, "⋯ did not open:\n\(app.debugDescription.prefix(4000))")
+        sleep(1)
+        app.openAgentMenuMore() // Resume in Terminal is More's (#13396)
         sleep(1)
     }
 

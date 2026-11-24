@@ -7,6 +7,10 @@
     <string name="assistant_settings_loading">正在读取</string>
     <string name="assistant_settings_cancel">取消</string>
     <string name="assistant_settings_save">保存</string>
+    <string name="assistant_settings_name">名字</string>
+    <string name="assistant_settings_rename">改名</string>
+    <string name="assistant_settings_name_placeholder">比如：工作</string>
+    <string name="assistant_settings_name_invalid">名字要 1 到 40 个字</string>
     <string name="assistant_settings_discard">不保存</string>
     <string name="assistant_settings_edit">编辑</string>
     <string name="assistant_settings_delete">删除</string>

@@ -65,8 +65,9 @@ final class ShareViewController: UIViewController {
     private let items: [NSExtensionItem]
     private let finish: (Bool) -> Void
 
-    /// What Persona's composer sends at most (ChatView `add`); more pictures go as files.
-    static let maxImages = 4
+    /// The pictures one message carries (#12973): the hub's `image_limits`, which this extension does not read (it gets
+    /// no hello); every hub publishes the standard ones today. More pictures go as files.
+    static let maxImages = ImageLimits.standard.perMessage
 
     init(items: [NSExtensionItem], finish: @escaping (Bool) -> Void) {
         self.items = items

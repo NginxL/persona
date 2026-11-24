@@ -369,7 +369,7 @@ func discoverAgyModels(ctx context.Context, cmd *exec.Cmd, name string) ([]proto
 	}
 	stopReading := context.AfterFunc(ctx, func() { _ = stdout.Close() })
 	defer stopReading()
-	models, parseErr := agyModelList(io.TeeReader(stdout, &stdoutTail))
+	models, windows, parseErr := agyModelListWithWindows(io.TeeReader(stdout, &stdoutTail))
 	if parseErr != nil && ctx.Err() == nil {
 		_ = cmd.Cancel()
 	}
@@ -389,26 +389,46 @@ func discoverAgyModels(ctx context.Context, cmd *exec.Cmd, name string) ([]proto
 	if len(models) == 0 {
 		return nil, fmt.Errorf("%s models returned no models", name)
 	}
+	recordAgyModelWindows(windows)
 	return models, nil
 }
 
 // agyModelList reads the same tab-separated catalog as the Antigravity companion, retaining the first row per ID.
 // Effort suffixes identify variants of the same model and advertise the levels present in the catalog.
 func agyModelList(r io.Reader) ([]proto.AgentModel, error) {
+	models, _, err := agyModelListWithWindows(r)
+	return models, err
+}
+
+// agyModelListWithWindows parses `agy models` rows and also extracts any explicit context window token counts
+// declared in extra tab-separated columns without guessing when omitted.
+func agyModelListWithWindows(r io.Reader) ([]proto.AgentModel, map[string]int, error) {
 	var models []proto.AgentModel
 	seen := map[string]bool{}
+	var windows map[string]int
 	scanner := bufio.NewScanner(r)
 	for scanner.Scan() {
 		id, rest, ok := strings.Cut(strings.TrimSpace(scanner.Text()), "\t")
 		if !ok || id == "" || strings.IndexFunc(id, unicode.IsSpace) >= 0 || seen[id] {
 			continue
 		}
-		name, _, _ := strings.Cut(strings.TrimLeft(rest, "\t"), "\t")
+		name, extra, hasExtra := strings.Cut(strings.TrimLeft(rest, "\t"), "\t")
 		if name == "" {
 			name = id
 		}
 		seen[id] = true
 		models = append(models, proto.AgentModel{ID: id, Name: name})
+		if hasExtra {
+			for col := range strings.SplitSeq(extra, "\t") {
+				if w := parseAgyModelWindow(col); w > 0 {
+					if windows == nil {
+						windows = map[string]int{}
+					}
+					windows[strings.ToLower(id)] = w
+					break
+				}
+			}
+		}
 	}
 	for i := range models {
 		model := &models[i]
@@ -425,7 +445,7 @@ func agyModelList(r io.Reader) ([]proto.AgentModel, error) {
 			}
 		}
 	}
-	return models, scanner.Err()
+	return models, windows, scanner.Err()
 }
 
 // claudeModelList asks a headless claude (stream-json both ways) for the models of its /model menu.

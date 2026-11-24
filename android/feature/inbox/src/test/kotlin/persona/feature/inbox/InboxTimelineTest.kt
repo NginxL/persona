@@ -27,6 +27,7 @@ import persona.core.domain.inbox.InboxItem
 import persona.core.domain.sort.AgentSession
 import persona.core.domain.sort.stateWord
 import java.io.File
+import persona.core.inbox.*
 
 /** Every shared timeline case, plus the live-session lookup behind an Agent step. */
 @RunWith(RobolectricTestRunner::class)

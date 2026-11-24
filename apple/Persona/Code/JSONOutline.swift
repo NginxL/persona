@@ -1,7 +1,5 @@
 import SwiftUI
-#if canImport(UIKit)
 import UIKit
-#endif
 
 /// A JSON document as a flat list of nodes in document order (docs/apple/ios.md「File viewer」): each node knows its depth,
 /// its key and where its subtree ends, so showing it folded or open only walks what is on screen. Parsed from the

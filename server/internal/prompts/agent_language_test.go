@@ -58,13 +58,17 @@ func TestAgentLanguagePeerBodyAndConcurrency(t *testing.T) {
 }
 
 func TestAgentLanguageTaskFileInstructions(t *testing.T) {
-	for language, line := range map[string]string{
-		"":        "file: <这台电脑上的绝对路径>",
-		"English": "file: <absolute path on this computer>",
-		"日本語":     "file: <このコンピューター上の絶対パス>",
+	for language, want := range map[string]struct{ marker, scratch string }{
+		"":        {"file: <这台电脑上的绝对路径>", "临时文件和草稿请放在仓库工作区外"},
+		"English": {"file: <absolute path on this computer>", "Keep temporary files and drafts outside repository checkouts"},
+		"日本語":     {"file: <このコンピューター上の絶対パス>", "リポジトリの外に保存してください"},
 	} {
-		if got := RenderTaskFiles(language); !strings.Contains(got, "\n"+line+"\n") {
+		got := RenderTaskFiles(language)
+		if !strings.Contains(got, "\n"+want.marker+"\n") {
 			t.Errorf("%q missed file protocol line: %q", language, got)
+		}
+		if !strings.Contains(got, want.scratch) {
+			t.Errorf("%q missed the instruction to keep scratch files outside the checkout", language)
 		}
 	}
 }

@@ -370,7 +370,7 @@ internal fun AddMailAccountPage(
                 val uri = LocalUriHandler.current
                 Column(verticalArrangement = Arrangement.spacedBy(Tokens.Space.xs), modifier = Modifier.padding(top = Tokens.Space.xs)) {
                     SettingsCaption(stringResource(guide.provider.steps))
-                    JTextButton(stringResource(guide.provider.open), onClick = { runCatching { uri.openUri(guide.webMail) } }, icon = PhIcons.ArrowSquareOut)
+                    JTextButton(stringResource(guide.provider.open), onClick = { val _ = runCatching { uri.openUri(guide.webMail) } }, icon = PhIcons.ArrowSquareOut)
                 }
             } else item("form-footer") {
                 SettingsCaption(
@@ -665,7 +665,7 @@ internal fun ConnectorSignInStep(
                     JGroupItem(GroupPosition.Single) {
                         JRow(stringResource(R.string.settings_ext_auth_link_label), subtitle = url, subtitleLines = 2, leadingIcon = PhIcons.LinkSimple,
                             trailing = { JIcon(PhIcons.ArrowSquareOut, null, size = Tokens.Space.l, tint = PersonaTheme.palette.ink3) },
-                            onClick = { runCatching { uri.openUri(url) } })
+                            onClick = { val _ = runCatching { uri.openUri(url) } })
                     }
                 }
                 // No code: the page alone is enough (the protocol leaves it out then).
@@ -682,7 +682,7 @@ internal fun ConnectorSignInStep(
                 SignInWaiting(stringResource(R.string.settings_src_channel_waiting_authorize))
                 Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.s)) {
                     link?.let { url ->
-                        JButton(stringResource(R.string.settings_ext_auth_open_link), { runCatching { uri.openUri(url) } }, Modifier.weight(1f),
+                        JButton(stringResource(R.string.settings_ext_auth_open_link), { val _ = runCatching { uri.openUri(url) } }, Modifier.weight(1f),
                             icon = PhIcons.ArrowSquareOut)
                     }
                     JButton(stringResource(R.string.settings_src_cancel), model::cancel, Modifier.weight(1f), kind = JButtonKind.Secondary)
@@ -701,7 +701,7 @@ internal fun ConnectorSignInStep(
                     else stringResource(R.string.settings_src_channel_waiting_authorize))
                 Row(horizontalArrangement = Arrangement.spacedBy(Tokens.Space.s)) {
                     prompt.url?.takeIf { StepView.isWebLink(it) }?.let { url ->
-                        JButton(stringResource(R.string.settings_src_open_web), { runCatching { uri.openUri(url) } }, Modifier.weight(1f),
+                        JButton(stringResource(R.string.settings_src_open_web), { val _ = runCatching { uri.openUri(url) } }, Modifier.weight(1f),
                             kind = JButtonKind.Secondary, icon = PhIcons.ArrowSquareOut)
                     }
                     JButton(stringResource(R.string.settings_src_cancel), model::cancel, Modifier.weight(1f), kind = JButtonKind.Secondary)

@@ -1,0 +1,15 @@
+# The app without its moved feature modules (#14017; docs/apple/ios.md "Modules"): PERSONA_CORE_ONLY=YES leaves every
+# apple/Modules/<Name> out of the build, as the server's `persona_core_only` tag does. A later include's `:REPLACE` key
+# replaces what the includes before it merged: modules.yml's sources and conditions, and nothing of project.yml's own,
+# which merges after every include. Checked by scripts/ci/apple.sh ("Core-only iOS build").
+targets:
+  Persona:
+    sources:REPLACE: []
+    settings:
+      base:
+        SWIFT_ACTIVE_COMPILATION_CONDITIONS: "$(inherited)"
+  PersonaVision:
+    sources:REPLACE: []
+    settings:
+      base:
+        SWIFT_ACTIVE_COMPILATION_CONDITIONS: "$(inherited)"

@@ -91,7 +91,7 @@ def inspect(config, apk, request, version):
     return publish_android_apk.inspect_apk(apk, args)
 
 
-def release(config, worktree, commit, version, receipt):
+def release(config, worktree, commit, version, receipt, release_only=False):
     check_source(worktree, commit)
     receipt.unlink(missing_ok=True)
     state = Path(config["state_directory"]).expanduser().resolve()
@@ -100,7 +100,7 @@ def release(config, worktree, commit, version, receipt):
     directory = state / "tags" / version
     directory.mkdir(parents=True, exist_ok=True)
     with wait_for_lock(state / "worker.lock", config.get("lock_timeout_seconds", 7200)):
-        request = worker.build(config, worktree, commit, directory, version)
+        request = worker.build(config, worktree, commit, directory, version, release_only=release_only)
         (directory / "signed.apk").unlink(missing_ok=True)
         if "signing_queue" in config:
             worker.signing(config, request, directory)
@@ -133,6 +133,8 @@ def main():
     parser.add_argument("--commit", required=True, help="{commit}: the tag's full commit")
     parser.add_argument("--version", required=True, help="{version}: the tag without its v")
     parser.add_argument("--receipt", required=True, type=Path, help="the receipt path of the tag-release configuration")
+    parser.add_argument("--release-only", action="store_true",
+                        help="after the standard sharded CI passed this commit, build only the release APK and signing evidence")
     args = parser.parse_args()
     os.umask(0o077)
     try:
@@ -146,7 +148,7 @@ def main():
         check_config(config)
         # aapt2 and apksigner come from the build environment's SDK, as the build's tools do.
         os.environ.update(config.get("build_environment", {}))
-        index = release(config, args.worktree.resolve(), args.commit, args.version, args.receipt)
+        index = release(config, args.worktree.resolve(), args.commit, args.version, args.receipt, args.release_only)
     except (OSError, ValueError, KeyError, TimeoutError, subprocess.CalledProcessError) as error:
         print(f"ANDROID_TAG_RELEASE_FAILED {args.version}: {error}", file=sys.stderr, flush=True)
         return 1

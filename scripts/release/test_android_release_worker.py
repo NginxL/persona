@@ -263,7 +263,7 @@ class ReleaseWorkerTest(unittest.TestCase):
             self.assertEqual(gzip.decompress(archived.read_bytes()), built[mapping])
             self.assertEqual(sorted(p.name for p in directory.iterdir()), sorted(["build.json", "unsigned.apk", archived.name]))
 
-    def build_with_receipt(self, root, sha, receipt, rebuilt=b"rebuilt APK"):
+    def build_with_receipt(self, root, sha, receipt, rebuilt=b"rebuilt APK", release_only=False):
         """Run build() over an existing run directory holding unsigned.apk and [receipt]; return (result, commands)."""
         directory = root / "runs" / sha
         directory.mkdir(parents=True)
@@ -282,7 +282,18 @@ class ReleaseWorkerTest(unittest.TestCase):
                 apk.write_bytes(rebuilt)
 
         with patch.object(worker, "run", side_effect=run), patch.object(worker, "version_code", return_value=100002):
-            return worker.build(config, root, sha, directory), commands, directory
+            return worker.build(config, root, sha, directory, release_only=release_only), commands, directory
+
+    def test_release_only_skips_duplicate_suite_but_keeps_release_guards(self):
+        sha = "a" * 40
+        with tempfile.TemporaryDirectory() as tmp:
+            result, commands, _ = self.build_with_receipt(Path(tmp), sha, {}, release_only=True)
+            gradle = next(command for command in commands if command[0] == "./gradlew")
+            self.assertEqual(gradle[-1], ":app:assembleRelease")
+            self.assertNotIn(":feature:settings:testDebugUnitTest", gradle)
+            names = [command[1] if command[0] == "python3" else command[0] for command in commands]
+            self.assertIn("scripts/release/check_android_shrink.py", names)
+            self.assertIn("scripts/release/check_android_build_commit.py", names)
 
     def test_a_receipt_with_this_build_commit_is_reused(self):
         sha = "a" * 40

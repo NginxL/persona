@@ -872,11 +872,12 @@ func TestDefaultMergedGateParkAndWakeCloseoutLoop(t *testing.T) {
 		"waiting_on": "external_event",
 		"reason":     "Waiting for PR merge: " + prURL,
 		"evidence": map[string]any{
-			"kind":     "external_event",
-			"target":   "PR #9",
-			"url":      prURL,
-			"pr_event": "terminal",
-			"wake":     "PR #9 is merged or closed",
+			"kind":       "external_event",
+			"next_actor": "external",
+			"target":     "PR #9",
+			"url":        prURL,
+			"pr_event":   "terminal",
+			"wake":       "PR #9 is merged or closed",
 		},
 	})
 	if _, err := s.runTool(ctx, "server", "conv1", "task_review", parkArgs); err != nil {

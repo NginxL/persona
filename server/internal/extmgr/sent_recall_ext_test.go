@@ -287,6 +287,7 @@ func recalledAtOf(led *sentLedgerStore, id int64) *time.Time {
 // user is asked first, the program is given the row's action, message ref, target and time (and the connector it is for),
 // and only its yes writes recalled_at; a second recall finds it done and does not ask the program again.
 func TestRecallSentAsksTheExtensionOfEachSource(t *testing.T) {
+	needsLarkModule(t)
 	h, led := recallHub(t)
 	logFile := filepath.Join(t.TempDir(), "recalls.log")
 	pkg := recallPkg{id: "ext-a", conn: "lark", gate: "examplecli", recall: true, log: logFile}.write(t)
@@ -343,6 +344,7 @@ func TestRecallSentAsksTheExtensionOfEachSource(t *testing.T) {
 // What the program answers is told as the core does: it cannot (nothing was sent and it says so), the outcome is not
 // known, the service refuses; only a yes writes recalled_at, and the user can ask again.
 func TestRecallSentTellsWhatTheExtensionAnswered(t *testing.T) {
+	needsLarkModule(t)
 	h, led := recallHub(t)
 	logFile := filepath.Join(t.TempDir(), "recalls.log")
 	installRecall(t, h, recallPkg{id: "ext-a", conn: "lark", gate: "examplecli", recall: true, log: logFile}.write(t), "lark")
@@ -393,6 +395,7 @@ func recallable(t *testing.T, h *Manager, led *sentLedgerStore, what string, id 
 // none are not taken back and nothing is sent to any extension; the user is not asked either. Only a gate row is held to
 // this: a write through an extension's own connector is taken back by it.
 func TestRecallSentOfAGateRowNeedsTheGateOfTheConnectorsExtension(t *testing.T) {
+	needsLarkModule(t)
 	h, led := recallHub(t)
 	logA, logB := filepath.Join(t.TempDir(), "a.log"), filepath.Join(t.TempDir(), "b.log")
 	installRecall(t, h, recallPkg{id: "ext-a", conn: "lark", gate: "examplecli", recall: true, log: logA}.write(t), "lark")
@@ -412,6 +415,7 @@ func TestRecallSentOfAGateRowNeedsTheGateOfTheConnectorsExtension(t *testing.T) 
 // A gate row whose target says nothing the hub can read about the gate is a gate row all the same: not taken back, and
 // nobody is asked. The target here is what a damaged row, or one written by another version, could hold.
 func TestRecallSentOfAGateRowWhoseTargetNamesNoReadableGate(t *testing.T) {
+	needsLarkModule(t)
 	h, led := recallHub(t)
 	logFile := filepath.Join(t.TempDir(), "a.log")
 	installRecall(t, h, recallPkg{id: "ext-a", conn: "lark", gate: "examplecli", recall: true, log: logFile}.write(t), "lark")
@@ -430,6 +434,7 @@ func TestRecallSentOfAGateRowWhoseTargetNamesNoReadableGate(t *testing.T) {
 // the row's connector, and an extension with no program, which the assistant is given the gate of all the same, counts.
 // Once only one has the command again, it is the one that is asked.
 func TestRecallSentOfAGateRowWhoseCommandTwoExtensionsHave(t *testing.T) {
+	needsLarkModule(t)
 	h, led := recallHub(t)
 	mux := h.routes()
 	logA, logB := filepath.Join(t.TempDir(), "a.log"), filepath.Join(t.TempDir(), "b.log")
@@ -456,6 +461,7 @@ func TestRecallSentOfAGateRowWhoseCommandTwoExtensionsHave(t *testing.T) {
 // A gate row's command is counted over the extensions the assistant is given the gates of (assistantGates): not a disabled
 // one, and not one with a problem (it cannot run on this hub); both leave the other the only one with the command.
 func TestRecallSentCountsOnlyTheExtensionsTheAssistantIsGiven(t *testing.T) {
+	needsLarkModule(t)
 	h, led := recallHub(t)
 	mux := h.routes()
 	logA, logB := filepath.Join(t.TempDir(), "a.log"), filepath.Join(t.TempDir(), "b.log")
@@ -482,6 +488,7 @@ func TestRecallSentCountsOnlyTheExtensionsTheAssistantIsGiven(t *testing.T) {
 // An extension that still needs setting up (a required secret is missing) is not run, but the assistant is given its gate
 // all the same, so it counts.
 func TestRecallSentCountsAnExtensionThatNeedsSetup(t *testing.T) {
+	needsLarkModule(t)
 	h, led := recallHub(t)
 	logA := filepath.Join(t.TempDir(), "a.log")
 	installRecall(t, h, recallPkg{id: "ext-a", conn: "lark", gate: "samecli", recall: true, log: logA}.write(t), "lark")
@@ -505,6 +512,7 @@ func TestRecallSentCountsAnExtensionThatNeedsSetup(t *testing.T) {
 // as much as the first (a row through it is taken back while it is alone with the command), and is shared when another
 // extension has the command, whichever of the first's gates it is.
 func TestRecallSentCountsEveryGateOfAnExtension(t *testing.T) {
+	needsLarkModule(t)
 	h, led := recallHub(t)
 	logA, logB := filepath.Join(t.TempDir(), "a.log"), filepath.Join(t.TempDir(), "b.log")
 	installRecall(t, h, recallPkg{id: "ext-a", conn: "lark", gate: "firstcli", moreGates: []string{"samecli"}, recall: true, log: logA}.write(t), "lark")
@@ -518,6 +526,7 @@ func TestRecallSentCountsEveryGateOfAnExtension(t *testing.T) {
 // asked as before. One removed and installed again is a new install: what the ledger wrote before is not taken back, and
 // what it writes after is.
 func TestRecallSentWhenTheExtensionIsOffRemovedOrInstalledAgain(t *testing.T) {
+	needsLarkModule(t)
 	h, led := recallHub(t)
 	mux := h.routes()
 	logFile := filepath.Join(t.TempDir(), "recalls.log")
@@ -576,6 +585,7 @@ func TestRecallSentWhenTheExtensionIsOffRemovedOrInstalledAgain(t *testing.T) {
 // An extension that did not say it can take things back is not asked (a recall of its row is not recallable), and one
 // upgraded to say so is, also for what it sent before: the upgrade neither asks the user again nor starts the install over.
 func TestRecallSentAfterAnUpgradeThatDeclaresRecall(t *testing.T) {
+	needsLarkModule(t)
 	h, led := recallHub(t)
 	mux := h.routes()
 	logFile := filepath.Join(t.TempDir(), "recalls.log")
@@ -613,6 +623,7 @@ func TestRecallSentAfterAnUpgradeThatDeclaresRecall(t *testing.T) {
 // new command is taken back, and one of the old command is not (the extension no longer has that gate, so whose it was
 // cannot be told).
 func TestRecallSentAfterAnUpgradeThatChangesTheGate(t *testing.T) {
+	needsLarkModule(t)
 	h, led := recallHub(t)
 	mux := h.routes()
 	logFile := filepath.Join(t.TempDir(), "recalls.log")
@@ -636,6 +647,7 @@ func TestRecallSentAfterAnUpgradeThatChangesTheGate(t *testing.T) {
 // What the ledger wrote before an install is not asked about, for an installed extension only: a dev extension and a
 // built-in one are not replaced by another under their id, and are asked about what came before they were registered.
 func TestRecallSentBeforeTheInstallIsRefusedForAnInstalledExtensionOnly(t *testing.T) {
+	needsLarkModule(t)
 	h, led := recallHub(t)
 	ctx := context.Background()
 	before := time.Now().Add(-time.Hour)
@@ -684,6 +696,7 @@ func TestRecallSentBeforeTheInstallIsRefusedForAnInstalledExtensionOnly(t *testi
 // row of the node's gate proxy, whether the gate it names is nobody's or is another extension's: it is no gate of an
 // extension that provides it. Nobody is asked.
 func TestRecallSentOfAGateRowOfAConnectorNoExtensionProvides(t *testing.T) {
+	needsLarkModule(t)
 	h, led := recallHub(t)
 	logFile := filepath.Join(t.TempDir(), "recalls.log")
 	installRecall(t, h, recallPkg{id: "ext-a", conn: "lark", gate: "examplecli", recall: true, log: logFile}.write(t), "lark")
@@ -735,6 +748,7 @@ func ledgerPage(t *testing.T, h *Manager) map[int64]map[string]any {
 // names no gate, a gate nobody has, or a gate two extensions have; the extension's own rows are, and what the page does not
 // offer a recall refuses too.
 func TestSentLedgerPageOffersRecallOfAnExtensionsRowsAsARecallWouldAllow(t *testing.T) {
+	needsLarkModule(t)
 	h, led := recallHub(t)
 	ctx := context.Background()
 	logA, logB := filepath.Join(t.TempDir(), "a.log"), filepath.Join(t.TempDir(), "b.log")
@@ -777,6 +791,7 @@ func TestSentLedgerPageOffersRecallOfAnExtensionsRowsAsARecallWouldAllow(t *test
 // recall and still offers the rule. Someone making the two agree would change one of them without meaning to. Both gate
 // files say they are for the Lark connector, so the per-chat rules see the command twice.
 func TestSentLedgerPageOffersAPerChatRuleForARowWhoseCommandTwoExtensionsHave(t *testing.T) {
+	needsLarkModule(t)
 	h, led := recallHub(t)
 	logA, logB := filepath.Join(t.TempDir(), "a.log"), filepath.Join(t.TempDir(), "b.log")
 	installRecall(t, h, recallPkg{id: "ext-a", conn: "lark", gate: "samecli", recall: true, log: logA}.write(t), "lark")

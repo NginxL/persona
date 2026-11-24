@@ -143,9 +143,35 @@ test("the user's own pi configuration wins", async (t) => {
 test('argvPicksModel and providerConfig', () => {
   assert.equal(argvPicksModel(['node', 'pi', '--models=a,b']), true)
   assert.equal(argvPicksModel(['node', 'pi', '--provider', 'x']), true)
+  assert.equal(argvPicksModel(['node', 'pi', '-m', 'claude-x']), true)
+  assert.equal(argvPicksModel(['node', 'pi', '-m=claude-x']), true)
   assert.equal(argvPicksModel(['node', 'pi', '-p', 'hello']), false)
+  assert.equal(argvPicksModel(['node', 'pi', '--', 'explain --model flag']), false)
+  assert.equal(argvPicksModel(['node', 'pi', '--', '-m', 'not-a-flag']), false)
   const c = providerConfig({ ...answer().providers[0], auth_header: true, headers: { 'X-Team': 'blue' } })
   assert.equal(c.authHeader, true)
   assert.deepEqual(c.headers, { 'X-Team': 'blue' })
   assert.deepEqual(c.models[0].cost, { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 })
+})
+
+test('askPersonaProviders decodes multi-byte UTF-8 split across socket chunks', async (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'pp-'))
+  t.after(() => rmSync(dir, { recursive: true, force: true }))
+  writeFileSync(join(dir, 'launch.key'), KEY + '\n', { mode: 0o600 })
+  const payload = Buffer.from(JSON.stringify({
+    providers: [{ id: 'persona-gw', name: 'Persona · 网关', launcher: 'gw', api: 'anthropic-messages', api_key: SECRET, models: [{ id: 'm1' }] }],
+  }) + '\n', 'utf8')
+  const cut = payload.indexOf(Buffer.from('网', 'utf8')) + 1
+  const server = createServer((c) => {
+    c.once('data', () => {
+      c.write(payload.subarray(0, cut))
+      setTimeout(() => c.end(payload.subarray(cut)), 10)
+    })
+  })
+  const socket = join(dir, 'node.sock')
+  await new Promise((r) => server.listen(socket, r))
+  t.after(() => server.close())
+
+  const got = await askPersonaProviders({ socket })
+  assert.equal(got.providers[0].name, 'Persona · 网关')
 })

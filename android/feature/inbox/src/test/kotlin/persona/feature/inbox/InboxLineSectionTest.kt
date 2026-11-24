@@ -34,6 +34,7 @@ import persona.core.navigation.ChatRoute
 import persona.core.navigation.Navigator
 import persona.core.navigation.RouteSource
 import persona.core.navigation.TodoDetailRoute
+import persona.core.inbox.*
 
 @RunWith(AndroidJUnit4::class)
 @Config(sdk = [35], qualifiers = "zh-w400dp-h900dp-mdpi")

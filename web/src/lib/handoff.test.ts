@@ -1,11 +1,14 @@
 // @vitest-environment jsdom
 // Leaving a conversation for an Agent it handed work to: the side panel by default (#5424), or, set to Full page, the
 // Agent's page, the way back, and the chat's place (#5096).
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { agentOpenMode, setAgentOpenMode } from "./agent-open";
-import { chatPlaceIn, chatPlaceOf, dropChatPlace, fromHere, handoffFrom, leaveChat, openAgent, openedFromHere, openFromPage, openTask, panelIn, sidebarPageOf, taskRoute } from "./handoff";
+import { chatPlaceIn, chatPlaceOf, dropChatPlace, fromHere, handoffFrom, leaveChat, openAgent, openedFromHere, openFromPage, openLinkPage, openTask, panelIn, pickMainChat, sidebarPageOf, taskRoute } from "./handoff";
+import { openLink } from "./links";
 import { closePanel, getPanel, openPanel } from "./panel";
-import { getState, reset, type State } from "./store";
+import { navigate } from "./router";
+import { getState, patchAssistant, refreshAssistant, reset, type State } from "./store";
+import { NARROW } from "./viewport";
 import type { Todo } from "./todos";
 
 afterEach(() => {
@@ -199,6 +202,121 @@ describe("leaving a conversation from its side panel (Open Agent page)", () => {
     history.replaceState(null, "", "/persona/c1");
     dispatchEvent(new PopStateEvent("popstate"));
     expect(getPanel()).toEqual({ kind: "task", todo: "t1" });
+  });
+});
+
+describe("the main conversation's page, set to Full page (#13164)", () => {
+  const back = () => new Promise<void>((done) => {
+    addEventListener("popstate", () => setTimeout(done, 0), { once: true });
+    history.back();
+  });
+  const at = () => location.pathname + location.search;
+  // the main conversation of the assistant the page shows (made up)
+  const assistant = async (main: string, manager = "") => {
+    vi.stubGlobal("fetch", vi.fn(() => Promise.resolve(new Response(JSON.stringify({ machine_id: "m1", main, manager, conversations: [] }), { headers: { "Content-Type": "application/json" } }))));
+    await refreshAssistant();
+  };
+  afterEach(() => {
+    // Main Chat picked in front: nothing kept for the next test
+    pickMainChat(true);
+    vi.unstubAllGlobals();
+    localStorage.clear();
+  });
+
+  it("opens again over the conversation when Main Chat is picked from another place, and Back returns to it", async () => {
+    setAgentOpenMode("page");
+    history.replaceState(null, "", "/");
+    chat({ top: 300, height: 1500, client: 600 });
+    openAgent("m1", "s1");
+    expect(at()).toBe("/s/m1/s1");
+    navigate({ name: "inbox" });
+    const before = history.length;
+    expect(pickMainChat(false)).toBe(true);
+    // the conversation's entry, then the Agent's naming it
+    expect(history.length).toBe(before + 2);
+    expect(at()).toBe("/s/m1/s1");
+    expect(handoffFrom()).toEqual({ path: "/" });
+    // kept while another place is in front: picked again from there, it opens again
+    navigate({ name: "todos" });
+    expect(pickMainChat(false)).toBe(true);
+    expect(at()).toBe("/s/m1/s1");
+    await back();
+    expect(at()).toBe("/");
+    expect(chatPlaceIn()).toEqual({ end: false, line: "b", offset: -40 });
+    // Back to the conversation drops it: Main Chat from another place is the bare conversation again
+    navigate({ name: "inbox" });
+    expect(pickMainChat(false)).toBe(false);
+  });
+
+  it("is dropped when Main Chat is picked while the conversation or its page is in front", () => {
+    setAgentOpenMode("page");
+    history.replaceState(null, "", "/");
+    openTask("t1");
+    expect(at()).toBe("/todos?id=t1");
+    // its page in front: the row goes to the bare conversation (a pop to its root)
+    expect(pickMainChat(true)).toBe(false);
+    navigate({ name: "inbox" });
+    expect(pickMainChat(false)).toBe(false);
+  });
+
+  it("is the page opened last, a link's from the conversation's cards too, which names the conversation", () => {
+    setAgentOpenMode("page");
+    history.replaceState(null, "", "/");
+    openAgent("m1", "s1");
+    navigate({ name: "persona" });
+    openTask("t1");
+    navigate({ name: "persona" });
+    openLinkPage({ name: "session", mid: "m1", sid: "s2" });
+    expect(handoffFrom()).toEqual({ path: "/" });
+    navigate({ name: "inbox" });
+    expect(pickMainChat(false)).toBe(true);
+    expect(at()).toBe("/s/m1/s2");
+    // from any other page a link's page is a root: it names nowhere, and the conversation keeps its page
+    navigate({ name: "inbox" });
+    openLinkPage({ name: "session", mid: "m1", sid: "s3" });
+    expect(handoffFrom()).toBeUndefined();
+    expect(pickMainChat(false)).toBe(true);
+    expect(at()).toBe("/s/m1/s2");
+  });
+
+  it("belongs to the main conversation only, of the assistant shown", async () => {
+    setAgentOpenMode("page");
+    await assistant("c-main", "mgr-a");
+    history.replaceState(null, "", "/persona/c-main");
+    openAgent("m1", "s1");
+    // another conversation's hand-off is that conversation's, not the main one's page
+    navigate({ name: "persona", sid: "c-side" });
+    openAgent("m1", "s2");
+    expect(pickMainChat(false)).toBe(true);
+    expect(at()).toBe("/s/m1/s1");
+    // another assistant's main conversation never opens it
+    navigate({ name: "inbox" });
+    patchAssistant({ manager: "mgr-b", main: "c-other" });
+    expect(pickMainChat(false)).toBe(false);
+  });
+
+  it("is not kept in the side panel mode, nor for a page naming nowhere, nor opened once set back to the panel", () => {
+    history.replaceState(null, "", "/");
+    // the side panel mode on a narrow window: a card's link opens a page, which names the conversation
+    let narrow = true;
+    vi.stubGlobal("matchMedia", (q: string) => ({ get matches() { return q === NARROW && narrow; }, addEventListener() {}, removeEventListener() {} }));
+    openLink(`${location.origin}/s/m1/s1`);
+    narrow = false;
+    expect(at()).toBe("/s/m1/s1");
+    expect(handoffFrom()).toEqual({ path: "/" });
+    navigate({ name: "inbox" });
+    setAgentOpenMode("page");
+    expect(pickMainChat(false)).toBe(false);
+    // a page opened naming nowhere (a Brief row's other conversation) is not the conversation's page
+    history.replaceState(null, "", "/");
+    leaveChat({ name: "persona", sid: "c2" }, false);
+    navigate({ name: "inbox" });
+    expect(pickMainChat(false)).toBe(false);
+    history.replaceState(null, "", "/");
+    openAgent("m1", "s1");
+    navigate({ name: "inbox" });
+    setAgentOpenMode("panel");
+    expect(pickMainChat(false)).toBe(false);
   });
 });
 

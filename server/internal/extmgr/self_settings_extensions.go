@@ -13,7 +13,6 @@ import (
 
 	"github.com/nwverse/persona/server/internal/extension"
 	"github.com/nwverse/persona/server/internal/i18n"
-	"github.com/nwverse/persona/server/internal/volc"
 )
 
 // An extension's settings in persona_settings (#2385): extension.<id> for every extension the user can configure that has
@@ -249,7 +248,7 @@ func (h *Manager) setExtensionSettings(id, title string, v json.RawMessage) (*se
 	if p == nil {
 		return nil, fmt.Errorf("no extension %s", id)
 	}
-	if _, ok := patch[volcMeetingsField]; ok && id == volc.ExtensionID {
+	if _, ok := patch[volcMeetingsField]; ok && id == volcID() {
 		return nil, errors.New(volcMeetingsField + " is the owner's choice of meeting transcription: only Settings › Extensions or Recording settings on a device change it")
 	}
 	for _, f := range iphoneOwnFields {

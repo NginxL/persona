@@ -12,6 +12,8 @@ private final class FakeSystem {
     private(set) var registrations = 0
     /// The groups' first hubs; nil: the pairings can't be read (before the first unlock).
     var hubs: [PushRegistrar.Hub]? = []
+    var grants = PushRegistrar.Grants()
+    var relayURL: URL?
     var now = Date(timeIntervalSince1970: 1_000_000)
     /// Waits for a retry due while the app stays open: none by default (the test moves the clock and comes back).
     var sleep: @MainActor (Duration) async -> Bool = { _ in false }
@@ -30,6 +32,8 @@ private final class FakeSystem {
             allowed: { self.allowed },
             register: { self.registrations += 1 },
             hubs: { self.hubs },
+            grants: { _, _, _ in self.grants },
+            relayURL: { self.relayURL },
             now: { self.now },
             sleep: { await self.sleep($0) })
     }
@@ -232,6 +236,62 @@ struct PushRegistrarTests {
         await r.registerIfPossible()?.value
         await r.didRegister(token: token)?.value
         return (r, health)
+    }
+
+    private struct DevicePost: Decodable {
+        var pushKey: String?
+        var relayURL: String?
+        var relayGrant: String?
+        var relayError: String?
+        enum CodingKeys: String, CodingKey {
+            case pushKey = "push_key", relayURL = "relay_url", relayGrant = "relay_grant", relayError = "relay_error"
+        }
+    }
+
+    private func devicePost(_ hub: Hub) throws -> DevicePost {
+        let post = try #require(hub.fake.sent("POST", "/api/v1/devices").first)
+        let body = try #require(post.body)
+        return try JSONDecoder().decode(DevicePost.self, from: body)
+    }
+
+    /// A refusal names the relay that gave it, so the hub can identify which relay needs fixing (#12988).
+    @Test func aRefusedRelayRegistrationSendsTheAttemptedURLAndError() async throws {
+        let fake = FakeSystem(), hub = Hub()
+        fake.relayURL = URL(string: "https://relay.example.com/relay")
+        fake.grants.relay = .refused(status: 403, message: "topic not served")
+        _ = await registered(fake, hub)
+
+        let body = try devicePost(hub)
+        let relay = try #require(fake.relayURL)
+        #expect(body.relayError == "403 topic not served")
+        #expect(body.relayGrant == nil)
+        #expect(body.relayURL == relay.absoluteString)
+    }
+
+    @Test func aSuccessfulRelayRegistrationSendsTheURLGrantAndPushKey() async throws {
+        let fake = FakeSystem(), hub = Hub()
+        let key = try #require(PushCrypto.ensureKey())
+        fake.relayURL = URL(string: "https://relay.example.com/relay")
+        fake.grants.relay = .registered
+        fake.grants.grant = "test-grant"
+        _ = await registered(fake, hub)
+
+        let body = try devicePost(hub)
+        let relay = try #require(fake.relayURL)
+        #expect(body.relayURL == relay.absoluteString)
+        #expect(body.relayGrant == "test-grant")
+        #expect(body.pushKey == PushCrypto.publicKey(key))
+        #expect(body.relayError == nil)
+    }
+
+    @Test func aBuildWithoutARelaySendsNoRelayFields() async throws {
+        let fake = FakeSystem(), hub = Hub()
+        _ = await registered(fake, hub)
+
+        let body = try devicePost(hub)
+        #expect(body.relayURL == nil)
+        #expect(body.relayGrant == nil)
+        #expect(body.relayError == nil)
     }
 
     /// 409 `push_registration_required` on a settings write: exactly one registration, then the write again.

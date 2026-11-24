@@ -79,7 +79,7 @@ func (s *Service) memoryMergeTell(ctx context.Context) {
 	if !ok || !d.Online && !d.Reachable {
 		return
 	}
-	cwd := s.spaceCwd(d, "")
+	cwd := s.spaceCwd(ctx, d, "")
 	if cwd == "" {
 		return
 	}
@@ -119,7 +119,7 @@ func (s *Service) memoryMergeTell(ctx context.Context) {
 		s.logf("memory merge: record what was told: %v", err)
 		return
 	}
-	s.push(ctx, Notification{Subtitle: "Persona", DeviceID: d.ID, SessionID: cfg.Main, Level: assistantwire.LevelP1,
+	s.push(withCard(ctx, cardMemoryMerge), Notification{Subtitle: "Persona", DeviceID: d.ID, SessionID: cfg.Main, Level: assistantwire.LevelP1,
 		Title: i18n.T(l, "assistant-memory.merge_push_title"),
 		Body:  i18n.T(l, "assistant-memory.merge_push_body", i18n.Args{"added": added, "conflicts": conflicts})})
 }

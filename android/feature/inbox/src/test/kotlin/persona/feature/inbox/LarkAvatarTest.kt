@@ -11,6 +11,7 @@ import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
 import java.io.IOException
+import persona.core.inbox.*
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class LarkAvatarTest {

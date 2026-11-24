@@ -8,13 +8,27 @@ const port = Number(process.env.PORT || 5996);
 const current = "a".repeat(40), latest = "b".repeat(40), saved = "c".repeat(40);
 const backups = [{ id: "snapshot-20261112000100000000-cccccccccccc", version: "web-dev-cccccccccccc-202611120001",
   build: 202611120001, commit: saved, updated_at: "2026-11-12T10:00:00Z", created_at: "2026-11-13T10:00:00Z" }];
+const assistants = [
+  { id: "assistant", name: "Example assistant", online: true, builtin: true, default: true },
+  { id: "studio", name: "Studio", online: true },
+];
+const computers = [
+  { id: "desk", name: "Desk computer", manager: "assistant", kind: "link", online: true, node_version: backups[0].version,
+    node_mismatch: true, deploying: true, deploy_phase: "transferring", deploy_source: "hub_package" },
+  { id: "lab", name: "Lab computer", manager: "studio", kind: "link", online: true, node_version: backups[0].version,
+    node_mismatch: true, deploying: true, deploy_phase: "waiting_idle", deploy_source: "local_build" },
+  { id: "travel", name: "Travel computer", manager: "studio", kind: "link", online: true, node_version: backups[0].version,
+    node_mismatch: true, can_deploy: false, deploy_error: "Go is unavailable on the assistant’s computer.",
+    deploy_reason: "Install Go on the computer running Studio, then choose Redeploy." },
+];
 let status, requests, mode;
 function reset(input = {}) {
   mode = input.mode || "available";
   requests = [];
   status = { version: "web-dev-aaaaaaaaaaaa-202611130001", build: 202611130001, channel: "release", source: "web-dev",
     can_update: true, state: mode, busy: [], auto: false, auto_notice: false, confirmed: true, auto_update_nodes: false,
-    development: { configured: true, branch: "main", current_commit: current, current_updated_at: "2026-11-13T10:00:00Z" },
+    development: { configured: true, branch: "main", current_commit: current, current_updated_at: "2026-11-13T10:00:00Z",
+      builtin_quiesce: true, backup_default_directory: "/var/lib/persona/update/development-backups" },
     latest: { version: "web-dev-bbbbbbbbbbbb-202611140001", build: 202611140001, newer: true, bad: false,
       commit: latest, updated_at: "2026-11-14T10:00:00Z", branch: "main" },
     backup: { id: backups[0].id, retained: 3, pruned: [] }, last_check: "2026-11-15T10:00:00Z" };
@@ -27,6 +41,7 @@ function reset(input = {}) {
     status.source = "beta"; status.state = "idle"; status.version = "0.6.2";
     status.latest = { version: "0.7.0-beta.1", build: 202611171300, newer: true, bad: false };
   }
+  if (mode === "multi-assistant") status.state = "available";
   if (mode === "backing_up") status.progress = "Synthetic snapshot: verifying saved programs";
   if (mode === "failed") status.error = "Update recovery is unresolved. Inspect the retained adoption journal and staged programs before retrying. (Synthetic fixture)";
   if (mode === "rolled_back") { status.latest.newer = false; status.error = "The attempted version did not start. Previous programs restored; current database and history preserved. (Synthetic fixture)"; }
@@ -52,8 +67,10 @@ const [{ App }, { ExtensionThemeProvider }] = await Promise.all([import('/src/Ap
 createRoot(document.getElementById('root')).render(React.createElement(ExtensionThemeProvider,null,React.createElement(App)));
 `;
 const server = await createServer({ root: web, configFile: web + '/vite.config.ts',
-  server: { host: '127.0.0.1', port, strictPort: true, proxy: {} },
+  server: { host: '127.0.0.1', port, strictPort: true },
   plugins: [{ name: 'synthetic-hub-development',
+    // The regular dev server proxies /api WebSocket upgrades. This fixture handles its own hello and machine list.
+    config(config) { delete config.server.proxy; },
     resolveId(id) { if (id === '/__fixture-app.js') return '\0fixture-app.js'; },
     load(id) { if (id === '\0fixture-app.js') return module; },
     configureServer(vite) { vite.middlewares.use(async (req, res, next) => {
@@ -87,8 +104,8 @@ const server = await createServer({ root: web, configFile: web + '/vite.config.t
         value = status;
       } else if (path === '/hub/update' && req.method === 'POST') { waiting(); value = status; }
       else if (path === '/extensions/-/market-settings') value = { registry_mirror: '', catalog_mirror: '' };
-      else if (path === '/managers') value = { default: 'assistant', managers: [{ id: 'assistant', name: 'Example assistant', online: true, builtin: true, default: true }] };
-      else if (path === '/machines') value = { machines: [] };
+      else if (path === '/managers') value = { default: 'assistant', managers: mode === 'multi-assistant' ? assistants : [assistants[0]] };
+      else if (path === '/machines') value = { machines: mode === 'multi-assistant' ? computers : [] };
       else if (path === '/assistant') value = { configured: true, main: '', conversations: [], name: 'Example assistant' };
       else if (path === '/assistant/directions/tree') value = { directions: [] };
       else if (path === '/sessions') value = { sessions: [] };

@@ -88,9 +88,7 @@ private func isolatedWebView(scripts: Bool, network: Bool, coordinator: Isolated
     config.websiteDataStore = .nonPersistent()
     config.defaultWebpagePreferences.allowsContentJavaScript = scripts
     config.preferences.javaScriptCanOpenWindowsAutomatically = false
-    #if os(iOS) || os(visionOS)
     config.dataDetectorTypes = []
-    #endif
     let web = WKWebView(frame: .zero, configuration: config)
     #if os(iOS)
     CallMediaGuard.shared.register(web) // a file's media stays still while a system call is live
@@ -159,7 +157,6 @@ final class IsolatedWebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDele
     }
 }
 
-#if os(iOS) || os(visionOS)
 struct IsolatedWebView: UIViewRepresentable {
     let html: String
     let scripts: Bool
@@ -186,31 +183,3 @@ struct IsolatedWebView: UIViewRepresentable {
         context.coordinator.load(html, in: web, network: network)
     }
 }
-#else
-struct IsolatedWebView: NSViewRepresentable {
-    let html: String
-    let scripts: Bool
-    let network: Bool
-    var onLink: (URL) -> Void
-    var onHeight: ((CGFloat) -> Void)? = nil
-    var onFail: (() -> Void)? = nil
-
-    func makeCoordinator() -> IsolatedWebViewCoordinator {
-        let c = IsolatedWebViewCoordinator(onLink: onLink)
-        c.onHeight = onHeight
-        c.onFail = onFail
-        return c
-    }
-
-    func makeNSView(context: Context) -> WKWebView {
-        let web = isolatedWebView(scripts: scripts, network: network, coordinator: context.coordinator)
-        context.coordinator.load(html, in: web, network: network)
-        return web
-    }
-
-    func updateNSView(_ web: WKWebView, context: Context) {
-        context.coordinator.onLink = onLink
-        context.coordinator.load(html, in: web, network: network)
-    }
-}
-#endif

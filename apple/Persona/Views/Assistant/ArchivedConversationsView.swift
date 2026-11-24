@@ -25,17 +25,10 @@ struct ArchivedConversationsView: View {
             #if os(iOS) || os(visionOS)
             .navigationBarTitleDisplayMode(.inline)
             #endif
-            #if os(macOS)
-            .macSheetDone { dismiss() }
-            #else
             .toolbar {
                 SheetClose { dismiss() }
             }
-            #endif
         }
-        #if os(macOS)
-        .macSheet()
-        #endif
     }
 
     private func row(_ s: Session) -> some View {

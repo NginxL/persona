@@ -125,9 +125,11 @@ data class ErrorEvent(
     @WireEnum("none", "unknown", "yes") val delivered: String? = null,
     val draft: String? = null,
     val clearable: String? = null,
+    val limit: ImageLimits? = null,
+    val got: ImageCount? = null,
 ) : ServerEvent {
     val sessionKey: SessionKey? get() = machineId?.let { machine -> sessionId?.let { SessionKey(machine, it) } }
-    val body: ErrorBody get() = ErrorBody(error, code, retryable, delivered, draft, clearable)
+    val body: ErrorBody get() = ErrorBody(error, code, retryable, delivered, draft, clearable, limit = limit, got = got)
 }
 
 object DeltaEventSerializer : WireSerializer<DeltaEvent>(DeltaEvent.generatedSerializer())

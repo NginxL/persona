@@ -1,4 +1,3 @@
-#if os(iOS) || os(visionOS)
 import SwiftUI
 import Testing
 import UIKit
@@ -306,4 +305,3 @@ private struct StaticHostedFace: UIViewRepresentable {
         CGSize(width: face.size, height: face.size)
     }
 }
-#endif

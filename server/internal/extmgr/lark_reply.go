@@ -6,7 +6,8 @@ import (
 	"errors"
 	"time"
 
-	larkconnector "github.com/nwverse/persona/server/internal/connector/larkcli"
+	"github.com/nwverse/persona/server/internal/cliport"
+	"github.com/nwverse/persona/server/internal/cliwire"
 	"github.com/nwverse/persona/server/internal/connectorwire"
 )
 
@@ -15,10 +16,10 @@ func (h *Manager) observeLarkReply(ctx context.Context, raw json.RawMessage) (an
 	if err := json.Unmarshal(raw, &watch); err != nil {
 		return nil, err
 	}
-	if h.connectors == nil || !h.connectors.Enabled(larkconnector.ID) {
+	if h.connectors == nil || !h.connectors.Enabled(cliwire.ConnectorID) {
 		return nil, errors.New("Lark CLI connector is unavailable")
 	}
-	reader, ok := h.connectors.Get(larkconnector.ID).(*larkconnector.Connector)
+	reader, ok := h.connectors.Get(cliwire.ConnectorID).(cliport.Connector)
 	if !ok || reader == nil {
 		return nil, errors.New("Lark CLI connector is unavailable")
 	}

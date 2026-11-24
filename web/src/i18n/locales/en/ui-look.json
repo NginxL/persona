@@ -39,5 +39,7 @@
   "font_custom_label": "{kind}: custom family",
   "font_invalid": "Enter one family name, without commas or CSS punctuation.",
   "font_unavailable": "This font may be unavailable. Your choice is kept; fallback fonts still apply.",
-  "font_local": "Use one font installed on this computer. No fonts are downloaded."
+  "font_local": "Use one font installed on this computer. No fonts are downloaded.",
+  "sidebar_usage": "Launcher quota in the sidebar",
+  "sidebar_usage_hint": "Show the usage card under the sidebar with each launcher's remaining quota. Saved in this browser only."
 }

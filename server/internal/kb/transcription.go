@@ -220,6 +220,10 @@ type MeetingTranscription struct {
 	// FinalUnreachable counts the final pass's tries that never reached the upstream (upstream_unavailable, nothing
 	// billed): they are tried again on their own, longer schedule (the manager's finalUnreachableRetries).
 	FinalUnreachable int `json:"final_unreachable,omitempty"`
+	// FinalDone is how far the final pass has got, in recording seconds: the end of the last window it finished, set
+	// by the manager as each window ends and when a try starts (0 after a restart, which starts over). The apps read it
+	// as the pass's progress (#13461); none once the state is final or failed.
+	FinalDone float64 `json:"final_done,omitempty"`
 	// Gaps are the spans of the recording the hub holds no audio for (GapsIn), kept up to date by the audio writes
 	// until the final pass starts and frozen from then on: the final pass's, which stay once the audio is gone.
 	Gaps         [][2]float64 `json:"gaps,omitempty"`
@@ -275,6 +279,7 @@ func (t *MeetingTranscription) settle(now time.Time) {
 		if t.FinalFrom.IsZero() {
 			t.FinalFrom = t.FinalAt
 		}
+		t.FinalDone = 0
 	}
 	if len(t.Gaps) == 0 {
 		t.Gaps = nil
@@ -294,11 +299,23 @@ func transcriptionShown(t *MeetingTranscription) any {
 	if len(t.Gaps) > 0 {
 		gaps = t.Gaps
 	}
+	done, end, _ := t.finalProgress()
 	return struct {
 		Mode, State, Problem string
 		Gaps                 [][2]float64
 		Fallback             bool
-	}{t.Mode, t.State, t.Problem, gaps, t.Fallback}
+		FinalDone, End       float64
+	}{t.Mode, t.State, t.Problem, gaps, t.Fallback, done, end}
+}
+
+// finalProgress is how far the final pass is, for the apps (#13461): the recording seconds it has finished and the
+// recording's end, while the state is finishing and the pass has started (it may be waiting for its next try), and
+// the end is known. done is at most end.
+func (t *MeetingTranscription) finalProgress() (done, end float64, ok bool) {
+	if !t.hub() || t.State != TranscriptionFinishing || t.FinalFrom.IsZero() || t.End <= 0 {
+		return 0, 0, false
+	}
+	return min(max(t.FinalDone, 0), t.End), t.End, true
 }
 
 // TranscriptionView is transcription on GET …/live and in detail.meta.
@@ -308,6 +325,10 @@ type TranscriptionView struct {
 	Gaps     *[][2]float64 `json:"gaps,omitempty"` // hub: always present, [] when none
 	Problem  string        `json:"problem,omitempty"`
 	Fallback bool          `json:"fallback,omitempty"`
+	// FinalDone and End: while the final pass runs (finishing, the pass started), how far it is and the recording's
+	// end, both in recording seconds (#13461); absent otherwise. FinalDone is 0 as the pass starts.
+	FinalDone *float64 `json:"final_done,omitempty"`
+	End       *float64 `json:"end,omitempty"`
 }
 
 // TranscriptionView is m's transcription as the apps read it; nil while no mode was decided. gaps are the spans the
@@ -327,7 +348,11 @@ func (m Meeting) TranscriptionView(gaps [][2]float64) *TranscriptionView {
 	}
 	shown := append([][2]float64{}, gaps...)
 	state := cmp.Or(t.State, TranscriptionLive)
-	return &TranscriptionView{Mode: t.Mode, State: state, Gaps: &shown, Problem: t.Problem, Fallback: t.Fallback}
+	v := &TranscriptionView{Mode: t.Mode, State: state, Gaps: &shown, Problem: t.Problem, Fallback: t.Fallback}
+	if done, end, ok := t.finalProgress(); ok {
+		v.FinalDone, v.End = &done, &end
+	}
+	return v
 }
 
 // HubTranscribed: r's meeting.json has mode hub (an unreadable meeting.json: false).

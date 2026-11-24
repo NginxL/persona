@@ -458,6 +458,36 @@ class ChatDetailsTest {
         assertTrue(sheet.toString(), "第 2 步，共 3 步 · 改重试" in sheet)
     }
 
+    @Test fun glassPlanPillShowsWhenWorkLineIsCollapsedAndHidesTopTaskBar() {
+        page(AppStyle.Glass, planned, session(), expanded = emptySet())
+        val shown = waitFor("the collapsed glass plan pill") { "第 2 步，共 3 步" in it }
+        assertFalse("Glass agent chat should not render the top TaskProgressBar", shown.any { "已完成" in it && "进行中" in it })
+        rule.onNodeWithContentDescription("第 2 步，共 3 步").performClick()
+        val sheet = waitFor("the plan sheet") { "计划" in it }
+        assertTrue(sheet.toString(), "第 2 步，共 3 步 · 改重试" in sheet)
+    }
+
+    @Test fun latestChatPlanReadsFoldedTodoSnapshotAndSkipsFailedTodoWrite() {
+        val folded = Item("fold:1", 2, kind = "fold", fold = persona.core.contracts.Fold(
+            items = 2, tools = 1, thoughts = 0, throughSeq = 3, throughId = "t3",
+            tasks = listOf(persona.core.contracts.FoldTaskSnapshot(
+                replace = "todo",
+                entries = listOf(
+                    persona.core.contracts.FoldTask("todo:0", "读代码", status = "completed"),
+                    persona.core.contracts.FoldTask("todo:1", "补单测", status = "in_progress"),
+                ),
+                sourceItemId = "t2", sourceToolUseId = "call-1", sourceSeq = 2,
+            )),
+        ))
+        val failedTodo = Item("t4", 4, role = "assistant", kind = "tool_use", toolUseId = "call-2", toolName = "TodoWrite",
+            toolInput = buildJsonObject { put("todos", buildJsonArray {
+                add(todo("失败步骤 1", "pending")); add(todo("失败步骤 2", "pending"))
+            }) })
+        val failedResult = Item("t5", 5, role = "user", kind = "tool_result", toolUseId = "call-2", isError = true, text = "error")
+        val found = latestChatPlan(listOf(user(1, "开始"), folded, failedTodo, failedResult))
+        assertTrue(found != null && found.id == "t2" && found.todos.size == 2 && found.todos[1].content == "补单测")
+    }
+
     @Test fun briefPlanPillStillScrollsBackToTheCard() {
         page(AppStyle.Brief, planned, session(), expanded = setOf("w-u1"))
         waitFor("the plan pill") { "回到计划：第 2 步，共 3 步" in it }

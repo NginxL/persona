@@ -60,6 +60,15 @@ func (n *Node) mergePiRow(s *proto.Session) {
 		s.Title, s.TitleManual, s.TitleSource = r.Title, r.TitleManual, r.TitleSource
 	}
 	s.OutputTokens = r.OutputTokens
+	if r.ContextTokens > 0 {
+		s.ContextTokens = r.ContextTokens
+	}
+	if r.ContextWindow > 0 {
+		s.ContextWindow = r.ContextWindow
+	}
+	if bd := r.ContextBreakdown(); bd != nil {
+		s.SetContextBreakdown(bd)
+	}
 	s.LastText, s.Model, s.UpdatedAt, s.Rev = r.LastText, r.Model, r.UpdatedAt, r.Rev
 	if r.Status == proto.StatusBlocked {
 		s.Status = proto.StatusBlocked

@@ -120,16 +120,16 @@ import persona.feature.assistant.AssistantSidebarContent
 import persona.feature.inbox.InboxConversations
 import persona.feature.inbox.InboxEventRoute
 import persona.feature.inbox.InboxLanding
-import persona.feature.inbox.InboxPreferences
-import persona.feature.inbox.InboxRecord
+import persona.core.inbox.InboxPreferences
+import persona.core.inbox.InboxRecord
 import persona.feature.inbox.InboxRepository
 import persona.feature.inbox.InboxScreen
-import persona.feature.inbox.InboxSnapshot
+import persona.core.inbox.InboxSnapshot
 import persona.feature.inbox.LocalInboxLanding
-import persona.feature.inbox.LarkConversation
-import persona.feature.inbox.ReplyDraft
-import persona.feature.inbox.ReplyRequest
-import persona.feature.inbox.ReplyTarget
+import persona.core.inbox.LarkConversation
+import persona.core.inbox.ReplyDraft
+import persona.core.inbox.ReplyRequest
+import persona.core.inbox.ReplyTarget
 import java.io.File
 
 /**
@@ -695,7 +695,7 @@ private class ShotInbox(records: List<InboxRecord>) : InboxRepository {
     override suspend fun readDraft(target: ReplyTarget): ReplyDraft? = null
     override suspend fun saveDraft(target: ReplyTarget, draft: ReplyDraft) = Unit
     override suspend fun reply(target: ReplyTarget, request: ReplyRequest) = Unit
-    override suspend fun downloadFile(file: persona.feature.inbox.LarkPart.File): String = error("not used")
+    override suspend fun downloadFile(file: persona.core.inbox.LarkPart.File): String = error("not used")
 }
 
 private fun item(id: String, title: String, tier: String = "action") = InboxRecord(

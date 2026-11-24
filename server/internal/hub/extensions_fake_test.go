@@ -300,3 +300,10 @@ func (f *fakeExt) RecordNodeSent(context.Context, string, json.RawMessage) (any,
 func (f *fakeExt) MailAttachment(context.Context, proto.MailAttachmentRequest) (proto.MailAttachment, error) {
 	return proto.MailAttachment{}, errors.New("mail is not available")
 }
+
+func (f *fakeExt) WaterExtension(context.Context, bool) (*assistantwire.WaterExtension, error) {
+	return nil, nil
+}
+func (f *fakeExt) DisableWaterExtension(http.ResponseWriter, *http.Request, string) bool {
+	return false
+}

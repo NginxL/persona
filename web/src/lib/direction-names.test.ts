@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { countsLabel, directionLabel, directionNames, leaderCounts, totalCounts } from "./direction-names";
+import { countsLabel, directionLabel, directionNames, leaderCounts, leaderExternalDirections, totalCounts, treeLeaders } from "./direction-names";
 
 describe("direction names", () => {
   it("keep the current leaders' names by id, leaving out ended ones and blank names", () => {
@@ -17,6 +17,23 @@ describe("direction names", () => {
     const names = new Map([["a", "Product"]]);
     expect(directionLabel(names, "a", "1110 | explore | x")).toBe("Product");
     expect(directionLabel(names, "b", "Trip plan")).toBe("Trip plan");
+  });
+
+  it("preserve external metadata in tree and leaders-list projections, keyed by direction id", () => {
+    const list = [
+      { id: "direction-outside", name: "Outside", external: true, machine_id: "mac", session_id: "agent-7" },
+      { id: "direction-targetless", name: "Targetless", external: true },
+      { id: "direction-ended", name: "Ended", external: true, machine_id: "mac", session_id: "old", ended: true },
+      { id: "lead-a", name: "Product", machine_id: "hub", session_id: "lead-a" },
+    ];
+    expect([...leaderExternalDirections(list)]).toEqual([
+      ["direction-outside", { external: true, machine_id: "mac", session_id: "agent-7" }],
+      ["direction-targetless", { external: true }],
+    ]);
+    expect(treeLeaders({ directions: [
+      { id: "direction-outside", name: "Outside", external: true, machine_id: "mac", session_id: "agent-7", counts: { working: 1, needs_you: 2, stuck: 0, review: 0 }, running: true },
+      { id: "main", name: "", secretary: true, counts: { working: 0, needs_you: 0, stuck: 0, review: 0 }, running: false },
+    ] })).toEqual([{ id: "direction-outside", name: "Outside", external: true, machine_id: "mac", session_id: "agent-7", counts: { running: true, needs_you: 2 } }]);
   });
 });
 

@@ -287,12 +287,15 @@ describe("the page after a switch", () => {
     expect(routeAfterSwitch({ name: "inbox" })).toBeNull();
     expect(routeAfterSwitch({ name: "kb", kind: "people", id: "p1" })).toEqual({ name: "kb", kind: "people" });
     expect(routeAfterSwitch({ name: "todos", id: "t1", view: "calendar", mode: "week" })).toEqual({ name: "todos", view: "calendar", mode: "week" });
-    for (const name of ["settings", "machines", "routines", "home", "health", "agent-list"] as const) expect(routeAfterSwitch({ name })).toBeNull();
+    for (const name of ["settings", "machines", "routines", "home", "agent-list"] as const) expect(routeAfterSwitch({ name })).toBeNull();
+    // a feature module's page (the health module's) stays too
+    expect(routeAfterSwitch({ name: "module", module: "health", base: "health", path: ["h1"] })).toBeNull();
   });
 
   it("opens again where a page that stays reads the assistant's things itself", () => {
     for (const route of [{ name: "history" }, { name: "profile" }, { name: "routines" }, { name: "kb", kind: "docs" }] as const) expect(reopensOnSwitch(route)).toBe(true);
     // these follow the pick by themselves, or are no assistant's
-    for (const name of ["persona", "home", "inbox", "machines", "todos", "agent-list", "settings", "health", "messages", "terminal"] as const) expect(reopensOnSwitch({ name } as never)).toBe(false);
+    for (const name of ["persona", "home", "inbox", "machines", "todos", "agent-list", "settings", "messages", "terminal"] as const) expect(reopensOnSwitch({ name } as never)).toBe(false);
+    expect(reopensOnSwitch({ name: "module", module: "health", base: "health", path: [] })).toBe(false);
   });
 });

@@ -19,9 +19,6 @@ struct RenameWorktreeSheet: View {
                 }
                 if let failure { Section { Text(failure).foregroundStyle(Theme.danger) } }
             }
-            #if os(macOS)
-            .formStyle(.grouped)
-            #endif
             .themedPage()
             .navigationTitle(String(localized: "worktree.rename", defaultValue: "Rename Worktree…"))
             .navigationBarTitleDisplayMode(.inline)
@@ -36,9 +33,6 @@ struct RenameWorktreeSheet: View {
         }
         .onAppear { name = workspace.title }
         .interactiveDismissDisabled(busy)
-        #if os(macOS)
-        .macSheet()
-        #endif
     }
 
     private func save() async {

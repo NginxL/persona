@@ -1,4 +1,3 @@
-#if os(iOS) || os(visionOS)
 import SwiftUI
 
 /// Handing a meeting to an Agent after it (#8852, docs/assistant/meeting-minutes.md "Handing a meeting to an Agent
@@ -297,5 +296,4 @@ struct MeetingHandoffSheet: View {
         }
     }
 }
-#endif
 #endif

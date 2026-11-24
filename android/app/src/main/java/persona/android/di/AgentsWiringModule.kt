@@ -97,7 +97,15 @@ private fun groupAgentsState(stack: GroupStack, assistant: AssistantConversation
         }
         override suspend fun closeSession(key: SessionKey) = api().closeSession(key)
         override suspend fun attachSession(key: SessionKey) = api().attachSession(key)
+        override suspend fun interruptSession(key: SessionKey) = api().interruptSession(key)
         override suspend fun deleteSession(key: SessionKey) = api().deleteSession(key)
+        override suspend fun forkSession(key: SessionKey) = api().forkSession(key)
+        override suspend fun codexTakeoverInfo(key: SessionKey) = api().codexTakeoverInfo(key)
+        override suspend fun codexTakeover(key: SessionKey, token: String, confirmStop: Boolean) = api().codexTakeover(key, token, confirmStop)
+        override suspend fun startCodexContinuation(key: SessionKey, info: persona.core.contracts.CodexTakeoverInfo, operationId: String, todoId: String?) =
+            api().startCodexContinuation(key, info, operationId, todoId)
+        override suspend fun codexContinuationOperation(key: SessionKey, operationId: String) =
+            api().codexContinuationOperation(key, operationId)
     }
     // Notifications are posted with merged ids; the plain key a closed session reports is put back into them.
     val bindings = AgentsOperationsBindings(PersistentAgentOperations(operations, data.operations, HubChatTransport(connection)), assistant) { key ->

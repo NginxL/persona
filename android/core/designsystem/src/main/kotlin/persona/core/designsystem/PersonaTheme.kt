@@ -16,6 +16,7 @@ import dev.chrisbanes.haze.HazePerformanceMode
 import dev.chrisbanes.haze.LocalHazePerformanceMode
 import androidx.compose.runtime.*
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntSize
@@ -147,6 +148,9 @@ internal object Motions {
     }
 }
 
+/** Android's xxxLarge-equivalent interface font scale; reading content keeps the system's chosen scale. */
+const val InterfaceFontScaleCap = 1.35f
+
 val LocalAppStyle = compositionLocalOf { AppStyle.Default }
 val LocalGlassLevel = compositionLocalOf { GlassLevel.Liquid }
 val LocalReduceMotion = compositionLocalOf { false }
@@ -186,7 +190,11 @@ fun PersonaTheme(
         ?: accent?.let { ThemeColors.palette(Palettes.of(style, darkTheme), it) } ?: Palettes.of(style, darkTheme)
     val type = Types.of(style)
     val shapes = Shapes.of(style)
+    val chosenDensity = LocalDensity.current
+    val readingDensity = LocalReadingDensity.current ?: chosenDensity
     CompositionLocalProvider(
+        LocalReadingDensity provides readingDensity,
+        LocalDensity provides chosenDensity.atInterfaceCap(),
         LocalAppStyle provides style,
         LocalPersonaDarkTheme provides darkTheme,
         LocalReduceMotion provides reduceMotion,

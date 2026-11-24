@@ -1,11 +1,32 @@
 // The page's right-hand panel (docs/web/web.md "Side panel"): a session's files / Git, a link opened in the page, or an
 // Agent or task opened from a conversation (lib/agent-open.ts). A session's terminal is the page's own view now
 // (lib/session-view.ts), not a panel.
-// One panel at a time; opening another replaces it. Session panels close when the page moves to another conversation;
-// a link, a task and an Agent stay until closed (they are not tied to the conversation they came from).
-import { useSyncExternalStore } from "react";
+// One panel at a time: opening from outside replaces it and clears the back stack; drilling in from inside the active
+// side panel pushes the previous panel onto a bounded back stack. Session panels close when the page moves to another
+// conversation; a link, a task and an Agent stay until closed (they are not tied to the conversation they came from).
+import { createContext, useContext, useSyncExternalStore } from "react";
 import type { DiffScope } from "./comments";
 import { followSubagentLink } from "./subagent-link";
+
+/** Maximum number of previous panels kept in the side-panel back stack. */
+export const MAX_PANEL_HISTORY = 8;
+
+const PANEL_SEL = "[data-side-panel]";
+const TRIGGER_EVENTS = ["click", "keydown", "submit"] as const;
+
+export interface OpenPanelOptions {
+  /** Push the current panel onto the back stack (`true`), clear it (`false`), or auto-detect from the trigger (default). */
+  push?: boolean;
+  /** Replace the current panel in place without pushing or clearing the existing back stack. */
+  replace?: boolean;
+}
+
+/** Provides `popPanel` to headers rendered inside `<SidePanel />` when the back stack is non-empty. */
+export const SidePanelBackContext = createContext<(() => void) | undefined>(undefined);
+
+export function useSidePanelBack(): (() => void) | undefined {
+  return useContext(SidePanelBackContext);
+}
 
 /** A diff opened straight at a line (a comment's card, lib/comments.ts): which diff, which file, which line. */
 export interface GitSpot {
@@ -62,6 +83,11 @@ export type Panel =
    *  and workflow runs. `run`: a workflow run's task_id; `task`: a background command's id; `from`: Session overview when
    *  that view opened the detail. */
   | { kind: "background"; mid: string; sid: string; run?: string; task?: string; from?: "overview" }
+  /** A subagent's full conversation opened from Session overview, an expanded TaskCard, or a deep link (#14323):
+   *  renders embedded ChatView in the right panel (full-screen overlay on narrow viewports) while keeping the parent chat
+   *  in place. `mid`/`sid` name the subagent (including `<parent>@<agent>` or cross-machine child); `parentMid`/`parentSid`
+   *  name the parent session; `call` is the parent transcript's launching call ID when known. */
+  | { kind: "subagent"; mid: string; sid: string; parentMid?: string; parentSid?: string; call?: string; from?: "overview" | "card" | "link" }
   /** The session's dev server in a headless browser on its computer (docs/web/preview.md); `port` / `path`: the one to
    *  show (a localhost link of a reply), else the one shown last or the first running one. */
   | { kind: "preview"; mid: string; sid: string; cwd: string; port?: number; path?: string };
@@ -72,19 +98,128 @@ export function directoryPanelKey(panel: { mid: string; sid: string; cwd: string
 }
 
 let current: Panel | null = null;
+let history: Panel[] = [];
 let opener: Element | null = null;
 const listeners = new Set<() => void>();
 
-export function openPanel(p: Panel | null) {
+let tracking = false;
+let trigger: EventTarget | null = null;
+
+function inSidePanel(n: EventTarget | Node | null | undefined): boolean {
+  if (!(n instanceof Node)) return false;
+  return Boolean((n instanceof Element ? n : n.parentElement)?.closest(PANEL_SEL));
+}
+
+function onCapture(e: Event) {
+  const t = e.target;
+  trigger = t;
+  queueMicrotask(() => {
+    if (trigger === t) trigger = null;
+  });
+}
+
+function onBubble(e: Event) {
+  if (trigger === e.target) trigger = null;
+}
+
+function setTracking(on: boolean) {
+  if (typeof window === "undefined" || on === tracking) return;
+  tracking = on;
+  for (const ev of TRIGGER_EVENTS) {
+    if (on) {
+      window.addEventListener(ev, onCapture, true);
+      window.addEventListener(ev, onBubble);
+    } else {
+      window.removeEventListener(ev, onCapture, true);
+      window.removeEventListener(ev, onBubble);
+    }
+  }
+  if (!on) trigger = null;
+}
+
+function panelTargetKey(p: Panel): string {
+  switch (p.kind) {
+    case "files":
+    case "git":
+    case "review":
+    case "preview":
+      return `${p.kind}:${directoryPanelKey(p)}`;
+    case "changes":
+    case "agent":
+    case "team":
+    case "sides":
+    case "background":
+    case "subagent":
+      return `${p.kind}:${p.mid}/${p.sid}`;
+    case "file":
+      return `file:${p.mid}:${p.path}`;
+    case "link":
+      return `link:${p.manager ?? ""}:${p.url}`;
+    case "task":
+      return `task:${p.todo}`;
+    case "conversation-tasks":
+      return `conversation-tasks:${p.manager}:${p.mid}/${p.sid}`;
+  }
+}
+
+const sub = (l: () => void) => {
+  listeners.add(l);
+  return () => listeners.delete(l);
+};
+const emit = () => listeners.forEach((l) => l());
+
+export function openPanel(p: Panel | null, options?: OpenPanelOptions) {
   // a subagent's conversation is not opened (#5030): its parent's chat, at the subagent's card
   if (p?.kind === "agent") p = { ...p, sid: followSubagentLink(p.mid, p.sid) };
   // what had the focus when the panel opened (its header button): closing gives the focus back to it (#5155). Called
   // from the click, before the panel renders, so it is never something inside the panel; a panel replacing another keeps
   // the first one's, except an overview detail, which returns to the overview row that opened it.
-  if (p && (!current || (p.kind === "background" && p.from === "overview")))
+  if (p && (!current || ((p.kind === "background" || p.kind === "subagent") && p.from === "overview")))
     opener = typeof document === "undefined" ? null : document.activeElement;
-  current = p;
-  listeners.forEach((l) => l());
+  if (!p) {
+    history = [];
+    current = null;
+  } else if (options?.replace) {
+    current = p;
+  } else {
+    // Auto-push only during an active user interaction event inside the side panel; programmatic and outside opens
+    // always clear history regardless of whether the requested panel shares the current target key.
+    const shouldPush = options?.push ?? (Boolean(current) && trigger !== null && inSidePanel(trigger));
+    if (!shouldPush || !current) {
+      history = [];
+    } else {
+      const curKey = panelTargetKey(current);
+      if (curKey !== panelTargetKey(p)) {
+        const top = history[history.length - 1];
+        if (!top || panelTargetKey(top) !== curKey) {
+          history = [...history, current].slice(-MAX_PANEL_HISTORY);
+        }
+      }
+    }
+    current = p;
+  }
+  setTracking(current !== null);
+  emit();
+}
+
+/** Clears the side-panel back stack without closing the currently open panel. */
+export function clearPanelHistory() {
+  if (!history.length) return;
+  history = [];
+  emit();
+}
+
+/** Pops the top panel from the back stack into `current`; if the stack is empty, closes the panel. */
+export function popPanel(): boolean {
+  if (!history.length) {
+    if (current) closePanel();
+    return false;
+  }
+  current = history[history.length - 1];
+  history = history.slice(0, -1);
+  setTracking(true);
+  emit();
+  return true;
 }
 
 export function closePanel() {
@@ -95,25 +230,30 @@ export function getPanel() {
   return current;
 }
 
+export function canGoBack(): boolean {
+  return history.length > 0;
+}
+
+export function getPanelHistory(): readonly Panel[] {
+  return history;
+}
+
 /** What had the focus when the open panel was opened (see openPanel). */
 export function panelOpener(): Element | null {
   return opener;
 }
 
-/** Toggle a session panel from a header button: the same kind for the same session closes it. */
+/** Toggle a session panel from a header button: the same kind for the same session closes it; another replaces it. */
 export function togglePanel(p: Panel) {
   const c = current;
-  const same = c && c.kind === p.kind && "mid" in c && "mid" in p && c.mid === p.mid && ("sid" in c && "sid" in p ? c.sid === p.sid : true);
-  openPanel(same ? null : p);
+  const sameKind = c && c.kind === p.kind && "mid" in c && "mid" in p && c.mid === p.mid && ("sid" in c && "sid" in p ? c.sid === p.sid : true);
+  openPanel(sameKind ? null : p, { push: false });
 }
 
 export function usePanel(): Panel | null {
-  return useSyncExternalStore(
-    (l) => {
-      listeners.add(l);
-      return () => listeners.delete(l);
-    },
-    () => current,
-    () => current,
-  );
+  return useSyncExternalStore(sub, () => current, () => current);
+}
+
+export function usePanelCanGoBack(): boolean {
+  return useSyncExternalStore(sub, canGoBack, canGoBack);
 }

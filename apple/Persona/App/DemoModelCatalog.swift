@@ -43,11 +43,14 @@ enum DemoModelCatalog {
             let providerID = kind == "api" ? "legacy.ai" : "launcher.demo"
             var effective: [String: JSONValue] = ["provider": .string(providerID), "model": .string(kind == "api" ? "model-fast" : "model-chat")]
             effective.merge(binding) { _, new in new }
+            if id == "inbox.agent" && binding["permission_mode"] == nil {
+                effective["permission_mode"] = "default"
+            }
             var purpose: [String: JSONValue] = [
                 "id": .string(id), "name": .string(name), "group": .string(group), "kind": .string(kind),
                 "override": .object(binding), "effective": .object(effective), "revision": saved?["revision"] ?? 0,
                 "inherited_from": .string(binding.isEmpty ? "现有默认" : "此用途"), "status": "体验模式 · 不会调用模型",
-                "fields": kind == "api" ? ["provider", "model"] : ["provider", "model", "effort"],
+                "fields": kind == "api" ? ["provider", "model"] : ["provider", "model", "effort", "permission_mode"],
                 "provider_ids": .array(providers.filter { $0["kind"]?.string == kind }.compactMap { $0["id"] })]
             // The four categories the hub edits (docs/assistant/model-config.md); every other use is set through its category.
             if let uses = categories[id] {

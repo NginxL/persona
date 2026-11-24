@@ -254,7 +254,7 @@ func pairCmd(e *env, args []string) error {
 		if flags.any() {
 			return link.NewTextError("link-cli.pair_listen_ssh", nil)
 		}
-		if flags.proxy.set {
+		if flags.proxy.any() {
 			return link.NewTextError("link-cli.listen_proxy", nil)
 		}
 		if seen || machine != "" {
@@ -262,7 +262,7 @@ func pairCmd(e *env, args []string) error {
 		}
 		return pairListen(e, listen, addrs)
 	}
-	if err := flags.proxy.save(e); err != nil {
+	if err := flags.check(); err != nil {
 		return err
 	}
 	c, err := pairWithSSH(e, raw, machine, flags)
@@ -310,6 +310,10 @@ func pairWithSSH(e *env, raw, machine string, flags routeFlags) (*link.Config, e
 	}
 	sshCfg, err := flags.build(raw)
 	if err != nil {
+		return nil, err
+	}
+	// Saved before pairing, so the pairing goes through the proxy too.
+	if err := flags.saveProxy(e, sshCfg); err != nil {
 		return nil, err
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)

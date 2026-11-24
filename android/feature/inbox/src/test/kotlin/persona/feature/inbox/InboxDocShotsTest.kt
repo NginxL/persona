@@ -39,6 +39,7 @@ import persona.core.domain.inbox.InboxItem
 import persona.core.navigation.AppTab
 import persona.core.navigation.Navigator
 import java.io.File
+import persona.core.inbox.*
 
 /**
  * A Feishu document's notice opened from the inbox (#2323), on the JVM with Robolectric's native graphics, in every

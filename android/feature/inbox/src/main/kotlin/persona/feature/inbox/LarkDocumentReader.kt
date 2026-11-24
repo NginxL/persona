@@ -40,6 +40,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import persona.core.inbox.*
 
 internal val LocalLarkLinkOpener = staticCompositionLocalOf<((String, LarkContentSource?) -> Unit)?> { null }
 private data class LarkLink(val url: String, val source: LarkContentSource?)
@@ -343,7 +344,7 @@ private fun LarkDocumentFooter(url: String) {
 /** The Feishu app (or a browser) for [url]; nothing happens when no app takes it. */
 internal fun openInLark(context: android.content.Context, url: String) {
     val link = larkWebUrl(url) ?: return
-    runCatching {
+    val _ = runCatching {
         context.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(link))
             .addCategory(android.content.Intent.CATEGORY_BROWSABLE).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
     }
