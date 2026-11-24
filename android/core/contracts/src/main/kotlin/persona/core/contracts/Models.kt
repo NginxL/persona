@@ -429,6 +429,8 @@ data class SessionCapabilities(
      * between them (`persona.core.domain.sort.listedModes`); null from an older node and wherever Claude Code's modes stand.
      */
     @SerialName("permission_modes") val permissionModes: List<String>? = null,
+    /** Reply to asynchronous questions without granting general approval support. */
+    @SerialName("answer_questions") val answerQuestions: Boolean = false,
 )
 
 /**

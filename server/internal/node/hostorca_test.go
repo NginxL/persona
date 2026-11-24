@@ -108,6 +108,15 @@ func TestMain(m *testing.M) {
 	for _, k := range []string{"PERSONA_HOME", legacyEnv("PERSONA_HOME")} {
 		os.Unsetenv(k)
 	}
+	// Nor the user's herdr or herdr-core: their sockets point nowhere, and no session named in the environment picks
+	// another. These tests run from inside a herdr pane, whose HERDR_SOCKET_PATH names the user's running server, and
+	// the tests that build a node's default hosts (engineHostsFor) pinged it, listed its Agents and subscribed to its
+	// events (#13549); without it the default socket is the one under the real home. A test that wants a herdr gives its
+	// client the fake's socket.
+	os.Setenv("HERDR_SOCKET_PATH", noHerdrSocket)
+	os.Unsetenv("HERDR_SESSION")
+	os.Setenv("HC_SOCKET", noHerdrCoreSocket)
+	os.Unsetenv("HC_SESSION")
 	// Nor the user's login shell: herdr's panes run zsh, whatever the machine's is (a test that wants another sets it).
 	herdrPaneShell = func() string { return "/bin/zsh" }
 	// A send looks at the box once after typing and confirms nothing: most fakes never write what was typed into the
@@ -117,6 +126,13 @@ func TestMain(m *testing.M) {
 }
 
 const orcaCwd = "/tmp/orcaproj"
+
+// noHerdrSocket and noHerdrCoreSocket are where the package's tests find the user's herdr and herdr-core: nowhere
+// (TestMain).
+const (
+	noHerdrSocket     = "/tmp/persona-test-no-herdr/herdr.sock"
+	noHerdrCoreSocket = "/tmp/persona-test-no-herdr-core/default.sock"
+)
 
 // fakeProcs is the process table the Orca host scans: agent processes by pane key.
 type fakeProcs struct {

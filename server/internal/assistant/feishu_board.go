@@ -292,7 +292,7 @@ func (s *Service) boardRows(ctx context.Context, l i18n.Lang, web string, now ti
 	for _, a := range s.awaitingAcceptance(ctx) {
 		summary := i18n.T(l, "assistant-feishu_cards.board_verify", i18n.Args{"title": clip(oneLine(a.title), 40)})
 		if a.ask.Conclusion { // the task's conclusion, as its card says it
-			summary = i18n.T(l, "assistant-feishu_cards.board_verdict", i18n.Args{"title": clip(oneLine(a.title), 40), "verdict": verdictText(l, &a.ask)})
+			summary = i18n.T(l, "assistant-feishu_cards.board_verdict", i18n.Args{"title": clip(oneLine(a.title), 40), "verdict": verdictText(l, &a.ask, a.delivery)})
 		}
 		rows = append(rows, boardRow{waited: boardWaited(now, a.since), id: a.todo, summary: summary,
 			from: s.boardFrom(l, a.machine, a.session, ""), link: todoLink(web, a.todo), asked: a.since})
@@ -367,7 +367,8 @@ func boardWait(l i18n.Lang, d time.Duration) string {
 type awaitingAccept struct {
 	todo, title, machine, session string
 	since                         time.Time
-	ask                           acceptAsk // its verdict for a conclusion's row (conclusion.go)
+	ask                           acceptAsk     // its verdict for a conclusion's row (conclusion.go)
+	delivery                      *TodoDelivery // effective delivery state (currentDelivery)
 }
 
 // awaitingAcceptance are the to-dos whose "Please verify" ask is up (with a card or without, NoCard) and not passed: the ones that can still be passed
@@ -403,7 +404,7 @@ func (s *Service) acceptanceRounds(ctx context.Context, includeReturned bool) []
 		if !includeReturned && (!a.RecheckAt.IsZero() || ownerDecisionReturned(t.Supervision)) {
 			continue
 		}
-		out = append(out, awaitingAccept{todo: id, title: t.Title, machine: a.MachineID, session: a.SessionID, since: a.AskedAt, ask: a})
+		out = append(out, awaitingAccept{todo: id, title: t.Title, machine: a.MachineID, session: a.SessionID, since: a.AskedAt, ask: a, delivery: currentDelivery(t)})
 	}
 	slices.SortFunc(out, func(x, y awaitingAccept) int {
 		if c := x.since.Compare(y.since); c != 0 {

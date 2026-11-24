@@ -1806,7 +1806,7 @@ nonisolated struct APIClient: Sendable {
     func makeDirection(_ id: String) async throws {
         _ = try await request("POST", "/api/v1/assistant/directions/\(id)/make", body: [String: String]())
     }
-    /// Ends a direction (#4331, `POST /api/v1/assistant/directions/{id}/end`): its tasks keep their supervisor.
+    /// Ends a direction (#4331, `POST /api/v1/assistant/directions/{id}/end`): its open tasks go to the main chat's supervision.
     func endDirection(_ id: String) async throws {
         _ = try await request("POST", "/api/v1/assistant/directions/\(id)/end")
     }

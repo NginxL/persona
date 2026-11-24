@@ -67,6 +67,7 @@ func TestTaskDoneSourceAllowsBackgroundWorkButKeepsQueuedPeer(t *testing.T) {
 		{items: []proto.Item{{Kind: proto.KindNotice, Role: "system", Injected: &proto.Injected{Kind: proto.InjectedSystem, State: "supervise"}}}, wantBlocked: true},
 		{items: []proto.Item{{Kind: proto.KindText, Role: "user", Injected: &proto.Injected{Kind: proto.InjectedSystem, State: "inbox"}}}, wantBlocked: true},
 		{items: []proto.Item{{Kind: proto.KindText, Role: "user", Injected: &proto.Injected{Kind: proto.InjectedFollowup, State: "wake"}}}},
+		{items: []proto.Item{{Kind: proto.KindText, Role: "user", Text: prompts.RenderLimitFallbackContinue("English")}}},
 		{items: []proto.Item{{Kind: proto.KindText, Role: "user", Injected: &proto.Injected{Kind: proto.InjectedFollowup, State: "limit_continue"}}, {Kind: proto.KindText, Role: "user", From: "peer-agent", Queued: true}}, wantBlocked: true},
 		{items: []proto.Item{{Kind: proto.KindText, Role: "user", Text: "Continue the login fix"}, {Kind: proto.KindText, Role: "user", From: "peer-agent", Text: "Unrelated question", Queued: true}}, wantBlocked: true},
 		{items: []proto.Item{{Kind: proto.KindNotice, Role: "system", Task: &proto.TaskNote{}}, {Kind: proto.KindText, Role: "user", From: "peer-agent", Text: "Unrelated question", Queued: true}}, wantBlocked: true},

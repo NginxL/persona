@@ -24,6 +24,8 @@ type historyRuntime struct {
 	offline bool
 	reads   int
 	after   []int
+	// sdkEnd answers a cursor past the end as the runtime SDK's page() does: from_seq is the cursor, to_seq the end.
+	sdkEnd bool
 }
 
 func (rt *historyRuntime) page(_ string, raw json.RawMessage) (any, error) {
@@ -48,7 +50,9 @@ func (rt *historyRuntime) page(_ string, raw json.RawMessage) (any, error) {
 	for _, it := range rt.items {
 		end = max(end, it.Seq)
 	}
-	end = max(end, from)
+	if !rt.sdkEnd {
+		end = max(end, from)
+	}
 	items := []proto.Item{}
 	for _, it := range rt.items {
 		if it.Seq <= from || (p.Before != nil && *p.Before > 0 && it.Seq >= *p.Before) {
@@ -422,6 +426,26 @@ func TestDurableHistorySameRevisionRewriteAndLateNotification(t *testing.T) {
 	rows, err := database.ConversationItems(t.Context(), "server", "main-chat", "h2", 0, 100, 100, false)
 	if err != nil || len(rows) != 1 || rows[0].Item.ID != "replaced" {
 		t.Fatalf("late event was stored %+v %v", rows, err)
+	}
+}
+
+// A source answers a cursor past its end (one from an earlier numbering of it) with that end, as the runtime SDK
+// does. The durable history keeps the source's end: stored at the reader's cursor, the tail claimed lines the
+// source never had.
+func TestDurableHistoryKeepsTheSourceEndForACursorPastIt(t *testing.T) {
+	s, _, database, rt := historyFixture(t)
+	rt.mu.Lock()
+	rt.sdkEnd = true
+	rt.mu.Unlock()
+	if p := readHistory(t, s, "main-chat", map[string]any{"after_seq": 0, "lazy_images": true}); len(p.Items) != 6 {
+		t.Fatalf("first read %+v", p)
+	}
+	if p := readHistory(t, s, "main-chat", map[string]any{"after_seq": 9, "lazy_images": true}); len(p.Items) != 0 || intValue(p.ToSeq) != 6 {
+		t.Fatalf("read past the end %+v", p)
+	}
+	h, err := database.ConversationHistory(t.Context(), "server", "main-chat")
+	if err != nil || h == nil || h.TailSeq == nil || *h.TailSeq != 6 || fmt.Sprint(h.Coverage) != "[{0 6}]" {
+		t.Fatalf("stored end %+v %v", h, err)
 	}
 }
 

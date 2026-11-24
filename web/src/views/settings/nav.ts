@@ -55,8 +55,9 @@ export const TAB_INFO: Record<CoreTab, { label: string; icon: IconName; hint: st
   sources: { label: t("settings-nav.tab_sources"), icon: "inbox", hint: t("settings-nav.hint_sources") },
   extensions: { label: t("settings-nav.tab_extensions"), icon: "extension", hint: t("settings-nav.hint_extensions") },
   shortcuts: { label: t("settings-nav.tab_shortcuts"), icon: "keyboard", hint: t("settings-nav.hint_shortcuts") },
-  // trial features and new implementations, this browser's (lib/labs.ts, Labs.tsx); the existing sparkles
-  // glyph rather than a new one, as the first screen has no room for another (docs/web/web.md "Labs")
+  // Temporary trials with a stable default, lossless rollback and a tracked exit (docs/web/web.md "Labs").
+  // General owns permanent module switches. Put lasting advanced preferences in their owning category and
+  // keep debug controls, demos and irreversible changes out of Labs.
   labs: { label: t("settings-nav.tab_labs"), icon: "sparkles", hint: t("settings-nav.hint_labs") },
   devices: { label: t("settings-nav.tab_devices"), icon: "key", hint: t("settings-nav.hint_devices") },
   hub: { label: t("settings-nav.tab_hub"), icon: "hub", hint: t("settings-nav.hint_hub") },

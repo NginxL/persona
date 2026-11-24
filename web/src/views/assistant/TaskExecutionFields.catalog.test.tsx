@@ -1,9 +1,10 @@
 // @vitest-environment jsdom
-import { act } from "react";
+import { act, useState } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { TaskExecutionFields } from "./TaskExecutionFields";
-import { blankTask, type Task } from "../../lib/routines";
+import { blankTask, taskInputSettings, type Task } from "../../lib/routines";
+import { agyModels, claudeModels, codexModels, neon } from "../../lib/launcher-model-binding.fixture";
 import { getState } from "../../lib/store";
 import { resetManagerChoice, setRosterDefault } from "../../lib/manager-choice";
 import { t } from "../../i18n";
@@ -110,6 +111,89 @@ it("uses a folded saved alias's advertised default effort without changing the c
   expect(details.querySelector("summary")!.textContent).toContain("second · codex · test-alias · low");
   const effort = [...host.querySelectorAll("label")].find((el) => el.textContent?.startsWith(t("settings-modelconfiguration.effort")))!.querySelector("select")!;
   expect([...effort.options].map((option) => option.value)).toEqual(["", "low"]);
-  expect(effort.options[0].textContent).toContain("low");
+  expect(effort.options[0].textContent).toContain("Low");
   expect(changed).not.toHaveBeenCalled();
+});
+
+async function editExecution(stored: Partial<Task>, catalog = agyModels) {
+  const { agent } = catalog;
+  vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+    const path = String(input);
+    if (path.includes("/models")) return json(catalog);
+    if (path.includes("/launchers")) return json({ launchers: [{ name: agent, agent }], default: { provider: agent, model: agent === "agy" ? `${neon}-medium` : "" } });
+    if (path.includes("/purposes/assistant")) return json({ purpose: { machine_id: "first", effective: { provider: `launcher.${agent}` } } });
+    throw new Error(`unexpected request ${path}`);
+  }));
+  const saved = { ...blankTask(), id: "test", ...stored };
+  let draft = saved;
+  function Harness() {
+    const [current, update] = useState(saved);
+    draft = current;
+    return <TaskExecutionFields draft={current} saved={saved} disabled={false} onChange={(patch) => update((prev) => ({ ...prev, ...patch }))} />;
+  }
+  await act(async () => root.render(<Harness />));
+  await flush();
+  await act(async () => {
+    const details = host.querySelector("details")!;
+    details.open = true;
+    details.dispatchEvent(new Event("toggle"));
+  });
+  await flush();
+  return () => taskInputSettings(draft, saved);
+}
+
+const taskPicker = () => host.querySelector<HTMLButtonElement>("button[aria-expanded]")!;
+const taskEffort = () => [...host.querySelectorAll("select")]
+  .find((node) => node.closest("label")?.querySelector("span")?.textContent === t("settings-modelconfiguration.effort"))!;
+async function setEffort(value: string) {
+  await act(async () => {
+    taskEffort().value = value;
+    taskEffort().dispatchEvent(new Event("change", { bubbles: true }));
+  });
+}
+async function pickModel(text: string) {
+  await act(async () => taskPicker().click());
+  const row = [...host.querySelectorAll<HTMLButtonElement>('[role="option"]')].find((node) => node.textContent?.startsWith(text))!;
+  await act(async () => row.click());
+}
+
+it("picks a folded task model and sends only the new variant's ID for a new effort", async () => {
+  const body = await editExecution({});
+  await pickModel("Gemini 4 Neon");
+  expect(taskEffort().value).toBe("medium");
+  expect([...taskEffort().options].slice(1).map((o) => o.textContent)).toEqual(["Low", "Medium", "High", "XHigh"]);
+  await setEffort("xhigh");
+  expect(body()).toMatchObject({ model: `${neon}-xhigh` });
+  expect(body()).not.toHaveProperty("effort");
+  await pickModel("Gemini 4 Flash");
+  expect(taskEffort().disabled).toBe(true);
+});
+
+it.each([["", "medium"], ["high", "high"]])("hydrates and serializes the saved task variant with standalone effort %j", async (effort, level) => {
+  const body = await editExecution({ model: `${neon}-medium`, effort });
+  expect(taskPicker().textContent).toBe(`Gemini 4 Neon${neon}-${level}`);
+  expect(taskEffort().value).toBe(level);
+  if (effort) expect(body()).toMatchObject({ model: `${neon}-high`, effort: "" });
+  else expect(body()).not.toHaveProperty("effort");
+});
+
+it("pins a sibling variant when only an inherited task's effort changes", async () => {
+  const body = await editExecution({});
+  expect(taskPicker().textContent).toContain(t("assistant-taskeditor.follow_assistant"));
+  expect(taskEffort().value).toBe("");
+  expect(taskEffort().options[0].textContent).toContain("Medium");
+  expect(body()).not.toHaveProperty("model");
+  await setEffort("high");
+  expect(body()).toMatchObject({ model: `${neon}-high` });
+  expect(body()).not.toHaveProperty("effort");
+});
+
+it.each([
+  { agent: "Claude", catalog: claudeModels, name: "Sonnet", value: "high" },
+  { agent: "Codex", catalog: codexModels, name: "5.5", value: "xhigh" },
+])("writes $agent task model and effort independently", async ({ catalog, name, value }) => {
+  const body = await editExecution({}, catalog);
+  await pickModel(name);
+  await setEffort(value);
+  expect(body()).toMatchObject({ model: catalog.models[0].id, effort: value });
 });

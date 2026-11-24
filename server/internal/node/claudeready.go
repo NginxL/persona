@@ -86,6 +86,10 @@ func (n *Node) waitReady(ctx context.Context, pane string, probe *startProbe) (*
 	gone := 0               // looks in a row at which the pane's host listed no such pane (errNoOrcaTerminal)
 	dialogLooks := 0        // looks in a row at which a dialog none of claudeStartDialogs is was on screen
 	var dialog *screenDialog
+	var exited paneStartExit
+	if probe != nil {
+		exited.file = probe.startFile
+	}
 	for time.Now().Before(deadline) {
 		select {
 		case <-ctx.Done():
@@ -125,7 +129,7 @@ func (n *Node) waitReady(ctx context.Context, pane string, probe *startProbe) (*
 			time.Sleep(time.Second)
 			continue
 		}
-		if reason := firstRunScreen(unframed(screen)); reason != "" {
+		if reason := claudeStartupError(screen); reason != "" {
 			return nil, errors.New(reason)
 		}
 		// A dialog the node does not know, on a start (probe: not a wait for a running claude's box again): counted
@@ -148,7 +152,7 @@ func (n *Node) waitReady(ctx context.Context, pane string, probe *startProbe) (*
 		if gone = goneLooks(gone, err); gone >= paneGoneLooks && !running {
 			return nil, errPaneGone()
 		}
-		claude := err == nil && a.Agent == "claude"
+		claude := err == nil && a != nil && a.Agent == "claude"
 		if claude && ownEvidence && !running && !probe.claudeCame(screen) {
 			claude = false // the host's word alone: looked at as a tab where claude has not come
 		}
@@ -166,6 +170,11 @@ func (n *Node) waitReady(ctx context.Context, pane string, probe *startProbe) (*
 						return nil, &startLineRejected{line: line}
 					}
 					shellSaid = other
+				}
+			}
+			if !sawClaude {
+				if err := exited.check(ctx, n, pane, "Claude Code"); err != nil {
+					return nil, err
 				}
 			}
 			if onHerdr && (err == nil || errors.Is(err, host.ErrNoAgent)) {
@@ -477,6 +486,14 @@ func bypassConfirmKeys(screen string) []string {
 
 // firstRunScreen names the first-run screen the node cannot complete on its own, or "" when the screen is not one.
 // These wait for a person, so the caller reports them at once instead of polling until the timeout.
+func claudeStartupError(text string) string {
+	if reason := startupErrorLine(text, "There's an issue with the selected model", "There’s an issue with the selected model",
+		"Warning: Unknown --effort value", "No conversation found with session ID", "Error: No conversation found"); reason != "" {
+		return reason
+	}
+	return firstRunScreen(unframed(text))
+}
+
 func firstRunScreen(screen string) string {
 	switch {
 	case strings.Contains(screen, "WARNING: Claude Code running in Bypass Permissions mode") && strings.Contains(screen, "Yes, I accept"):

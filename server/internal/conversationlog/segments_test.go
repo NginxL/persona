@@ -44,6 +44,25 @@ func TestSegmentProjectionKeepsLegacyIdentityAndPhysicalLineOffsets(t *testing.T
 	}
 }
 
+// A source answers a cursor past its end (it renumbered its lines under a new history) with from > through: that
+// is the empty span at its end, so the batch still reaches its reader, never an error.
+func TestSegmentSpanPastTheSourceEndIsEmptyAtTheEnd(t *testing.T) {
+	end := 100
+	retired := Segment{ID: "one", Ordinal: 1, FrozenEnd: &end}
+	active := Segment{ID: "two", Ordinal: 2, Offset: end}
+	if from, through, err := active.Span(9, 4); err != nil || from != 104 || through != 104 {
+		t.Fatalf("cursor past the end: %d %d %v", from, through, err)
+	}
+	if from, through, err := retired.Span(120, 90); err != nil || from != 90 || through != 90 {
+		t.Fatalf("cursor past a retired source's end: %d %d %v", from, through, err)
+	}
+	for _, span := range [][2]int{{-1, 4}, {4, -1}} {
+		if _, _, err := active.Span(span[0], span[1]); err == nil {
+			t.Fatalf("negative span %v accepted", span)
+		}
+	}
+}
+
 func TestSegmentProjectionRewritesReferencesWithoutMutatingSource(t *testing.T) {
 	s := Segment{ID: "second", Ordinal: 2, Offset: 100}
 	it := proto.Item{ID: "tool", Seq: 2, Stored: &proto.StoredItem{MachineID: "physical", SessionID: "private", History: "source", ItemID: "tool"},

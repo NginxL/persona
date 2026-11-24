@@ -12,7 +12,7 @@ import apple_launch_diagnostics
 LOGS = ("simulator.log", "simulator-boot.log", "simulator-readiness.log",
         "regular-simulator.log", "regular-simulator-boot.log", "regular-readiness.log", "native-ssh-trace.log",
         "ios-unit.log", "ios-html-card.log", "ios-html-security.log",
-        "ios-visual-compact.log", "ios-visual-regular.log")
+        "ios-visual-compact.log", "ios-visual-regular.log", "ios-about-regular.log")
 
 
 def collect(output, destination, runner=subprocess.run, scope="all"):
@@ -20,15 +20,36 @@ def collect(output, destination, runner=subprocess.run, scope="all"):
     logs = LOGS if scope != "regular" else (
         "regular-simulator.log", "regular-simulator-boot.log", "regular-readiness.log")
     for path in [output / name for name in logs] + sorted(output.glob("runtimes-*.json")):
+        visual_required = path.name == "ios-about-regular.log" and (
+            output / "regular-visual-context.json").is_file()
+        if visual_required and (not path.is_file() or path.is_symlink()):
+            apple_launch_diagnostics.publish(
+                destination / "ios-about-regular.log.status.txt",
+                "unavailable: visual invocation started but its console log was not published\n")
+            raise RuntimeError("the required visual console log is missing")
         if path.is_file() and not path.is_symlink():
-            shutil.copyfile(path, destination / path.name)
+            try:
+                shutil.copyfile(path, destination / path.name)
+            except OSError:
+                if visual_required:
+                    apple_launch_diagnostics.publish(
+                        destination / "ios-about-regular.log.status.txt",
+                        "unavailable: visual console log copy failed\n")
+                    raise RuntimeError("the required visual console log could not be included") from None
+                raise
+            if visual_required:
+                if not (destination / path.name).is_file():
+                    raise RuntimeError("the required visual console log could not be included")
+                apple_launch_diagnostics.publish(
+                    destination / "ios-about-regular.log.status.txt",
+                    "included: actual xcodebuild stdout and stderr\n")
     for bundle in sorted(output.glob("*.xcresult")):
         if bundle.is_dir() and not bundle.is_symlink() and (scope != "regular" or bundle.name == "ios-regular-readiness.xcresult"):
             # Do not follow links out of a generated result bundle.
             shutil.copytree(bundle, destination / bundle.name, dirs_exist_ok=True,
                             ignore=lambda directory, names: [name for name in names
                                 if (Path(directory) / name).is_symlink()])
-    for name in ("live-readiness", "live-regular-readiness"):
+    for name in ("live-readiness", "live-regular-readiness", "live-regular-visual"):
         if scope == "regular" and name != "live-regular-readiness":
             continue
         source = output / "diagnostics" / name

@@ -2,6 +2,7 @@ package node
 
 import (
 	"context"
+	"errors"
 	"log"
 	"strings"
 	"time"
@@ -87,14 +88,21 @@ func agyInputReady(text string) bool {
 // once the input box is drawn with no dialog and herdr no longer reports status unknown, bounded by agyInitWait
 // and agyTrustWait. herdr can report the process before agy takes the terminal, and agy can draw its input box before
 // it finishes loading its model, mode and notices (#11437, #11345). A start notice over the box gets one Esc first.
-func (n *Node) agyTrustFolder(ctx context.Context, pane string) error {
+func (n *Node) agyTrustFolder(ctx context.Context, pane string, exit ...*paneStartExit) error {
 	deadline := time.Now().Add(agyTrustWait)
 	var initDeadline time.Time
+	var exited *paneStartExit
+	if len(exit) > 0 {
+		exited = exit[0]
+	}
 	answered := "" // the dialog screen last answered: the same screen is not answered twice
 	dismissed := false
 	for {
 		text, err := n.readPane(ctx, pane, "visible", 40)
 		if err == nil {
+			if err := n.agyStartupFailure(ctx, pane, text, exited); err != nil {
+				return err
+			}
 			if keys := agyTrustKeys(text); keys != nil {
 				initDeadline = time.Time{}
 				if text != answered {
@@ -115,7 +123,7 @@ func (n *Node) agyTrustFolder(ctx context.Context, pane string) error {
 					dismissed = true
 				} else {
 					a, aerr := n.paneAgent(ctx, pane)
-					if aerr != nil || a.Agent != agyAgent || a.AgentStatus != proto.StatusUnknown {
+					if aerr != nil || a == nil || a.Agent != agyAgent || a.AgentStatus != proto.StatusUnknown {
 						return nil
 					}
 					if initDeadline.IsZero() {
@@ -136,6 +144,17 @@ func (n *Node) agyTrustFolder(ctx context.Context, pane string) error {
 		case <-time.After(agyTrustPoll):
 		}
 	}
+}
+
+func (n *Node) agyStartupFailure(ctx context.Context, pane, text string, exited *paneStartExit) error {
+	if reason := startupErrorLine(text, "CLI error:", "error: invalid model selection", "Error: invalid model selection",
+		"Error: Antigravity", "Invalid effort:", "Unknown model:"); reason != "" {
+		return errors.New(reason)
+	}
+	if strings.Contains(text, "Welcome to Antigravity CLI") && strings.Contains(text, "Choose your color scheme") {
+		return errors.New("Antigravity CLI is waiting for first-run setup. Run agy in a terminal on this computer to finish setup.")
+	}
+	return exited.check(ctx, n, pane, "Antigravity")
 }
 
 // agyClearOverlay clears a late-arriving trust dialog or start notice before confirmWorkFirst retypes a dropped first

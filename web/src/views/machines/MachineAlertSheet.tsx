@@ -33,6 +33,8 @@ export interface AlertSheetProps {
   onClose: () => void;
   onReconnect: (id: string) => Promise<void> | void;
   onRecords: (records: LauncherHealthRecord[]) => void;
+  /** Reads every launcher health record again (a check that answered no record for its launcher, #14534). */
+  onReloadRecords?: () => void;
 }
 
 export function MachineAlertSheet(p: AlertSheetProps) {
@@ -71,7 +73,7 @@ export function MachineAlertSheet(p: AlertSheetProps) {
         ) : kind === "offline" ? (
           <OfflineSection machine={m} reason={offlineReason(m)} onReconnect={p.onReconnect} onRedeploy={() => p.onKind("mismatch")} />
         ) : (
-          <LauncherSection machine={m} records={p.records} onRecords={p.onRecords} />
+          <LauncherSection machine={m} records={p.records} onRecords={p.onRecords} onReload={p.onReloadRecords} />
         )}
       </div>
     </Dialog>

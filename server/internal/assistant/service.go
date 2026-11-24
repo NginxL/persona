@@ -1142,6 +1142,8 @@ func (s *Service) turnEnded(ctx context.Context, r SessionRef, meeting bool) {
 		s.afterSettle(context.WithoutCancel(ctx), s.inboxAgentTurnSettled, r.MachineID, r.SessionID)
 		// What the turn said is tagged with its information categories (info_tag.go).
 		s.afterSettle(context.WithoutCancel(ctx), s.infoTagTurnSettled, r.MachineID, r.SessionID)
+		// A usage limit moves a conversation the owner relies on to a backup launcher (limit_fallback.go).
+		s.afterSettle(context.WithoutCancel(ctx), s.limitFallbackTurnSettled, r.MachineID, r.SessionID)
 	}
 	if !meeting {
 		s.spawnPinAfterTurn(ctx, r.MachineID, r.SessionID)

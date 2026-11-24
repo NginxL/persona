@@ -105,6 +105,13 @@ func (h *Hub) meshLocalCall(ctx context.Context, from, method string, params jso
 		}
 		if n > 0 {
 			h.logf("mesh: took over %d device credentials from %q", n, h.hubNameOf(from))
+			// A request that came before the handover cached "no such token" for tokenCacheFor: forget it, or the
+			// device just handed over is refused (a 401 apps read as a revoked credential) for that long.
+			hashes := make([]string, len(keep))
+			for i, t := range keep {
+				hashes[i] = t.Hash
+			}
+			h.forgetUnknownTokens(hashes)
 		}
 		return map[string]any{"added": n}, nil
 	}

@@ -212,7 +212,7 @@ func TestDeployedWorkKeepsPleaseVerifyWithTheVerdictOnTop(t *testing.T) {
 	s.ownerVerifiesAll = true
 	f.judge = `{"changed":"飞书机器人多了任务进展开关","link":"https://hub.example.com/settings?tab=feishu","how":"打开设置看开关"}`
 	agentTurn(s, f, proto.StatusWorking, "", 0)
-	agentTurn(s, f, proto.StatusDone, deployedReply, 0)
+	agentTurn(s, f, proto.StatusDone, deployedReply+"\n交付：已上线并实测", 0)
 	waitFor(t, "the 请验收 card", func() bool { a := askOf(s, todo.ID); return a != nil && a.MessageID != "" })
 	card := acceptCardOf(posts())
 	top, lines := strings.Index(card, "✅ 做完了：已部署，按下面验收"), strings.Index(card, "改了什么")
@@ -718,5 +718,116 @@ func TestFeishuConclusionQuestionGoesToSupervisorWithoutAnswering(t *testing.T) 
 	sends := sentToAgent(f)[before:]
 	if len(sends) != 1 || !strings.Contains(sends[0], "先不动") {
 		t.Fatalf("agent got %v, want just the selected option", sends)
+	}
+}
+
+// Verification asks (!a.Conclusion) reflect the to-do's effective delivery state across locales and every surface
+// (Lark card, GET /todos ask, briefing feed, briefing card, snapshot), while preserving empty outcome (#14539).
+func TestConclusionVerificationCopyFollowsDeliveryState(t *testing.T) {
+	verifyAsk := &acceptAsk{}
+	for _, tc := range []struct {
+		name     string
+		lang     i18n.Lang
+		delivery *TodoDelivery
+		want     string
+	}{
+		{"zh live", i18n.ZhHans, &TodoDelivery{State: deliveryLive}, "✅ 做完了：已部署，按下面验收"},
+		{"zh pr", i18n.ZhHans, &TodoDelivery{State: deliveryPR}, "✅ 做完了：停在 PR，未部署，按下面验收"},
+		{"zh merged", i18n.ZhHans, &TodoDelivery{State: deliveryMerged}, "✅ 做完了：已合未部署，按下面验收"},
+		{"zh off", i18n.ZhHans, &TodoDelivery{State: deliveryOff}, "✅ 做完了：已部署但默认关着，按下面验收"},
+		{"zh none", i18n.ZhHans, &TodoDelivery{State: deliveryNone}, "✅ 做完了：请验收结果"},
+		{"zh nil", i18n.ZhHans, nil, "✅ 做完了：请验收结果"},
+		{"en live", i18n.En, &TodoDelivery{State: deliveryLive}, "✅ Done: deployed, check it below"},
+		{"en pr", i18n.En, &TodoDelivery{State: deliveryPR}, "✅ Done: PR open, not deployed yet; check it below"},
+		{"en merged", i18n.En, &TodoDelivery{State: deliveryMerged}, "✅ Done: merged, not deployed yet; check it below"},
+		{"en off", i18n.En, &TodoDelivery{State: deliveryOff}, "✅ Done: deployed, off by default; check it below"},
+		{"en none", i18n.En, &TodoDelivery{State: deliveryNone}, "✅ Done: please verify the result below"},
+		{"en nil", i18n.En, nil, "✅ Done: please verify the result below"},
+		{"ja live", i18n.Ja, &TodoDelivery{State: deliveryLive}, "✅ 完了：デプロイ済み。下の手順で確認してください"},
+		{"ja pr", i18n.Ja, &TodoDelivery{State: deliveryPR}, "✅ 完了：PR で停止中・未デプロイ。下の手順で確認してください"},
+		{"ja merged", i18n.Ja, &TodoDelivery{State: deliveryMerged}, "✅ 完了：マージ済み・未デプロイ。下の手順で確認してください"},
+		{"ja off", i18n.Ja, &TodoDelivery{State: deliveryOff}, "✅ 完了：デプロイ済み・既定でオフ。下の手順で確認してください"},
+		{"ja none", i18n.Ja, &TodoDelivery{State: deliveryNone}, "✅ 完了：結果を確認してください"},
+		{"ja nil", i18n.Ja, nil, "✅ 完了：結果を確認してください"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := verdictText(tc.lang, verifyAsk, tc.delivery); got != tc.want {
+				t.Fatalf("verdictText(%q, %+v) = %q, want %q", tc.lang, tc.delivery, got, tc.want)
+			}
+		})
+	}
+	// A conclusion keeps its own reason regardless of delivery state.
+	concl := &acceptAsk{Conclusion: true, Outcome: outcomeDone, Reason: "已完成方案"}
+	if got := verdictText(i18n.ZhHans, concl, &TodoDelivery{State: deliveryMerged}); got != "✅ 做完了：已完成方案" {
+		t.Fatalf("conclusion verdictText = %q", got)
+	}
+
+	// End-to-end: accepted + user_check with delivery.state=merged under default delivery_gate=merged must never
+	// claim "已部署，按下面验收" on any surface, and must keep Outcome == "".
+	needsLarkLayer(t)
+	s, f, todo, posts, _ := conclusionService(t, false)
+	ctx := t.Context()
+	s.setTaskDelivery(ctx, todo.ID, TodoDelivery{State: deliveryMerged, Gate: "等待部署", Unblock: unblockOther, At: time.Now().UTC()})
+	waitsForReview(t, s, f, todo.ID, "PR 已合并，等待部署。")
+	reviewTask(t, s, todo.ID, map[string]any{
+		"verdict":    "accepted",
+		"user_check": true,
+		"note":       "合并完成，请验收",
+		"checks":     completeReviewChecks(todoNow(s, todo.ID)),
+	})
+	waitFor(t, "user_check accept card", func() bool { a := askOf(s, todo.ID); return a != nil && a.MessageID != "" })
+
+	const wantVerdict = "✅ 做完了：已合未部署，按下面验收"
+	const forbidden = "已部署，按下面验收"
+
+	// 1. Lark accept card
+	card := acceptCardOf(posts())
+	if !strings.Contains(card, wantVerdict) || strings.Contains(card, forbidden) {
+		t.Fatalf("accept card verdict mismatch:\n%s", card)
+	}
+
+	// 2. todoAsks (GET /api/v1/todos) preserves empty Outcome and AskedAt
+	asks := s.todoAsks(ctx)
+	gotAsk, ok := asks[todo.ID]
+	if !ok {
+		t.Fatalf("todoAsks missing %s", todo.ID)
+	}
+	if gotAsk.Verdict != wantVerdict || gotAsk.Outcome != "" || gotAsk.AskedAt.IsZero() {
+		t.Fatalf("todoAsks[%s] = %+v, want verdict=%q outcome=\"\" non-zero asked_at", todo.ID, gotAsk, wantVerdict)
+	}
+
+	// 3. Briefing feed and briefing card
+	facts := s.briefFactsAt(ctx, time.Now(), "")
+	body := facts.body(s, "早报")
+	var row *briefBodyRow
+	for i := range body.Accept {
+		if body.Accept[i].ID == todo.ID {
+			row = &body.Accept[i]
+		}
+	}
+	if row == nil || row.Verdict != wantVerdict || row.Outcome != "" {
+		t.Fatalf("brief body row = %+v, want verdict=%q outcome=\"\"", row, wantVerdict)
+	}
+	briefCard, _, _ := s.briefCard(facts, "早报", "")
+	if js := briefCard.JSON(); !strings.Contains(js, botcard.EscapeMarkdown(wantVerdict)) || strings.Contains(js, forbidden) {
+		t.Fatalf("brief card verdict mismatch:\n%s", js)
+	}
+
+	// 4. Snapshot
+	snap, total := s.snapshotUnaccepted(ctx, s.location(ctx))
+	if total != 1 || len(snap) != 1 || snap[0].Verdict != wantVerdict {
+		t.Fatalf("snapshotUnaccepted = (%+v, %d), want verdict=%q", snap, total, wantVerdict)
+	}
+
+	// 5. Effective delivery (currentDelivery): a recorded pr hold promoted to merged by polled PR facts uses merged copy.
+	prURL := "https://github.com/o/r/pull/42"
+	now := time.Now().UTC()
+	s.setTaskStage(ctx, todo.ID, "review", prURL)
+	s.setTaskDelivery(ctx, todo.ID, TodoDelivery{State: deliveryPR, Gate: "等待合入", Unblock: unblockOther, At: now.Add(-time.Minute)})
+	if err := s.applyPRStatus(ctx, todoNow(s, todo.ID), TodoPRStatus{URL: prURL, State: "merged", CheckedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	if got := s.todoAsks(ctx)[todo.ID].Verdict; got != wantVerdict {
+		t.Fatalf("currentDelivery-promoted verdict = %q, want %q", got, wantVerdict)
 	}
 }

@@ -46,7 +46,8 @@ function hub(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
   requests.push(`${init?.method ?? "GET"} ${url.pathname}${url.search}`);
   if (url.pathname === "/api/v1/metrics") return Promise.resolve(json({ machines: metricsList }));
   if (url.pathname === "/api/v1/launchers/health") return Promise.resolve(json({ records: health }));
-  const m = /^\/api\/v1\/machines\/([^/]+)\/(diagnosis|launchers)$/.exec(url.pathname);
+  if (url.pathname === "/api/v1/launchers/health/check") return Promise.resolve(json({ records: [] }));
+  const m =/^\/api\/v1\/machines\/([^/]+)\/(diagnosis|launchers)$/.exec(url.pathname);
   if (m?.[2] === "diagnosis") return Promise.resolve(json({ machine_id: m[1], at: 1, tools: [{ id: "git", version: "2.47" }], processes: { mem_total: 32 * GB, count: 10, groups: [] } }));
   if (m?.[2] === "launchers") return Promise.resolve(json({ launchers: [{ name: "claude" }, { name: "codex", agent: "codex" }] }));
   return Promise.resolve(json({ error: "not found", code: "not_found" }, 404));
@@ -130,6 +131,24 @@ describe("alert chips on the Machines page", () => {
     // a click inside the sheet doesn't open the computer either
     await click($("[data-part=what]"));
     expect(location.pathname).toBe("/machines");
+  });
+
+  // A check that answers no record for its launcher (#14534): the page reads the records again, so a record the hub
+  // no longer holds leaves the sheet and the card instead of staying as it was.
+  it("reads the launcher records again after a check with no result", async () => {
+    health = [{ machine: "ok", launcher: "codex", state: "failing", kind: "cli_outdated", error: "Method not found: session/set_mode", checked_at: new Date().toISOString() }];
+    act(() => root.render(<Machines onToggleSidebar={() => {}} />));
+    await flush();
+    await click(card("Office Mini")!.querySelector("[data-alert=launcher]"));
+    expect($$("[data-testid=failing-launchers] [data-launcher]").map((l) => l.getAttribute("data-launcher"))).toEqual(["codex"]);
+    const reads = () => requests.filter((r) => r === "GET /api/v1/launchers/health").length;
+    const before = reads();
+    health = [];
+    await click($("[data-launcher=codex] [data-testid=test-again]"));
+    expect(requests).toContain("POST /api/v1/launchers/health/check?machine=ok&launcher=codex");
+    expect(reads()).toBe(before + 1);
+    expect($$("[data-testid=failing-launchers] [data-launcher]")).toEqual([]);
+    expect(card("Office Mini")!.querySelector("[data-alert=launcher]")).toBeNull();
   });
 
   it("opens the version sheet from the mismatch strip's Details", async () => {

@@ -3,8 +3,8 @@
 // the `kb.detail` slot. Its code and its strings (recording.json, recording-*.json) load when a recording opens.
 //
 // Its hub flag is `module.recording` (the rule on #13844, core/module-host.ts): off only on a hub that publishes module
-// flags without it, so an older hub keeps it on as before. Settings › Labs › Features turns it off in a browser too;
-// off, recordings are absent from Knowledge (the Meetings list, searches, their addresses).
+// flags without it, so an older hub keeps it on as before. Settings › General › Optional features can turn it off
+// per browser. While off, recordings are absent from Knowledge (the Meetings list, searches, their addresses).
 import { byLanguage, t, type CatalogModule } from "../../i18n";
 import { moduleFeature, type ModuleDescriptor } from "../../core/module-host";
 

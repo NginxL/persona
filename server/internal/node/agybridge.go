@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -335,6 +336,7 @@ func (rh *RuntimeHost) runAgyBridge(ctx context.Context, agyBin string, wake <-c
 	}()
 
 	started := rh.agyProviderEnv() // read before the command is made: a change in between restarts it
+	bin := statAgy(agyBin)         // the file the companion runs; a different one later restarts it (agyChange)
 	cmd, err := agyBridgeCommand(ctx, rh, agyBin, instance)
 	if err != nil {
 		return false, err
@@ -375,6 +377,9 @@ func (rh *RuntimeHost) runAgyBridge(ctx context.Context, agyBin string, wake <-c
 			<-exited
 		}
 	}
+	probe := time.NewTicker(agyBridgeProbeEvery)
+	defer probe.Stop()
+	var change agyChange
 	for {
 		if !slices.Equal(started, rh.agyProviderEnv()) {
 			rh.logger.Printf("agy runtime: the agy launcher's model provider changed; restarting")
@@ -390,10 +395,88 @@ func (rh *RuntimeHost) runAgyBridge(ctx context.Context, agyBin string, wake <-c
 		case err := <-exited:
 			return false, err
 		case <-wake:
+		case <-probe.C:
+			if change.see(bin, statAgy(findAgyExecutable())) {
+				builtin, _ := rh.agyPeers(instance)
+				if builtin != nil && builtin.agyBusy() {
+					change.logWait(rh.logger, bin)
+					continue
+				}
+				rh.logger.Printf("agy runtime: %s; restarting", change.describe(bin))
+				stopChild()
+				return true, nil
+			}
 		case <-ctx.Done():
 			stopChild()
 			return false, ctx.Err()
 		}
+	}
+}
+
+// agyBinary is an agy executable as a companion started on it: its path and the file there then (nil: none could be
+// read). The node resolves agy once per companion start, so one installed elsewhere later, or replaced in place by an
+// update, is noticed only by comparing (#14533).
+type agyBinary struct {
+	path string
+	info os.FileInfo
+}
+
+func statAgy(path string) agyBinary {
+	b := agyBinary{path: path}
+	if path != "" {
+		if info, err := os.Stat(path); err == nil {
+			b.info = info
+		}
+	}
+	return b
+}
+
+// same: o is the same path to the same file, unchanged (os.SameFile, size and modification time).
+func (b agyBinary) same(o agyBinary) bool {
+	if b.path != o.path || (b.info == nil) != (o.info == nil) {
+		return false
+	}
+	return b.info == nil || os.SameFile(b.info, o.info) && b.info.Size() == o.info.Size() && b.info.ModTime().Equal(o.info.ModTime())
+}
+
+// agyChange follows what the probes find in place of the companion's agy. A change counts once two probes in a row
+// see the same one, so an installer caught between removing the old file and writing the new one restarts nothing.
+type agyChange struct {
+	seen   *agyBinary
+	logged bool
+}
+
+// see records what a probe found, now, against the companion's own bin; true once the same change was seen twice.
+func (c *agyChange) see(bin, now agyBinary) bool {
+	if now.same(bin) {
+		c.seen, c.logged = nil, false
+		return false
+	}
+	if c.seen == nil || !c.seen.same(now) {
+		c.seen, c.logged = &now, false
+		return false
+	}
+	return true
+}
+
+func (c *agyChange) describe(bin agyBinary) string {
+	switch {
+	case c.seen == nil:
+		return "agy is unchanged"
+	case c.seen.path == "":
+		return fmt.Sprintf("agy at %s is gone", bin.path)
+	case c.seen.path != bin.path:
+		return fmt.Sprintf("agy moved from %s to %s", bin.path, c.seen.path)
+	}
+	return fmt.Sprintf("agy at %s was replaced", bin.path)
+}
+
+// logWait says once per change that the restart waits for the companion's work: an agy turn in flight, or a call the
+// node is waiting on, would be cut by it. The old file keeps running until then.
+func (c *agyChange) logWait(logger *log.Logger, bin agyBinary) {
+	if !c.logged {
+		c.logged = true
+		logger.Printf("agy runtime: %s; restarting once no agy session is working", c.describe(bin))
 	}
 }
 
@@ -435,6 +518,11 @@ func (h *runtimeConn) waitAgyIdle(ctx context.Context) {
 		case <-tick.C:
 		}
 	}
+}
+
+// agyBusy: the companion has a session at work, or the node waits on a call to it (a start, a check), without waiting.
+func (h *runtimeConn) agyBusy() bool {
+	return h.peer.Pending() > 0 || h.agyWorking()
 }
 
 func (h *runtimeConn) agyWorking() bool {

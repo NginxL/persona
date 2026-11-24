@@ -79,8 +79,12 @@ func (s *Service) launcherRoutes() {
 					}()
 				}
 				wg.Wait()
-			} else if v.Source == "agy" {
+			} else if v.Source == "agy" || (v.Agent == "agy" && v.Source != "" && v.Source != "persona" && v.Source != "builtin") {
 				v.Details = map[string]proto.LauncherDetail{}
+				auth := "Antigravity OAuth (~/.gemini/antigravity-cli)"
+				if v.Source != "agy" {
+					auth = "Antigravity ACP (" + v.Source + ")"
+				}
 				for _, id := range v.Machines {
 					l := s.requestCtxLang(ctx)
 					models := []proto.LauncherModel{{Role: i18n.T(l, "assistant-models_launchers.role_default"), Env: "agy acp", Model: v.Model}}
@@ -96,7 +100,7 @@ func (s *Service) launcherRoutes() {
 					}
 					v.Details[id] = proto.LauncherDetail{
 						Agent:  "agy",
-						Auth:   "Antigravity OAuth (~/.gemini/antigravity-cli)",
+						Auth:   auth,
 						Models: models,
 					}
 				}

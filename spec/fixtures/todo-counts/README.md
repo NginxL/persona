@@ -10,7 +10,7 @@ values to the schema and the generated types read them back unchanged (the tests
 
 | File | What it pins | Cases |
 | --- | --- | --- |
-| `todo_counts.json` | A list → its counts, places and order | 8: an empty list, one to-do in each section, a failed start counted open, a superseded failed start, a step counted once, rows ranked in every section, rows ranked by what their steps carry, runs that wait counted In progress and ranked by their wake |
+| `todo_counts.json` | A list → its counts, places and order | 10: an empty list, one to-do in each section, a failed start counted open, a superseded failed start, a step counted once, rows ranked in every section, rows ranked by what their steps carry, runs that wait counted In progress and ranked by their wake, can_wait/supervisor-held/merged-vs-live counts, and parent/child with superseded steps |
 
 ## Format
 

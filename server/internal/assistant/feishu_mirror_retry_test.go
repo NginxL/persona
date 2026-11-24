@@ -78,9 +78,8 @@ func TestFeishuMirrorRetryKeepsItsKey(t *testing.T) {
 	if keys[0] == "" || keys[0] != keys[1] {
 		t.Fatalf("keys %q", keys)
 	}
-	if got := w.s.botTargetFor("om_card", ""); got.SessionID != "m1" {
-		t.Fatalf("thread %+v", got)
-	}
+	// The fake records the key when it receives the post; the card's thread is remembered once the post returns.
+	waitFor(t, "the card's thread", func() bool { return w.s.botTargetFor("om_card", "").SessionID == "m1" })
 }
 
 // One that keeps failing is tried feishuMirrorRetries more times, then given up.

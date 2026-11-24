@@ -269,6 +269,14 @@ func TestAssistantEmptyRuntimeStartWaitsForFirstMessage(t *testing.T) {
 			host := dialRuntime(t, n, assistantRuntimeHello())
 			const id = "session-empty-start"
 			cwd := filepath.Join(n.home, ".persona", "assistant")
+			const remainder = "The generic runtime must retain this split instruction section.\n"
+			rules := filepath.Join(cwd, ".claude", "rules")
+			if err := os.MkdirAll(rules, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(rules, testInstructionRuleName(2)), []byte(testInstructionRuleMarker+remainder), 0o600); err != nil {
+				t.Fatal(err)
+			}
 			host.mu.Lock()
 			host.answer = func(method string, _ json.RawMessage) (any, error) {
 				if method == "session.start" {
@@ -339,7 +347,8 @@ func TestAssistantEmptyRuntimeStartWaitsForFirstMessage(t *testing.T) {
 			if err := json.Unmarshal(sends[1], &sent); err != nil {
 				t.Fatal(err)
 			}
-			if sent.Text != message["text"] || !strings.Contains(sent.Context, "MEMORY.md") || !strings.Contains(sent.Context, "<persona-context>") {
+			if sent.Text != message["text"] || !strings.Contains(sent.Context, "MEMORY.md") || !strings.Contains(sent.Context, "<persona-context>") ||
+				!strings.Contains(sent.Context, remainder) {
 				t.Fatalf("first runtime message lost instructions or words: %+v", sent)
 			}
 			if st, _ := n.state.get(id); st.AwaitingFirstMessage {
@@ -350,8 +359,15 @@ func TestAssistantEmptyRuntimeStartWaitsForFirstMessage(t *testing.T) {
 				t.Fatal(err)
 			}
 			sends = host.got("session.send")
-			if len(sends) != 3 || strings.Contains(string(sends[2]), "MEMORY.md") {
-				t.Fatal("runtime initialization instructions were repeated after delivery")
+			if len(sends) != 3 {
+				t.Fatalf("runtime send count = %d, want 3", len(sends))
+			}
+			var next struct{ Context string }
+			if err := json.Unmarshal(sends[2], &next); err != nil {
+				t.Fatal(err)
+			}
+			if strings.Contains(string(sends[2]), "MEMORY.md") || !strings.Contains(next.Context, remainder) {
+				t.Fatal("runtime initialization instructions were repeated, or a later turn lost split instructions")
 			}
 		})
 	}

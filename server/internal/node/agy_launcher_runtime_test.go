@@ -224,6 +224,31 @@ func TestAgyStartRoutesHerdrAndCompanion(t *testing.T) {
 	}
 }
 
+func TestAgyStartResolvesSuffixedModelEffort(t *testing.T) {
+	n, _, home := herdrNode(t)
+	catalog, _ := fakeAgyModels(t, home)
+	writeFile(t, catalog, "example-medium\tExample (Medium)\nexample-high\tExample (High)\nexample-xhigh\tExample (XHigh)\n")
+	ctx := withStartHost(t.Context(), proto.EngineHerdr)
+	model, err := n.agyPaneStartModel(ctx, agyAgent, "example-medium", "high")
+	if err != nil || model != "example-high" {
+		t.Fatalf("mismatched effort did not select its advertised variant: %q, %v", model, err)
+	}
+	if _, err := n.agyPaneStartModel(ctx, agyAgent, "example-medium", "max"); err == nil || !strings.Contains(err.Error(), `does not offer effort "max"`) {
+		t.Fatalf("unsupported model effort was accepted: %v", err)
+	}
+	if model, err := n.agyPaneStartModel(ctx, agyAgent, "", "high"); model != "" || err != nil {
+		t.Fatalf("effort-only start changed the CLI's default model: %q, %v", model, err)
+	}
+	if err := validModesFor(agyAgent, "", "ultra"); err == nil {
+		t.Fatal("Antigravity accepted Claude/Codex-incompatible effort")
+	}
+	spec := agentLaunch{Agent: agyAgent, Launcher: agyAgent, Model: "example-medium", Effort: "high", AgyConversation: startID}
+	argv, ok := n.agentResumeArgv(spec, startID)
+	if !ok || !strings.Contains(argv[1], "--model example-high --effort high --conversation "+startID) {
+		t.Fatalf("restore kept conflicting flags or lost the conversation: %q", argv)
+	}
+}
+
 func TestAgyStartRefusesInvalidEffortBeforeCreatingPane(t *testing.T) {
 	n, f, home := herdrNode(t)
 	for _, effort := range []string{"auto", "ultra", "bogus"} {

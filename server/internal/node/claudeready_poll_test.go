@@ -3,6 +3,7 @@ package node
 import (
 	"context"
 	"errors"
+	"path/filepath"
 	"strings"
 	"testing"
 	"testing/synctest"
@@ -93,6 +94,61 @@ func TestReadyPollFixtureKeepsTheStartDeadline(t *testing.T) {
 		_, err := n.waitReady(context.Background(), "orca:t1:l1", nil)
 		if err == nil || !strings.Contains(err.Error(), "the tab's shell had not run it yet") || len(h.reads) != 5 || time.Since(began) != n.claudeStart {
 			t.Fatalf("start deadline changed: %d reads in %v, %v", len(h.reads), time.Since(began), err)
+		}
+	})
+}
+
+func TestClaudeStartupFailureBeforeReady(t *testing.T) {
+	for _, message := range []string{
+		"There's an issue with the selected model (missing-model).",
+		"Warning: Unknown --effort value 'ultra' — ignoring it and using the default effort.",
+		"Error: No conversation found with session ID example",
+	} {
+		t.Run(message, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				n, _ := testNode(t)
+				h := &readinessFrames{stateless: stateless{screenHost{bareHost: bareHost{kind: host.Orca}}},
+					frames: []string{"│ " + message + " │\n  ? for shortcuts"}, missing: true}
+				n.hosts = host.NewRegistry(h)
+				_, err := n.waitReady(t.Context(), "orca:t1:l1", nil)
+				if err == nil || err.Error() != message || len(h.reads) != 1 {
+					t.Fatalf("want immediate diagnostic %q, got %v after %d reads", message, err, len(h.reads))
+				}
+			})
+		})
+	}
+}
+
+func TestClaudeRestoreRetainsExplicitModelAndEffort(t *testing.T) {
+	n, _ := testNode(t)
+	for _, effort := range []string{"xhigh", "max", effortAuto} {
+		argv, ok := n.claudeResumeArgv(claudeLaunch{Launcher: "claude", Model: "gateway-model", Effort: effort}, startID)
+		if !ok || !strings.Contains(argv[1], "--model gateway-model") || !strings.Contains(argv[1], "--resume "+startID) {
+			t.Fatalf("resume command lost its model or session: %q", argv)
+		}
+		if got := strings.Contains(argv[1], "--effort "+effort); got != (effort != effortAuto) {
+			t.Fatalf("unexpected effort on restore: %q", argv)
+		}
+	}
+}
+
+type exitedReadinessHost struct{ *readinessFrames }
+
+func (*exitedReadinessHost) PaneForeground(context.Context, host.PaneRef) ([]string, error) {
+	return []string{"zsh"}, nil
+}
+
+func TestClaudeDetectsShellReturnBeforeAgentDiscovery(t *testing.T) {
+	consumed := filepath.Join(t.TempDir(), "consumed-start")
+	synctest.Test(t, func(t *testing.T) {
+		n, _ := testNode(t)
+		h := &exitedReadinessHost{&readinessFrames{stateless: stateless{screenHost{bareHost: bareHost{kind: host.Orca}}},
+			frames: []string{"a launcher quit immediately\n$ "}, missing: true}}
+		n.hosts = host.NewRegistry(h)
+		started := time.Now()
+		_, err := n.waitReady(t.Context(), "orca:t1:l1", &startProbe{startFile: consumed})
+		if err == nil || !strings.Contains(err.Error(), "a launcher quit immediately") || time.Since(started) > 4*time.Second {
+			t.Fatalf("launcher exit took %s: %v", time.Since(started), err)
 		}
 	})
 }

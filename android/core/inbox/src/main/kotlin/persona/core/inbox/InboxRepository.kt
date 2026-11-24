@@ -311,10 +311,15 @@ data class InboxAgent(
     val sessionId: String? = null,
 )
 
+/**
+ * Persisted in `InboxReplyJournal` (`replies.json`): keep the original `persona.feature.inbox` serial names from
+ * before #14075 moved `ReplyTarget` to `:core:inbox`, so existing outbox entries decode across upgrades.
+ */
 @Serializable
+@SerialName("persona.feature.inbox.ReplyTarget")
 sealed interface ReplyTarget {
-    @Serializable data class Inbox(val itemId: String) : ReplyTarget
-    @Serializable data class Lark(val feedId: String) : ReplyTarget
+    @Serializable @SerialName("persona.feature.inbox.ReplyTarget.Inbox") data class Inbox(val itemId: String) : ReplyTarget
+    @Serializable @SerialName("persona.feature.inbox.ReplyTarget.Lark") data class Lark(val feedId: String) : ReplyTarget
 }
 
 @Serializable

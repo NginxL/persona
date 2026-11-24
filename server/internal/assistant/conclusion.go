@@ -31,17 +31,38 @@ const (
 func decideAsk(a *acceptAsk) bool { return a.Conclusion && a.Outcome == outcomeDecide }
 
 // verdictText is an ask's verdict line: the same words on its Lark card, the briefing's card and `brief` item, the board
-// and the snapshot. A deployed task's ask is done, deployed.
-func verdictText(l i18n.Lang, a *acceptAsk) string {
+// and the snapshot. A verification ask (!a.Conclusion) reflects the to-do's effective delivery state.
+func verdictText(l i18n.Lang, a *acceptAsk, delivery *TodoDelivery) string {
 	label := i18n.T(l, "assistant-reports.verdict_"+cmp.Or(a.Outcome, outcomeDone))
 	reason := a.Reason
 	if !a.Conclusion {
-		reason = i18n.T(l, "assistant-reports.verdict_deployed")
+		reason = verifyReason(l, delivery)
 	}
 	if reason == "" {
 		return label
 	}
 	return i18n.T(l, "assistant-reports.verdict_line", i18n.Args{"verdict": label, "reason": reason})
+}
+
+// verifyReason picks the verification ask's reason from the to-do's effective delivery state: only explicit live says
+// deployed; held states name their gate; none or missing live evidence stays neutral.
+func verifyReason(l i18n.Lang, delivery *TodoDelivery) string {
+	state := ""
+	if delivery != nil {
+		state = delivery.State
+	}
+	switch state {
+	case deliveryLive:
+		return i18n.T(l, "assistant-reports.verdict_deployed")
+	case deliveryPR:
+		return i18n.T(l, "assistant-reports.verdict_verify_pr")
+	case deliveryMerged:
+		return i18n.T(l, "assistant-reports.verdict_verify_merged")
+	case deliveryOff:
+		return i18n.T(l, "assistant-reports.verdict_verify_off")
+	default:
+		return i18n.T(l, "assistant-reports.verdict_verify")
+	}
 }
 
 // recommendText is a decision's recommended option as a line ("" when it is not a decision or recommends nothing).
@@ -55,7 +76,7 @@ func recommendText(l i18n.Lang, a *acceptAsk) string {
 // askSummary is the plain line a card of ask a falls back to, and what the chat list shows of it.
 func askSummary(l i18n.Lang, a *acceptAsk) string {
 	if a.Conclusion {
-		return verdictText(l, a)
+		return verdictText(l, a, nil)
 	}
 	return a.Changed
 }
@@ -124,9 +145,10 @@ func (s *Service) conclusionCard(ctx context.Context, t Todo, a acceptAsk) *botc
 	case a.Outcome == outcomeDecide:
 		color = botcard.Orange
 	}
-	c := botcard.NewCard(title, color, verdictText(l, &a)).Tag(i18n.T(l, "assistant-reports.tag_conclusion"), botcard.Neutral)
+	delivery := currentDelivery(t)
+	c := botcard.NewCard(title, color, verdictText(l, &a, delivery)).Tag(i18n.T(l, "assistant-reports.tag_conclusion"), botcard.Neutral)
 	// The goal, where it is now (with how far the work went out) and the evidence below (#3218).
-	now := botcard.EscapeMarkdown(verdictText(l, &a))
+	now := botcard.EscapeMarkdown(verdictText(l, &a, delivery))
 	if live := liveText(l, s.todoStages(ctx)[t.ID]); live != "" && a.Outcome != outcomeDecide {
 		now += " · " + botcard.EscapeMarkdown(live)
 	}

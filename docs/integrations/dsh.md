@@ -164,7 +164,7 @@ The assistant computer (hub computer, or `assistant.machine`) must run persisten
 | Permission mode | Sent with every message; the plugin sets DSH permission presets (`permissionPresets.set`): Default / Auto-accept edits / Auto → `workspace-write`, Plan → `read-only`, Allow all → `danger-full-access` (the Lark gate still applies: it runs on node, independent of DSH authorization); customizable through `config.presets` |
 | Reasoning effort, model | Choose in DSH (Web GUI or DSH default model); Persona model configuration does not select a specific model for `dsh` |
 | Images | Already in the plugin: base64 image blocks |
-| Instructions | DSH reads assistant-directory `AGENTS.md` / `CLAUDE.md` (`assistant.prepare` writes both, loading only one if identical), plus the user's `$DSH_HOME/AGENTS.md` |
+| Instructions | DSH reads the bounded assistant-directory `AGENTS.md` / `CLAUDE.md` entry (`assistant.prepare` writes both, loading only one if identical); node carries the exact remainder in `context` on every non-command message, plus the user's `$DSH_HOME/AGENTS.md` |
 | Extension skills (such as those from the Lark extension) | Assistant directory `.agents/skills/` (DSH reads here); commands run through the gate-declared tool above |
 | Memory | **The same files** as Claude and Codex: the first message of a new chat is prefixed with memory directory, format, and current index (`prompts/assistant/runtime_instructions.md`); edits in that directory do not prompt outside Plan mode |
 | Background tasks | DSH's own tasks (`job_*`), with running ones listed in session `background` (see "Subagents and background tasks"); whether completion wakes the chat follows DSH rules, with no separate node bookkeeping |

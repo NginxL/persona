@@ -99,3 +99,30 @@ describe("New agent: a typed model ID (#1644)", () => {
     expect(host.querySelector("button[aria-expanded]")!.textContent).toContain("acme/coder-9");
   });
 });
+
+it("folds catalog effort variants, finds them by concrete ID, and accepts an unlisted ID", () => {
+  const agy: LauncherModels = { agent: "agy", models: [
+    { id: "gemini-4-neon-low", name: "Gemini 4 Neon (Low)", default_effort: "low" },
+    { id: "gemini-4-neon-medium", name: "Gemini 4 Neon (Medium)", default_effort: "medium", default: true },
+    { id: "gemini-4-neon-xhigh", name: "Gemini 4 Neon (XHigh)", default_effort: "xhigh" },
+    { id: "gemini-4-flash-low", name: "Gemini 4 Flash (Low)", default_effort: "low" },
+  ] };
+  act(() => root.render(<Picker models={{ status: "ready", list: agy }} initial="gemini-4-neon-xhigh" />));
+  const trigger = () => host.querySelector("button[aria-expanded]")!.textContent;
+  const options = () => [...host.querySelectorAll('[role="option"]')].map((row) => row.textContent);
+  expect(trigger()).toBe("Gemini 4 Neongemini-4-neon-xhigh");
+  expect(options().filter((row) => row?.includes("Gemini 4 Neon"))).toEqual(["Gemini 4 Neongemini-4-neon"]);
+  expect(options().some((row) => row?.includes("Gemini 4 Flash (Low)"))).toBe(true);
+
+  const search = host.querySelector<HTMLInputElement>('input[aria-label="搜索模型"]')!;
+  for (const id of ["gemini-4-neon-xhigh", "gemini-4-neon-medium", "gemini-4-neon"]) {
+    type(search, id);
+    expect(options().filter((row) => row?.includes("Gemini 4 Neon"))).toHaveLength(1);
+    expect(button(`使用「${id}」`)).toBeUndefined();
+    enter(search);
+    expect(picked).toHaveBeenLastCalledWith("gemini-4-neon-medium");
+  }
+  type(search, "vendor/new-model");
+  enter(search);
+  expect(picked).toHaveBeenLastCalledWith("vendor/new-model");
+});

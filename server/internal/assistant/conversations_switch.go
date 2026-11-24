@@ -64,6 +64,12 @@ type conversationSwitchBatch struct {
 	RestoreOf string                   `json:"restore_of,omitempty"`
 	CreatedAt time.Time                `json:"created_at"`
 	Items     []conversationSwitchItem `json:"items"`
+	// FirstTurn: an item's switch is done only when the target took its first input, which carries the switch's
+	// summary of what went before; an activated item with none pending waits for one instead of being accepted idle.
+	// The usage-limit fallback's batches (limit_fallback.go) are made so; a batch someone asks for is not.
+	FirstTurn bool `json:"first_turn,omitempty"`
+	// Fallback marks a batch the usage-limit fallback opened (limit_fallback.go).
+	Fallback *conversationSwitchFallback `json:"fallback,omitempty"`
 }
 
 type conversationSwitchState struct {
@@ -81,6 +87,15 @@ type conversationSwitchBook struct {
 	mu        sync.Mutex
 	scheduled bool
 	idle      bool
+	// due: when a usage-limit fallback next needs a look though nothing is under way (its restore); zero: none.
+	due time.Time
+}
+
+// settle records what state leaves to do, with b.mu held: idle when no item is under way and no fallback has its
+// continuation to hand over, and when a fallback's restore is due.
+func (b *conversationSwitchBook) settle(state conversationSwitchState) {
+	b.idle = conversationSwitchStateIdle(state) && !limitFallbackPending(state)
+	b.due = limitFallbackDue(state)
 }
 
 type conversationsSwitchArgs struct {
@@ -318,7 +333,7 @@ func conversationSwitchSummary(items []conversationSwitchItem, a conversationsSw
 	return "Switch Assistant conversations\n\n" + strings.Join(lines, "\n")
 }
 
-func (s *Service) reconcileConversationSwitchItem(ctx context.Context, st logicalSwitchStore, item *conversationSwitchItem) (bool, error) {
+func (s *Service) reconcileConversationSwitchItem(ctx context.Context, st logicalSwitchStore, firstTurn bool, item *conversationSwitchItem) (bool, error) {
 	op, err := st.ConversationSwitch(ctx, item.Machine, item.ConversationID, item.OperationID)
 	if err != nil {
 		return false, err
@@ -343,6 +358,10 @@ func (s *Service) reconcileConversationSwitchItem(ctx context.Context, st logica
 			return true, nil
 		}
 	case "active":
+		if firstTurn {
+			// Its first input carries the summary (drainLogicalInput) and settles it as accepted or rejected.
+			return false, nil
+		}
 		// The no-input check and acceptance share one database lock. A real
 		// input arriving concurrently therefore either keeps the original
 		// delivery/rollback protocol or is queued after acceptance, never lost
@@ -365,9 +384,9 @@ func conversationSwitchBusyError(err error) bool {
 	return errors.As(err, &re) && re.Code == assistantwire.CodeConversationBusy
 }
 
-func (s *Service) runConversationSwitchItem(ctx context.Context, st logicalSwitchStore, restore bool, item *conversationSwitchItem) bool {
+func (s *Service) runConversationSwitchItem(ctx context.Context, st logicalSwitchStore, restore, firstTurn bool, item *conversationSwitchItem) bool {
 	if item.Outcome == conversationSwitchSwitching {
-		changed, err := s.reconcileConversationSwitchItem(ctx, st, item)
+		changed, err := s.reconcileConversationSwitchItem(ctx, st, firstTurn, item)
 		if err != nil {
 			s.logf("conversations_switch %s: reconcile: %v", item.OperationID, err)
 			return false
@@ -390,7 +409,7 @@ func (s *Service) runConversationSwitchItem(ctx context.Context, st logicalSwitc
 	}
 	if op != nil {
 		item.Outcome = conversationSwitchSwitching
-		_, reconcileErr := s.reconcileConversationSwitchItem(ctx, st, item)
+		_, reconcileErr := s.reconcileConversationSwitchItem(ctx, st, firstTurn, item)
 		if reconcileErr != nil {
 			s.logf("conversations_switch %s: replay reconcile: %v", item.OperationID, reconcileErr)
 		}
@@ -449,10 +468,13 @@ func (s *Service) runConversationSwitchesLocked(ctx context.Context, state *conv
 	for bi := range state.Batches {
 		batch := &state.Batches[bi]
 		for ii := range batch.Items {
-			if s.runConversationSwitchItem(ctx, st, batch.RestoreOf != "", &batch.Items[ii]) {
+			if s.runConversationSwitchItem(ctx, st, batch.RestoreOf != "", batch.FirstTurn, &batch.Items[ii]) {
 				changed = true
 			}
 		}
+	}
+	if s.limitFallbacksLocked(ctx, state, time.Now()) {
+		changed = true
 	}
 	return changed
 }
@@ -560,7 +582,7 @@ func (s *Service) executeConversationSwitches(ctx context.Context, a conversatio
 			return conversationSwitchReport{}, "", err
 		}
 	}
-	s.conversationSwitches.idle = conversationSwitchStateIdle(state)
+	s.conversationSwitches.settle(state)
 	return makeConversationSwitchReport(state.Batches[len(state.Batches)-1], false), "", nil
 }
 
@@ -576,7 +598,7 @@ func (s *Service) conversationSwitchStatus(ctx context.Context, id string, space
 			return conversationSwitchReport{}, err
 		}
 	}
-	s.conversationSwitches.idle = conversationSwitchStateIdle(state)
+	s.conversationSwitches.settle(state)
 	if found {
 		for _, batch := range state.Batches {
 			if batch.ID == id && (space == nil || batch.Space == *space) {
@@ -590,7 +612,7 @@ func (s *Service) conversationSwitchStatus(ctx context.Context, id string, space
 func (s *Service) wakeConversationSwitches() {
 	book := &s.conversationSwitches
 	book.mu.Lock()
-	if book.scheduled || book.idle {
+	if book.scheduled || book.idle && (book.due.IsZero() || time.Now().Before(book.due)) {
 		book.mu.Unlock()
 		return
 	}
@@ -617,7 +639,7 @@ func (s *Service) wakeConversationSwitches() {
 				return
 			}
 		}
-		book.idle = conversationSwitchStateIdle(state)
+		book.settle(state)
 	}()
 }
 

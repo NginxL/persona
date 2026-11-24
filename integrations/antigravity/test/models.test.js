@@ -157,6 +157,31 @@ test('availability checks use native ACP and deny tools without phone cards', as
   assert.equal(n.last('runtime.sessions')?.sessions.length ?? 0, 0)
 })
 
+// An Antigravity CLI without session/set_mode (#14533): a check needs no mode switch, so it passes; a start that asks
+// for a mode other than the default says the CLI is too old, and one that asks for the default starts.
+test('availability checks and default-mode starts work on a CLI without session/set_mode', async (t) => {
+  const { n, home, catalog, settings, calls } = await fixture(t, { noStart: true })
+  catalog({ models: entries, noSetMode: true })
+  settings({ model: entries[1].name, agentMode: 'default' })
+  const result = await n.peer.call('launchers.check', { cwd: home, prompt: 'Reply with OK' })
+  assert.equal(result.ok, true)
+  assert.equal(result.answer, 'OK')
+  assert.equal(calls().filter((call) => call.method === 'session/close').length, 1)
+  await assert.rejects(n.peer.call('session.start', { cwd: home, permission_mode: 'acceptEdits' }), /too old to switch to the "accept-edits" mode.*Please update agy/)
+  const { session } = await n.peer.call('session.start', { cwd: home, permission_mode: 'default' })
+  assert.ok(session.session_id)
+})
+
+test('availability checks switch to the default mode only where the CLI lists one', async (t) => {
+  const { n, home, catalog, calls } = await fixture(t, { noStart: true })
+  catalog({ models: entries, availableModes: [{ id: 'accept-edits' }, { id: 'plan' }] })
+  assert.equal((await n.peer.call('launchers.check', { cwd: home, prompt: 'Reply with OK' })).ok, true)
+  assert.equal(calls().filter((call) => call.method === 'session/set_mode').length, 0)
+  catalog({ models: entries, availableModes: [{ id: 'default' }, { id: 'plan' }] })
+  assert.equal((await n.peer.call('launchers.check', { cwd: home, prompt: 'Reply with OK' })).ok, true)
+  assert.deepEqual(calls().filter((call) => call.method === 'session/set_mode').map((call) => call.params.modeId), ['default'])
+})
+
 test('failed availability inference closes the check session and propagates the native error', async (t) => {
   const { n, home, catalog, calls } = await fixture(t, { noStart: true })
   catalog({ models: entries, promptError: 'Provider unavailable' })

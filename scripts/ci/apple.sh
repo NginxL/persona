@@ -436,6 +436,10 @@ fi
         sleep 0.1
       done
       : > "$watch_log/observer.stop"
+      # This observer has its own process group, so the readiness timeout does
+      # not kill its evidence. Send the stop to that group explicitly: waiting
+      # without it would leave the observer collecting until the full horizon.
+      kill -TERM "-$watcher" 2>/dev/null || kill -TERM "$watcher" 2>/dev/null || true
       # The observer stops polling after its bounded product phase, then
       # completes final evidence. The outer 900-second deadline still owns a
       # stuck watcher; never kill it before that final collection.
@@ -546,14 +550,17 @@ fi
         printf "%s\n" "unavailable: bundle signature collection incomplete" > "$watch_log/product-$product-bundle-signature.pending"
         mv "$watch_log/product-$product-bundle-signature.pending" "$watch_log/product-$product-bundle-signature.txt"
       done
-      # Give the observer its own group so a probe deadline cannot leave its
-      # detached collectors behind. Both steps use the unchanged budget.
+      # Noninteractive Bash gives the observer a separate process group only
+      # with job control enabled. The bounded readiness runner must never kill
+      # this group while it finishes its bounded final evidence.
+      set -m
       bash -c "exec python3 \"\$@\"" -- "$ci_root/scripts/ci/apple_readiness_watch.py" \
         --udid "$udid" --bundle-id "$bundle_id" --scope-root "$output" \
         --app "$output/ios-tests/Build/Products/Debug-iphonesimulator/Persona.app/Persona" \
         --test-bundle "$output/ios-tests/Build/Products/Debug-iphonesimulator/Persona.app/PlugIns/PersonaTests.xctest/PersonaTests" \
         --output "$watch_log" --seconds 900 &
       watcher=$!
+      set +m
       stop_watcher() {
         local code=$?
         trap - EXIT TERM INT
@@ -563,6 +570,9 @@ fi
           sleep 0.1
         done
         : > "$watch_log/observer.stop"
+        # Signal the independent observer group explicitly; otherwise the
+        # stop-file cannot end its polling after the readiness shell is gone.
+        kill -TERM "-$watcher" 2>/dev/null || kill -TERM "$watcher" 2>/dev/null || true
         # Let the stop-aware observer finish bounded final evidence. The
         # existing readiness deadline remains the hard outer bound.
         wait "$watcher" || true
@@ -591,9 +601,46 @@ fi
       exit 0
     fi
     mkdir -p "$OUTPUT/regular-shots"
+    # Observe the actual visual invocation, not only the successful readiness
+    # probe before it. Both stay inside the unchanged 600-second outer step.
     TEST_RUNNER_PERSONA_SHOTS="$OUTPUT/regular-shots" \
-      ci_run 'iOS regular-width About visual test on real iPad' 600 "${IOS_COMMON[@]}" \
-        -destination "platform=iOS Simulator,id=$REGULAR_SIM" -destination-timeout 120 \
+      ci_run 'iOS regular-width About visual test on real iPad' 600 bash -c '
+        set -euo pipefail
+        ci_root="$1"; output="$2"; watch_log="$3"; udid="$4"; bundle_id="$5"; shift 5
+        mkdir -p "$watch_log"
+        printf "%s\n" "collection incomplete; observation only; no launch cause established" > "$watch_log/observer.status.pending"
+        mv "$watch_log/observer.status.pending" "$watch_log/observer.status.txt"
+        printf "%s\n" "unavailable: observation incomplete" > "$watch_log/launch-system-after-60s.txt.pending"
+        mv "$watch_log/launch-system-after-60s.txt.pending" "$watch_log/launch-system-after-60s.txt"
+        printf "%s\n" "incomplete" > "$watch_log/launch-system-after-60s.txt.status.pending"
+        mv "$watch_log/launch-system-after-60s.txt.status.pending" "$watch_log/launch-system-after-60s.txt.status.txt"
+        # The observer owns its process group; the existing deadline still owns
+        # both it and xcodebuild. No boot, shutdown or launch setting changes.
+        set -m
+        python3 "$ci_root/scripts/ci/apple_launch_diagnostics.py" \
+          --record "$output/regular-visual-context.json" --udid "$udid" --bundle-id "$bundle_id"
+        python3 "$ci_root/scripts/ci/apple_regular_visual_watch.py" \
+          --udid "$udid" --bundle-id "$bundle_id" --scope-root "$output" \
+          --output "$watch_log" --seconds 600 &
+        watcher=$!
+        set +m
+        stop_watcher() {
+          local code=$?
+          trap - EXIT TERM INT
+          : > "$watch_log/observer.stop"
+          wait "$watcher" || true
+          if kill -0 "$watcher" 2>/dev/null; then
+            kill -KILL "-$watcher" 2>/dev/null || kill -KILL "$watcher" 2>/dev/null || true
+          fi
+          wait "$watcher" || true
+          exit "$code"
+        }
+        trap stop_watcher EXIT TERM INT
+        command_status=0
+        "$@" 2>&1 | tee "$output/ios-about-regular.log" || command_status=$?
+        exit "$command_status"
+      ' -- "$CI_ROOT" "$OUTPUT" "$OUTPUT/diagnostics/live-regular-visual" "$REGULAR_SIM" "$CI_BUNDLE_ID" \
+        "${IOS_COMMON[@]}" -destination "platform=iOS Simulator,id=$REGULAR_SIM" -destination-timeout 120 \
         -only-testing:PersonaTests/AboutVersionRegularVisualTests \
         -resultBundlePath "$OUTPUT/ios-about-regular.xcresult" test-without-building
     result ios-about-regular "$REGULAR_SIM" AboutVersionRegularVisualTests

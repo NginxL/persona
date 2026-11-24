@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strconv"
 	"strings"
@@ -144,6 +145,34 @@ func TestEngineHostsForSets(t *testing.T) {
 		if !slices.Equal(kinds, c.kinds) {
 			t.Errorf("%v: hosts %v, want %v", c.hosts, kinds, c.kinds)
 		}
+	}
+}
+
+// The package's tests reach no herdr or herdr-core of the user's: the default hosts a node builds talk to the sockets
+// TestMain points nowhere, and look for no other herdr sessions of the account, whatever shell ran the tests.
+func TestDefaultHostsReachNoServerOfTheUsers(t *testing.T) {
+	ch, err := proto.NormalizeEngineChoice([]string{"herdr", "herdr-core"}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	seen := 0
+	for _, h := range engineHostsFor(ch, nil) {
+		switch h := h.(type) {
+		case *herdrHost:
+			seen++
+			if h.c.Socket != noHerdrSocket || h.c.Session != "" || h.named != nil {
+				t.Errorf("herdr host: socket %q, session %q, named sessions %v", h.c.Socket, h.c.Session, h.named != nil)
+			}
+		case *herdrCoreHost:
+			seen++
+			// On Windows herdr-core is a named pipe: HC_SOCKET counts only as one (socket_windows.go).
+			if runtime.GOOS != "windows" && h.c.Socket != noHerdrCoreSocket {
+				t.Errorf("herdr-core host: socket %q", h.c.Socket)
+			}
+		}
+	}
+	if seen != 2 {
+		t.Fatalf("%d of the two hosts", seen)
 	}
 }
 

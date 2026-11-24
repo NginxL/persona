@@ -257,6 +257,21 @@ describe("a brief item", () => {
     expect(host.textContent).not.toContain("直接完成");
   });
 
+  it("preserves non-deployed verification verdicts and Pass action on brief accept rows", async () => {
+    const accept = [
+      { id: "todo_m1", title: "合入待部署", detail: "PR 已合并", verdict: "✅ 做完了：已合未部署，按下面验收", waited_s: 60, asked_at: ASKED },
+      { id: "todo_n1", title: "本地文档更新", detail: "补齐说明", verdict: "✅ 做完了：请验收结果", waited_s: 60, asked_at: ASKED },
+    ];
+    draw(item(body({ accept })));
+    const [merged, neutral] = rows("accept");
+    expect(merged.querySelector("[data-brief-verdict]")?.textContent).toBe("✅ 做完了：已合未部署，按下面验收");
+    expect(merged.textContent).not.toContain("已部署，按下面验收");
+    expect(neutral.querySelector("[data-brief-verdict]")?.textContent).toBe("✅ 做完了：请验收结果");
+    const pass = [...merged.querySelectorAll("button")].find((b) => b.textContent === "通过")!;
+    await act(async () => pass.click());
+    expect(api).toHaveBeenCalledWith("/todos/todo_m1/accept", { method: "POST", json: { asked_at: ASKED } });
+  });
+
   it("offers direct completion in live Pending even without a recommendation", () => {
     drawDecision({ id: "todo_no_recommendation", title: "Synthetic decision", outcome: "decide", waited_s: 60, asked_at: ASKED });
     expect([...rows("accept")[0].querySelectorAll("button")].map((b) => b.textContent)).toEqual(["打开", "直接完成"]);

@@ -57,6 +57,8 @@
   "change_main_supervises_own_tasks": "「メインチャットが自分のタスクを監督する」：{before} → {after}",
   "title_background_supervisor_keeps_context": "バックグラウンド監督が過去のラウンドをすべて保持する",
   "change_background_supervisor_keeps_context": "「バックグラウンド監督が過去のラウンドをすべて保持する」：{before} → {after}",
+  "title_chat_reply_relay": "自分名義で書いたチャットの新しい返信を会話へ転送",
+  "change_chat_reply_relay": "「自分名義で書いたチャットの新しい返信を会話へ転送」：{before} → {after}",
   "title_model_tiers": "Agent プリセット",
   "change_model_tier": "{profile} · {tier}：{before} → {after}",
   "change_model_group_provider": "{purpose}：{before} → {after}。別の provider に変更すると、以前の provider の model、effort、permission mode は消去されます。以前の provider を再設定すると元に戻せます。",
@@ -120,5 +122,10 @@
   "change_supervision_batch_minutes": "通常の監督通知を受信者ごとにまとめる間隔：{before} → {after} 分（0 は既存の間隔を維持）",
   "bad_supervision_batch_minutes": "0〜1440の整数分で指定してください。",
   "supervision_batch_minutes_unchanged": "通常の監督通知をまとめる間隔は変更されていません。",
-  "supervision_batch_minutes_saved": "通常の監督通知をまとめる間隔を{value}分に保存しました。"
+  "supervision_batch_minutes_saved": "通常の監督通知をまとめる間隔を{value}分に保存しました。",
+  "title_limit_fallbacks": "利用上限に達したときの予備ランチャー",
+  "change_limit_fallbacks": "利用上限で会話が止まったときに使う予備ランチャー：{before} → {after}",
+  "bad_limit_fallbacks": "ランチャー名を第一候補から順に最大 8 個までリストで指定してください。空のリストでオフになります。",
+  "limit_fallbacks_unchanged": "予備ランチャーは変更されていません。",
+  "limit_fallbacks_saved": "予備ランチャーを保存しました：{value}。次に利用上限に達したときから適用されます。"
 }

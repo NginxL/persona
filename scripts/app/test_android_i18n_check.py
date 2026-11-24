@@ -83,6 +83,24 @@ class I18nCheckTest(unittest.TestCase):
                                   ['<string name="demo_hi">こんにちは</string>'])
         self.assertIn('values/ is the English fallback', '\n'.join(problems))
 
+    def test_string_arrays_validate_length_and_placeholders_by_index(self):
+        def array(*items):
+            return ('<string-array name="demo_items">' + ''.join(f'<item>{text}</item>' for text in items)
+                    + '</string-array>')
+
+        en = [array('Name %1$s', 'Label', 'Count %1$d')]
+        ja = [array('%1$s', 'Label', '%1$d')]
+        self.assertEqual([], self.resources(en, [array('%1$s', 'Label', '%1$d')], ja))
+        with self.subTest('missing item'):
+            self.assertEqual(['feature/demo: string-array "demo_items" has 3 items in values/ but 2 in values-zh/'],
+                             self.resources(en, [array('%1$s', '%1$d')], ja))
+        with self.subTest('placeholders swapped across items'):
+            problems = self.resources(en, [array('%1$d', 'Label', '%1$s')], ja)
+            self.assertEqual([
+                'feature/demo: string-array "demo_items" item 1 has placeholders [\'%1$s\'] in values/ but [\'%1$d\'] in values-zh/',
+                'feature/demo: string-array "demo_items" item 3 has placeholders [\'%1$d\'] in values/ but [\'%1$s\'] in values-zh/',
+            ], problems)
+
     def test_counts_code_literals_not_comments_or_ignored_lines(self):
         write(self.module, 'src/main/kotlin/A.kt', '\n'.join([
             '// 注释里的中文不算',

@@ -4,10 +4,24 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/nwverse/persona/server/internal/assistantwire"
 )
+
+func TestPlanWaitingReceiptWhenOwnerIsPresent(t *testing.T) {
+	s, f := newQuietService(t)
+	ctx := context.Background()
+	s.UserSpoke(ctx, SessionRef{MachineID: "server", SessionID: "side1"})
+	res, err := s.toolTaskPlan(ctx, "side1", planArgs(false))
+	if err != nil || !strings.Contains(res, "修登录崩溃: waiting for the user to tap Start") {
+		t.Fatalf("waiting plan receipt: %q, %v", res, err)
+	}
+	if got := f.pushed(); len(got) != 0 {
+		t.Fatalf("the owner's conversation received a duplicate push: %+v", got)
+	}
+}
 
 // A plan card's push stands for the card: it carries the plan as its card, and once the card is decided anywhere
 // (Don't start here) the manager tells the hub it is over, so the push leaves the phones it went to. Start on a card

@@ -3,6 +3,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { t } from "../../i18n";
 import { api } from "../../lib/api";
+import { launcherBindingState, useCanonicalLauncherBinding } from "../../lib/launcher-model-binding";
+import { takesEffort } from "../../lib/launcher-models";
 import { MANAGER_HEADER } from "../../lib/manager-choice";
 import { providerAgent, type ModelBinding, type ModelProvider, type ModelPurpose } from "../../lib/model-config";
 import { chooseProvider, effortOffered, modelConfiguration, permissionModesForLauncher, permissionModesForProvider } from "../../lib/model-config-execution";
@@ -339,6 +341,7 @@ export function ModelProfileEditor({
                 id={id}
                 title={categoryTitle(id, purposes)}
                 purpose={catalogPurpose}
+                parent={purposes.find((p) => p.id === catalogPurpose.parent)?.effective}
                 providers={providers}
                 chatEffortKnown={chatEffortKnown}
                 manager={manager}
@@ -492,6 +495,7 @@ function PurposeBindingCard({
   id,
   title,
   purpose,
+  parent,
   providers,
   chatEffortKnown,
   manager,
@@ -502,6 +506,7 @@ function PurposeBindingCard({
   id: string;
   title: string;
   purpose: ModelPurpose;
+  parent?: ModelBinding;
   providers: ModelProvider[];
   chatEffortKnown: boolean;
   manager: string;
@@ -510,11 +515,12 @@ function PurposeBindingCard({
   onChange: (patch: Partial<PurposeDraftEntry>) => void;
 }) {
   const [expanded, setExpanded] = useState(entry.included);
-  const runsOn = entry.provider || purpose.effective?.provider || "";
+  const inherited = parent ?? purpose.effective;
+  const runsOn = entry.provider || inherited?.provider || "";
   const chosen = providers.find((v) => v.id === runsOn);
   const effectiveProvider = providers.find((v) => v.id === purpose.effective?.provider);
   const isDirectApi = chosen?.kind === "api";
-  const listProvider = entry.included && expanded && chosen?.kind === "launcher" ? chosen.id : "";
+  const listProvider = entry.included && chosen?.kind === "launcher" ? chosen.id : "";
   const { list: launcherList, reload: reloadLauncher, hasPicker } = useLauncherModels(listProvider, {
     manager,
     machine: purpose.machine_id,
@@ -523,7 +529,16 @@ function PurposeBindingCard({
   const effortAllowed = effortOffered(purpose, chosen, effectiveProvider, false, chatEffortKnown);
   const chosenAgent = launcherList.list?.agent || providerAgent(chosen, runsOn);
   const permissionModes = !isDirectApi ? permissionModesForProvider(purpose, chosen, chosenAgent) : [];
-  const followed: ModelBinding = !entry.provider && purpose.effective?.model ? { model: purpose.effective.model } : {};
+  const followed: ModelBinding = {
+    model: (runsOn === inherited.provider ? inherited.model : undefined) || chosen?.model,
+    effort: runsOn === inherited.provider ? inherited.effort : chosen?.effort,
+  };
+  const allowOff = purpose.kind === "api" || id === "inbox.triage";
+  const binding = launcherBindingState(launcherList.list, entry, followed, {
+    allowed: allowOff ? ["off", ...EFFORT_LEVELS] : EFFORT_LEVELS,
+    allowUnknown: allowOff || takesEffort(chosenAgent, chosen) || chosenAgent === "codex",
+  });
+  useCanonicalLauncherBinding(binding.legacy, onChange);
 
   const summary = !entry.included
     ? t("settings-modelprofiles.purpose_unchanged")
@@ -531,8 +546,8 @@ function PurposeBindingCard({
         entry.provider
           ? (providers.find((v) => v.id === entry.provider)?.name ?? entry.provider)
           : t("settings-modelprofiles.purpose_follow_default"),
-        entry.model,
-        entry.effort && effortTitle(entry.effort),
+        binding.model,
+        binding.value && effortTitle(binding.value),
         entry.permission_mode && modeTitle(entry.permission_mode),
       ]
         .filter(Boolean)
@@ -604,8 +619,9 @@ function PurposeBindingCard({
                 models={launcherList}
                 hasPicker={hasPicker}
                 onReload={reloadLauncher}
-                model={entry.model}
+                model={binding.model}
                 followed={followed}
+                defaultLabel={t("settings-modelconfiguration.follow_default")}
                 disabled={busy}
                 ariaLabel={`${title} ${t("settings-modelconfiguration.specific_model")}`}
                 placeholder={chosen?.model || purpose.effective?.model || t("settings-modelconfiguration.follow_default")}
@@ -616,7 +632,7 @@ function PurposeBindingCard({
                       ? t("settings-modelconfiguration.picker_hint_provider")
                       : t("settings-modelconfiguration.picker_hint_inherit")
                 }
-                onChange={(model) => onChange({ model })}
+                onChange={(model) => onChange(binding.pickModel(model))}
               />
             </div>
           )}
@@ -624,15 +640,14 @@ function PurposeBindingCard({
           {effortAllowed && (
             <ProfileEffortSelect
               chosen={chosen}
-              kind={purpose.kind === "api" ? "api" : "launcher"}
-              launcherList={launcherList}
+              launcherBinding={binding}
               discoveredModels={apiModels.models}
               model={entry.model}
               followed={followed}
               value={entry.effort}
-              disabled={busy}
-              allowOff={purpose.kind === "api" || id === "inbox.triage"}
-              onChange={(effort) => onChange({ effort })}
+              disabled={busy || launcherList.status === "loading"}
+              allowOff={allowOff}
+              onChange={(effort) => onChange(binding.pickEffort(effort))}
             />
           )}
 
@@ -720,7 +735,10 @@ function LauncherOverrideCard({
     onChange(next);
   };
 
-  const effortValue = entry.effort === undefined ? UNSET_EFFORT : entry.effort;
+  const binding = launcherBindingState(launcherList.list, entry, { model: managed?.model || provider?.model });
+  useCanonicalLauncherBinding(binding.legacy, (patch) => onChange({ ...entry, ...patch }));
+  const explicitVariant = Boolean(entry.model && binding.folded);
+  const effortValue = !explicitVariant && entry.effort === undefined ? UNSET_EFFORT : binding.value;
 
   return (
     <div data-testid={`profile-launcher-${name}`} className="flex flex-col gap-3 rounded-control bg-field p-3 shadow-hairline">
@@ -761,12 +779,17 @@ function LauncherOverrideCard({
               models={launcherList}
               hasPicker={hasPicker}
               onReload={reloadLauncher}
-              model={entry.model ?? ""}
+              model={binding.model}
+              followed={{ model: managed?.model || provider?.model }}
               defaultLabel={t("settings-modelprofiles.leave_unchanged")}
               disabled={busy}
               ariaLabel={`${name} ${t("settings-modelprofiles.field_model")}`}
               placeholder={managed?.model || provider?.model || t("settings-modelprofiles.leave_unchanged")}
-              onChange={(value) => setField("model", value.trim() ? value : undefined)}
+              onChange={(value) => {
+                const patch = binding.pickModel(value);
+                if (patch.effort === "") onChange({ ...entry, ...patch });
+                else setField("model", value.trim() ? value : undefined);
+              }}
             />
           </div>
 
@@ -778,23 +801,25 @@ function LauncherOverrideCard({
               aria-label={`${name} ${t("settings-modelprofiles.field_effort")}`}
               className={pickerInputClass}
               value={effortValue}
-              disabled={busy}
+              disabled={busy || launcherList.status === "loading" || (!binding.choices.length && entry.effort === undefined)}
               onChange={(e) => {
                 const v = e.target.value;
-                setField("effort", v === UNSET_EFFORT ? undefined : v);
+                if (v === UNSET_EFFORT) setField("effort", undefined);
+                else onChange({ ...entry, ...binding.pickEffort(v) });
               }}
             >
-              <option value={UNSET_EFFORT}>{t("settings-modelprofiles.leave_unchanged")}</option>
-              <option value="">{t("settings-modelprofiles.clear_on_switch")}</option>
-              {entry.effort && !EFFORT_LEVELS.includes(entry.effort) && (
-                <option value={entry.effort}>{t("settings-modelconfiguration.model_current", { id: effortTitle(entry.effort) })}</option>
+              {!explicitVariant && <option value={UNSET_EFFORT}>{t("settings-modelprofiles.leave_unchanged")}</option>}
+              <option value="">{t("settings-modelprofiles.clear_on_switch")}{explicitVariant && binding.defaultEffort ? ` · ${effortTitle(binding.defaultEffort)}` : ""}</option>
+              {binding.value && !binding.choices.includes(binding.value) && (
+                <option value={binding.value}>{t("settings-modelconfiguration.model_current", { id: effortTitle(binding.value) })}</option>
               )}
-              {EFFORT_LEVELS.map((level) => (
+              {binding.choices.map((level) => (
                 <option key={level} value={level}>
                   {effortTitle(level)}
                 </option>
               ))}
             </select>
+            {!binding.choices.length && <span className="mt-1 block text-submeta text-ink-3">{t("settings-modelconfiguration.api_effort_unsupported")}</span>}
           </label>
 
           <details open={hasExtraFields}>
@@ -837,6 +862,7 @@ function LauncherOverrideCard({
                         defaultLabel={t("settings-modelprofiles.leave_unchanged")}
                         disabled={busy}
                         ariaLabel={`${name} ${label}`}
+                        foldVariants={false}
                         placeholder={t("settings-modelprofiles.leave_unchanged")}
                         onChange={(next) => setField(field, next.trim() ? next : undefined)}
                       />
@@ -896,6 +922,11 @@ function TierEditorCard({
 
   const chosenAgent = launcherList.list?.agent || providerAgent(chosenProvider, providerId);
   const permissionModes = permissionModesForLauncher(chosenProvider, chosenAgent);
+  const followed = { model: chosenProvider?.model, effort: chosenProvider?.effort };
+  const binding = launcherBindingState(launcherList.list, tier, followed, {
+    allowUnknown: takesEffort(chosenAgent, chosenProvider) || chosenAgent === "codex",
+  });
+  useCanonicalLauncherBinding(binding.legacy, onChange);
 
   return (
     <div data-testid={`profile-tier-edit-${tier.name || tier.key}`} className="flex flex-col gap-3 rounded-control bg-field p-3 shadow-hairline">
@@ -955,23 +986,24 @@ function TierEditorCard({
           models={launcherList}
           hasPicker={hasPicker}
           onReload={reloadLauncher}
-          model={tier.model}
+          model={binding.model}
+          followed={followed}
           disabled={busy}
           ariaLabel={`${tier.name || tier.key} ${t("settings-modelconfiguration.specific_model")}`}
           placeholder={chosenProvider?.model || t("settings-modelconfiguration.provider_default")}
-          onChange={(model) => onChange({ model })}
+          onChange={(model) => onChange(binding.pickModel(model))}
         />
       </div>
 
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <ProfileEffortSelect
           chosen={chosenProvider}
-          kind="launcher"
-          launcherList={launcherList}
+          launcherBinding={binding}
           model={tier.model}
+          followed={followed}
           value={tier.effort}
-          disabled={busy}
-          onChange={(effort) => onChange({ effort })}
+          disabled={busy || launcherList.status === "loading"}
+          onChange={(effort) => onChange(binding.pickEffort(effort))}
         />
 
         <label className="block">

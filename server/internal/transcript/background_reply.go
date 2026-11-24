@@ -125,7 +125,7 @@ func lastBackgroundInput(items []proto.Item) (int, bool) {
 			if in == nil {
 				in = prompts.ParseInjected(item.Text)
 			}
-			return i, strings.TrimSpace(source.Title) != "" && (in == nil || in.State != "limit_continue" && in.State != "wake")
+			return i, strings.TrimSpace(source.Title) != "" && !prompts.ContinuesOwnWork(in)
 		}
 		return i, false
 	}

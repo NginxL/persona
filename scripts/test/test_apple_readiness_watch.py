@@ -151,6 +151,20 @@ class ObserverTests(unittest.TestCase):
                           sleep=lambda _: None, scope_root=self.output)
         self.assertEqual(events, [("correlate", [99]), ("stop",)])
 
+    def test_parent_exit_enters_the_existing_final_collection(self):
+        with mock.patch.object(watch, "product_evidence"), \
+                mock.patch.object(watch, "sample_host", return_value=self.empty) as sample, \
+                mock.patch.object(watch, "bounded_file", return_value=0), \
+                mock.patch.object(watch, "start_live_log", return_value=self.live), \
+                mock.patch.object(watch.os, "getppid", side_effect=[123, 123, 123, 1]), \
+                mock.patch.object(watch.launch, "collect") as collect:
+            watch.observe(UDID, watch.launch.BUNDLE, self.app, self.test_bundle,
+                          self.destination, 140, monotonic=lambda: 0,
+                          sleep=lambda _: None, scope_root=self.output)
+        collect.assert_called_once()
+        self.assertEqual([call.args[2] for call in sample.call_args_list], ["host-first", "host-first", "host-final"])
+        self.assertIn("xcodebuild-finished", (self.destination / "observer.status.txt").read_text())
+
     def test_live_scope_failure_returns_unavailable_without_a_process(self):
         self.destination.mkdir(parents=True)
         (self.output / watch.launch.CONTEXT).unlink()
@@ -247,6 +261,20 @@ class BoundedCommandTests(unittest.TestCase):
             self.assertEqual(pgid, os.getpgid(0))
             self.assertEqual(path.read_text(), "unavailable: command timed out\n")
             self.assertEqual(path.with_suffix(".txt.status.txt").read_text(), "124\n")
+
+    def test_bounded_file_preserves_an_interrupt_during_cleanup(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "output.txt"
+            process = mock.Mock()
+            process.returncode = None
+            process.wait.side_effect = KeyboardInterrupt
+            process.poll.side_effect = lambda: process.returncode
+            process.kill.side_effect = lambda: setattr(process, "returncode", -9)
+            with mock.patch.object(watch.subprocess, "Popen", return_value=process):
+                with self.assertRaises(KeyboardInterrupt):
+                    watch.bounded_file(["synthetic-command"], path)
+            process.kill.assert_called_once()
+            self.assertGreaterEqual(process.wait.call_count, 2)
 
     def test_interrupted_collection_has_explicit_atomic_incomplete_status(self):
         with tempfile.TemporaryDirectory() as directory:

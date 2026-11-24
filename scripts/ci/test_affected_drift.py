@@ -17,8 +17,11 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import unittest.mock
+import io
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts/operations"))
 import affected_drift  # noqa: E402
 import check_fast_map  # noqa: E402
 import paths  # noqa: E402
@@ -231,6 +234,51 @@ class WatcherLaneTests(unittest.TestCase):
         self.assertEqual(["desktop"], pr_watch_verify.watcher_lanes(paths.select(names), names, focused=True))
         names = ["android/app/src/test/FooTest.kt"]
         self.assertEqual(["android"], pr_watch_verify.watcher_lanes(paths.select(names), names, focused=True))
+
+
+class FrozenReaderPlanTests(unittest.TestCase):
+    """The --each reader index preserves check-fast.sh's path-local git-grep rules."""
+
+    def test_go_literals_client_paths_and_runtime_directories(self):
+        expected = {
+            "spec/fixtures/answer/a.json": (["internal/assistant"], ["integrations/clip", "sdk/ts"]),
+            "spec/fixtures/answer/b.json": (["internal/assistant"], []),
+            "schema/configuration/all-types.json": (["internal/configuration"], []),
+            "apple/Shared/Models.swift": (["internal/hub"], []),
+            "apple/Shared/Commented.swift": ([], []),
+            "docs/example.md": (["internal/hub"], []),
+            "integrations/clip/test/clip.test.js": (["internal/hub"], []),
+            "scripts/test/server_test_env.py": (["internal/hub"], []),
+        }
+        lines = [
+            'server/internal/hub/client_test.go:1:const model = "apple/Shared/Models.swift"',
+            'server/internal/hub/comment_test.go:3:// "apple/Shared/Commented.swift"',
+            'server/internal/assistant/read_test.go:4:os.ReadFile("spec/fixtures/answer/a.json")',
+            'server/internal/assistant/join_test.go:5:filepath.Join("..", "spec", "fixtures", "answer", "b.json")',
+            'server/internal/configuration/read_test.go:6:filepath.Join("..", "schema", "configuration", "all-types.json")',
+            'server/internal/hub/doc_test.go:7:const doc = "docs/example.md"',
+            'server/internal/hub/integration_test.go:8:const integration = "integrations"',
+            'server/internal/hub/env_test.go:9:const helper = "server_test_env.py"',
+            'integrations/clip/test/clip.test.js:10:const fixture = "../../../spec/fixtures/answer/a.json"',
+            'integrations/clip/test/comment.test.js:11:// spec/fixtures/answer/b.json',
+            'sdk/ts/src/read.ts:12:const fixture = "../../../spec/fixtures/answer/a.json"',
+        ]
+        def git_output(arguments, **kwargs):
+            stdout = "\n".join(lines[:8] if "server/*_test.go" in arguments else lines[8:]) + "\n"
+            return subprocess.CompletedProcess([], 0, stdout=stdout, stderr="")
+        with unittest.mock.patch.object(subprocess, "run", side_effect=git_output):
+            found = affected_drift.reader_plan(list(expected))
+        self.assertEqual(expected, found)
+
+    def test_a_missing_reader_record_cannot_shift_the_next_path(self):
+        paths = ["docs/none.md", "apple/Shared/None.swift"]
+        with unittest.mock.patch.object(affected_drift, "_git_reader_lines", return_value=[]), \
+             unittest.mock.patch.object(subprocess, "run", return_value=subprocess.CompletedProcess([], 1,
+                                                                                               stdout="", stderr="")):
+            output = io.TextIOWrapper(io.BytesIO(), encoding="utf-8")
+            affected_drift.write_reader_plan(paths, output)
+            output.flush()
+            self.assertEqual(b"docs/none.md\0\0\0apple/Shared/None.swift\0\0\0", output.buffer.getvalue())
 
 
 class ResolverCommandLineTests(unittest.TestCase):

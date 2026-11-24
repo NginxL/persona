@@ -68,6 +68,7 @@ func TestBackgroundRoundKind(t *testing.T) {
 	notice := prompts.RenderTaskNotice(prompts.TaskNotice{Title: "Build", Machine: "server", State: "done", Text: "Built."})
 	wake := prompts.RenderAgentWake(prompts.AgentWake{Attempt: 1, Wait: "the build"})
 	limit := prompts.RenderAgentLimitContinue("")
+	fallback := prompts.RenderLimitFallbackContinue("English")
 	for _, tt := range []struct {
 		name, text string
 		source     *proto.MessageSource
@@ -83,6 +84,7 @@ func TestBackgroundRoundKind(t *testing.T) {
 		// Persona going on with the owner's own work is no background round.
 		{"usage limit reset", limit, prompts.ItemSource(proto.Item{Role: "user", Kind: proto.KindText, Text: limit}), ""},
 		{"wake", wake, prompts.ItemSource(proto.Item{Role: "user", Kind: proto.KindText, Text: wake}), ""},
+		{"backup launcher", fallback, prompts.ItemSource(proto.Item{Role: "user", Kind: proto.KindText, Text: fallback}), ""},
 	} {
 		if got := backgroundRoundKind(tt.text, tt.source); got != tt.want {
 			t.Errorf("%s: %q, want %q", tt.name, got, tt.want)

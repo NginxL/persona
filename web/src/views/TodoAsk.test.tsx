@@ -186,6 +186,20 @@ describe("a to-do's row", () => {
     expect(askButton(byOutcome.cannot)!.textContent).toBe("知道了");
     expect(askButton(byOutcome.deployed)!.textContent).toBe("通过");
   });
+
+  it("renders merged-not-deployed verification copy with Pass action intact when outcome is empty", async () => {
+    const mergedAsk: TodoAsk = { verdict: "✅ 做完了：已合未部署，按下面验收", asked_at: ASKED };
+    expect(askTake(mergedAsk)).toBe("accept");
+    await drawList([todo({ ask: mergedAsk })]);
+    const row = askRow()!;
+    expect(row.dataset.ask).toBe("deployed");
+    expect(row.textContent).toContain("✅ 做完了：已合未部署，按下面验收");
+    expect(row.textContent).not.toContain("已部署，按下面验收");
+    expect(askButton()!.textContent).toBe("通过");
+    act(() => askButton()!.click());
+    await flush();
+    expect(accepts()).toEqual([["/todos/t1/accept", { method: "POST", json: { asked_at: ASKED } }]]);
+  });
 });
 
 describe("a to-do's page", () => {

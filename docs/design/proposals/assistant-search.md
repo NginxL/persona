@@ -120,7 +120,9 @@ without injected prompts or tools) is a few tens of MB at most: a scan of 10 to 
 - **How**: one worker reads `session.items` with `after_seq` (about 500 items a page, `more_after` to go on), with lazy
   images and **without** `fold_work`, extracts section 2's text, and writes each page and its cursor in one transaction.
 - **Rewritten transcripts**: a `history` token other than the cursor's (the file was replaced or rewritten and seqs
-  start over) drops the chat's rows and indexes it again from 0.
+  start over) drops the chat's rows and indexes it again from 0. A read that fails because the history moved under
+  it (a switched conversation's read that saw it change on every try) starts again from 0 at the next try, so a
+  cursor from the old numbering is never kept; other failures keep the cursor (#14354).
 - **Pace**: a chat that is working is read at most every 5 s, and at once when its turn ends: a new message can be
   found within seconds.
 - **Backfill**: chats without a cursor, the most recently updated first, one at a time, 200 ms between pages; the cursors

@@ -590,7 +590,10 @@ def serve_socket(h, hub):
         try:
             frame(8, struct.pack(">H", 1001) + b"case drop")
             h.connection.shutdown(socket.SHUT_RDWR)
-        except OSError:
+        except (OSError, ValueError):
+            # A peer that already closed its stream cannot receive the close
+            # frame. The case has already dropped this socket; do not turn the
+            # old handler's cleanup into a failed unrelated HTTP request.
             pass
 
     conn = Conn(write, close)

@@ -45,8 +45,14 @@ func (c *codexConn) start(ctx context.Context, id, cwd string, resume bool, star
 	if c.p.model.Model != "" {
 		params["model"] = c.p.model.Model
 	}
-	// The same on every start of the thread, apart from the memory index: the live snapshot goes with each message.
-	params["developerInstructions"] = prompts.RenderCodexInstructions(codexMemoryPrompt(c.memDir), c.p.model.SupervisionInstructions)
+	// AGENTS.md supplies the bounded entry. Codex has no native .agents/rules loader, so the exact remainder
+	// travels on both start and resume through its authoritative developer-instruction channel.
+	remainder, err := assistantInstructionRemainder(cwd)
+	if err != nil {
+		return err
+	}
+	params["developerInstructions"] = prompts.RenderCodexInstructions(codexMemoryPrompt(c.memDir),
+		joinInstructionRemainderAndPolicy(remainder, c.p.model.SupervisionInstructions))
 	var res struct {
 		Model       string          `json:"model"`
 		ServiceTier json.RawMessage `json:"serviceTier"`

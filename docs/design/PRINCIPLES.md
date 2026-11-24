@@ -35,6 +35,10 @@ Complex capabilities sit behind settings or an advanced entry and open on reques
 - New advanced options default to off and live in Settings or an advanced group, not on the main chat or Agents screens.
 - Detail opens on request: tool execution stays one summary line (super rule 2); expert terms and raw values (model IDs, ports, paths, hub, node, MCP) appear only in the advanced area that needs them, or come with a plain explanation (`DESIGN_SYSTEM.md` section 5).
 - A new look is an opt-in style or theme color; the default style stays pixel-identical.
+- Web Labs is for temporary trials of real features or new implementations alongside the stable path. Each trial keeps
+  the stable default and a lossless rollback, with a linked issue to graduate or remove it. Shipped module switches
+  belong in Settings › General. Put permanent per-browser and advanced preferences in their owning category and keep
+  irreversible changes, internal debug controls and placeholder demos out of Labs. See [Labs](../web/web.md#labs).
 
 **How to check**: with the feature off, before / after screenshots of the primary screens are identical; the PR names where the option lives and that it is off by default.
 

@@ -2,6 +2,7 @@ package assistant
 
 import (
 	"context"
+	"errors"
 	"sort"
 	"sync"
 	"time"
@@ -16,9 +17,11 @@ import (
 // database (db.SearchItemRow). A sweep finds the conversations whose rev moved since they were read (woken by the
 // nodes' session lists, else every searchIdle) and reads them one at a time: a working one at most every
 // searchWorkingEvery, a new one (the backfill) newest first with a pause between pages. A transcript that was
-// rewritten (its history token changed) is read again from the start; a conversation gone from the list for
-// searchGoneAfter leaves the index. An index emptied under it (`assistant search-reindex`, db.ResetSearch) is read
-// again from the start too: each sweep first looks whether the resets' count moved since its cursors were read.
+// rewritten (its history token changed) is read again from the start, as is one whose read failed because its
+// history moved under it; other failures keep the cursor and wait searchRetryAfter. A conversation gone from the
+// list for searchGoneAfter leaves the index. An index emptied under it (`assistant search-reindex`,
+// db.ResetSearch) is read again from the start too: each sweep first looks whether the resets' count moved since
+// its cursors were read.
 
 // searchStore is what the index keeps in the database; a store without it has no index (search answers titles only).
 type searchStore interface {
@@ -308,6 +311,11 @@ func (s *Service) searchRead(ctx context.Context, st searchStore, c proto.Sessio
 		}
 		page, err := s.searchFetch(ctx, c.MachineID, c.SessionID, cur.afterSeq)
 		if err != nil {
+			if errors.Is(err, db.ErrConversationHistoryChanged) {
+				// The history moved under every try of the read, so the cursor may be from its earlier numbering.
+				// The next read starts over; the page that brings the new history clears the old one's rows.
+				cur.afterSeq = 0
+			}
 			return cur, false, err
 		}
 		if !reset && cur.history != "" && page.History != "" && page.History != cur.history {

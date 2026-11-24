@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/nwverse/persona/server/internal/apns"
+	"github.com/nwverse/persona/server/internal/assistantwire"
 	"github.com/nwverse/persona/server/internal/proto"
 )
 
@@ -155,13 +156,18 @@ func TestWithdrawOnlyWhereTheCardWent(t *testing.T) {
 	p.now = func() time.Time { return now }
 	p.cardPushedTo("ix_a", "phone")
 	p.cardPushedTo("ix_old", "phone")
+	p.ownerCardPushedTo("plan_old", "phone") // an assistant card's push: remembered for days
 	now = now.Add(withdrawKept + time.Second)
 	p.cardPushedTo("ix_b", "ipad")
 	p.withdrawals.mu.Lock()
 	_, kept := p.withdrawals.pushed["ix_old"]
+	_, planKept := p.withdrawals.pushed["plan_old"]
 	p.withdrawals.mu.Unlock()
 	if kept {
 		t.Fatal("a card pushed half an hour ago is still remembered")
+	}
+	if !planKept {
+		t.Fatal("an assistant card's push was forgotten after half an hour")
 	}
 	p.withdrawals.gather = time.Hour // queued, not sent: what is waiting is what is checked
 	p.withdraw("ix_b")
@@ -178,6 +184,30 @@ func TestWithdrawOnlyWhereTheCardWent(t *testing.T) {
 	}
 }
 
+// An assistant card's push is remembered for ownerCardKept, then forgotten like any other.
+func TestAnAssistantCardsPushIsRememberedForDays(t *testing.T) {
+	p := newPusher(t.TempDir(), nil, t.Logf)
+	now := time.Now()
+	p.now = func() time.Time { return now }
+	p.ownerCardPushedTo("plan_old", "phone")
+	remembered := func() bool {
+		p.withdrawals.mu.Lock()
+		defer p.withdrawals.mu.Unlock()
+		_, ok := p.withdrawals.pushed["plan_old"]
+		return ok
+	}
+	now = now.Add(ownerCardKept - time.Minute)
+	p.cardPushedTo("ix_a", "ipad") // a push prunes what is forgotten
+	if !remembered() {
+		t.Fatal("an assistant card's push was forgotten before ownerCardKept")
+	}
+	now = now.Add(2 * time.Minute)
+	p.cardPushedTo("ix_b", "ipad")
+	if remembered() {
+		t.Fatal("an assistant card's push is remembered past ownerCardKept")
+	}
+}
+
 // A manager's push that stands for a card (a plan's, assistantwire.Notification.CardID) names the card like an
 // interaction's push, and the card's end takes it back the same way.
 func TestWithdrawTakesBackAPushStandingForACard(t *testing.T) {
@@ -185,12 +215,30 @@ func TestWithdrawTakesBackAPushStandingForACard(t *testing.T) {
 	h.notifyDoneUnder("", "assistant", "m1", "笔记本", "s1", "A plan waits for Start", "修登录崩溃", pushWants{}, managerPushCollapseID("", "plan:plan_x"), "",
 		pushPolicy{level: "P0", cardID: "plan_x"})
 	got := f.wait(t, 1)
-	if p := open(got[0]); p["interaction_id"] != "plan_x" {
+	if p := open(got[0]); p["interaction_id"] != "plan_x" || p["card_id"] != "plan_x" {
 		t.Fatalf("the push does not name its card: %v", p)
 	}
 	h.push.withdraw("plan_x")
 	got = f.wait(t, 2)
 	if p := open(got[1]); got[1].PushType != "background" || fmt.Sprint(p["resolved_interaction_ids"]) != "[plan_x]" {
+		t.Fatalf("withdrawal %+v %v", got[1], p)
+	}
+}
+
+// A decision's push names its card (TodoAskCardID) as card_id, never as interaction_id, and once the to-do no longer
+// waits on the owner the hub takes it back.
+func TestADecisionsPushIsTakenBackOnceItIsOver(t *testing.T) {
+	h, f, open := withdrawHub(t, "withdraw")
+	todo := assistantwire.NotifyTodo{ID: "t1", AskedAt: time.Now(), Recommend: "a"}
+	h.notifyDecideKeyed("", "m1", "笔记本", "s1", "Pick a vendor", "A or B", todo, assistantwire.TodoPushKey("t1", assistantwire.TodoPushDecide))
+	got := f.wait(t, 1)
+	card := assistantwire.TodoAskCardID("t1")
+	if p := open(got[0]); p["card_id"] != card || p["interaction_id"] != nil {
+		t.Fatalf("the decision's push does not name its card as card_id only: %v", p)
+	}
+	h.push.withdraw(card)
+	got = f.wait(t, 2)
+	if p := open(got[1]); got[1].PushType != "background" || fmt.Sprint(p["resolved_interaction_ids"]) != "["+card+"]" {
 		t.Fatalf("withdrawal %+v %v", got[1], p)
 	}
 }

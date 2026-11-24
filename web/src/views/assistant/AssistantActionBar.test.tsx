@@ -1192,4 +1192,141 @@ describe("Assistant Needs you / In progress trays", () => {
       toastsHost.remove();
     }
   });
+
+  it("shows an escalated terminal confirmation (screen) card in main chat Needs you and sends the chosen option, while keeping delegating cards hidden", async () => {
+    mainChat = conversation;
+    const screenID = "scr_demo_worker_rev1";
+    const command = "rm -rf dist && npm run build";
+    const baseScreen: Interaction = {
+      id: screenID,
+      machine_id: "demo",
+      session_id: "worker",
+      kind: "screen",
+      created_at: at,
+      dialog: {
+        question: "Do you want to proceed?",
+        command,
+        description: "Clean and rebuild the output directory",
+        options: [{ key: "1", label: "Yes" }, { key: "2", label: "No" }],
+        rev: "rev1",
+      },
+    };
+    moreSessions = [{ machine_id: "demo", session_id: "worker", title: "Demo agent", cwd: "/demo", state: "needs_you", status: "blocked", updated_at: at, pending_interactions: 1 } as Session];
+
+    // Held by supervisor (`delegating: true`): stays in In progress and out of main chat Needs you.
+    todo = { ...todo, quiet: true, view: { phase: "working", section: "working", reason: "persona_working", rank: 0 } };
+    moreInteractions = [{ ...baseScreen, delegating: true }];
+    await act(async () => {
+      await refresh();
+      await refreshTodos();
+      upsertSession(moreSessions[0]);
+    });
+    await settleHeldPushRead();
+    expect(entry("needs").textContent).toBe(label.needs);
+    act(() => entry("needs").click());
+    expect(host.querySelector('[data-needs-row="task:tray-task"]')).toBeNull();
+    act(() => entry("needs").click());
+
+    // Plain unescalated screen card on a quiet task (even with view needs_you / agent_asks): stays out of main chat
+    // Needs you per D19 until explicitly escalated via ask_escalate.
+    todo = { ...todo, quiet: true, view: { phase: "needs_you", section: "needs_you", reason: "agent_asks", rank: 0, asks: [{ id: "run:demo/worker", kind: "question", home: "run", interaction: screenID }] } };
+    moreInteractions = [{ ...baseScreen, delegating: false }];
+    await act(async () => {
+      await refresh();
+      await refreshTodos();
+    });
+    expect(entry("needs").textContent).toBe(label.needs);
+
+    // Escalated via ask_escalate (`!delegating`, `delegate` set, hub view `needs_you` / `agent_asks`):
+    // visible, counted, renders CommandScreenCard, and Allow resolves the exact screen card.
+    moreInteractions = [{ ...baseScreen, delegating: false, delegate: { reason: "Deleting build output needs owner approval", recommend: "Allow" } }];
+    await act(async () => {
+      await refresh();
+      await refreshTodos();
+    });
+    expect(entry("needs").textContent).toBe(`${label.needs}1`);
+    act(() => entry("needs").click());
+    const folded = host.querySelector<HTMLButtonElement>('button[data-needs-row="task:tray-task"]')!;
+    expect(folded).not.toBeNull();
+    expect(folded.textContent).toContain("Demo task");
+    expect(folded.textContent).toContain("Do you want to proceed?");
+    await openRows("task:tray-task");
+    await act(async () => {
+      await vi.dynamicImportSettled();
+      await Promise.resolve();
+    });
+    const card = host.querySelector<HTMLElement>(`[data-card="${screenID}"]`)!;
+    expect(card).not.toBeNull();
+    expect(card.querySelector("[data-screen-command]")?.textContent).toBe(command);
+    const allow = [...card.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent?.trim() === t("chat-interactions.allow"))!;
+    expect(allow).toBeDefined();
+    const before = writes.length;
+    await act(async () => {
+      allow.click();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(writes.slice(before)).toEqual([`/api/v1/interactions/${screenID}/resolve`]);
+    const call = vi.mocked(fetch).mock.calls.find(([url, init]) => String(url) === `/api/v1/interactions/${screenID}/resolve` && init?.method === "POST");
+    expect(JSON.parse(String(call?.[1]?.body))).toEqual({ option: "1" });
+  });
+
+  it("shows an escalated ordinary permission card in main chat Needs you and allows approving it in place, while keeping unescalated standalone permissions out", async () => {
+    mainChat = conversation;
+    const permID = "ix_perm_escalated";
+    const escalatedPerm: Interaction = {
+      id: permID,
+      machine_id: "demo",
+      session_id: "worker",
+      kind: "permission",
+      tool_name: "Bash",
+      tool_input: { command: "gh pr comment 12 --body done" },
+      created_at: at,
+      delegate: { reason: "Commenting on the PR acts in your name", recommend: "Allow" },
+    };
+    const routinePerm: Interaction = {
+      id: "ix_perm_standalone_noise",
+      machine_id: "demo",
+      session_id: "by-hand-perm",
+      kind: "permission",
+      tool_name: "Bash",
+      tool_input: { command: "npm test" },
+      created_at: at,
+    };
+    moreSessions = [
+      { machine_id: "demo", session_id: "worker", title: "Demo agent", cwd: "/demo", state: "needs_you", status: "blocked", updated_at: at, pending_interactions: 1 } as Session,
+      { machine_id: "demo", session_id: "by-hand-perm", title: "Standalone agent", cwd: "/demo", state: "needs_you", status: "blocked", updated_at: at, pending_interactions: 1 } as Session,
+    ];
+    moreInteractions = [escalatedPerm, routinePerm];
+    await act(async () => {
+      await refresh();
+      await refreshTodos();
+      for (const s of moreSessions) upsertSession(s);
+    });
+    await settleHeldPushRead();
+
+    // Only the escalated task permission counts; the unescalated standalone Agent permission stays out of main chat Needs you.
+    expect(entry("needs").textContent).toBe(`${label.needs}1`);
+    act(() => entry("needs").click());
+    expect(host.querySelector('[data-needs-row="agent:demo/by-hand-perm"]')).toBeNull();
+    await openRows("task:tray-task");
+    await act(async () => {
+      await vi.dynamicImportSettled();
+      await Promise.resolve();
+    });
+    const card = host.querySelector<HTMLElement>(`[data-card="${permID}"]`)!;
+    expect(card).not.toBeNull();
+    expect(card.textContent).toContain("gh pr comment 12 --body done");
+    const allow = [...card.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent?.trim() === t("chat-interactions.allow"))!;
+    expect(allow).toBeDefined();
+    const before = writes.length;
+    await act(async () => {
+      allow.click();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(writes.slice(before)).toEqual([`/api/v1/interactions/${permID}/resolve`]);
+    const call = vi.mocked(fetch).mock.calls.find(([url, init]) => String(url) === `/api/v1/interactions/${permID}/resolve` && init?.method === "POST");
+    expect(JSON.parse(String(call?.[1]?.body))).toEqual({ allow: true });
+  });
 });

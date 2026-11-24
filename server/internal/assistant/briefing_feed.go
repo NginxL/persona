@@ -142,14 +142,18 @@ func (f *briefFacts) body(s *Service, title string) briefBody {
 	for _, r := range f.Accept {
 		x := row(r)
 		x.Title, x.Detail, x.AskedAt = r.id, f.Changed[r.id], r.asked
+		delivery := f.Deliveries[r.id]
+		if t, ok := s.todoNow(r.id); ok {
+			x.Title = t.Title
+			if delivery == nil {
+				delivery = currentDelivery(t)
+			}
+		}
 		if a, ok := f.Asks[r.id]; ok {
-			x.Verdict, x.Outcome = verdictText(f.l, &a), a.Outcome
+			x.Verdict, x.Outcome = verdictText(f.l, &a, delivery), a.Outcome
 			if decideAsk(&a) {
 				x.Recommend = a.Recommend
 			}
-		}
-		if t, ok := s.todoNow(r.id); ok {
-			x.Title = t.Title
 		}
 		b.Accept = append(b.Accept, x)
 	}

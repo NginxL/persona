@@ -1002,8 +1002,18 @@ func (s *Service) todoRoutes() {
 	// GET /api/v1/todos: list all todos (newest created_at first), agents sorted (active first, then released); a todo
 	// waiting for the owner carries its ask (todo_ask.go), an open one nobody works on why (tasks_orphan.go); each its
 	// view, and the list its counts (todo_view_routes.go); to an extension's token without the to-dos it is not shown
-	// (todo_scope.go)
+	// (todo_scope.go). With ?limit or ?cursor it answers one page and how to read the next (todo_pagination.go); no
+	// parameter keeps the complete answer, its fields and its revision header unchanged.
 	s.handle("GET /api/v1/todos", func(w http.ResponseWriter, r *http.Request) {
+		limit, after, paged, err := todoListPageQuery(r.URL.Query())
+		if err != nil {
+			code := "invalid_todo_limit"
+			if errors.Is(err, errTodoPageCursor) {
+				code = "invalid_todo_cursor"
+			}
+			apierr.WriteCode(w, http.StatusBadRequest, code, err)
+			return
+		}
 		writes := s.trevision.writes.Load()
 		list, p, err := s.todosViewed(r.Context(), true)
 		if err != nil {
@@ -1012,8 +1022,12 @@ func (s *Service) todoRoutes() {
 		}
 		if r.Header.Get(RoleHeader) == roleExtension {
 			list = s.extensionRows(r.Context(), list, p)
-		} else {
+		} else if !paged {
 			s.tagTodoRevision(w, writes, p)
+		}
+		if paged {
+			writeTodoPage(w, list, p, limit, after)
+			return
 		}
 		apierr.WriteJSON(w, todosList{Todos: list, Counts: p.counts()})
 	})
@@ -2140,6 +2154,7 @@ func (s *Service) reopenFailedTodo(ctx context.Context, id string) (Todo, bool, 
 	}
 	s.resetTodoReadyWake(ctx, id)
 	s.resetParentCloseoutWake(ctx, id)
+	s.resolveCard(taskFailedCardID(id)) // started again: the failure's push is over
 	return out, true, nil
 }
 

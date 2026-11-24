@@ -1,6 +1,6 @@
 // Machines: every computer's CPU / memory / network now and over the last hour (docs/server/machines.md), as Insight Cards. "Add computer"
 // (feature machines_add) adds one from here, and a computer waiting to be confirmed (trust pending) says so on its card.
-import { memo, Suspense, useCallback, useEffect, useMemo, useState } from "react";
+import { memo, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { storedValue, storeValue } from "../lib/compatibility";
 import { lazyPage } from "../lib/lazy-page";
 import { concernOf, launcherFailing, machineAlerts, orderMachines, type AlertKind, type LauncherHealthRecord } from "../lib/machine-alerts";
@@ -420,9 +420,12 @@ type MachinesView = "resources" | "cards" | "capabilities" | "procs" | "services
 const VIEW_KEY = "persona.machines.view";
 
 /** The launcher health records (GET /api/v1/launchers/health), kept current by the hub's `launcher_health` events and
- *  read again every minute while the page is shown; none from a hub without them. `merge` takes records a check returned. */
-function useLauncherHealth(): { list: LauncherHealthRecord[]; merge: (records: LauncherHealthRecord[]) => void } {
+ *  read again every minute while the page is shown; none from a hub without them. `merge` takes records a check returned,
+ *  `reload` reads them all again now. */
+function useLauncherHealth(): { list: LauncherHealthRecord[]; merge: (records: LauncherHealthRecord[]) => void; reload: () => void } {
   const [list, setList] = useState<LauncherHealthRecord[]>([]);
+  const loadRef = useRef<() => void>(() => {});
+  const reload = useCallback(() => loadRef.current(), []);
   const merge = useCallback((records: LauncherHealthRecord[]) => {
     if (!records.length) return;
     setList((now) => {
@@ -440,6 +443,7 @@ function useLauncherHealth(): { list: LauncherHealthRecord[]; merge: (records: L
         () => {}, // an older hub has none: no launcher alerts
       );
     };
+    loadRef.current = load;
     const stop = visiblePoll(load, 60_000, documentPage);
     const off = onHubEvent("launcher_health", (msg) => {
       const record = (msg as { record?: LauncherHealthRecord }).record;
@@ -447,11 +451,12 @@ function useLauncherHealth(): { list: LauncherHealthRecord[]; merge: (records: L
     });
     return () => {
       dead = true;
+      loadRef.current = () => {};
       stop();
       off();
     };
   }, [merge]);
-  return { list, merge };
+  return { list, merge, reload };
 }
 
 /** The alert sheet for the computer and alert asked for; closed (with its exit) when none is. */
@@ -461,7 +466,7 @@ function AlertSheetHost({ sheet, machines, metrics, sessions, known, records, la
   metrics: MachineMetrics[] | null;
   sessions: readonly Session[];
   known: AgentsKnown;
-  records: { list: LauncherHealthRecord[]; merge: (records: LauncherHealthRecord[]) => void };
+  records: { list: LauncherHealthRecord[]; merge: (records: LauncherHealthRecord[]) => void; reload: () => void };
   launcherIssues: (mid: string) => number;
   roster: ReturnType<typeof useRoster>;
   onKind: (mid: string, kind: AlertKind) => void;
@@ -488,6 +493,7 @@ function AlertSheetHost({ sheet, machines, metrics, sessions, known, records, la
       onClose={onClose}
       onReconnect={onReconnect}
       onRecords={records.merge}
+      onReloadRecords={records.reload}
     />
   );
 }

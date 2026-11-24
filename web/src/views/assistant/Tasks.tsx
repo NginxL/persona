@@ -1170,8 +1170,9 @@ export const AssistantActionBar = memo(function AssistantActionBar({ conversatio
     const row = conversations?.find((c) => c.session_id === id);
     return row ? conversationTitle(row) : t("assistant-tasks.needs_group_another");
   };
-  // The badge and the rows it opens share directUserWaiting: current direct questions, owner-only decisions and
-  // explicit acceptance. Unstarted/failed work, Agent permissions, terminal dialogs and generic retries stay out.
+  // The badge and the rows it opens share directUserWaiting: current direct questions, owner-only decisions,
+  // explicit acceptance, and escalated or hub-projected task cards. Unstarted/failed work, unescalated Agent
+  // permissions/terminal dialogs, delegating cards and generic retries stay out.
   // Other trays keep the existing To-dos open-work rule (#3331).
   const badgeOf = (items: { kind: string; countsOpen?: boolean }[]) =>
     items.reduce((n, item) => n + (item.kind === "task" ? (item.countsOpen ? 1 : 0) : 1), 0);

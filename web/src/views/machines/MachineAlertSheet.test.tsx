@@ -68,7 +68,7 @@ const agents = [
   agent("u1", "Release notes", "unread"),
 ];
 
-function render(over: { machine?: Machine; kind?: AlertKind; alerts?: MachineAlert[]; records?: LauncherHealthRecord[]; onReconnect?: (id: string) => void; onRecords?: (r: LauncherHealthRecord[]) => void; onKind?: (k: AlertKind) => void; agents?: Session[] } = {}) {
+function render(over: { machine?: Machine; kind?: AlertKind; alerts?: MachineAlert[]; records?: LauncherHealthRecord[]; onReconnect?: (id: string) => void; onRecords?: (r: LauncherHealthRecord[]) => void; onReloadRecords?: () => void; onKind?: (k: AlertKind) => void; agents?: Session[] } = {}) {
   act(() => root.render(
     <MachineAlertSheet
       machine={over.machine ?? laptop}
@@ -85,6 +85,7 @@ function render(over: { machine?: Machine; kind?: AlertKind; alerts?: MachineAle
       onClose={() => {}}
       onReconnect={over.onReconnect ?? (() => {})}
       onRecords={over.onRecords ?? (() => {})}
+      onReloadRecords={over.onReloadRecords}
     />,
   ));
 }
@@ -350,5 +351,17 @@ describe("the launcher sheet", () => {
     expect(posts("/launchers/health/check").map((c) => c.path)).toEqual(["/api/v1/launchers/health/check?machine=laptop&launcher=team"]);
     expect(got).toEqual([[expect.objectContaining({ launcher: "team", state: "ok" })]]);
     expect($("[data-launcher=team]")?.textContent).toContain("现在可以用了");
+  });
+
+  it("reads the records again when a check answers none for the launcher (#14534)", async () => {
+    routes["GET /api/v1/machines/laptop/launchers"] = () => json({ launchers: [{ name: "claude" }] });
+    routes["POST /api/v1/launchers/health/check"] = () => json({ records: [] });
+    let reloads = 0;
+    render({ kind: "launcher", alerts: [{ kind: "launcher", severity: "warning", count: 2 }], records, onReloadRecords: () => reloads++ });
+    await flush();
+    expect(reloads).toBe(0);
+    await click($("[data-launcher=team] [data-testid=test-again]"));
+    expect(reloads).toBe(1);
+    expect($("[data-launcher=team]")?.textContent).toContain("这次检查没有结果");
   });
 });

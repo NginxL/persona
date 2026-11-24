@@ -343,6 +343,7 @@ func (s *Service) notifyTaskFailed(ctx context.Context, t Todo, machine, reason 
 		sub = "Persona"
 	}
 	s.push(withCard(ctx, cardTaskFailed), Notification{
+		CardID:    taskFailedCardID(t.ID), // started again (reopenFailedTodo): the push leaves the phone
 		Subtitle:  sub,
 		DeviceID:  here,
 		SessionID: t.Origin,

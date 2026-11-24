@@ -25,6 +25,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import persona.core.contracts.Session
+import persona.core.domain.sort.canAnswerInteraction
 import persona.core.contracts.CoreText
 import persona.core.contracts.DialogOption
 import persona.core.contracts.Interaction
@@ -57,6 +59,7 @@ internal fun InteractionPanel(
     onFold: (Interaction, Boolean) -> Unit = { _, _ -> },
     /** Set when the session's source does not let the phone answer: everything is shown, nothing can be sent. */
     blockedReason: String? = null,
+    answerSession: Session? = null,
     /** False for a session without a terminal (a Codex thread, an agent runtime's): no terminal to explain either. */
     terminalHelp: Boolean = true,
     onDiscardLocal: ((Interaction) -> Unit)? = null,
@@ -81,10 +84,12 @@ internal fun InteractionPanel(
     val now by produceState(Instant.now(), requests.mapNotNull { it.expiresAt }) {
         while (true) { value = Instant.now(); delay(1_000) }
     }
+    fun blockFor(request: Interaction): String? =
+        blockedReason.takeUnless { answerSession?.canAnswerInteraction(request) == true }
     val body: @Composable (Interaction, Boolean) -> Unit = { request, complete ->
         key(request.id, request.dialog?.rev, complete) {
             RequestEditor(request, machine, busyId != null, request.id in uncertainIds, complete,
-                onTerminal = onTerminal, onExpand = { full = request.id }, linkVisible = linkVisible, blockedReason = blockedReason,
+                onTerminal = onTerminal, onExpand = { full = request.id }, linkVisible = linkVisible, blockedReason = blockFor(request),
                 terminalHelp = terminalHelp) { action, value, planRead ->
                 AnswerBuilder.build(request, action, value, AnswerContext(fullPlanRead = planRead)).resolution?.let {
                     onResolve(request, it)
@@ -93,7 +98,7 @@ internal fun InteractionPanel(
         }
     }
     val closeCard: @Composable (Interaction) -> Unit = { request ->
-        val requestBlock = resolveRequestApprovalBlockedReason(request, blockedReason)
+        val requestBlock = resolveRequestApprovalBlockedReason(request, blockFor(request))
         val stoppedWork = requestBlock != null && request.isManagerWorkCard
         val localOnly = !stoppedWork && (requestBlock != null || (request.kind == "question" && request.canCancel != true))
         if ((localOnly && onDiscardLocal != null) || stoppedWork || (request.kind == "question" && request.canCancel == true)) {

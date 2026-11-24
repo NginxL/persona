@@ -235,6 +235,15 @@ func (n *Node) assistantSendRuntime(ctx context.Context, h *runtimeConn, id, cwd
 		if !public {
 			live, commit = n.turnContext(id, n.assistantContext(id))
 		}
+		// Antigravity loads .agents/rules on every turn. Other generic runtimes have no verified native
+		// rule-directory contract, so carry the exact split remainder alongside their bounded AGENTS.md.
+		if h.agent() != "agy" {
+			remainder, err := assistantInstructionRemainder(cwd)
+			if err != nil {
+				return "", err
+			}
+			live = joinInstructionRemainderAndPolicy(remainder, live)
+		}
 		if st.AwaitingFirstMessage {
 			live = strings.TrimSpace(n.runtimeInstructions(cwd, memDir) + "\n" + live)
 		}

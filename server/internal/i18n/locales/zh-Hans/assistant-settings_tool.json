@@ -57,6 +57,8 @@
   "change_main_supervises_own_tasks": "「主对话自己督办它派出的任务」：{before} → {after}",
   "title_background_supervisor_keeps_context": "后台督办对话保留之前每一轮",
   "change_background_supervisor_keeps_context": "「后台督办对话保留之前每一轮」：{before} → {after}",
+  "title_chat_reply_relay": "把我发过消息的飞书聊天里的新回复转给对话",
+  "change_chat_reply_relay": "「把我发过消息的飞书聊天里的新回复转给对话」：{before} → {after}",
   "title_model_tiers": "Agent 预设",
   "change_model_tier": "{profile} · {tier}：{before} → {after}",
   "change_model_group_provider": "{purpose}：{before} → {after}。换成不同的 provider 会清除旧 provider 的 model、effort 和 permission mode。重新设置为之前的 provider 即可回退。",
@@ -120,5 +122,10 @@
   "change_supervision_batch_minutes": "普通督办按接收方攒批：{before} → {after} 分钟（0 保持现有节奏）",
   "bad_supervision_batch_minutes": "请输入 0 至 1440 的整数分钟。",
   "supervision_batch_minutes_unchanged": "普通督办攒批间隔未变化。",
-  "supervision_batch_minutes_saved": "普通督办攒批间隔已保存为 {value} 分钟。"
+  "supervision_batch_minutes_saved": "普通督办攒批间隔已保存为 {value} 分钟。",
+  "title_limit_fallbacks": "额度用完时的备用启动器",
+  "change_limit_fallbacks": "对话被用量额度卡住时换用的备用启动器：{before} → {after}",
+  "bad_limit_fallbacks": "请给出最多 8 个启动器名称的列表，首选在前；空列表表示关闭。",
+  "limit_fallbacks_unchanged": "备用启动器没有变化。",
+  "limit_fallbacks_saved": "备用启动器已保存：{value}。从下一次额度用完时起生效。"
 }

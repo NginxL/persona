@@ -115,13 +115,8 @@ func (s *Service) assignAgentUnder(ctx context.Context, mid, sid, lead, title st
 	if lead == "" {
 		return Todo{}, false, errors.New("there is no main conversation to supervise it")
 	}
-	if lead != cfg.Main {
-		if err := s.validateSupervisorLead(ctx, lead); err != nil {
-			return Todo{}, false, err
-		}
-		if s.runtimeWithoutSupervisionPolicy(ctx, cfg.MachineID, lead) {
-			return Todo{}, false, errors.New("the target lead's runtime cannot receive supervision policy")
-		}
+	if err := s.transferTarget(ctx, cfg, lead); err != nil {
+		return Todo{}, false, err
 	}
 	am, ok := s.device(ctx, mid)
 	if !ok {
@@ -144,35 +139,14 @@ func (s *Service) assignAgentUnder(ctx context.Context, mid, sid, lead, title st
 		if t.Origin == "" {
 			return Todo{}, false, fmt.Errorf("%s is on the owner's own to-do %q: it stays theirs", agentLabel(c), t.Title)
 		}
-		var blockedBy string
-		v, moved, err := s.updateSupervision(ctx, t.ID, func(v *Supervision) bool {
-			if requireSupervisor != "" {
-				cur := cmp.Or(v.Supervisor, t.Origin)
-				if cur != requireSupervisor {
-					blockedBy = cur
-					return false
-				}
-			}
-			if v.Supervisor == lead && v.SupervisorSource == "explicit" {
-				return false
-			}
-			v.Supervisor, v.SupervisorSource = lead, "explicit"
-			return true
-		})
+		moved, blockedBy, err := s.transferTaskLocked(ctx, t, lead, requireSupervisor)
 		if err != nil {
 			return Todo{}, false, err
 		}
 		if blockedBy != "" {
 			return Todo{}, false, s.transferRefused(ctx, c, t, blockedBy)
 		}
-		if moved {
-			s.taskCard(ctx, lead, t.ID, wakeActive) // its card follows it (the old conversation keeps its history)
-		}
-		t.Supervision = &v
-		if err := s.transferPendingAsks(ctx, t); err != nil {
-			return Todo{}, false, err
-		}
-		return t, false, nil
+		return moved, false, nil
 	}
 	if !allowAdoption {
 		return Todo{}, false, errors.New("that Agent has no open task to transfer: use agent_supervise to adopt work first")
@@ -186,6 +160,59 @@ func (s *Service) assignAgentUnder(ctx context.Context, mid, sid, lead, title st
 		s.taskCard(ctx, lead, todo.ID, wakeActive)
 	}
 	return todo, made, nil
+}
+
+// transferTarget refuses a supervisor a task may not be moved to: one that is neither the main conversation nor a
+// current lead, a lead validateSupervisorLead turns down (a reporting-only direction), or a lead whose runtime cannot
+// receive supervision policy. The main conversation always takes one.
+func (s *Service) transferTarget(ctx context.Context, cfg Settings, lead string) error {
+	if lead == cfg.Main {
+		return nil
+	}
+	if err := s.validateSupervisorLead(ctx, lead); err != nil {
+		return err
+	}
+	if s.runtimeWithoutSupervisionPolicy(ctx, cfg.MachineID, lead) {
+		return errors.New("the target lead's runtime cannot receive supervision policy")
+	}
+	return nil
+}
+
+// transferTaskLocked is the move itself, the same for Move to, agent_transfer and an ended direction's hand-back
+// (handBackDirectionTasks): open task t becomes an explicit assignment of lead (supervisor_source "explicit", kept
+// across restarts), its card follows it (the old conversation keeps its history), and its supervisor-held cards,
+// untried queued signals and pending outbox go with it (transferPendingAsks). With requireSupervisor set, t moves only
+// while that conversation supervises it; blockedBy then names the one that does. routingMu is held by the caller.
+func (s *Service) transferTaskLocked(ctx context.Context, t Todo, lead, requireSupervisor string) (
+	moved Todo, blockedBy string, err error) {
+	v, changed, err := s.updateSupervision(ctx, t.ID, func(v *Supervision) bool {
+		if requireSupervisor != "" {
+			cur := cmp.Or(v.Supervisor, t.Origin)
+			if cur != requireSupervisor {
+				blockedBy = cur
+				return false
+			}
+		}
+		if v.Supervisor == lead && v.SupervisorSource == "explicit" {
+			return false
+		}
+		v.Supervisor, v.SupervisorSource = lead, "explicit"
+		return true
+	})
+	if err != nil {
+		return Todo{}, "", err
+	}
+	if blockedBy != "" {
+		return t, blockedBy, nil
+	}
+	if changed {
+		s.taskCard(ctx, lead, t.ID, wakeActive)
+	}
+	t.Supervision = &v
+	if err := s.transferPendingAsks(ctx, t); err != nil {
+		return Todo{}, "", err
+	}
+	return t, "", nil
 }
 
 // transferRefused explains why a direction lead may not move a task supervised by cur, naming cur and who can move it.

@@ -610,6 +610,11 @@ class Call:
 
     def run(self):
         target = self.start.get("target") or {}
+        # Register before ready: a client may request ?unprompted=1 immediately
+        # after receiving it. Appending afterward left an empty-call window in
+        # which the request was acknowledged but no run was ever emitted.
+        with CALLS_LOCK:
+            CALLS.append(self)
         self.say({"type": "ready", "protocol": 2, "features": features(), "input_rate": 16000, "output_rate": 24000,
                   "model": self.start.get("model") or self.hub.VOICE_MODELS["default"], "voice": self.start.get("voice"),
                   "target": {"machine_id": target.get("machine_id"), "session_id": target.get("session_id"),
@@ -617,8 +622,6 @@ class Call:
                              "title": (self.session or {}).get("title", ""),
                              "agent_label": "" if self.label == "Persona" else "Claude Code", "machine_name": self.mid}})
         threading.Thread(target=self.script, args=(time.monotonic(),), daemon=True).start()
-        with CALLS_LOCK:
-            CALLS.append(self)
         r = self.h.rfile
         try:
             while True:

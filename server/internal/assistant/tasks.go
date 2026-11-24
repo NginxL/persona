@@ -693,28 +693,36 @@ func (s *Service) feedPlans(ctx context.Context, items []FeedItem) map[string]*T
 // planStartsAtOnce: every task only reads, was asked for by the user in this turn (while start_requested_tasks is on),
 // or is a kind the user said to start without asking (its directory or one it is under, task_trust_scope.go).
 func (s *Service) planStartsAtOnce(ctx context.Context, tasks []PlanTask) bool {
-	return s.planStartsAtOnceUnder(ctx, tasks, nil)
+	return s.planAutoStartReasons(ctx, tasks, nil) != nil
 }
 
-// planStartsAtOnceUnder is planStartsAtOnce in a scheduled round whose schedule's grant may start more (granted, read
-// only when a task needs it; nil: none, schedule_grant.go). started says which tasks the grant alone lets start.
-func (s *Service) planStartsAtOnceUnder(ctx context.Context, tasks []PlanTask, granted func() func(PlanTask) bool) bool {
+// planAutoStartReasons gives each task's reason in plan order, or nil if the whole plan must wait. A scheduled
+// round's grant is read only if a task needs it (schedule_grant.go).
+func (s *Service) planAutoStartReasons(ctx context.Context, tasks []PlanTask, granted func() func(PlanTask) bool) []string {
 	trusted := s.trustCover(ctx)
 	requested := s.startRequestedTasks(ctx)
+	reasons := make([]string, len(tasks))
 	var cover func(PlanTask) bool
-	for _, t := range tasks {
-		if t.Readonly || (requested && t.UserRequested) || trustedTask(trusted, t) {
-			continue
-		}
-		if cover == nil && granted != nil {
-			cover = granted()
-			granted = nil
-		}
-		if cover == nil || !cover(t) {
-			return false
+	for i, t := range tasks {
+		switch {
+		case t.Readonly:
+			reasons[i] = "read-only"
+		case requested && t.UserRequested:
+			reasons[i] = "requested by the user this turn"
+		case trustedTask(trusted, t):
+			reasons[i] = "trusted directory or repository"
+		default:
+			if cover == nil && granted != nil {
+				cover = granted()
+				granted = nil
+			}
+			if cover == nil || !cover(t) {
+				return nil
+			}
+			reasons[i] = "allowed by the user's schedule grant"
 		}
 	}
-	return true
+	return reasons
 }
 
 // trustKey names a kind of task the user can let start without asking: a machine's repository (Repo, every worktree

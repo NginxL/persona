@@ -423,3 +423,188 @@ func TestManagedAgyLauncherPaneStartAndResumeCarryNoSecret(t *testing.T) {
 		}
 	}
 }
+
+func TestCustomAntigravityRuntimeCoexistsWithBuiltinAgy(t *testing.T) {
+	n, hub := runtimeNode(t)
+	assistantHub(hub)
+
+	builtinHello := assistantRuntimeHello()
+	builtinHello["runtime"], builtinHello["agent"], builtinHello["launcher"], builtinHello["instance"] = "agy", "agy", "agy", "builtin-1"
+	_ = dialRuntime(t, n, builtinHello)
+
+	customHello := assistantRuntimeHello()
+	customHello["runtime"], customHello["agent"], customHello["launcher"], customHello["instance"] = "agy-wrap", "agy", "agy-wrap", "custom-1"
+	customHello["name"] = "Antigravity Wrapped"
+	customHello["launchers"] = []map[string]any{{"name": "agy-wrap", "agent": "agy", "display_name": "Antigravity Wrapped"}}
+	_ = dialRuntime(t, n, customHello)
+
+	if _, external := n.runtimeHost.agyPeers("builtin-1"); external {
+		t.Fatal("custom runtime id agy-wrap must not be treated as an external agy peer that makes built-in yield")
+	}
+	if h := n.assistantRuntime("agy"); h == nil || h.hello.Runtime != "agy" {
+		t.Fatalf("assistantRuntime(agy) = %v, want agy runtime", h)
+	}
+	if h := n.assistantRuntime("agy-wrap"); h == nil || h.hello.Runtime != "agy-wrap" {
+		t.Fatalf("assistantRuntime(agy-wrap) = %v, want agy-wrap runtime", h)
+	}
+}
+
+// writeAgy puts a new file at path the way an installer replaces one: written beside it, then renamed over it.
+func writeAgy(t *testing.T, path, body string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	tmp := path + ".new"
+	if err := os.WriteFile(tmp, []byte(body), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// The companion keeps the agy it started on until the node notices another (#14533): one replaced in place (an update)
+// or installed elsewhere with the old one removed restarts it on the agy found now; an unchanged one never does.
+func TestAgyBridgeRestartsOnANewAgyBinary(t *testing.T) {
+	dir := t.TempDir()
+	first, moved := filepath.Join(dir, "a", "agy"), filepath.Join(dir, "b", "agy")
+	writeAgy(t, first, "v1")
+	var where atomic.Value
+	where.Store(first)
+	oldFind, oldCmd, oldProbe := findAgyExecutable, agyBridgeCommand, agyBridgeProbeEvery
+	t.Cleanup(func() { findAgyExecutable, agyBridgeCommand, agyBridgeProbeEvery = oldFind, oldCmd, oldProbe })
+	agyBridgeProbeEvery = 10 * time.Millisecond
+	findAgyExecutable = func() string { return where.Load().(string) }
+	started := make(chan string, 8)
+	agyBridgeCommand = func(_ context.Context, _ *RuntimeHost, agyBin, _ string) (*exec.Cmd, error) {
+		started <- agyBin
+		return exec.Command("sleep", "30"), nil
+	}
+	host := NewRuntimeHost("test", filepath.Join(t.TempDir(), "runtime.sock"))
+	logs := &syncBuffer{}
+	host.logger = log.New(logs, "", 0)
+	host.setAgyBridge(true)
+	defer host.setAgyBridge(false)
+	next := func(what string) string {
+		t.Helper()
+		select {
+		case bin := <-started:
+			return bin
+		case <-time.After(10 * time.Second):
+			t.Fatalf("%s: the companion was not (re)started; log:\n%s", what, logs.String())
+			return ""
+		}
+	}
+	if got := next("first start"); got != first {
+		t.Fatalf("first start on %q, want %q", got, first)
+	}
+	select {
+	case bin := <-started:
+		t.Fatalf("restarted on an unchanged agy (%s); log:\n%s", bin, logs.String())
+	case <-time.After(150 * time.Millisecond): // fifteen probes
+	}
+
+	writeAgy(t, first, "v2")
+	if got := next("replaced in place"); got != first {
+		t.Fatalf("restart after an update on %q, want %q", got, first)
+	}
+	if !strings.Contains(logs.String(), "agy at "+first+" was replaced; restarting") {
+		t.Fatalf("the restart does not say why:\n%s", logs.String())
+	}
+
+	writeAgy(t, moved, "v3")
+	where.Store(moved)
+	if err := os.Remove(first); err != nil {
+		t.Fatal(err)
+	}
+	if got := next("installed elsewhere"); got != moved {
+		t.Fatalf("restart after a move on %q, want %q", got, moved)
+	}
+	if !strings.Contains(logs.String(), "agy moved from "+first+" to "+moved) {
+		t.Fatalf("the restart does not say where agy went:\n%s", logs.String())
+	}
+}
+
+// A new agy does not cut the companion's work: while one of its sessions is working the restart waits (the old file
+// keeps running it), and it happens once the session is idle.
+func TestAgyBridgeRestartWaitsForAWorkingSession(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX shell script fixture")
+	}
+	dir := t.TempDir()
+	bin, marks := filepath.Join(dir, "agy"), filepath.Join(dir, "marks")
+	writeAgy(t, bin, "v1")
+	oldFind, oldCmd, oldProbe := findAgyExecutable, agyBridgeCommand, agyBridgeProbeEvery
+	t.Cleanup(func() { findAgyExecutable, agyBridgeCommand, agyBridgeProbeEvery = oldFind, oldCmd, oldProbe })
+	agyBridgeProbeEvery = 10 * time.Millisecond
+	findAgyExecutable = func() string { return bin }
+	agyBridgeCommand = func(context.Context, *RuntimeHost, string, string) (*exec.Cmd, error) {
+		script := fmt.Sprintf("echo start >> %q; trap 'echo stopped >> %q; exit 0' TERM; while :; do sleep 0.02; done", marks, marks)
+		return exec.Command("/bin/sh", "-c", script), nil
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	host := NewRuntimeHost("test", filepath.Join(dir, "runtime.sock"))
+	logs := &syncBuffer{}
+	host.logger = log.New(logs, "", 0)
+	host.setAgyBridge(true)
+	defer host.setAgyBridge(false)
+	waitFor(t, "the companion started", func() bool { return slices.Equal(starts(marks), []string{"start"}) })
+
+	// the companion's own connection, with one session at work
+	instance := host.builtinAgyInstance()
+	client, hello := startAgyHello(t, ctx, host, instance)
+	if err := <-hello; err != nil {
+		t.Fatal(err)
+	}
+	var builtin *runtimeConn
+	waitFor(t, "the companion registered", func() bool { builtin, _ = host.agyPeers(instance); return builtin != nil })
+	status := func(s string) {
+		builtin.mu.Lock()
+		builtin.sessions = []proto.Session{{SessionID: "s1", Status: s}}
+		builtin.mu.Unlock()
+	}
+	status(proto.StatusWorking)
+
+	writeAgy(t, bin, "v2")
+	waitFor(t, "the restart to wait for the session", func() bool {
+		return strings.Contains(logs.String(), "agy at "+bin+" was replaced; restarting once no agy session is working")
+	})
+	if got := starts(marks); !slices.Equal(got, []string{"start"}) {
+		t.Fatalf("the companion was stopped while its session was working: %v", got)
+	}
+
+	status(proto.StatusIdle)
+	waitFor(t, "the restart once the session is idle", func() bool { return slices.Contains(starts(marks), "stopped") })
+	_ = client.Close() // the old companion's connection goes with it
+	waitFor(t, "the companion started again", func() bool { m := starts(marks); return len(m) >= 3 && m[2] == "start" })
+}
+
+// What counts as a change: another path, another file at the path, none any more; the same one seen twice in a row.
+func TestAgyChangeSettlesOnTwoProbes(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "agy")
+	writeAgy(t, path, "v1")
+	bin := statAgy(path)
+	var c agyChange
+	if c.see(bin, statAgy(path)) || c.seen != nil {
+		t.Fatalf("the same file is a change: %+v", c)
+	}
+	writeAgy(t, path, "v2")
+	if c.see(bin, statAgy(path)) {
+		t.Fatal("one probe's change restarted")
+	}
+	if !c.see(bin, statAgy(path)) {
+		t.Fatal("the same change on the next probe did not")
+	}
+	if c.see(bin, statAgy(path+"-gone")) || c.see(bin, statAgy("")) {
+		t.Fatal("a different change must be seen twice of its own")
+	}
+	if !c.see(bin, statAgy("")) || c.describe(bin) != "agy at "+path+" is gone" {
+		t.Fatalf("agy gone: %q", c.describe(bin))
+	}
+	if c.see(bin, bin) || c.seen != nil {
+		t.Fatal("back to the companion's own agy is no change")
+	}
+}

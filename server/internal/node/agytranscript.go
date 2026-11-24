@@ -235,8 +235,24 @@ func agyReadFile(brain *os.Root, path string) ([]byte, error) {
 // A same-step completion replaces its earlier record. A rewind invalidates the
 // abandoned tail and gives replacement steps a new identity.
 func parseAgySteps(raw []byte, conversation string) ([]agyStep, agyRevision) {
-	var steps []agyStep
-	rev := agyRevision{length: len(raw), hash: sha256.Sum256(raw)}
+	f := agyFold{conversation: conversation}
+	f.add(raw)
+	return f.steps, f.revision(len(raw), sha256.Sum256(raw))
+}
+
+// agyFold is parseAgySteps' state after the complete lines it has read: the steps kept and the branch and native
+// revisions so far. Each line folds in on its own, so lines appended later go on from it (agyParse, agypane.go).
+type agyFold struct {
+	conversation   string
+	steps          []agyStep
+	branch, native string
+}
+
+// add folds raw's lines in, raw starting at a line.
+func (f *agyFold) add(raw []byte) {
+	steps, rev := f.steps, agyRevision{branch: f.branch, native: f.native}
+	conversation := f.conversation
+	defer func() { f.steps, f.branch, f.native = steps, rev.branch, rev.native }()
 	for line := range bytes.SplitSeq(raw, []byte{'\n'}) {
 		line = bytes.TrimSpace(line)
 		if len(line) == 0 || line[0] != '{' {
@@ -295,8 +311,12 @@ func parseAgySteps(raw []byte, conversation string) ([]agyStep, agyRevision) {
 		step.key = strconv.Itoa(step.seq) + "@" + agyDigest(conversation+"\n"+step.CreatedAt+"\n"+rev.branch)
 		steps = slices.Insert(steps, at, step)
 	}
-	rev.steps = make([]agyStepMemo, len(steps))
-	for i, s := range steps {
+}
+
+// revision is the fold's agyRevision for the length bytes it read, whose SHA-256 is hash.
+func (f *agyFold) revision(length int, hash [32]byte) agyRevision {
+	rev := agyRevision{length: length, hash: hash, branch: f.branch, native: f.native, steps: make([]agyStepMemo, len(f.steps))}
+	for i, s := range f.steps {
 		rev.steps[i] = agyStepMemo{
 			seq:      s.seq,
 			key:      s.key,
@@ -304,7 +324,7 @@ func parseAgySteps(raw []byte, conversation string) ([]agyStep, agyRevision) {
 			running:  isAgyStepRunning(s.Status),
 		}
 	}
-	return steps, rev
+	return rev
 }
 
 // Match the whitespace used by JavaScript's \s and String.trim in cleanUserText.

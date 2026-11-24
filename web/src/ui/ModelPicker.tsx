@@ -3,6 +3,7 @@
 // agent" also lists the IDs typed before (each can be forgotten) and "Other model…", a field for a model ID (#1644).
 import { useEffect, useState } from "react";
 import type { ModelBinding } from "../lib/model-config";
+import { foldLauncherModels, type LauncherModelOption } from "../lib/launcher-model-binding";
 import { customModel, defaultDetail, defaultModel, listedModel, modelDetail, modelName, modelRows, type AgentModel, type LauncherModels } from "../lib/launcher-models";
 import { cleanModelId } from "../lib/model-id";
 import { typedModelProblem } from "../lib/model-id-input";
@@ -18,7 +19,7 @@ export interface ModelList {
   error?: string;
 }
 
-export function ModelPicker({ models, model, followed = {}, defaultLabel, ownModel, open, onToggle, query, onQuery, search, onPick, onReload, custom, typing, onForget, failedNote }: {
+export function ModelPicker({ models, model, followed = {}, defaultLabel, ownModel, ariaLabel, open, onToggle, query, onQuery, search, onPick, onReload, custom, typing, onForget, foldVariants = true, failedNote }: {
   models: ModelList;
   /** The pick's id; "": "Default". */
   model: string;
@@ -28,6 +29,8 @@ export function ModelPicker({ models, model, followed = {}, defaultLabel, ownMod
   defaultLabel?: string;
   /** What the launcher passes as its own --model (shown when it is locked). */
   ownModel?: string;
+  /** The form field's label, spoken with its selected value. */
+  ariaLabel?: string;
   open: boolean;
   onToggle: () => void;
   query: string;
@@ -42,32 +45,40 @@ export function ModelPicker({ models, model, followed = {}, defaultLabel, ownMod
   typing?: boolean;
   /** Forgets an ID typed before (the hub's `custom` rows); absent: they can't be forgotten here. */
   onForget?: (id: string) => void;
+  /** Leave the variants individually selectable for a field without a paired effort control. */
+  foldVariants?: boolean;
   /** The list's last line when it could not be read. */
   failedNote: string;
 }) {
   const all = models.list?.models ?? [];
+  const options: LauncherModelOption[] = foldVariants ? foldLauncherModels(all) : all;
   const locked = models.list?.locked;
   const loading = models.status === "loading";
   // a model saved as a spelling the hub folded into another row (`opus` under the concrete model's id) is that row's
-  const picked = model ? listedModel(all, model) : undefined;
+  const picked = model ? listedModel(options, model) : undefined;
   const unlisted = !picked && model ? model : ""; // "Models"' id from before, or one typed in
-  const { showDefault, rows } = modelRows(all, query, followed);
+  const { showDefault, rows } = modelRows(options, query, followed);
+  const count = options.length + (defaultModel(all) && !defaultModel(options) ? 1 : 0);
   const own = rows.filter((m) => !m.custom);
   const remembered = rows.filter((m) => m.custom);
   const takesTyped = custom || typing;
-  const typed = takesTyped ? customModel(all, query) : "";
+  const queryId = cleanModelId(query);
+  const exactVariant = rows.find((m) => m.variants && (m.resolved === queryId || m.aliases?.includes(queryId)));
+  const typed = takesTyped && !exactVariant ? customModel(all, query) : "";
   // what is typed in the search, when it is no model's and the hub wouldn't take it as one: why
-  const typedProblem = takesTyped && !rows.length && !listedModel(all, cleanModelId(query)) ? typedModelProblem(query) : "";
+  const typedProblem = takesTyped && !rows.length && !listedModel(all, queryId) ? typedModelProblem(query) : "";
   const [entering, setEntering] = useState(false);
   useEffect(() => {
     if (!open) setEntering(false);
   }, [open]);
   const pickFirst = () => {
-    if (showDefault) onPick("");
+    if (exactVariant) onPick(exactVariant.id);
+    else if (showDefault) onPick("");
     else if (rows[0]) onPick(rows[0].id);
     else if (typed) onPick(typed);
   };
-  const detail = picked ? (picked.custom ? t("ui-modelpicker.typed") : modelDetail(picked)) : unlisted ? (typing ? t("ui-modelpicker.typed") : t("ui-modelpicker.not_in_list")) : locked ? (ownModel ?? "") : defaultDetail(all, followed);
+  const label = picked ? modelName(picked) : unlisted ? modelName({ id: unlisted }) : defaultLabel || t("ui-modelpicker.default");
+  const detail = picked ? (picked.variants ? model : picked.custom ? t("ui-modelpicker.typed") : modelDetail(picked)) : unlisted ? (typing ? t("ui-modelpicker.typed") : t("ui-modelpicker.not_in_list")) : locked ? (ownModel ?? "") : defaultDetail(all, followed);
   const otherLabel = all.some((m) => !m.default && !m.custom) ? t("ui-modelpicker.other") : t("ui-modelpicker.enter_id");
   const typedRow = (m: AgentModel) => (
     <div key={m.id} className="flex items-center gap-0.5">
@@ -81,12 +92,13 @@ export function ModelPicker({ models, model, followed = {}, defaultLabel, ownMod
       <button
         type="button"
         disabled={!!locked}
+        aria-label={ariaLabel ? `${ariaLabel} · ${label}` : undefined}
         aria-expanded={open}
         onClick={onToggle}
         title={picked?.description ?? (picked || unlisted ? undefined : defaultModel(all)?.description)}
         className="flex h-9 w-full items-center gap-2 rounded-control bg-inset px-3 text-left shadow-hairline outline-none transition-colors enabled:hover:bg-hover focus-visible:shadow-[0_0_0_1px_var(--line-strong)] disabled:cursor-not-allowed"
       >
-        <span className={cx("max-w-[60%] shrink-0 truncate text-[12.5px]", locked ? "text-ink-3" : "text-ink", unlisted && "font-mono")}>{picked ? modelName(picked) : unlisted ? modelName({ id: unlisted }) : defaultLabel || t("ui-modelpicker.default")}</span>
+        <span className={cx("max-w-[60%] shrink-0 truncate text-[12.5px]", locked ? "text-ink-3" : "text-ink", unlisted && "font-mono")}>{label}</span>
         {loading && !all.length ? (
           <span className="flex min-w-0 flex-1 items-center gap-1.5 text-[11.5px] text-ink-3"><Spinner size={10} /><span className="truncate">{t("ui-modelpicker.loading")}</span></span>
         ) : models.status === "error" && !unlisted && !typing ? (
@@ -125,9 +137,9 @@ export function ModelPicker({ models, model, followed = {}, defaultLabel, ownMod
               autoComplete="off"
               className="h-8 min-w-0 flex-1 bg-transparent text-[12.5px] text-ink outline-none placeholder:text-ink-3"
             />
-            {all.length > 0 && (
+            {count > 0 && (
               <span className="shrink-0 text-[11px] text-ink-3 tabular-nums">
-                {query.trim() ? `${rows.length + (showDefault ? 1 : 0)} / ${all.length}` : t("ui-modelpicker.count", { count: all.length })}
+                {query.trim() ? `${rows.length + (showDefault ? 1 : 0)} / ${count}` : t("ui-modelpicker.count", { count })}
               </span>
             )}
             <IconButton icon="retry" label={t("ui-modelpicker.reload")} size={24} iconSize={12} disabled={loading} onClick={onReload} />

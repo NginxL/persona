@@ -41,6 +41,7 @@ import persona.core.designsystem.*
 import persona.core.designsystem.icons.PhIcon
 import persona.core.designsystem.icons.PhIcons
 import persona.core.designsystem.icons.PersonaIcons
+import persona.core.domain.sort.canAnswerInteraction
 import persona.core.domain.sort.*
 import persona.core.domain.answer.firstBySession
 import persona.core.domain.answer.rowLine
@@ -668,7 +669,7 @@ internal fun AgentsScreen(
                                     showsPlace = entry.showsPlace,
                                     onOpen = { requestDetail = entry.request },
                                     onAnswer = model::answer,
-                                    approvable = entry.owner?.canApprove ?: true,
+                                    approvable = entry.owner?.canAnswerInteraction(entry.request) ?: true,
                                 )
                             }
                         }
@@ -692,7 +693,7 @@ internal fun AgentsScreen(
                         } else items(row.cards, key = { "request:${it.id}" }) { request ->
                             RequestCard(request, names[request.machineId], metadata, now, reachable(request),
                                 delivery[request.id], { requestDetail = request }, model::answer,
-                                space = owner?.spaceName?.takeIf { it.isNotBlank() }, approvable = owner?.canApprove ?: true)
+                                space = owner?.spaceName?.takeIf { it.isNotBlank() }, approvable = owner?.canAnswerInteraction(request) ?: true)
                         }
                     }
                 }
@@ -1253,7 +1254,7 @@ internal fun AgentsScreen(
                 requestDetail = null
                 navigator.navigate(TerminalRoute(request.machineId, request.sessionId))
             }), machine = machine,
-            blockedReason = session?.takeIf { !it.canApprove }?.let { approveBlocked },
+            blockedReason = session?.takeIf { !it.canAnswerInteraction(request) }?.let { approveBlocked },
             terminalHelp = session?.canTerminal != false)
     }
 }

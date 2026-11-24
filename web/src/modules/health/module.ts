@@ -2,8 +2,7 @@
 // what it adds to the shell, small enough to load at start. Its page and its strings (health.json) load on first use.
 //
 // Its hub flag is module.health (core/module-host.ts, the hub flag rule): a hub that publishes module flags turns it off
-// by leaving the flag out; every older hub, which publishes none, keeps it on, as the page always was. Settings › Labs ›
-// Features turns it off in a browser.
+// by leaving the flag out. Older hubs keep it on. Settings › General › Optional features can turn it off in a browser.
 import { byLanguage, t, type CatalogModule } from "../../i18n";
 import { moduleFeature, type ModuleDescriptor } from "../../core/module-host";
 import { HEALTH_INTAKE_UI } from "../../lib/health-intake-ui";

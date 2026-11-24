@@ -92,8 +92,8 @@ interface AssistantManagement {
      */
     suspend fun makeDirection(session: SessionKey): Unit = throw UnsupportedOperationException("Directions unavailable")
     /**
-     * Ends a conversation's leadership (POST /api/v1/assistant/directions/{id}/end, #4331): it leaves 常驻; the tasks it
-     * handed out keep their supervisor. The conversation itself stays, an ordinary chat now.
+     * Ends a conversation's leadership (POST /api/v1/assistant/directions/{id}/end, #4331): it leaves 常驻; its open
+     * tasks go to the main chat's supervision. The conversation itself stays, an ordinary chat now.
      */
     suspend fun endDirection(session: SessionKey): Unit = throw UnsupportedOperationException("Directions unavailable")
     /**

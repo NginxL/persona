@@ -10,6 +10,7 @@
   "lost_tasks_n_other": "ノードが再起動し、{count}件のバックグラウンドタスクが停止しました",
   "inbox_update": "受信箱：「{title}」に動きがありました",
   "limit_continue": "利用上限がリセットされたので、Personaが続きを頼みました",
+  "limit_fallback": "利用上限に達したため、Personaが別のランチャーに移して続けさせました",
   "ask_answered": "回答しました：{title}",
   "ask_expired": "質問は回答がないまま期限切れになりました",
   "ask_closed": "質問は回答されずに閉じられました",

@@ -121,8 +121,8 @@ func (s *Service) briefCardWithHeader(f *briefFacts, label, answer, header strin
 		md := boardRowMarkdown(l, i+1, r)
 		btnLabel := i18n.T(l, "assistant-reports.accept_pass")
 		a, asked := f.Asks[r.id]
-		if asked && !a.Conclusion { // a conclusion's row says its verdict already (boardRows); deployed work's says it here (#1226)
-			md += "\n" + botcard.EscapeMarkdown(verdictText(l, &a))
+		if asked && !a.Conclusion { // a conclusion's row says its verdict already (boardRows); verification work says it here (#1226)
+			md += "\n" + botcard.EscapeMarkdown(verdictText(l, &a, f.Deliveries[r.id]))
 		}
 		if ch := f.Changed[r.id]; ch != "" {
 			md += "\n" + botcard.EscapeMarkdown(clip(oneLine(ch), 80))

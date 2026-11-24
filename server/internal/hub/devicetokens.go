@@ -536,6 +536,18 @@ func (h *Hub) revokeWebToken(ctx context.Context, id string) (bool, error) {
 	return h.store.RevokeDeviceToken(ctx, id)
 }
 
+// forgetUnknownTokens drops the cached "no such token" answers for these token hashes, once the tokens exist here.
+func (h *Hub) forgetUnknownTokens(hashes []string) {
+	t := &h.devtok
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	for _, hash := range hashes {
+		if c, ok := t.cache[hash]; ok && c.p == nil {
+			delete(t.cache, hash)
+		}
+	}
+}
+
 // revoked forgets a device's cached lookups, closes its live connections (what it relays to the manager too), stops
 // its pushes and tells managers to fail its queued messages.
 func (h *Hub) revoked(id string) {

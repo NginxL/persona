@@ -173,6 +173,11 @@ Persona Core is a product on its own: a hub built without any module starts, ser
   `/api/v1/extensions` and `/api/v1/extensions/<id>/-/assistant-data` answers 404, and a clean SIGTERM shutdown, then
   prints one PASS / FAIL / TIMEOUT line. `--full` runs the same on a default build and expects the opposite. `DOCKER`
   names another Docker client.
+- **End-to-end gate**: `python3 scripts/ci/module-e2e.py --modules <ids>` switches the modules off and on at run time
+  (the `modules` row) on a test hub started the same way, with a default build and the real web app in headless
+  Chrome: flags, the manager's list, the module's routes, extensions and connectors, its web entry and chunks, and the
+  core's pages in every phase, plus the mock hub as an older hub. A module move merges only after it passes on its
+  branch (docs/operations/testing.md "Module e2e gate", #14417).
 - **Tests**: `GOFLAGS="-trimpath -tags=persona_core_only" python3 scripts/ci/server-shards.py <node|managers|other>
   --database-file <file with database_url>` runs a shard's every package without modules; a test of a module's own
   behaviour skips without it (`needsBriefingModule`, `needsVoiceModule`, `needsVolcModule`). Locally the `other` shard
@@ -184,7 +189,10 @@ Persona Core is a product on its own: a hub built without any module starts, ser
   about 5.5 minutes, managers about 6, other about 3.5.
   The per-module steps ('Builds without the … module(s)', 'Core-only and module-less builds') run in the `node`,
   `managers`, `core-node` and `core-other` lanes, one or two each, not in `build`: together they outgrow a hosted job's
-  20 minutes.
+  20 minutes. Each runs only its own `persona_without_<id>` tests (#14412): the module's `go build ./...` and the module
+  list and guard tests are 'Builds without each module', and every package's tests with `persona_core_only` are the
+  core lanes' (the node step keeps the one `persona_core_only` build, Windows' node included). Where a module section
+  below names `persona_core_only` among a step's tags, the core lanes run those tests.
 - **Size**: `python3 scripts/diag/core_size.py [--no-build] [--json] <ref> …` prints the core's non-test Go lines (every
   `*.go` under `server/` that is not `_test.go`, `server/internal/modules/` left out), each module's lines, and the
   stripped sizes of `personad`, `persona-hub` and `persona-manager` built by default and with `persona_core_only`
@@ -492,7 +500,14 @@ Each client documents its side in its own platform doc; these are pointers only.
   `docs/apple/ios.md`, "Modules" (#13849).
 - **Android** (#13433): `:core:moduleapi` and `:module:<id>`. See `docs/android/` (written with #13433).
 - **Web** (#13434, #13846): the module host `web/src/core/module-host.ts` and `web/src/modules/<id>/`, serving routes,
-  sidebar entries, chat slots, Settings categories and card renderers. See `docs/web/web.md` ("Modules").
+  sidebar entries, chat slots, Settings categories and card renderers. Shipped module switches are lasting browser
+  preferences in Settings › General › Optional features. The form reads the registry and the browser stores disabled
+  module ids in `persona.modules.off`. A core-only build has no module switches. See `docs/web/web.md` ("Modules").
+
+Web Labs admits temporary trials or a choice between stable and new implementations of one capability. A trial keeps
+the stable default and a lossless rollback, and links a tracking issue with a plan to graduate or remove it. Put
+permanent browser and advanced preferences in their owning Settings category. Keep irreversible changes, internal
+debug controls and placeholder demos out of Labs. See `docs/web/web.md` ("Labs").
 
 **Hub flags.** Every client switches modules on the hub's hello the same way (agreed on #13844): a module's `feature`
 is `module.<id>`; a hub that publishes module flags also announces the marker `modules`; a module with a `feature` is

@@ -39,6 +39,47 @@ class QuestionCancellationUiTest {
         ))),
     )
 
+    @Test fun desktopCodexQuestionUsesTheQuestionCapability() {
+        val request = question.copy(machineId = "machine", sessionId = "session", agent = "codex",
+            toolName = "request_user_input_async", canCancel = false)
+        val app = Session("machine", "session", sourceKind = "codex_history", agent = "codex",
+            capabilities = SessionCapabilities(read = true, send = true))
+        val blocked = "This session can't be approved on the phone. Approve it on the computer."
+        var answerQuestions by mutableStateOf(false)
+        var style by mutableStateOf(AppStyle.Glass)
+        var dark by mutableStateOf(false)
+        val sent = mutableListOf<Resolution>()
+        rule.setContent {
+            PersonaTheme(style = style, darkTheme = dark, reduceMotion = true) {
+                Column(Modifier.testTag("codex-question").background(PersonaTheme.palette.background)) {
+                    InteractionPanel(listOf(request), null, 600.dp, null, emptySet(), { _, resolution -> sent += resolution },
+                        null, {}, blockedReason = blocked,
+                        answerSession = app.copy(capabilities = app.capabilities?.copy(answerQuestions = answerQuestions)),
+                        terminalHelp = false)
+                }
+            }
+        }
+        rule.onNodeWithText(blocked).assertExists()
+        rule.onNodeWithText("1. JSON").assertIsNotEnabled()
+
+        answerQuestions = true
+        val output = File("build/codex-desktop-question-shots").also { it.mkdirs() }
+        for (nextStyle in AppStyle.entries) for (darkTheme in listOf(false, true)) {
+            style = nextStyle
+            dark = darkTheme
+            rule.waitForIdle()
+            rule.onNodeWithText(blocked).assertDoesNotExist()
+            rule.onNodeWithText("1. JSON").assertIsEnabled()
+            val bitmap = rule.onNodeWithTag("codex-question").captureToImage().asAndroidBitmap()
+            File(output, "${nextStyle.name.lowercase()}-${if (darkTheme) "dark" else "light"}.png").outputStream().use {
+                assertTrue(bitmap.compress(Bitmap.CompressFormat.PNG, 100, it))
+            }
+        }
+
+        rule.onNodeWithText("1. JSON").performClick()
+        assertEquals(listOf(Resolution(answers = mapOf("Choose a format" to "JSON"))), sent)
+    }
+
     @Test fun triageCloseDiscardsOnlyCurrentCardAndLaterQuestionStillAnswers() {
         var requests by mutableStateOf(listOf(triageQuestion))
         val sent = mutableListOf<Pair<String, Resolution>>()

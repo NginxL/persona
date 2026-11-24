@@ -11,6 +11,7 @@ vi.mock("./ModelProfiles", () => ({ ModelProfiles: () => null }));
 vi.mock("../../ui/atoms", async (original) => ({ ...(await original<typeof import("../../ui/atoms")>()), toast: vi.fn() }));
 import { initI18n, t } from "../../i18n";
 import { BYPASS_WARNING, modeTitle } from "../../lib/session-actions";
+import { agyModels, claudeModels, codexModels, neon } from "../../lib/launcher-model-binding.fixture";
 import type { ModelBinding, ModelProvider, ModelPurpose } from "../../lib/model-config";
 import { getState, reset } from "../../lib/store";
 import { ModelConfiguration } from "./ModelConfiguration";
@@ -79,7 +80,8 @@ async function hub(input: RequestInfo | URL, init?: RequestInit): Promise<Respon
   if (path.endsWith("/models")) {
     const providerId = decodeURIComponent(path.split("/").slice(-2)[0] ?? "");
     const provider = PROVIDERS.find((p) => p.id === providerId);
-    return json({ agent: provider?.agent ?? "claude", models: [{ id: "default", name: "Default", default: true }] });
+    const catalog = [agyModels, claudeModels, codexModels].find((list) => list.agent === provider?.agent);
+    return json(catalog ?? { agent: provider?.agent ?? "claude", models: [{ id: "default", name: "Default", default: true }] });
   }
   const purpose = [agents, lark, inbox, triage].find((p) => path === `/api/v1/model-config/purposes/${p.id}`);
   if (purpose && init?.method === "PATCH") {
@@ -106,6 +108,9 @@ const dialog = () => document.querySelector<HTMLElement>('[role="dialog"]')!;
 const button = (label: string, scope: ParentNode = document) => [...scope.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent?.trim() === label)!;
 const permSelect = () => dialog().querySelector<HTMLSelectElement>("[data-permission-mode-select]");
 const providerSelect = () => dialog().querySelector<HTMLSelectElement>("select")!;
+const modelPicker = () => dialog().querySelector<HTMLButtonElement>("button[aria-expanded]")!;
+const effortSelect = () => [...dialog().querySelectorAll("select")]
+  .find((el) => el.closest("label")?.querySelector("span")?.textContent === t("settings-modelconfiguration.effort"))!;
 
 async function render() {
   function Harness() {
@@ -127,6 +132,13 @@ async function selectValue(el: HTMLSelectElement, value: string) {
     el.dispatchEvent(new Event("change", { bubbles: true }));
   });
   await flush();
+}
+
+async function pickModel(name: string) {
+  await vi.waitFor(() => expect(modelPicker()).not.toBeNull());
+  await act(async () => modelPicker().click());
+  const row = [...dialog().querySelectorAll<HTMLButtonElement>('[role="option"]')].find((el) => el.textContent?.startsWith(name))!;
+  await act(async () => row.click());
 }
 
 beforeEach(async () => {
@@ -238,5 +250,70 @@ describe("ModelConfiguration unified permission mode", () => {
 
     await selectValue(providerSelect(), "launcher.codex");
     expect([...permSelect()!.options].map((o) => o.value)).toEqual(["", "default", "acceptEdits", "plan", "auto", "bypassPermissions"]);
+  });
+});
+
+describe("Model configuration model and effort", () => {
+  async function save() {
+    await act(async () => button(t("common.save"), dialog()).click());
+    await flush();
+  }
+
+  it("saves the picked variant and offers only the family's effort levels", async () => {
+    agents = makeAgents({ provider: "launcher.agy" });
+    await render();
+    await openPurpose("agent.new");
+    await pickModel("Gemini 4 Neon");
+    expect(modelPicker().textContent).toBe(`Gemini 4 Neon${neon}-medium`);
+    expect(effortSelect().value).toBe("medium");
+    expect([...effortSelect().options].slice(1).map((option) => option.textContent)).toEqual(["Low", "Medium", "High", "XHigh"]);
+    await selectValue(effortSelect(), "xhigh");
+    await save();
+    expect(writes[0].body).toMatchObject({ model: `${neon}-xhigh`, effort: null });
+  });
+
+  it.each([["", "medium"], ["high", "high"]])("loads the saved variant and clears standalone effort %j on Save", async (effort, level) => {
+    agents = makeAgents({ provider: "launcher.agy", model: `${neon}-medium`, effort });
+    await render();
+    await openPurpose("agent.new");
+    await vi.waitFor(() => expect(modelPicker()?.textContent).toBe(`Gemini 4 Neon${neon}-${level}`));
+    expect(effortSelect().value).toBe(level);
+    await save();
+    expect(writes[0].body).toMatchObject({ model: `${neon}-${level}`, effort: null });
+  });
+
+  it("turns an effort-only change on a child purpose into a sibling variant", async () => {
+    agents = makeAgents({ provider: "launcher.agy", model: `${neon}-medium` });
+    lark = makeLark();
+    await render();
+    await openPurpose("lark.agent");
+    expect(modelPicker()?.textContent).toContain(t("ui-modelpicker.default"));
+    expect(effortSelect().value).toBe("");
+    expect(effortSelect().options[0].textContent).toContain("Medium");
+    await selectValue(effortSelect(), "high");
+    await save();
+    expect(writes[0].body).toMatchObject({ provider: null, model: `${neon}-high`, effort: null });
+  });
+
+  it.each([
+    ["claude", "Sonnet", "sonnet", "high"],
+    ["codex", "5.5", "gpt-5.5", "xhigh"],
+  ])("writes %s model and effort separately", async (agent, name, model, effort) => {
+    agents = makeAgents({ provider: `launcher.${agent}` });
+    await render();
+    await openPurpose("agent.new");
+    await pickModel(name);
+    await selectValue(effortSelect(), effort);
+    await save();
+    expect(writes[0].body).toMatchObject({ model, effort });
+  });
+
+  it("disables effort when a known model offers none", async () => {
+    agents = makeAgents({ provider: "launcher.agy" });
+    await render();
+    await openPurpose("agent.new");
+    await pickModel("Gemini 4 Flash");
+    expect(effortSelect().disabled).toBe(true);
+    expect(dialog().textContent).toContain(t("settings-modelconfiguration.api_effort_unsupported"));
   });
 });

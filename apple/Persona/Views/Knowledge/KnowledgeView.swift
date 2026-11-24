@@ -704,7 +704,7 @@ enum RelevanceMeter {
     }
 }
 
-/// One entry found by a search: its tile and name, then up to two matching lines with what was searched for in bold.
+/// One entry found by a search: its tile and name, then up to two lines with the matches highlighted.
 struct KBHitRow: View {
     var result: KBResult
     var query: String
@@ -736,14 +736,14 @@ struct KBHitRow: View {
         .padding(.vertical, Theme.Space.xxs)
     }
 
-    /// The text with every word searched for in bold primary (the hub matches lines with all the words).
+    /// The accent tint behind every word searched for (the hub matches lines with all the words).
     static func marked(_ text: String, _ query: String) -> AttributedString {
         var a = AttributedString(text)
         for q in query.split(whereSeparator: \.isWhitespace).map(String.init) where !q.isEmpty {
             var from = a.startIndex
             while from < a.endIndex, let r = a[from...].range(of: q, options: .caseInsensitive) {
+                a[r].backgroundColor = Theme.accentTint
                 a[r].foregroundColor = .primary
-                a[r].inlinePresentationIntent = .stronglyEmphasized
                 from = r.upperBound
             }
         }
@@ -1500,7 +1500,7 @@ struct ItemFacts {
     }
 }
 
-/// A place a search found in an entry: where (Profile, Chat History · day), the line with the words in bold, and for a message
+/// A place a search found in an entry: where (Profile, Chat History · day), the line with the matches highlighted, and for a message
 /// the one before and after it in grey.
 struct KBMatchRow: View {
     var match: KBMatch
@@ -1529,7 +1529,7 @@ struct KBMatchRow: View {
     }
 }
 
-/// One archived message: who and when on a line, then what was said, the searched words in bold.
+/// One archived message: who and when on a line, then what was said, with the searched words highlighted.
 struct KBMessageText: View {
     var line: KBMessageLine
     var query: String

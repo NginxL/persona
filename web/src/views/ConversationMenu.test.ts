@@ -73,7 +73,7 @@ describe("a Persona conversation's sidebar menu (iOS AssistantSidebar)", () => {
     expect(calls).toEqual(["make:c1", "ok:已设为常驻「周报」", "refresh"]);
     calls.length = 0;
     await leaderItem(conv(), true, d).onSelect();
-    expect(calls).toEqual(["end:c1", "ok:已取消常驻「周报」，它派出的任务不变", "refresh"]);
+    expect(calls).toEqual(["end:c1", "ok:已取消常驻「周报」，还在办的任务已交还主对话督办", "refresh"]);
   });
 
   it("says so when the hub refuses", async () => {

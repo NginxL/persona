@@ -145,17 +145,22 @@ func (s *Service) launcherViewsFrom(ctx context.Context, zshrc []zshrcLaunchers,
 				if l.Source != "" {
 					src = l.Source
 				}
-				v = &LauncherView{Name: l.Name, Source: src, Agent: l.Agent, BaseURL: l.BaseURL, Model: l.Model, Hidden: slices.Contains(hidden, l.Name), PermissionModes: l.PermissionModes, builtinCompanion: l.BuiltinCompanion, modelRunMachines: []string{}}
+				v = &LauncherView{Name: l.Name, DisplayName: l.DisplayName, Source: src, Agent: l.Agent, BaseURL: l.BaseURL, Model: l.Model, Hidden: slices.Contains(hidden, l.Name), PermissionModes: l.PermissionModes, builtinCompanion: l.BuiltinCompanion, modelRunMachines: []string{}}
 				byName[l.Name] = v
 				names = append(names, l.Name)
 				if l.PermissionModes == 0 {
 					unrestrictedModes[l.Name] = true
 				}
-			} else if l.PermissionModes == 0 {
-				unrestrictedModes[l.Name] = true
-				v.PermissionModes = 0
-			} else if !unrestrictedModes[l.Name] {
-				v.PermissionModes |= l.PermissionModes
+			} else {
+				if v.DisplayName == "" && l.DisplayName != "" {
+					v.DisplayName = l.DisplayName
+				}
+				if l.PermissionModes == 0 {
+					unrestrictedModes[l.Name] = true
+					v.PermissionModes = 0
+				} else if !unrestrictedModes[l.Name] {
+					v.PermissionModes |= l.PermissionModes
+				}
 			}
 			v.Machines = append(v.Machines, m.MachineID)
 			if l.BuiltinCompanion {

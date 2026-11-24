@@ -261,8 +261,12 @@ final class ScreenshotBannerUITests: XCTestCase {
         let ctx = try XCTUnwrap(CGContext(data: &px, width: crop.width, height: crop.height, bitsPerComponent: 8, bytesPerRow: crop.width * 4,
                                           space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
         ctx.draw(crop, in: CGRect(x: 0, y: 0, width: crop.width, height: crop.height))
-        return Crop(luma: stride(from: 0, to: px.count, by: 4).map { i in
-            (Int(px[i]) * 299 + Int(px[i + 1]) * 587 + Int(px[i + 2]) * 114) / 1000
+        // Typed parts: with Vision imported, the one-line sum timed out Xcode 26's type-checker (#13374).
+        return Crop(luma: stride(from: 0, to: px.count, by: 4).map { (i: Int) -> Int in
+            let r: Int = Int(px[i]) * 299
+            let g: Int = Int(px[i + 1]) * 587
+            let b: Int = Int(px[i + 2]) * 114
+            return (r + g + b) / 1000
         })
     }
 

@@ -2345,6 +2345,453 @@
           ]
         }
       }
+    },
+    {
+      "name": "can_wait_and_supervisor_held_counts",
+      "description": "Contrasts an active owner ask (counted in needs_you) against a can_wait decision (listed in can_wait, not counted in needs_you), a supervised failed start (counted in working/in_progress), and merged vs live delivery states (both open; merged in todo, live in just_finished).",
+      "source": [
+        "docs/design/proposals/todos-redesign.md 3.7 \"Counts\"",
+        "#14541 (can_wait, supervisor-held, merged vs live counts)"
+      ],
+      "input": {
+        "now": "2026-11-10T12:00:00Z",
+        "todos": [
+          {
+            "id": "todo_cw_real",
+            "title": "Approve the venue deposit",
+            "notes": "",
+            "done_at": null,
+            "created_at": "2026-11-09T08:00:00Z",
+            "updated_at": "2026-11-10T10:00:00Z",
+            "origin": "conv_main",
+            "spaces": [],
+            "agents": [],
+            "quiet": false,
+            "project": "kyoto-trip",
+            "ask": {
+              "outcome": "decide",
+              "verdict": "Needs your decision",
+              "recommend": "Wire transfer",
+              "asked_at": "2026-11-10T10:00:00Z",
+              "risk": "safe",
+              "question": "How should we pay the deposit?",
+              "options": [
+                {
+                  "label": "Wire transfer",
+                  "leads_to": "Zero fee"
+                },
+                {
+                  "label": "Card",
+                  "leads_to": "Instant receipt"
+                }
+              ]
+            }
+          },
+          {
+            "id": "todo_cw_wait",
+            "title": "Pick the welcome snack",
+            "notes": "",
+            "done_at": null,
+            "created_at": "2026-11-09T08:00:00Z",
+            "updated_at": "2026-11-10T10:00:00Z",
+            "origin": "conv_main",
+            "spaces": [],
+            "agents": [],
+            "quiet": false,
+            "project": "kyoto-trip",
+            "ask": {
+              "outcome": "decide",
+              "verdict": "Needs your decision",
+              "recommend": "Matcha cookies",
+              "asked_at": "2026-11-10T10:00:00Z",
+              "risk": "safe",
+              "question": "Which welcome snack?",
+              "deadline": "2026-11-13T09:00:00Z",
+              "default": "taken",
+              "for_briefing": true
+            }
+          },
+          {
+            "id": "todo_cw_sup_fail",
+            "title": "Book the luggage van",
+            "notes": "",
+            "done_at": "2026-11-10T09:30:00Z",
+            "created_at": "2026-11-10T09:25:00Z",
+            "updated_at": "2026-11-10T09:30:00Z",
+            "origin": "conv_main",
+            "start_error": "Desk Mac is offline",
+            "spaces": [],
+            "agents": [],
+            "quiet": false,
+            "project": "kyoto-trip",
+            "supervision": {
+              "supervisor": "conv_lead",
+              "state": "",
+              "reviews": [],
+              "updated_at": "2026-11-10T09:25:00Z"
+            }
+          },
+          {
+            "id": "todo_cw_merged",
+            "title": "Merge the map update",
+            "notes": "",
+            "done_at": null,
+            "created_at": "2026-11-09T08:00:00Z",
+            "updated_at": "2026-11-10T09:00:00Z",
+            "origin": "conv_main",
+            "spaces": [],
+            "agents": [],
+            "quiet": false,
+            "project": "travel-admin",
+            "delivery": {
+              "state": "merged",
+              "at": "2026-11-10T10:00:00Z"
+            }
+          },
+          {
+            "id": "todo_cw_live",
+            "title": "Publish the trip page",
+            "notes": "",
+            "done_at": null,
+            "created_at": "2026-11-09T08:00:00Z",
+            "updated_at": "2026-11-10T09:00:00Z",
+            "origin": "conv_main",
+            "spaces": [],
+            "agents": [],
+            "quiet": false,
+            "project": "travel-admin",
+            "delivery": {
+              "state": "live",
+              "at": "2026-11-10T10:30:00Z"
+            }
+          }
+        ],
+        "sessions": [],
+        "projects": {
+          "kyoto-trip": "Kyoto trip",
+          "travel-admin": "Travel admin"
+        }
+      },
+      "expected": {
+        "counts": {
+          "open": 5,
+          "needs_you": 1,
+          "in_progress": 1,
+          "sections": {
+            "needs_you": 1,
+            "can_wait": 1,
+            "working": 1,
+            "waiting": 0,
+            "todo": 1,
+            "just_finished": 1,
+            "someday": 0,
+            "done": 0
+          }
+        },
+        "places": {
+          "places": [
+            {
+              "id": "all",
+              "kind": "all",
+              "title": "",
+              "needs_you": 1
+            },
+            {
+              "id": "today",
+              "kind": "today",
+              "title": "",
+              "needs_you": 0
+            },
+            {
+              "id": "upcoming",
+              "kind": "upcoming",
+              "title": "",
+              "needs_you": 0
+            },
+            {
+              "id": "project:kyoto-trip",
+              "kind": "project",
+              "title": "Kyoto trip",
+              "project": "kyoto-trip",
+              "needs_you": 1
+            },
+            {
+              "id": "project:travel-admin",
+              "kind": "project",
+              "title": "Travel admin",
+              "project": "travel-admin",
+              "needs_you": 0
+            }
+          ],
+          "counts": {
+            "open": 5,
+            "needs_you": 1,
+            "in_progress": 1,
+            "sections": {
+              "needs_you": 1,
+              "can_wait": 1,
+              "working": 1,
+              "waiting": 0,
+              "todo": 1,
+              "just_finished": 1,
+              "someday": 0,
+              "done": 0
+            }
+          }
+        },
+        "order": {
+          "needs_you": [
+            "todo_cw_real"
+          ],
+          "can_wait": [
+            "todo_cw_wait"
+          ],
+          "working": [
+            "todo_cw_sup_fail"
+          ],
+          "todo": [
+            "todo_cw_merged"
+          ],
+          "just_finished": [
+            "todo_cw_live"
+          ]
+        }
+      }
+    },
+    {
+      "name": "parent_child_and_superseded_steps",
+      "description": "An open parent carrying a superseded failed-start child, its finished sibling, and a working child counts once in Working; a closed parent's open child is not carried and counts as its own Needs you row.",
+      "source": [
+        "docs/design/proposals/todos-redesign.md 3.4 \"Steps roll up\"",
+        "docs/design/proposals/todos-redesign.md 6.2 invariant 6",
+        "#14541 (parent/child counts and superseded children)"
+      ],
+      "input": {
+        "now": "2026-11-10T12:00:00Z",
+        "todos": [
+          {
+            "id": "todo_ps_parent",
+            "title": "Arrange airport transfer",
+            "notes": "",
+            "done_at": null,
+            "created_at": "2026-11-09T08:00:00Z",
+            "updated_at": "2026-11-09T08:00:00Z",
+            "origin": "conv_main",
+            "spaces": [],
+            "agents": [],
+            "quiet": false,
+            "project": "kyoto-trip"
+          },
+          {
+            "id": "todo_ps_fail",
+            "title": "Book the shuttle",
+            "notes": "",
+            "done_at": "2026-11-10T09:00:00Z",
+            "created_at": "2026-11-10T08:55:00Z",
+            "updated_at": "2026-11-10T09:00:00Z",
+            "origin": "conv_main",
+            "plan_id": "plan_ps",
+            "start_error": "Desk Mac is offline",
+            "spaces": [],
+            "agents": [],
+            "quiet": false,
+            "project": "kyoto-trip",
+            "part_of": "todo_ps_parent"
+          },
+          {
+            "id": "todo_ps_done",
+            "title": "Book the shuttle",
+            "notes": "",
+            "done_at": "2026-11-10T10:00:00Z",
+            "created_at": "2026-11-10T09:10:00Z",
+            "updated_at": "2026-11-10T10:00:00Z",
+            "origin": "conv_main",
+            "plan_id": "plan_ps",
+            "done_by": "auto",
+            "spaces": [],
+            "agents": [],
+            "quiet": false,
+            "project": "kyoto-trip",
+            "part_of": "todo_ps_parent",
+            "seen_at": "2026-11-10T10:15:00Z"
+          },
+          {
+            "id": "todo_ps_work",
+            "title": "Confirm shuttle stop",
+            "notes": "",
+            "done_at": null,
+            "created_at": "2026-11-10T10:05:00Z",
+            "updated_at": "2026-11-10T11:40:00Z",
+            "origin": "conv_main",
+            "spaces": [],
+            "agents": [
+              {
+                "machine_id": "m1",
+                "session_id": "s-ps-work",
+                "linked_at": "2026-11-10T10:06:00Z",
+                "title": "Shuttle stop",
+                "cwd": "/home/user/project",
+                "agent": "claude",
+                "source": "manual"
+              }
+            ],
+            "quiet": false,
+            "project": "kyoto-trip",
+            "part_of": "todo_ps_parent"
+          },
+          {
+            "id": "todo_ps_closed",
+            "title": "Book outbound flights",
+            "notes": "",
+            "done_at": "2026-11-08T10:00:00Z",
+            "created_at": "2026-11-07T08:00:00Z",
+            "updated_at": "2026-11-08T10:00:00Z",
+            "origin": "conv_main",
+            "done_by": "auto",
+            "spaces": [],
+            "agents": [],
+            "quiet": false,
+            "project": "travel-admin",
+            "seen_at": "2026-11-08T11:00:00Z"
+          },
+          {
+            "id": "todo_ps_orphan",
+            "title": "Pick aisle or window seat",
+            "notes": "",
+            "done_at": null,
+            "created_at": "2026-11-08T10:05:00Z",
+            "updated_at": "2026-11-10T11:00:00Z",
+            "origin": "conv_main",
+            "spaces": [],
+            "agents": [
+              {
+                "machine_id": "m1",
+                "session_id": "s-ps-ask",
+                "linked_at": "2026-11-08T10:06:00Z",
+                "title": "Seat choice",
+                "cwd": "/home/user/project",
+                "agent": "claude",
+                "source": "manual"
+              }
+            ],
+            "quiet": false,
+            "project": "travel-admin",
+            "part_of": "todo_ps_closed"
+          }
+        ],
+        "sessions": [
+          {
+            "machine_id": "m1",
+            "session_id": "s-ps-work",
+            "title": "Shuttle stop",
+            "status": "working",
+            "state": "working",
+            "state_since": "2026-11-10T11:40:00Z",
+            "updated_at": "2026-11-10T11:55:00Z",
+            "pending_interactions": 0,
+            "activity": "checking terminal map"
+          },
+          {
+            "machine_id": "m1",
+            "session_id": "s-ps-ask",
+            "title": "Seat choice",
+            "status": "blocked",
+            "state": "needs_you",
+            "state_since": "2026-11-10T11:00:00Z",
+            "updated_at": "2026-11-10T11:00:00Z",
+            "pending_interactions": 1,
+            "asks": "Aisle or window?"
+          }
+        ],
+        "projects": {
+          "kyoto-trip": "Kyoto trip",
+          "travel-admin": "Travel admin"
+        }
+      },
+      "expected": {
+        "counts": {
+          "open": 2,
+          "needs_you": 1,
+          "in_progress": 1,
+          "sections": {
+            "needs_you": 1,
+            "can_wait": 0,
+            "working": 1,
+            "waiting": 0,
+            "todo": 0,
+            "just_finished": 0,
+            "someday": 0,
+            "done": 1
+          }
+        },
+        "places": {
+          "places": [
+            {
+              "id": "all",
+              "kind": "all",
+              "title": "",
+              "needs_you": 1
+            },
+            {
+              "id": "today",
+              "kind": "today",
+              "title": "",
+              "needs_you": 0
+            },
+            {
+              "id": "upcoming",
+              "kind": "upcoming",
+              "title": "",
+              "needs_you": 0
+            },
+            {
+              "id": "project:kyoto-trip",
+              "kind": "project",
+              "title": "Kyoto trip",
+              "project": "kyoto-trip",
+              "needs_you": 0
+            },
+            {
+              "id": "project:travel-admin",
+              "kind": "project",
+              "title": "Travel admin",
+              "project": "travel-admin",
+              "needs_you": 1
+            }
+          ],
+          "counts": {
+            "open": 2,
+            "needs_you": 1,
+            "in_progress": 1,
+            "sections": {
+              "needs_you": 1,
+              "can_wait": 0,
+              "working": 1,
+              "waiting": 0,
+              "todo": 0,
+              "just_finished": 0,
+              "someday": 0,
+              "done": 1
+            }
+          }
+        },
+        "order": {
+          "needs_you": [
+            "todo_ps_orphan"
+          ],
+          "working": [
+            "todo_ps_parent",
+            "todo_ps_work"
+          ],
+          "just_finished": [
+            "todo_ps_fail"
+          ],
+          "done": [
+            "todo_ps_done",
+            "todo_ps_closed"
+          ]
+        }
+      }
     }
   ]
 }

@@ -542,7 +542,7 @@ func (n *Node) agyRead(root *os.Root, key, conversation string, previous *agyPan
 		return empty, nil, err
 	}
 	raw = raw[:bytes.LastIndexByte(raw, '\n')+1]
-	steps, rev := parseAgySteps(raw, conversation)
+	steps, rev := n.agyParse(key, conversation, info, raw)
 	if !slices.ContainsFunc(steps, func(step agyStep) bool { return step.Type != "" }) && len(bytes.TrimSpace(raw)) != 0 {
 		return empty, nil, errors.New("unrecognized Antigravity transcript format")
 	}
@@ -590,6 +590,63 @@ func (n *Node) agyRead(root *os.Root, key, conversation string, previous *agyPan
 		h.token += ":wake:" + h.observedWakeRevision
 	}
 	return h, files, nil
+}
+
+// agyParsesKept is how many conversations' parses agyParse keeps to go on from: the panes being watched.
+const agyParsesKept = 8
+
+// agyParsed is how far agyParse read a conversation's transcript: the file, the length and SHA-256 of the complete
+// lines it parsed, and the fold after them.
+type agyParsed struct {
+	file   os.FileInfo
+	length int
+	hash   [32]byte
+	fold   agyFold
+}
+
+// agyParse is parseAgySteps(raw, conversation) for transcript file info at key. When the file is the one it parsed last
+// time, only grew, and the bytes parsed then hash the same, only the lines after them are parsed, going on from that
+// fold: a watched pane re-parsed the whole transcript four times a second while agy wrote to it (#13470). A truncated,
+// rewritten or replaced file is parsed whole, as before.
+func (n *Node) agyParse(key, conversation string, info os.FileInfo, raw []byte) ([]agyStep, agyRevision) {
+	n.mu.Lock()
+	if n.agyParses == nil {
+		n.agyParses = newLRU[string, *agyParsed](agyParsesKept)
+	}
+	last, _ := n.agyParses.get(key)
+	n.agyParses.put(key, nil) // taken: a reader meanwhile parses on its own
+	n.mu.Unlock()
+
+	h := sha256.New()
+	fold, from := agyFold{conversation: conversation}, 0
+	if last != nil && last.fold.conversation == conversation && os.SameFile(info, last.file) && len(raw) >= last.length {
+		h.Write(raw[:last.length])
+		if [32]byte(h.Sum(nil)) == last.hash {
+			fold, from = last.fold, last.length
+		} else {
+			h.Reset()
+		}
+	}
+	fold.add(raw[from:])
+	h.Write(raw[from:])
+	sum := [32]byte(h.Sum(nil))
+
+	n.mu.Lock()
+	n.agyParses.put(key, &agyParsed{file: info, length: len(raw), hash: sum, fold: fold})
+	n.mu.Unlock()
+	return agyOwnSteps(fold.steps), fold.revision(len(raw), sum)
+}
+
+// agyOwnSteps copies a fold's steps for the caller to keep and change: the fold stays the transcript's parse, for the
+// next read to go on from, which can replace steps in place (a late arrival, a rewind, a running step that finished).
+// agyRead restores a truncated reply's full text into its copy (restoreAgyFullText), dropping restored fields from
+// TruncatedFields in place, so each step's list is copied too.
+func agyOwnSteps(steps []agyStep) []agyStep {
+	own := slices.Clone(steps)
+	for i := range own {
+		own[i].TruncatedFields = slices.Clone(own[i].TruncatedFields)
+	}
+	return own
 }
 
 type agyPageParams struct {
@@ -772,10 +829,10 @@ func (n *Node) agyPaneCall(ctx context.Context, method, id, pane string, raw jso
 		}
 	}
 	if method == "session.item" {
-		return nil, fmt.Errorf("no item"), true
+		return nil, &rpc.Error{Code: codeNotFound, Message: "no item"}, true // 404, not a gateway failure (#13470)
 	}
 	if method == "session.image" {
-		return nil, fmt.Errorf("no image"), true
+		return nil, &rpc.Error{Code: codeNotFound, Message: "no image"}, true
 	}
 	return h.page(p), nil, true
 }

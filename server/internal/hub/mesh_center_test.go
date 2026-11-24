@@ -817,3 +817,25 @@ func TestCenterLearnsWhyAMemberCannotOpenIt(t *testing.T) {
 	lap.mu.Unlock()
 	eventually(t, 30*time.Second, "through the member once it can", func() bool { return center.machines(t, tok)["lap"].Online })
 }
+
+// A request that reached the center before a member handed its credentials over was answered "no such token" and
+// cached; once the credential is handed over the device is taken at once, not after the cache entry expires.
+func TestCredsImportForgetsEarlierUnknownTokenAnswer(t *testing.T) {
+	center := startTestHub(t, hubB, "Office", nil, nil)
+	member := startTestHub(t, hubA, "家里", nil, nil)
+	joinHubs(t, member, center)
+	member.waitCenter(t, hubB)
+	center.waitCenter(t, hubB)
+	const tok = "jt_handed_over_after_a_first_request"
+	if st, _ := center.do(t, http.MethodGet, "/api/v1/machines", tok, ""); st != http.StatusUnauthorized {
+		t.Fatalf("an unknown credential: %d, want 401", st)
+	}
+	dt := db.DeviceToken{ID: "dev_late", Name: "phone", Kind: "phone", Role: roleFull}
+	raw, _ := json.Marshal(map[string]any{"tokens": []db.ExportedToken{{DeviceToken: dt, Hash: hashToken(tok)}}})
+	if _, err := center.h.meshLocalCall(context.Background(), hubA, "creds.import", raw); err != nil {
+		t.Fatal(err)
+	}
+	if st, b := center.do(t, http.MethodGet, "/api/v1/machines", tok, ""); st != http.StatusOK {
+		t.Fatalf("the credential right after the handover: %d %s, want 200", st, b)
+	}
+}

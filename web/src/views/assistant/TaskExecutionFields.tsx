@@ -2,11 +2,13 @@
 import { useEffect, useRef, useState } from "react";
 import { errorText } from "../../lib/api";
 import { modelPurpose, type ModelPurpose } from "../../lib/model-config";
-import { defaultModel, effortChoices, listedModel, machineLaunchers, providerModels, takesEffort, type MachineLaunchers } from "../../lib/launcher-models";
+import { launcherBindingState, useCanonicalLauncherBinding } from "../../lib/launcher-model-binding";
+import { machineLaunchers, providerModels, takesEffort, type MachineLaunchers } from "../../lib/launcher-models";
 import { launcherTitle } from "../../lib/provider-names";
 import { useChosenManager, useKnownDefault } from "../../lib/manager-choice";
-import { taskExecutionNeedsOwnChat, taskExecutionSummary, type Task } from "../../lib/routines";
+import { taskExecutionNeedsOwnChat, taskExecutionSummary, taskStartsFresh, type Task } from "../../lib/routines";
 import { useStore } from "../../lib/store";
+import { LauncherEffortSelect } from "../../ui/LauncherEffortSelect";
 import { ModelPicker, type ModelList } from "../../ui/ModelPicker";
 import { Button } from "../../ui/atoms";
 import { Icon } from "../../ui/icons";
@@ -70,17 +72,16 @@ export function TaskExecutionFields({ draft, saved, disabled, onChange }: { draf
       .catch((e) => { if (!controller.signal.aborted) setModelCatalog({ key: modelKey, models: { status: "error", error: errorText(e) } }); });
     return () => controller.abort();
   }, [expanded, manager, machine, launcher, reload, modelKey]);
-  const list = models.list;
-  const model = draft.model || inherited.model;
-  const selectedModel = model ? listedModel(list?.models ?? [], model) : defaultModel(list?.models ?? []);
-  const efforts = list && (takesEffort(list.agent) || selectedModel?.efforts?.length) ? effortChoices(list, draft.model || "", inherited) : [];
   const known = launchers?.launchers ?? [];
   const knownLauncher = known.find((l) => l.name === launcher);
-  const agent = knownLauncher?.agent_type || knownLauncher?.agent || list?.agent || (draft.execution?.launcher === launcher ? draft.execution.agent : "");
+  const agent = knownLauncher?.agent_type || knownLauncher?.agent || models.list?.agent || (draft.execution?.launcher === launcher ? draft.execution.agent : "");
+  const binding = launcherBindingState(models.list, draft, inherited, {
+    allowUnknown: !!models.list && (takesEffort(agent || models.list.agent, knownLauncher) || agent === "codex"),
+  });
+  // Source-chat tasks can keep historical metadata during unrelated edits (taskExecutionNeedsOwnChat).
+  useCanonicalLauncherBinding(draft.session_id && !taskStartsFresh(draft) ? undefined : binding.legacy, onChange);
   const defaultLabel = t(inheritsAssistant ? "assistant-taskeditor.follow_assistant" : "assistant-taskeditor.follow_launcher");
-  const defaultEffort = inherited.effort || selectedModel?.default_effort;
-  const defaultModelID = selectedModel?.resolved || (selectedModel?.id !== "default" ? selectedModel?.id : "");
-  const summary = taskExecutionSummary({ launcher, agent, model: model || defaultModelID, effort: draft.effort || defaultEffort }, known, defaultLabel);
+  const summary = taskExecutionSummary({ launcher, agent, model: binding.effectiveModel, effort: binding.value || binding.defaultEffort }, known, defaultLabel);
   const incompatibleOrigin = taskExecutionNeedsOwnChat(draft, saved);
   return <details onToggle={(e) => setExpanded(e.currentTarget.open)} className="rounded-card bg-inset p-3 shadow-hairline">
     <summary className="flex cursor-pointer list-none items-center gap-2 text-meta font-medium text-ink [&::-webkit-details-marker]:hidden">
@@ -106,17 +107,12 @@ export function TaskExecutionFields({ draft, saved, disabled, onChange }: { draf
       </Field>
       <div>
         <span className="mb-1 block text-label font-medium text-ink-2">{t("settings-modelconfiguration.specific_model")}</span>
-        <fieldset className="min-w-0" disabled={disabled || modelsPending}><ModelPicker models={models} model={draft.model || ""} followed={inherited} defaultLabel={defaultLabel} open={open} onToggle={() => setOpen((v) => !v)} query={query} onQuery={setQuery} search={search}
-          onPick={(model) => { if (!disabled && !modelsPending) { onChange({ model }); setOpen(false); } }} onReload={() => setReload((v) => v + 1)} custom failedNote={t("settings-modelconfiguration.list_failed")} /></fieldset>
+        <fieldset className="min-w-0" disabled={disabled || modelsPending}><ModelPicker models={models} model={binding.model} followed={inherited} defaultLabel={defaultLabel} ariaLabel={t("settings-modelconfiguration.specific_model")} open={open} onToggle={() => setOpen((v) => !v)} query={query} onQuery={setQuery} search={search}
+          onPick={(model) => { if (!disabled && !modelsPending) { onChange(binding.pickModel(model)); setOpen(false); setQuery(""); } }} onReload={() => setReload((v) => v + 1)} custom failedNote={t("settings-modelconfiguration.list_failed")} /></fieldset>
         {models.status === "error" && <p role="alert" className="mt-1 break-words text-label text-red">{models.error}</p>}
       </div>
-      <Field label={t("settings-modelconfiguration.effort")}>
-        <select className={inputClass} value={draft.effort ?? ""} disabled={disabled} onChange={(e) => onChange({ effort: e.target.value })}>
-          <option value="">{[defaultLabel, defaultEffort].filter(Boolean).join(" · ")}</option>
-          {draft.effort && !efforts.includes(draft.effort) && <option value={draft.effort}>{draft.effort}</option>}
-          {efforts.map((effort) => <option key={effort} value={effort}>{effort}</option>)}
-        </select>
-      </Field>
+      <LauncherEffortSelect {...binding} className={inputClass} defaultLabel={defaultLabel} disabled={disabled || modelsPending}
+        onChange={(effort) => onChange(binding.pickEffort(effort))} />
       <Field label={t("assistant-taskeditor.execution_directory")} note={t("assistant-taskeditor.directory_hint")}>
         <input className={inputClass} value={draft.cwd ?? ""} disabled={disabled} placeholder={t("assistant-taskeditor.directory_follow")} spellCheck={false} autoComplete="off" onChange={(e) => onChange({ cwd: e.target.value })} />
       </Field>

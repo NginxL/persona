@@ -1,13 +1,13 @@
-// Settings › Labs › Features (#13434): one switch per optional feature module (core/module-host.ts), as a configuration
-// Document the Labs page draws with the generic form, like the terminal renderer (lib/labs-terminal.ts). Kept in this
-// browser (core/module-switch.ts); a module the hub does not offer is shown, unchangeable, saying so.
+// Settings › General › Optional features (#14468): ConfigurationForm draws a switch for each registered module.
+// These shipped features have lasting per-browser preferences (core/module-switch.ts). Labs is for reversible,
+// time-limited trials with a tracking issue and an exit plan. A module the hub does not offer is shown read-only.
 import { t } from "../i18n";
 import { checkUpdate, CONFIGURATION_VERSION, ConfigurationError, type ConfigurationDocument, type ConfigurationField, type ConfigurationSource, type ConfigurationUpdate } from "../lib/configuration/contract";
 import { getState } from "../lib/store";
 import { hubServes, moduleState, registeredModules, subscribeModules } from "./module-host";
 import { MODULE_SWITCH_KEY, moduleSwitchedOff, setModuleSwitchedOff } from "./module-switch";
 
-export const MODULES_LABS_ID = "features";
+export const MODULE_FEATURES_ID = "features";
 
 /** Whether the hub offers the module (core/module-host.ts, the hub flag rule). */
 const offered = (feature: string | undefined) => hubServes(feature, getState());
@@ -30,19 +30,19 @@ function document(): ConfigurationDocument {
     title: d.title(),
     description: d.description(),
     default: true,
-    ...(offered(d.feature) ? {} : { read_only: true, disabled_reason: t("settings-labs.features_not_offered") }),
+    ...(offered(d.feature) ? {} : { read_only: true, disabled_reason: t("settings-features.features_not_offered") }),
     details: [
       { title: t("settings-labs.scope"), description: t("settings-labs.scope_browser") },
-      { title: t("settings-labs.activation"), description: t("settings-labs.features_activation") },
-      { title: t("settings-labs.rollback"), description: t("settings-labs.features_rollback") },
+      { title: t("settings-labs.activation"), description: t("settings-features.features_activation") },
+      { title: t("settings-labs.rollback"), description: t("settings-features.features_rollback") },
     ],
   }));
   return {
     schema_version: CONFIGURATION_VERSION,
-    id: MODULES_LABS_ID,
+    id: MODULE_FEATURES_ID,
     revision: revision(),
-    title: t("settings-labs.area_features"),
-    groups: [{ id: "modules", title: t("settings-labs.features_group"), description: t("settings-labs.features_hint"), fields }],
+    title: t("settings-features.area_features"),
+    groups: [{ id: "modules", title: t("settings-features.features_group"), description: t("settings-features.features_hint"), fields }],
     values: Object.fromEntries(modules.map((d) => [d.id, !moduleSwitchedOff(d.id) && moduleState(d) !== "off"])),
   };
 }
@@ -58,11 +58,11 @@ function update(u: ConfigurationUpdate): ConfigurationDocument {
   return document();
 }
 
-/** The Features source: one toggle per registered module; none registered, no source (Labs leaves it out). */
-export function modulesLabsSource(): ConfigurationSource | null {
+/** General omits Optional features when the build registers no modules. */
+export function moduleFeaturesSource(): ConfigurationSource | null {
   if (!registeredModules().length) return null;
   return {
-    key: `labs:${MODULES_LABS_ID}`,
+    key: `general:${MODULE_FEATURES_ID}`,
     read: async () => document(),
     update: async (u) => update(u),
     // a switch here or in another tab, and the hub's features (what it offers)

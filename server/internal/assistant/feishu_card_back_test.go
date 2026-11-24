@@ -54,6 +54,23 @@ func waitFeishu(seen func() (int, []string), d time.Duration, ok func(int, []str
 	}
 }
 
+// waitCardKept waits until a card of ft's Feishu bot has its message id: the post is seen by the fake before that, and a
+// node that detaches earlier finds a card with no message to close, which is then closed as answered ("Handled")
+// when its post returns, not as "Ended".
+func waitCardKept(t *testing.T, ft *fleetTest) {
+	t.Helper()
+	waitFor(t, "the Feishu card's message id kept", func() bool {
+		ft.s.fbot.mu.Lock()
+		defer ft.s.fbot.mu.Unlock()
+		for _, c := range ft.s.fbot.cards {
+			if c.MessageID != "" {
+				return true
+			}
+		}
+		return false
+	})
+}
+
 // The node's connection drops and comes back while the agent still waits on the same dialog: the Feishu card closed
 // as "Ended" asks it again, in the same message, not as a second card (#4583).
 func TestFeishuCardBackAfterTheNodeReconnects(t *testing.T) {
@@ -64,6 +81,7 @@ func TestFeishuCardBackAfterTheNodeReconnects(t *testing.T) {
 	if p, _ := waitFeishu(seen, 2*time.Second, func(p int, _ []string) bool { return p == 1 }); p != 1 {
 		t.Fatalf("first card: %d posts", p)
 	}
+	waitCardKept(t, ft)
 	s := ft.s
 	s.NodeDetached("mac") // the session still shows blocked: the card comes back at once
 	if back, _ := waitCards(s, 1, 2*time.Second); len(back) != 1 {
@@ -90,6 +108,7 @@ func TestFeishuCardThatEndedWhileTheNodeWasAwayStaysClosed(t *testing.T) {
 	if p, _ := waitFeishu(seen, 2*time.Second, func(p int, _ []string) bool { return p == 1 }); p != 1 {
 		t.Fatalf("first card: %d posts", p)
 	}
+	waitCardKept(t, ft)
 	ft.d.setSessions("mac", []proto.Session{{SessionID: "s1", Agent: "claude", Status: proto.StatusUnknown}})
 	ft.s.NodeDetached("mac")
 	ft.sessions("mac", proto.Session{SessionID: "s1", Agent: "claude", Status: proto.StatusWorking}) // back, moved on

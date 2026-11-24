@@ -112,4 +112,32 @@ describe("drawnFromView", () => {
     expect(r.sections.just_done.flatMap((g) => g.members.map((m) => m.id))).toEqual(["todo_fresh_concern"]);
     expect(r.sections.done.flatMap((g) => g.members.map((m) => m.id))).toEqual(["todo_stale_concern"]);
   });
+
+  it("maps boundary projection views deterministically into legacy sections for lossless rollback (#14541)", () => {
+    const list = [
+      // can_wait sits under waiting after real needs_you
+      todo("todo_real_ask", { view: view("needs_you", "agent_asks", { phase: "needs_you", rank: 0 }) }),
+      todo("todo_can_wait", { view: view("can_wait", "can_wait", { phase: "needs_you", can_wait: true, rank: 0 }) }),
+      // supervisor-held ask stays in working (persona_working)
+      todo("todo_sup_held", { view: view("working", "persona_working", { phase: "working", rank: 0 }) }),
+      // expired park stays in parked; real wake moves to working
+      todo("todo_parked_exp", { view: view("waiting", "parked", { phase: "waiting", rank: 0 }) }),
+      todo("todo_parked_wake", { view: view("working", "agent_running", { phase: "working", rank: 1 }) }),
+      // delivery merged stays in other; delivery live enters just_done
+      todo("todo_merged", { delivery: { state: "merged", at: ago(2) }, view: view("todo", "rest", { phase: "todo", rank: 0 }) }),
+      todo("todo_live", { delivery: { state: "live", at: ago(1) }, view: view("just_finished", "finished_unseen", { phase: "ready", line: { key: "deployed" }, rank: 0 }) }),
+      // new activity after seen_at returns to just_done
+      todo("todo_new_act", { seen_at: ago(3), view: view("just_finished", "finished_unseen", { phase: "ready", line: { key: "finished" }, rank: 1 }) }),
+    ];
+    const local = triageTodos(list, undefined, NOW);
+    const r = drawnFromView(local, NOW);
+    expect(ids(r)).toEqual({
+      waiting: [["todo_real_ask"], ["todo_can_wait"]],
+      working: [["todo_sup_held"], ["todo_parked_wake"]],
+      parked: [["todo_parked_exp"]],
+      other: [["todo_merged"]],
+      just_done: [["todo_live"], ["todo_new_act"]],
+    });
+    expect([r.open, r.shelved, r.finished, r.cancelled]).toEqual([8, 0, 0, 0]);
+  });
 });

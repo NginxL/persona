@@ -458,10 +458,22 @@ func (s *Service) leadersChange(ctx context.Context, cfg Settings, in []string) 
 			}); err != nil {
 				return "", err
 			}
+			// A lead taken out ends its direction as Unpin does: its open tasks go to main's supervision.
+			handed := 0
+			for _, id := range before {
+				if !slices.Contains(list, id) {
+					handed += s.handBackDirectionTasks(context.WithoutCancel(ctx), id)
+				}
+			}
 			s.settingsChanged(ctx)
-			return fmt.Sprintf("assistant.leaders is %q: a manually started Agent the owner explicitly puts under one keeps its ordinary "+
+			out := fmt.Sprintf("assistant.leaders is %q: a manually started Agent the owner explicitly puts under one keeps its ordinary "+
 				"supervision there. A direction lead supervises its own task_plan work, including failed starts, retry and review; "+
-				"main supervises its own tasks and receives the lead's owner-decision escalations.", list), nil
+				"main supervises its own tasks and receives the lead's owner-decision escalations.", list)
+			if handed > 0 {
+				out += fmt.Sprintf(" The %d open tasks of the leads taken out are supervised by the main conversation now, as "+
+					"agent_transfer moves a task; making a lead again does not take them back.", handed)
+			}
+			return out, nil
 		}}, nil
 }
 

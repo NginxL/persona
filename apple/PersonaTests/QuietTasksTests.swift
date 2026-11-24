@@ -19,8 +19,9 @@ struct QuietTasksTests {
         return try JSON.decoder.decode(Session.self, from: JSONSerialization.data(withJSONObject: o))
     }
 
-    private func todo(_ id: String, quiet: Bool, agents: [(String, String, released: Bool)] = [], done: Bool = false) -> TodoItem {
-        TodoItem(id: id, title: id, doneAt: done ? Date() : nil, origin: "main",
+    private func todo(_ id: String, quiet: Bool, agents: [(String, String, released: Bool)] = [], done: Bool = false,
+                      origin: String? = "main") -> TodoItem {
+        TodoItem(id: id, title: id, doneAt: done ? Date() : nil, origin: origin,
                  agents: agents.map { .init(machineID: $0.0, sessionID: $0.1, releasedAt: $0.released ? Date() : nil) },
                  quiet: quiet)
     }
@@ -96,10 +97,24 @@ struct QuietTasksTests {
     }
 
     @Test func todoBadgeLeavesOutQuietTasks() {
-        let store = TodoStore(cachedTodos: [todo("t1", quiet: true), todo("t2", quiet: false), todo("t3", quiet: false, done: true)],
+        let store = TodoStore(cachedTodos: [todo("t1", quiet: true, origin: nil), todo("t2", quiet: false, origin: nil),
+                                            todo("t3", quiet: false, done: true, origin: nil)],
                               cacheWriter: nil, hubListChanged: {})
         #expect(store.badgeCount == 1)
         #expect(store.openTodos.count == 2) // the list itself still has the quiet one
         #expect(store.quiet.todos == ["t1"])
+    }
+
+    /// A task a conversation handed out that nothing works on is its supervisor's to pick up: the badge leaves it out, as
+    /// the web's does. The owner's own to-dos, and a handed-out task waiting on the owner, still count.
+    @Test func todoBadgeLeavesOutHandedOutTasksNobodyWaitsOnTheOwnerFor() throws {
+        func decoded(_ json: String) throws -> TodoItem { try JSON.decoder.decode(TodoItem.self, from: Data(json.utf8)) }
+        let own = try decoded(#"{"id":"own","title":"buy milk"}"#)
+        let handed = try decoded(#"{"id":"handed","title":"fix the build","origin":"main"}"#)
+        let decide = try decoded(#"{"id":"decide","title":"pick a vendor","origin":"main","supervision":{"supervisor":"main","state":"needs_user"}}"#)
+        let store = TodoStore(cachedTodos: [own, handed, decide], cacheWriter: nil, hubListChanged: {})
+        #expect(store.badgeCount == 2)
+        #expect(TodoStore.countsForOwner(own) && !TodoStore.countsForOwner(handed) && TodoStore.countsForOwner(decide))
+        #expect(store.openTodos.count == 3, "the list itself still has the handed-out task")
     }
 }

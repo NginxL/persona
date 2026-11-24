@@ -4291,6 +4291,887 @@
           ]
         }
       }
+    },
+    {
+      "name": "can_wait_with_agent_asks",
+      "description": "A to-do that has a deferred can_wait decision and an active run asking the owner: row 2 (agent_asks, Needs you) beats row 4 (can_wait), and asks lists the run's real-time ask first followed by the deferred decision.",
+      "source": [
+        "docs/design/proposals/todos-redesign.md 6.3 rows 2, 4",
+        "#14541 (can_wait deferred decision vs active owner ask)"
+      ],
+      "input": {
+        "now": "2026-11-10T12:00:00Z",
+        "todo": {
+          "id": "todo_cw1",
+          "title": "Finalize the Kyoto dining list",
+          "notes": "",
+          "done_at": null,
+          "created_at": "2026-11-09T08:00:00Z",
+          "updated_at": "2026-11-10T10:00:00Z",
+          "origin": "conv_main",
+          "spaces": [],
+          "agents": [
+            {
+              "machine_id": "m1",
+              "session_id": "s-dining",
+              "linked_at": "2026-11-09T08:01:00Z",
+              "title": "Dining booking",
+              "cwd": "/home/user/project",
+              "agent": "claude",
+              "source": "manual"
+            }
+          ],
+          "quiet": false,
+          "project": "kyoto-trip",
+          "supervision": {
+            "supervisor": "conv_main",
+            "done_when": [
+              "Dinner and lunch spots are chosen"
+            ],
+            "criteria": [],
+            "state": "needs_user",
+            "round": 0,
+            "reviews": [
+              {
+                "at": "2026-11-10T10:00:00Z",
+                "verdict": "needs_user",
+                "reason": "Which tea house for afternoon break?",
+                "recommend": "Ippodo",
+                "options": [
+                  {
+                    "label": "Ippodo",
+                    "leads_to": "Counter seats near the palace"
+                  },
+                  {
+                    "label": "Tsujiri",
+                    "leads_to": "Gion main street"
+                  }
+                ],
+                "deadline": "2026-11-13T09:00:00Z",
+                "reversible": true
+              }
+            ],
+            "updated_at": "2026-11-10T10:00:00Z"
+          },
+          "ask": {
+            "outcome": "decide",
+            "verdict": "Needs your decision",
+            "recommend": "Ippodo",
+            "asked_at": "2026-11-10T10:00:00Z",
+            "risk": "safe",
+            "question": "Which tea house for afternoon break?",
+            "options": [
+              {
+                "label": "Ippodo",
+                "leads_to": "Counter seats near the palace"
+              },
+              {
+                "label": "Tsujiri",
+                "leads_to": "Gion main street"
+              }
+            ],
+            "deadline": "2026-11-13T09:00:00Z",
+            "default": "taken",
+            "responses": [
+              "decide_yourself",
+              "not_what_i_asked",
+              "explain_first"
+            ],
+            "for_briefing": true
+          }
+        },
+        "sessions": [
+          {
+            "machine_id": "m1",
+            "session_id": "s-dining",
+            "title": "Dining booking",
+            "status": "blocked",
+            "state": "needs_you",
+            "state_since": "2026-11-10T11:20:00Z",
+            "updated_at": "2026-11-10T11:20:00Z",
+            "pending_interactions": 1,
+            "asks": "Which seating time?"
+          }
+        ],
+        "interactions": [
+          {
+            "id": "ix_dining_time",
+            "machine_id": "m1",
+            "session_id": "s-dining",
+            "kind": "question",
+            "created_at": "2026-11-10T11:20:00Z",
+            "expires_at": "2026-11-10T13:20:00Z",
+            "tool_name": "AskUserQuestion",
+            "questions": [
+              {
+                "question": "Which seating time?",
+                "multi_select": false,
+                "options": [
+                  {
+                    "label": "18:30"
+                  },
+                  {
+                    "label": "20:00"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "expected": {
+        "view": {
+          "phase": "needs_you",
+          "section": "needs_you",
+          "reason": "agent_asks",
+          "line": {
+            "key": "agent_asks",
+            "args": {
+              "run": "Dining booking",
+              "text": "Which seating time?"
+            }
+          },
+          "since": "2026-11-10T11:20:00Z",
+          "rank": 0,
+          "asks": [
+            {
+              "id": "run:m1/s-dining@2026-11-10T11:20:00Z",
+              "kind": "question",
+              "home": "run",
+              "text": "Which seating time?",
+              "run": {
+                "machine_id": "m1",
+                "session_id": "s-dining",
+                "title": "Dining booking"
+              },
+              "risk": "safe",
+              "lockscreen": "answer",
+              "interaction": "ix_dining_time"
+            },
+            {
+              "id": "todo:decision@2026-11-10T10:00:00Z",
+              "kind": "decision",
+              "home": "todo",
+              "round": "2026-11-10T10:00:00Z",
+              "text": "Which tea house for afternoon break?",
+              "recommend": "Ippodo",
+              "options": [
+                {
+                  "label": "Ippodo",
+                  "leads_to": "Counter seats near the palace"
+                },
+                {
+                  "label": "Tsujiri",
+                  "leads_to": "Gion main street"
+                }
+              ],
+              "can_wait": true,
+              "default_at": "2026-11-13T09:00:00Z",
+              "risk": "safe",
+              "lockscreen": "answer"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "supervisor_held_vs_real_owner_ask",
+      "description": "Two runs on one to-do: one card is held by the supervisor (delegating) and another asks the owner directly. Needs you wins on the real owner ask, and only the real ask is listed.",
+      "source": [
+        "docs/design/proposals/todos-redesign.md 6.3 rows 2, 5",
+        "#14541 (supervisor-held ask vs real owner ask)"
+      ],
+      "input": {
+        "now": "2026-11-10T12:00:00Z",
+        "todo": {
+          "id": "todo_sh1",
+          "title": "Coordinate Kyoto logistics",
+          "notes": "",
+          "done_at": null,
+          "created_at": "2026-11-09T08:00:00Z",
+          "updated_at": "2026-11-10T10:00:00Z",
+          "origin": "conv_main",
+          "spaces": [],
+          "agents": [
+            {
+              "machine_id": "m1",
+              "session_id": "s-held",
+              "linked_at": "2026-11-10T09:00:00Z",
+              "title": "Luggage courier",
+              "cwd": "/home/user/project",
+              "agent": "claude",
+              "source": "manual"
+            },
+            {
+              "machine_id": "m1",
+              "session_id": "s-real",
+              "linked_at": "2026-11-10T08:00:00Z",
+              "title": "Seat reservation",
+              "cwd": "/home/user/project",
+              "agent": "claude",
+              "source": "manual"
+            }
+          ],
+          "quiet": false,
+          "project": "kyoto-trip"
+        },
+        "sessions": [
+          {
+            "machine_id": "m1",
+            "session_id": "s-held",
+            "title": "Luggage courier",
+            "status": "blocked",
+            "state": "needs_you",
+            "state_since": "2026-11-10T11:00:00Z",
+            "updated_at": "2026-11-10T11:00:00Z",
+            "pending_interactions": 1,
+            "asks": "Confirm courier pickup time"
+          },
+          {
+            "machine_id": "m1",
+            "session_id": "s-real",
+            "title": "Seat reservation",
+            "status": "blocked",
+            "state": "needs_you",
+            "state_since": "2026-11-10T11:25:00Z",
+            "updated_at": "2026-11-10T11:25:00Z",
+            "pending_interactions": 1,
+            "attention_reason": "Approve payment command"
+          }
+        ],
+        "interactions": [
+          {
+            "id": "ix_courier_held",
+            "machine_id": "m1",
+            "session_id": "s-held",
+            "kind": "question",
+            "created_at": "2026-11-10T11:00:00Z",
+            "tool_name": "AskUserQuestion",
+            "delegating": true,
+            "questions": [
+              {
+                "question": "Confirm courier pickup time",
+                "multi_select": false,
+                "options": [
+                  {
+                    "label": "Morning"
+                  },
+                  {
+                    "label": "Afternoon"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "id": "ix_seat_real",
+            "machine_id": "m1",
+            "session_id": "s-real",
+            "kind": "permission",
+            "created_at": "2026-11-10T11:25:00Z",
+            "expires_at": "2026-11-10T13:25:00Z",
+            "tool_name": "Bash",
+            "tool_input": {
+              "command": "python3 reserve_seats.py --confirm"
+            }
+          }
+        ]
+      },
+      "expected": {
+        "view": {
+          "phase": "needs_you",
+          "section": "needs_you",
+          "reason": "agent_asks",
+          "line": {
+            "key": "agent_asks",
+            "args": {
+              "run": "Seat reservation",
+              "text": "Approve payment command"
+            }
+          },
+          "since": "2026-11-10T11:25:00Z",
+          "rank": 0,
+          "asks": [
+            {
+              "id": "run:m1/s-real@2026-11-10T11:25:00Z",
+              "kind": "tool",
+              "home": "run",
+              "text": "Approve payment command",
+              "run": {
+                "machine_id": "m1",
+                "session_id": "s-real",
+                "title": "Seat reservation"
+              },
+              "risk": "open",
+              "lockscreen": "open_only",
+              "interaction": "ix_seat_real"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "multi_agent_asks_same_todo",
+      "description": "Two active runs attached to the same to-do both wait on the owner: Needs you, line and since from the oldest asking run, and asks lists both oldest first regardless of agent link order.",
+      "source": [
+        "docs/design/proposals/todos-redesign.md 6.3 row 2",
+        "#14541 (multi-agent asks on one to-do)"
+      ],
+      "input": {
+        "now": "2026-11-10T12:00:00Z",
+        "todo": {
+          "id": "todo_ma1",
+          "title": "Prepare the conference booth",
+          "notes": "",
+          "done_at": null,
+          "created_at": "2026-11-09T08:00:00Z",
+          "updated_at": "2026-11-10T10:00:00Z",
+          "origin": "conv_main",
+          "spaces": [],
+          "agents": [
+            {
+              "machine_id": "m1",
+              "session_id": "s-newer",
+              "linked_at": "2026-11-10T09:30:00Z",
+              "title": "Banner print",
+              "cwd": "/home/user/project",
+              "agent": "claude",
+              "source": "manual"
+            },
+            {
+              "machine_id": "m2",
+              "session_id": "s-older",
+              "linked_at": "2026-11-10T08:30:00Z",
+              "title": "Badge order",
+              "cwd": "/home/user/project",
+              "agent": "claude",
+              "source": "manual"
+            }
+          ],
+          "quiet": false,
+          "project": "kyoto-trip"
+        },
+        "sessions": [
+          {
+            "machine_id": "m1",
+            "session_id": "s-newer",
+            "title": "Banner print",
+            "status": "blocked",
+            "state": "needs_you",
+            "state_since": "2026-11-10T11:45:00Z",
+            "updated_at": "2026-11-10T11:45:00Z",
+            "pending_interactions": 1,
+            "attention_reason": "Approve upload script"
+          },
+          {
+            "machine_id": "m2",
+            "session_id": "s-older",
+            "title": "Badge order",
+            "status": "blocked",
+            "state": "needs_you",
+            "state_since": "2026-11-10T11:15:00Z",
+            "updated_at": "2026-11-10T11:15:00Z",
+            "pending_interactions": 1,
+            "asks": "Which lanyard color?"
+          }
+        ],
+        "interactions": [
+          {
+            "id": "ix_banner_tool",
+            "machine_id": "m1",
+            "session_id": "s-newer",
+            "kind": "permission",
+            "created_at": "2026-11-10T11:45:00Z",
+            "expires_at": "2026-11-10T13:45:00Z",
+            "tool_name": "Bash"
+          },
+          {
+            "id": "ix_badge_q",
+            "machine_id": "m2",
+            "session_id": "s-older",
+            "kind": "question",
+            "created_at": "2026-11-10T11:15:00Z",
+            "expires_at": "2026-11-10T13:15:00Z",
+            "tool_name": "AskUserQuestion",
+            "questions": [
+              {
+                "question": "Which lanyard color?",
+                "multi_select": false,
+                "options": [
+                  {
+                    "label": "Navy"
+                  },
+                  {
+                    "label": "Slate"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "expected": {
+        "view": {
+          "phase": "needs_you",
+          "section": "needs_you",
+          "reason": "agent_asks",
+          "line": {
+            "key": "agent_asks",
+            "args": {
+              "run": "Badge order",
+              "text": "Which lanyard color?"
+            }
+          },
+          "since": "2026-11-10T11:15:00Z",
+          "rank": 0,
+          "asks": [
+            {
+              "id": "run:m2/s-older@2026-11-10T11:15:00Z",
+              "kind": "question",
+              "home": "run",
+              "text": "Which lanyard color?",
+              "run": {
+                "machine_id": "m2",
+                "session_id": "s-older",
+                "title": "Badge order"
+              },
+              "risk": "safe",
+              "lockscreen": "answer",
+              "interaction": "ix_badge_q"
+            },
+            {
+              "id": "run:m1/s-newer@2026-11-10T11:45:00Z",
+              "kind": "tool",
+              "home": "run",
+              "text": "Approve upload script",
+              "run": {
+                "machine_id": "m1",
+                "session_id": "s-newer",
+                "title": "Banner print"
+              },
+              "risk": "open",
+              "lockscreen": "open_only",
+              "interaction": "ix_banner_tool"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "steps_with_superseded_child",
+      "description": "A plan with a failed-start step superseded by a finished sibling step plus an active working step: the superseded step counts as done (2/3) and never pulls the parent into Needs you.",
+      "source": [
+        "docs/design/proposals/todos-redesign.md 3.4 \"Steps roll up\"",
+        "docs/design/proposals/todos-redesign.md 6.3 \"Rule 1a\"",
+        "#14541 (parent/child counts and superseded children)"
+      ],
+      "input": {
+        "now": "2026-11-10T12:00:00Z",
+        "todo": {
+          "id": "todo_sc0",
+          "title": "Arrange airport transfer",
+          "notes": "",
+          "done_at": null,
+          "created_at": "2026-11-09T08:00:00Z",
+          "updated_at": "2026-11-09T08:00:00Z",
+          "origin": "conv_main",
+          "spaces": [],
+          "agents": [],
+          "quiet": false,
+          "project": "kyoto-trip"
+        },
+        "steps": [
+          {
+            "id": "todo_sc1",
+            "title": "Book the shuttle",
+            "notes": "",
+            "done_at": "2026-11-10T09:00:00Z",
+            "created_at": "2026-11-10T08:55:00Z",
+            "updated_at": "2026-11-10T09:00:00Z",
+            "origin": "conv_main",
+            "plan_id": "plan_sc",
+            "start_error": "Desk Mac is offline",
+            "spaces": [],
+            "agents": [],
+            "quiet": false,
+            "part_of": "todo_sc0"
+          },
+          {
+            "id": "todo_sc2",
+            "title": "Book the shuttle",
+            "notes": "",
+            "done_at": "2026-11-10T10:00:00Z",
+            "created_at": "2026-11-10T09:10:00Z",
+            "updated_at": "2026-11-10T10:00:00Z",
+            "origin": "conv_main",
+            "plan_id": "plan_sc",
+            "done_by": "auto",
+            "spaces": [],
+            "agents": [],
+            "quiet": false,
+            "part_of": "todo_sc0"
+          },
+          {
+            "id": "todo_sc3",
+            "title": "Confirm shuttle stop",
+            "notes": "",
+            "done_at": null,
+            "created_at": "2026-11-10T10:05:00Z",
+            "updated_at": "2026-11-10T11:40:00Z",
+            "origin": "conv_main",
+            "spaces": [],
+            "agents": [
+              {
+                "machine_id": "m1",
+                "session_id": "s-shuttle",
+                "linked_at": "2026-11-10T10:06:00Z",
+                "title": "Shuttle stop",
+                "cwd": "/home/user/project",
+                "agent": "claude",
+                "source": "manual"
+              }
+            ],
+            "quiet": false,
+            "part_of": "todo_sc0"
+          }
+        ],
+        "sessions": [
+          {
+            "machine_id": "m1",
+            "session_id": "s-shuttle",
+            "title": "Shuttle stop",
+            "status": "working",
+            "state": "working",
+            "state_since": "2026-11-10T11:40:00Z",
+            "updated_at": "2026-11-10T11:55:00Z",
+            "pending_interactions": 0,
+            "activity": "checking terminal map"
+          }
+        ]
+      },
+      "expected": {
+        "view": {
+          "phase": "working",
+          "section": "working",
+          "reason": "agent_running",
+          "line": {
+            "key": "working",
+            "args": {
+              "run": "Shuttle stop",
+              "step": "Confirm shuttle stop",
+              "text": "checking terminal map"
+            }
+          },
+          "since": "2026-11-10T11:40:00Z",
+          "rank": 0,
+          "steps": {
+            "done": 2,
+            "total": 3
+          }
+        }
+      }
+    },
+    {
+      "name": "delivery_merged_not_live",
+      "description": "A PR is merged (delivery state merged, not live) with no open PR and no unread run: unlike live, merged does not settle the to-do into Just finished, so it stays in To do with activity dated by delivery.at.",
+      "source": [
+        "docs/design/proposals/todos-redesign.md 6.3 rows 9, 13, 14",
+        "#14541 (merged vs live delivery state)"
+      ],
+      "input": {
+        "now": "2026-11-10T12:00:00Z",
+        "todo": {
+          "id": "todo_dm1",
+          "title": "Publish the packing checklist",
+          "notes": "",
+          "done_at": null,
+          "created_at": "2026-11-08T08:00:00Z",
+          "updated_at": "2026-11-10T09:00:00Z",
+          "origin": "conv_main",
+          "spaces": [],
+          "agents": [
+            {
+              "machine_id": "m1",
+              "session_id": "s-pack",
+              "linked_at": "2026-11-08T08:01:00Z",
+              "title": "Packing checklist",
+              "cwd": "/home/user/project",
+              "agent": "claude",
+              "source": "manual"
+            }
+          ],
+          "quiet": false,
+          "pr_url": "https://github.com/example/travel/pull/42",
+          "pr_status": {
+            "url": "https://github.com/example/travel/pull/42",
+            "state": "merged",
+            "draft": false,
+            "checked_at": "2026-11-10T11:55:00Z"
+          },
+          "delivery": {
+            "state": "merged",
+            "at": "2026-11-10T10:00:00Z"
+          }
+        },
+        "sessions": [
+          {
+            "machine_id": "m1",
+            "session_id": "s-pack",
+            "title": "Packing checklist",
+            "status": "idle",
+            "state": "idle",
+            "state_since": "2026-11-10T09:30:00Z",
+            "updated_at": "2026-11-10T09:30:00Z",
+            "pending_interactions": 0
+          }
+        ]
+      },
+      "expected": {
+        "view": {
+          "phase": "todo",
+          "section": "todo",
+          "reason": "rest",
+          "next_change_at": "2026-11-12T10:00:00Z",
+          "rank": 0
+        }
+      }
+    },
+    {
+      "name": "new_activity_after_seen_at",
+      "description": "The owner saw the to-do at 09:00, and its run finished a newer turn at 11:00: seen clears because last activity moved past seen_at, so it returns to Just finished as finished_unseen with no 24-hour timer.",
+      "source": [
+        "docs/design/proposals/todos-redesign.md 6.3 row 9",
+        "#14541 (new activity after seen_at)"
+      ],
+      "input": {
+        "now": "2026-11-10T12:00:00Z",
+        "todo": {
+          "id": "todo_na1",
+          "title": "Draft the museum schedule",
+          "notes": "",
+          "done_at": null,
+          "created_at": "2026-11-09T08:00:00Z",
+          "updated_at": "2026-11-10T08:30:00Z",
+          "origin": "conv_main",
+          "spaces": [],
+          "agents": [
+            {
+              "machine_id": "m1",
+              "session_id": "s-museum",
+              "linked_at": "2026-11-09T08:01:00Z",
+              "title": "Museum schedule",
+              "cwd": "/home/user/project",
+              "agent": "claude",
+              "source": "manual"
+            }
+          ],
+          "quiet": false,
+          "seen_at": "2026-11-10T09:00:00Z"
+        },
+        "sessions": [
+          {
+            "machine_id": "m1",
+            "session_id": "s-museum",
+            "title": "Museum schedule",
+            "status": "idle",
+            "state": "unread",
+            "state_since": "2026-11-10T11:00:00Z",
+            "updated_at": "2026-11-10T11:00:00Z",
+            "pending_interactions": 0
+          }
+        ]
+      },
+      "expected": {
+        "view": {
+          "phase": "ready",
+          "section": "just_finished",
+          "reason": "finished_unseen",
+          "line": {
+            "key": "finished",
+            "args": {
+              "run": "Museum schedule"
+            }
+          },
+          "since": "2026-11-10T11:00:00Z",
+          "rank": 0
+        }
+      }
+    },
+    {
+      "name": "parked_until_expired_stays_waiting",
+      "description": "A parked task whose until time already passed stays in Waiting until the hub's real wake moves it: time passing alone never changes the view.",
+      "source": [
+        "docs/design/proposals/todos-redesign.md 6.3 row 8",
+        "docs/assistant/todo-status-sop.md \"Decision table\" rule 5a",
+        "#14541 (parked expiry)"
+      ],
+      "input": {
+        "now": "2026-11-10T12:00:00Z",
+        "todo": {
+          "id": "todo_pe1",
+          "title": "Confirm the pottery class",
+          "notes": "",
+          "done_at": null,
+          "created_at": "2026-11-08T08:00:00Z",
+          "updated_at": "2026-11-09T15:00:00Z",
+          "origin": "conv_main",
+          "spaces": [],
+          "agents": [
+            {
+              "machine_id": "m1",
+              "session_id": "s-pottery",
+              "linked_at": "2026-11-08T08:01:00Z",
+              "title": "Pottery class",
+              "cwd": "/home/user/project",
+              "agent": "claude",
+              "source": "manual"
+            }
+          ],
+          "quiet": false,
+          "supervision": {
+            "supervisor": "conv_main",
+            "done_when": [
+              "Studio confirms the afternoon slot"
+            ],
+            "criteria": [],
+            "state": "parked",
+            "parked": {
+              "reason": "Waiting for the studio to reply",
+              "until": "2026-11-10T09:00:00Z",
+              "waiting_on": "external_event",
+              "count": 1
+            },
+            "round": 0,
+            "reviews": [
+              {
+                "at": "2026-11-09T15:00:00Z",
+                "verdict": "parked",
+                "reason": "Waiting for the studio to reply",
+                "until": "2026-11-10T09:00:00Z",
+                "waiting_on": "external_event",
+                "parks": 1
+              }
+            ],
+            "updated_at": "2026-11-09T15:00:00Z"
+          }
+        },
+        "sessions": [
+          {
+            "machine_id": "m1",
+            "session_id": "s-pottery",
+            "title": "Pottery class",
+            "status": "idle",
+            "state": "idle",
+            "state_since": "2026-11-09T14:50:00Z",
+            "updated_at": "2026-11-09T14:50:00Z",
+            "pending_interactions": 0
+          }
+        ]
+      },
+      "expected": {
+        "view": {
+          "phase": "waiting",
+          "section": "waiting",
+          "reason": "parked",
+          "line": {
+            "key": "parked",
+            "args": {
+              "reason": "Waiting for the studio to reply",
+              "until": "2026-11-10T09:00:00Z"
+            }
+          },
+          "since": "2026-11-09T15:00:00Z",
+          "rank": 0
+        }
+      }
+    },
+    {
+      "name": "parked_real_wake_agent_running",
+      "description": "Once a real wake starts the parked task's run again, Working (row 5) beats the lingering park (row 8).",
+      "source": [
+        "docs/design/proposals/todos-redesign.md 6.3 rows 5, 8",
+        "#14541 (parked real wake)"
+      ],
+      "input": {
+        "now": "2026-11-10T12:00:00Z",
+        "todo": {
+          "id": "todo_pw1",
+          "title": "Confirm the pottery class",
+          "notes": "",
+          "done_at": null,
+          "created_at": "2026-11-08T08:00:00Z",
+          "updated_at": "2026-11-09T15:00:00Z",
+          "origin": "conv_main",
+          "spaces": [],
+          "agents": [
+            {
+              "machine_id": "m1",
+              "session_id": "s-pottery-wake",
+              "linked_at": "2026-11-08T08:01:00Z",
+              "title": "Pottery class",
+              "cwd": "/home/user/project",
+              "agent": "claude",
+              "source": "manual"
+            }
+          ],
+          "quiet": false,
+          "supervision": {
+            "supervisor": "conv_main",
+            "done_when": [
+              "Studio confirms the afternoon slot"
+            ],
+            "criteria": [],
+            "state": "parked",
+            "parked": {
+              "reason": "Waiting for the studio to reply",
+              "until": "2026-11-10T09:00:00Z",
+              "waiting_on": "external_event",
+              "count": 1
+            },
+            "round": 0,
+            "reviews": [
+              {
+                "at": "2026-11-09T15:00:00Z",
+                "verdict": "parked",
+                "reason": "Waiting for the studio to reply",
+                "until": "2026-11-10T09:00:00Z",
+                "waiting_on": "external_event",
+                "parks": 1
+              }
+            ],
+            "updated_at": "2026-11-09T15:00:00Z"
+          }
+        },
+        "sessions": [
+          {
+            "machine_id": "m1",
+            "session_id": "s-pottery-wake",
+            "title": "Pottery class",
+            "status": "working",
+            "state": "working",
+            "state_since": "2026-11-10T11:50:00Z",
+            "updated_at": "2026-11-10T11:55:00Z",
+            "pending_interactions": 0,
+            "activity": "reading the studio confirmation"
+          }
+        ]
+      },
+      "expected": {
+        "view": {
+          "phase": "working",
+          "section": "working",
+          "reason": "agent_running",
+          "line": {
+            "key": "working",
+            "args": {
+              "run": "Pottery class",
+              "text": "reading the studio confirmation"
+            }
+          },
+          "since": "2026-11-10T11:50:00Z",
+          "rank": 0
+        }
+      }
     }
   ]
 }

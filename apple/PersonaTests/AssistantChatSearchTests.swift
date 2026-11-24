@@ -1,4 +1,5 @@
 import Foundation
+import SwiftUI
 import Testing
 @testable import Persona
 import PersonaWire
@@ -44,15 +45,16 @@ struct AssistantChatSearchTests {
         #expect(AssistantSearchMerge.rows(local: [local], answer: nil, known: [local]).map(\.hit) == [nil])
     }
 
-    @Test func emphasizesTheMatchCountingUTF16() throws {
+    @Test func tintsTheMatchCountingUTF16() throws {
         let a = try JSON.decoder.decode(AssistantSearchAnswer.self, from: Data(Self.answerJSON.utf8))
         let text = AssistantSearchMerge.snippet(a.results[0].hits[0])
-        let bold = text.runs.filter { $0.inlinePresentationIntent == .stronglyEmphasized }.map { String(text[$0.range].characters) }
-        #expect(bold == ["BlueLane"])
+        let matches = text.runs.filter { $0.backgroundColor == Theme.accentTint }
+        #expect(matches.map { String(text[$0.range].characters) } == ["BlueLane"])
+        #expect(matches.allSatisfy { $0.foregroundColor == .primary && $0.inlinePresentationIntent == nil })
         // ranges past the end or reversed are clipped, never crash
         let odd = AssistantSearchAnswer.Hit(itemID: "x", seq: 1, role: "user", snippet: "ab", ranges: [[1, 99], [5, 2], [0]])
-        let oddBold = AssistantSearchMerge.snippet(odd).runs.filter { $0.inlinePresentationIntent == .stronglyEmphasized }
-        #expect(oddBold.count == 1)
+        let clipped = AssistantSearchMerge.snippet(odd)
+        #expect(clipped.runs.filter { $0.backgroundColor == Theme.accentTint }.map { String(clipped[$0.range].characters) } == ["b"])
     }
 
     @Test func startsTheLineJustBeforeTheMatch() throws {
@@ -63,8 +65,8 @@ struct AssistantChatSearchTests {
         let text = AssistantSearchMerge.snippet(hit)
         let shown = String(text.characters)
         #expect(shown == "…" + String(lead.suffix(AssistantSearchMerge.lead)) + "BlueLane 看看")
-        let bold = text.runs.filter { $0.inlinePresentationIntent == .stronglyEmphasized }.map { String(text[$0.range].characters) }
-        #expect(bold == ["BlueLane"])
+        let matches = text.runs.filter { $0.backgroundColor == Theme.accentTint }.map { String(text[$0.range].characters) }
+        #expect(matches == ["BlueLane"])
         // a match near the start is left as it is
         let near = AssistantSearchAnswer.Hit(itemID: "y", seq: 1, role: "user", snippet: "我想去 BlueLane", ranges: [[4, 12]])
         #expect(String(AssistantSearchMerge.snippet(near).characters) == "我想去 BlueLane")
@@ -75,7 +77,7 @@ struct AssistantChatSearchTests {
         let early = AssistantSearchAnswer.Hit(itemID: "z", seq: 1, role: "user", snippet: "我想去青石巷 BlueLane 看看", ranges: [[7, 15]])
         let big = AssistantSearchMerge.snippet(early, lead: AssistantSearchMerge.lead(for: .xxxLarge))
         #expect(String(big.characters) == "…巷 BlueLane 看看") // the space before the match counts as one of the two
-        #expect(big.runs.filter { $0.inlinePresentationIntent == .stronglyEmphasized }.map { String(big[$0.range].characters) } == ["BlueLane"])
+        #expect(big.runs.filter { $0.backgroundColor == Theme.accentTint }.map { String(big[$0.range].characters) } == ["BlueLane"])
     }
 
     @Test func asksOnceTheKeysSettleAndNeverAgainOfAManagerWithoutIt() async throws {

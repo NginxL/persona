@@ -33,46 +33,72 @@ func (s *Service) ensureLegacySubagentsLoaded(ctx context.Context) {
 		f.subagentsMu.Unlock()
 		return
 	}
-	var legacy []struct {
+	type legacySubagent struct {
 		machine, session string
 		link             subagentLink
 	}
+	var legacy []legacySubagent
 	for _, dt := range s.dispatched(ctx) {
 		if dt.FromSession == "" || dt.Session == "" {
 			continue
 		}
-		legacy = append(legacy, struct {
-			machine, session string
-			link             subagentLink
-		}{dt.Machine, dt.Session, subagentLink{
+		legacy = append(legacy, legacySubagent{dt.Machine, dt.Session, subagentLink{
 			ParentMachine: dt.FromMachine,
 			ParentSession: dt.FromSession,
 			Origin:        proto.SubagentOriginDispatch,
 		}})
 	}
-	todosOK := s.ensureTodosLoaded(ctx) == nil
-	if todosOK {
-		s.todos.mu.RLock()
+	addSpawned := func(machine, session, source, via string) {
+		if source != sourceSpawned || via == "" || machine == "" || session == "" {
+			return
+		}
+		pm, ps, ok := strings.Cut(via, "/")
+		if !ok || pm == "" || ps == "" {
+			return
+		}
+		legacy = append(legacy, legacySubagent{machine, session, subagentLink{
+			ParentMachine: pm,
+			ParentSession: ps,
+			Origin:        proto.SubagentOriginSpawned,
+		}})
+	}
+	// Read legacy task_spawn parent links directly instead of calling ensureTodosLoaded:
+	// decorateInventory runs on the session-list hot path (and under sentMu), so it must neither
+	// run todo startup side effects (supervision backfills, session-list republishing) nor pull
+	// ensureTodosLoaded into decorateInventory's static call-graph SCC (which causes escape
+	// analysis to spill listedSession's single-row []proto.Session{row} onto the heap).
+	todosOK := false
+	s.todos.mu.RLock()
+	todosLoaded := s.todos.loaded
+	if todosLoaded {
 		for _, td := range s.todos.todos {
 			for _, a := range td.Agents {
-				if a.Source != sourceSpawned || a.Via == "" || a.MachineID == "" || a.SessionID == "" {
-					continue
-				}
-				pm, ps, ok := strings.Cut(a.Via, "/")
-				if !ok || pm == "" || ps == "" {
-					continue
-				}
-				legacy = append(legacy, struct {
-					machine, session string
-					link             subagentLink
-				}{a.MachineID, a.SessionID, subagentLink{
-					ParentMachine: pm,
-					ParentSession: ps,
-					Origin:        proto.SubagentOriginSpawned,
-				}})
+				addSpawned(a.MachineID, a.SessionID, a.Source, a.Via)
 			}
 		}
-		s.todos.mu.RUnlock()
+		todosOK = true
+	}
+	s.todos.mu.RUnlock()
+	if !todosLoaded {
+		if st := s.todoDB(); st != nil {
+			if alist, err := st.ListAllTodoAgents(ctx); err != nil {
+				s.logf("subagent index: load legacy todo agents: %v", err)
+			} else {
+				for _, a := range alist {
+					addSpawned(a.MachineID, a.SessionID, a.Source, a.Via)
+				}
+				todosOK = true
+			}
+		} else {
+			s.todos.mu.RLock()
+			for _, td := range s.todos.todos {
+				for _, a := range td.Agents {
+					addSpawned(a.MachineID, a.SessionID, a.Source, a.Via)
+				}
+			}
+			s.todos.mu.RUnlock()
+			todosOK = true
+		}
 	}
 	f.subagentsMu.Lock()
 	for _, item := range legacy {

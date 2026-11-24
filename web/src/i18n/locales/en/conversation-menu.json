@@ -17,7 +17,7 @@
   "make_leader": "Pin",
   "end_leader": "Unpin",
   "leader_made": "Pinned “{title}”",
-  "leader_ended": "Unpinned “{title}”: its tasks keep their lead",
+  "leader_ended": "Unpinned “{title}”: its open tasks went back to the main chat's supervision",
   "leader_failed": "Couldn't change it: {error}",
   "delete": "Delete…",
   "make_leader_confirm": "Confirm Pin",

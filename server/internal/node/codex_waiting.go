@@ -97,7 +97,7 @@ func codexBusyStarting(text string) bool { return strings.Contains(text, "Starti
 // The folder trust dialog and an update offer are answered on the way as
 // waitCodexThread does. nil once the box shows with the model known; errCodexBoxLate when codex runs but its box did
 // not come in time; the launcher's failure (codex-start's line) at once.
-func (n *Node) waitCodexBox(ctx context.Context, pane string, maxWait time.Duration) error {
+func (n *Node) waitCodexBox(ctx context.Context, pane string, maxWait time.Duration, exit ...*paneStartExit) error {
 	deadline := time.Now().Add(maxWait)
 	for time.Now().Before(deadline) {
 		select {
@@ -109,8 +109,8 @@ func (n *Node) waitCodexBox(ctx context.Context, pane string, maxWait time.Durat
 		if err != nil {
 			continue
 		}
-		if i := strings.LastIndex(text, codexStartError); i >= 0 {
-			return errors.New(strings.TrimSpace(strings.SplitN(text[i:], "\n", 2)[0]))
+		if err := n.codexStartupFailure(ctx, pane, text, exit); err != nil {
+			return err
 		}
 		if n.answerCodexStartDialog(ctx, pane, text) {
 			continue

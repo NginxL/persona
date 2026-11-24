@@ -12,7 +12,7 @@ import (
 
 // The hub types some messages into conversations as the user would, for the model: a quiet task's notice
 // (assistant/task_notice), a scheduled task's run (assistant/task_run), a wake-up (agents/wake), the continue after a
-// usage limit reset (agents/limit_continue), the background tasks
+// usage limit reset (agents/limit_continue) or on a backup launcher (agents/limit_fallback_continue), the background tasks
 // a node restart stopped (assistant/lost_tasks), news of an inbox item for a conversation it was handed to
 // (inbox/handoff_note), how a question asked without waiting ended (assistant/ask_later). The model reads them as they are; the apps show one line instead
 // (docs/protocol/protocol.md "Messages injected by Persona"). ParseInjected reads them back off the transcript's text, so old lines are
@@ -79,6 +79,13 @@ var noticeStates = map[string]string{"做完了": "done", "在等用户": "needs
 
 var noticeLines = map[string]string{"done": "做完了", "needs": "在等你", "interrupted": "被打断了", "failed": "没开起来"}
 
+// ContinuesOwnWork says whether in is Persona going on with the conversation's own work: the continuation once a
+// usage limit reset (agents/limit_continue) or on a backup launcher (agents/limit_fallback_continue), or a wake for
+// what it waits on (agents/wake). Such a message starts neither another task nor a background round.
+func ContinuesOwnWork(in *proto.Injected) bool {
+	return in != nil && (in.State == "limit_continue" || in.State == "limit_fallback" || in.State == "wake")
+}
+
 // ParseInjected says what text is when it is one of the messages Persona writes for the model; nil for anything
 // else (what the user wrote stays theirs: only the templates' exact shapes are taken).
 func ParseInjected(text string) *proto.Injected {
@@ -112,6 +119,10 @@ func ParseInjected(text string) *proto.Injected {
 	case head == "<persona-limit-continue />" && strings.TrimSpace(rest) != "":
 		return &proto.Injected{Kind: proto.InjectedFollowup, State: "limit_continue", Line: "用量额度重置了，Persona 让它接着做"}
 	case strings.HasPrefix(head, "<persona-limit-continue"):
+		return nil
+	case head == LimitFallbackMarker && strings.TrimSpace(rest) != "":
+		return &proto.Injected{Kind: proto.InjectedFollowup, State: "limit_fallback", Line: "用量额度用完了，Persona 换了个启动器让它接着做"}
+	case strings.HasPrefix(head, "<persona-limit-fallback"):
 		return nil
 	case strings.HasPrefix(head, limitContinueHead):
 		// Only hubs that write it mark it: it is not in the shared fixtures the apps' own recognition runs.

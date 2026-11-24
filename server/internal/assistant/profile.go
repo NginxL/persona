@@ -177,6 +177,10 @@ type Settings struct {
 	// Leaders are the side conversations the user made leaders (#3133, supervise_leader.go): a task one hands out with
 	// task_plan is supervised by it instead of the main conversation. Empty (the default): only the main one supervises.
 	Leaders []string `json:"leaders,omitempty"`
+	// LimitFallbacks are the launchers, first choice first, that a conversation the owner relies on goes on with when a
+	// subscription's usage limit stops it, until that limit resets (#14435, limit_fallback.go). Empty (the default):
+	// it waits for the reset as before. The assistant writes it through persona_settings; PUT /api/v1/assistant does not.
+	LimitFallbacks []string `json:"limit_fallbacks,omitempty"`
 	// BriefingWaits tunes only the deterministic wait rows in morning/evening facts: the briefing module's setting
 	// (internal/modules/briefing, Waits), kept here as stored, also while the module is off. Nil uses the module's
 	// defaults (the supervision thresholds); changes go through persona_settings' ordinary owner approval (modules.go),
@@ -217,6 +221,12 @@ type Settings struct {
 	// branches). nil is off (the default): each round starts from its first turn with only that round's facts and tools
 	// (supervise_round.go).
 	BackgroundSupervisorKeepsContext *bool `json:"background_supervisor_keeps_context,omitempty"`
+	// ChatReplyRelay: after a conversation wrote into a Lark chat as the user, other people's new messages there are
+	// told to it (chat_reply.go). nil is off (the default); on while true, and turning it off drops those still queued.
+	ChatReplyRelay *bool `json:"chat_reply_relay,omitempty"`
+	// ChatReplyHinted: the one-time hint that the feature exists was given to a conversation (chat_reply.go). The
+	// assistant writes it itself; PUT /api/v1/assistant does not.
+	ChatReplyHinted bool `json:"chat_reply_hinted,omitempty"`
 	// BackgroundSupervisor is the background supervisor's conversation, on BackgroundSupervisorMachineID, started at
 	// BackgroundSupervisorAt: made on first use, "" until then. BackgroundSupervisorAnnounced: the main conversation
 	// was told once that it follows up its tasks. The assistant writes these itself; PUT /api/v1/assistant does not.

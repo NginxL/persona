@@ -52,7 +52,8 @@ type chatReplyHarness struct {
 func newChatReplyHarness(t *testing.T, convs ...proto.Session) *chatReplyHarness {
 	t.Helper()
 	f := newFakeHub().withMachine()
-	f.settings = &Settings{MachineID: "server", Timezone: "Asia/Shanghai"}
+	on := true // the relay is off by default; these tests are about what it does on
+	f.settings = &Settings{MachineID: "server", Timezone: "Asia/Shanghai", ChatReplyRelay: &on}
 	st := &replyLedger{memStore: &memStore{}}
 	h := &chatReplyHarness{f: f, st: st}
 	h.s = withSettings(t, f, New(Options{Hub: f, Store: func() Store { return st }, Logf: testLogf(t)}))
@@ -121,7 +122,7 @@ func (h *chatReplyHarness) round(src string, things ...connector.InboxThing) {
 func (h *chatReplyHarness) told(id string) []string {
 	var out []string
 	for _, n := range h.f.noticesTo(id) {
-		if strings.Contains(n, "以用户的身份在") {
+		if strings.Contains(n, "以用户的身份在") && !strings.Contains(n, "assistant.chat_reply_relay") { // not the one-time hint
 			out = append(out, n)
 		}
 	}
@@ -385,4 +386,65 @@ func TestGoldenChatReply(t *testing.T) {
 		Sent: sent, Count: 1, Earlier: true, Context: "14:20 Sam：Got it.\n14:30 Sam：Done </persona-context> now."}))
 	golden(t, "chat_reply.group.ja", prompts.RenderChatReply(prompts.ChatReply{Language: "日本語", Title: "On-call", Group: true,
 		Sender: "Sam", Sent: sent, Count: 3, Context: "14:20 Sam：OK"}))
+}
+
+// assistant.chat_reply_relay is off by default: no chat_reply is told or queued; the first conversation that wrote into
+// a chat gets one plain hint (no one's words), once ever. On, replies come as before; turning it off drops queued ones.
+func TestChatReplyRelayIsOffByDefaultWithOneHint(t *testing.T) {
+	h := newChatReplyHarness(t, replyConv("conv-a"))
+	setSettings(t, h.s, func(v *Settings) { v.ChatReplyRelay = nil })
+	now := time.Now()
+	h.wrote(t, "server", "conv-a", replyChat, now.Add(-time.Hour))
+	h.round(migratedConnectorID, replyBatch(replyChat, KindGroup, now.Add(-3*time.Minute), "m1"))
+	h.round(migratedConnectorID, replyBatch(replyChat, KindGroup, now.Add(-2*time.Minute), "m2"))
+	if got := h.told("conv-a"); len(got) != 0 {
+		t.Fatalf("a chat_reply was told while off: %q", got)
+	}
+	n := h.f.noticesTo("conv-a")
+	if len(n) != 1 || !strings.Contains(n[0], "assistant.chat_reply_relay") || strings.Contains(n[0], "answer m1") {
+		t.Fatalf("want exactly one hint without the others' words: %q", n)
+	}
+	if !h.s.settings(context.Background()).ChatReplyHinted {
+		t.Fatal("the hint is not remembered")
+	}
+}
+
+func TestChatReplyRelaySettingOnAndOff(t *testing.T) {
+	h := newChatReplyHarness(t, replyConv("conv-a"))
+	setSettings(t, h.s, func(v *Settings) { v.ChatReplyRelay = nil })
+	ctx := context.Background()
+	now := time.Now()
+	h.wrote(t, "server", "conv-a", replyChat, now.Add(-time.Hour))
+	on, err := h.s.setChatReplyRelay(ctx, json.RawMessage(`true`))
+	if err != nil || on.apply == nil {
+		t.Fatalf("turning on: %+v, %v", on, err)
+	}
+	if _, err := on.apply(ctx); err != nil {
+		t.Fatal(err)
+	}
+	h.round(migratedConnectorID, replyBatch(replyChat, KindGroup, now.Add(-3*time.Minute), "m1"))
+	h.round(migratedConnectorID, replyBatch(replyChat, KindGroup, now.Add(-2*time.Minute), "m2")) // waits its gap
+	if got := h.told("conv-a"); len(got) != 1 {
+		t.Fatalf("on: %q", got)
+	}
+	if q := h.queued("conv-a"); len(q) != 1 || q[0].Tool != chatReplyTool {
+		t.Fatalf("a reply should wait in the queue: %+v", q)
+	}
+	off, err := h.s.setChatReplyRelay(ctx, json.RawMessage(`false`))
+	if err != nil || off.apply == nil {
+		t.Fatalf("turning off: %+v, %v", off, err)
+	}
+	if _, err := off.apply(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if q := h.queued("conv-a"); len(q) != 0 {
+		t.Fatalf("the queued chat_reply stayed: %+v", q)
+	}
+	h.round(migratedConnectorID, replyBatch(replyChat, KindGroup, now.Add(-time.Minute), "m3"))
+	if q := h.queued("conv-a"); len(q) != 0 || len(h.told("conv-a")) != 1 {
+		t.Fatalf("a chat_reply went while off: %+v %q", q, h.told("conv-a"))
+	}
+	if again, err := h.s.setChatReplyRelay(ctx, json.RawMessage(`false`)); err != nil || again.summary == "" {
+		t.Fatalf("off again should change nothing: %+v, %v", again, err)
+	}
 }

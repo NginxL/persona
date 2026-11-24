@@ -59,7 +59,7 @@ func taskTurnSource(t Todo, items []proto.Item) (from, source string) {
 		if injected != nil {
 			// These resume this session's work, rather than introduce another task.
 			// Continue scanning: a queued peer message still makes the turn a side exchange.
-			if injected.Kind == proto.InjectedFollowup && (injected.State == "limit_continue" || injected.State == "wake") {
+			if injected.Kind == proto.InjectedFollowup && prompts.ContinuesOwnWork(injected) {
 				continue
 			}
 			return from, "injected"

@@ -178,6 +178,11 @@ export function useDirectionName(id: string): string | undefined {
   return useSyncExternalStore(subscribe, name, name);
 }
 
+/** The currently cached direction names without triggering a fetch. */
+export function useCachedDirectionNames(): ReadonlyMap<string, string> {
+  return useSyncExternalStore(subscribe, snapshot, snapshot);
+}
+
 const countsSnapshot = () => counts;
 
 /** The current leaders' counts (read with useDirectionNames, which asks for them). */

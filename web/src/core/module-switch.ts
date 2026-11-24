@@ -1,8 +1,8 @@
-// Turning a module off in this browser (#13434, docs/web/web.md "Modules"): Settings › Labs › Features, drawn by the
-// generic configuration form (core/module-labs.ts). Every module is on by default, so an existing browser sees no
-// change; switching one off makes it absent here (core/module-host.ts) and is undone by switching it on again.
+// Settings › General › Optional features (docs/web/web.md "Modules") uses the generic configuration form
+// (core/module-features.ts) for these lasting browser preferences. Labs owns time-limited experiments.
+// A module defaults to on. Switching it off makes it absent here (core/module-host.ts) until it is switched on again.
 //
-// Scope: this browser only (localStorage), as everything else on the Labs page. It grants nothing and reaches neither
+// Scope: this browser only (localStorage). It grants nothing and reaches neither
 // the hub nor another device: a module the hub does not serve stays absent whatever is stored here.
 //
 // Storage: `persona.modules.off`, a JSON array of the module ids switched off; nothing stored while every one is on.

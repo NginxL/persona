@@ -24,7 +24,7 @@ export function failureKind(kind: string | undefined): string {
   return blockReason(kind ?? "");
 }
 
-export function LauncherSection({ machine, records, onRecords }: { machine: Machine; records: readonly LauncherHealthRecord[]; onRecords: (records: LauncherHealthRecord[]) => void }) {
+export function LauncherSection({ machine, records, onRecords, onReload }: { machine: Machine; records: readonly LauncherHealthRecord[]; onRecords: (records: LauncherHealthRecord[]) => void; onReload?: () => void }) {
   const mine = records.filter((r) => r.machine === machine.id);
   const failing = mine.filter(launcherFailing);
   const [list, setList] = useState<Launcher[] | null | undefined>(undefined);
@@ -50,6 +50,8 @@ export function LauncherSection({ machine, records, onRecords }: { machine: Mach
       const r = await api<{ records?: LauncherHealthRecord[] }>(`/launchers/health/check?machine=${enc(machine.id)}&launcher=${enc(launcher)}`, { method: "POST", timeout: 180_000 });
       const got = (r.records ?? []).filter((x) => x.launcher === launcher);
       onRecords(got);
+      // No record for it (#14534): the one shown may be gone or newer on the hub, so the sheet shows what it holds now.
+      if (!got.length) onReload?.();
       const now = got[0];
       setChecked((c) => ({ ...c, [launcher]: !now ? t("machines-alerts.launcher_no_result") : launcherFailing(now) ? t("machines-alerts.launcher_still_failing") : t("machines-alerts.launcher_works") }));
     } catch (e) {

@@ -1,11 +1,13 @@
 """Launch diagnostics must fail closed without exposing another simulator or raw output."""
 from datetime import datetime, timedelta, timezone
+import io
 import json
 import os
 from pathlib import Path
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import unittest
 from unittest import mock
@@ -758,6 +760,22 @@ class LiveLaunchTests(unittest.TestCase):
         self.assertEqual(self.live.exit_code, 7)
         self.assertIn("command-failure", (self.destination / "live-launch.status.txt").read_text())
         self.assertFalse((self.destination / "live-launch.json").exists())
+
+    def test_eof_waits_for_the_completed_command_status(self):
+        live = launch.LiveLog(["/usr/bin/log"], self.destination,
+                              START + timedelta(minutes=15), UDID, launch.BUNDLE)
+        live.start = START
+        process = mock.Mock()
+        process.stdout = io.BytesIO(b"")
+        process.poll.return_value = None  # EOF was visible before the child was reaped.
+        process.wait.side_effect = lambda timeout: 7
+        live.process = process
+        live.thread = threading.Thread(target=live.read)
+        live.thread.start()
+        live.thread.join(timeout=3)
+        self.assertFalse(live.thread.is_alive())
+        self.assertEqual(live.exit_code, 7)
+        process.wait.assert_called_once_with(timeout=2)
 
     def test_omitted_deadline_keeps_scope_window_for_filter_and_watchdog(self):
         """`deadline=None` must not clamp the live end to startup.

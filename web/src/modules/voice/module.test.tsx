@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 // The voice module (#13431, docs/web/web.md "Voice chat" and "Modules"): it reaches the chat only through the four chat
 // slots. On (the default, and with any hub that publishes no module flags), the composer offers the call through
-// `composer.trailingAction`; off (Settings › Labs › Features, or a hub that publishes module flags without module.voice),
+// `composer.trailingAction`; off (Settings › General › Optional features, or a hub that publishes module flags without module.voice),
 // there is no button, no mark, and none of its code or strings is requested.
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";

@@ -236,7 +236,7 @@ func (n *Node) startCodex(ctx context.Context, launch host.Launcher, cwd, launch
 		}
 		if err := ctx.Err(); err != nil {
 			if prepared != nil {
-				prepared.unsubscribe()
+				prepared.discard()
 			}
 			return nil, err
 		}
@@ -253,7 +253,7 @@ func (n *Node) startCodex(ctx context.Context, launch host.Launcher, cwd, launch
 		noAltScreen := slices.Contains(argv, "--no-alt-screen")
 		defer func() {
 			if !keep {
-				prepared.unsubscribe()
+				prepared.discard()
 			}
 		}()
 		argv = []string{argv[0], "--remote", prepared.server.spec.Endpoint}
@@ -316,12 +316,13 @@ func (n *Node) startCodex(ctx context.Context, launch host.Launcher, cwd, launch
 		return nil, err
 	}
 	defer done()
+	exited := paneStartExit{file: file}
 	var id string
 	if prepared != nil {
 		id = prepared.raw
-		err = n.waitCodexBox(ctx, pane, codexStartWait)
+		err = n.waitCodexBox(ctx, pane, codexStartWait, &exited)
 	} else if waiting {
-		err = n.waitCodexBox(ctx, pane, codexStartWait)
+		err = n.waitCodexBox(ctx, pane, codexStartWait, &exited)
 		if errors.Is(err, errCodexBoxLate) {
 			// Codex runs but its box has not come up yet: the row all the same, and its tab stays. Nothing is queued in it
 			// that could run later; the first message waits for the box itself (codexBoxFor).
@@ -329,7 +330,7 @@ func (n *Node) startCodex(ctx context.Context, launch host.Launcher, cwd, launch
 			err = nil
 		}
 	} else {
-		id, err = n.waitCodexThread(ctx, pane, cwd, prompt, began)
+		id, err = n.waitCodexThread(ctx, pane, cwd, prompt, began, &exited)
 	}
 	if err != nil {
 		shown, _ := n.readPane(ctx, pane, "recent-unwrapped", 30)
@@ -345,10 +346,15 @@ func (n *Node) startCodex(ctx context.Context, launch host.Launcher, cwd, launch
 		// A pane it did not open (a switch from Claude Code, engine_switch.go) is the user's terminal and is never
 		// closed: the switch quits what the start left in it (clearPane).
 		if adoptedPane(ctx) == nil {
-			identify, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
-			start.session = n.failedCodexSession(identify, pane, began)
-			cancel()
+			if prepared == nil {
+				identify, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+				start.session = n.failedCodexSession(identify, pane, began)
+				cancel()
+			}
 			cleanupErr = n.closeFailedCodexStart(ctx, start)
+		}
+		if prepared != nil && (cleanupErr != nil || adoptedPane(ctx) != nil) {
+			prepared.path = "" // the pane may still be using it
 		}
 		if cleanupErr != nil {
 			n.mu.Lock()
@@ -460,7 +466,7 @@ func (n *Node) unclaimCodexThread(id string) {
 // the shell's resolved working directory, or -C as given), begun after the launch, whose first user message is the
 // prompt. Codex's own dialogs on the way are answered as the user would for a start they asked
 // for: the folder is trusted (they chose it), an update is skipped. A launcher that fails ends the wait at once.
-func (n *Node) waitCodexThread(ctx context.Context, pane, cwd, prompt string, began time.Time) (string, error) {
+func (n *Node) waitCodexThread(ctx context.Context, pane, cwd, prompt string, began time.Time, exit ...*paneStartExit) (string, error) {
 	poll := n.readinessPoll()
 	maxWait := codexStartWait
 	deadline := time.Now().Add(maxWait)
@@ -500,8 +506,8 @@ func (n *Node) waitCodexThread(ctx context.Context, pane, cwd, prompt string, be
 		if err != nil {
 			continue
 		}
-		if i := strings.LastIndex(text, codexStartError); i >= 0 {
-			return "", errors.New(strings.TrimSpace(strings.SplitN(text[i:], "\n", 2)[0]))
+		if err := n.codexStartupFailure(ctx, pane, text, exit); err != nil {
+			return "", err
 		}
 		if keys := codexTrustKeys(text); keys != nil {
 			_ = n.sendKeys(ctx, pane, keys...)

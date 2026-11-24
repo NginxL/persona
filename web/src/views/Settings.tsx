@@ -67,6 +67,7 @@ import { builtinRows, loadLaunchers, rcFilesOf, rcGroups, syncStateText, type La
 import { TerminalModeRow } from "./settings/TerminalModeSetting";
 import { AgentOpenRow } from "./settings/AgentOpenSetting";
 import { AGENT_KINDS, ASSISTANT_TABS, categoryState, FROM_LIST, isCoreTab, isModuleTab, itemIsPage, itemState, navGroups, openedFromSub, redirectLegacySettings, settingsAt, settingsHref, SENT_SUB, stepsToList, tabInfo, TAB_INFO, type AgentTab, type SettingsSection, type Tab } from "./settings/nav";
+import { moduleFeaturesSource } from "../core/module-features";
 import { useModuleStates } from "../core/module-host";
 import { ModuleSettingsPage } from "../core/ModuleSettingsPage";
 import { searchSettings, type SearchGroup } from "./settings/search";
@@ -153,8 +154,9 @@ export function tokens(n: number): string {
 // the sidebar (NavRow). Every other category draws with the Settings chunk as before.
 const Extensions = lazyPage(() => import("./settings/Extensions").then((m) => m.Extensions));
 const Connectors = lazyPage(() => import("./settings/Connectors").then((m) => m.Connectors));
-// Labs and its configuration form come with their own chunk, on first open (src/startup-preload.ts FIRST_SCREEN_BUDGET)
+// Labs and the shared configuration form load on first use.
 const LabsSettings = lazyPage(() => import("./settings/Labs").then((m) => m.LabsSettings));
+const ModuleFeaturesForm = lazyPage(() => import("./settings/configuration/ConfigurationForm").then((m) => m.ConfigurationForm));
 const TAB_PAGES: Partial<Record<Tab, { preload: () => Promise<unknown> }>> = { extensions: Extensions, connectors: Connectors };
 // a failed load is not kept (lazyPage): opening the page asks again, and PageBoundary shows the failure then
 const preloadTab = (k: Tab) => void TAB_PAGES[k]?.preload().catch(() => {});
@@ -627,6 +629,7 @@ function General({ onModel }: { onModel: () => void }) {
   const theme = useTheme();
   const replyMotion = useReplyMotionSetting();
   const starred = useStarredSetting();
+  const features = moduleFeaturesSource();
 
   const themes: { k: Theme; label: string; icon: IconName }[] = [
     { k: "system", label: t("language.system"), icon: "monitor" },
@@ -673,6 +676,11 @@ function General({ onModel }: { onModel: () => void }) {
       <DesktopSettings />
       <StartPageGroup />
       <SidebarPagesGroup />
+      {features && (
+        <div className="mb-6">
+          <Suspense fallback={<Loading />}><ModuleFeaturesForm source={features} /></Suspense>
+        </div>
+      )}
 
       <section id="settings-translation" className="scroll-mt-4">
         <TranslationSettings onConfigure={onModel} />

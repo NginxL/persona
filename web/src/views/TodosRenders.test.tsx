@@ -40,7 +40,8 @@ vi.mock("./assistant/Supervision", async (orig) => {
 });
 
 const { getState, putTodo, upsertSession, refreshTodos } = await import("../lib/store");
-const { TodosView } = await import("./Todos");
+const { applyLeadersEvent, resetDirectionNames } = await import("../lib/direction-names");
+const { ReviewChecklist, TodosView } = await import("./Todos");
 const { t } = await import("../i18n");
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -78,6 +79,7 @@ beforeEach(async () => {
 afterEach(async () => {
   await act(async () => root.unmount());
   host.remove();
+  resetDirectionNames();
   seed(before);
 });
 
@@ -117,8 +119,71 @@ describe("todo rows on a sessions push", () => {
     await act(async () => { row().click(); });
     const detail = host.querySelector('[data-testid="review-checklist"]')!;
     expect(detail.textContent).toContain("go test: PASS");
-    expect(detail.textContent).toContain("agent:m1/s2");
+    expect(detail.querySelector('[data-testid="review-evidence-author"]')?.textContent).toBe("s2");
+    expect(detail.textContent).not.toContain("agent:m1/s2");
     expect(detail.querySelector("time")?.dateTime).toBe(now);
+  });
+
+  it("renders readable evidence authors in ReviewChecklist and scopes lookups to the todo manager", async () => {
+    const { makeSessionLookup } = await import("../lib/todos");
+    await act(async () => {
+      applyLeadersEvent([{ id: "dir-1", name: "Release Train" }]);
+    });
+    seed({
+      assistant: {
+        main: "main-conv",
+        conversations: [
+          session("dir-1", { assistant: true, title: "Old Direction Title" }),
+          session("conv-1", { assistant: true, title: "Weekly Triage" }),
+        ],
+      },
+    });
+    const lookup = makeSessionLookup([
+      session("m1", { machine_id: "m1", session_id: "s2", title: "Fix login tests" }),
+    ]);
+    const baseSup = {
+      supervisor: "dir-1",
+      done_when: ["Direction check", "Conversation check", "Unknown supervisor", "Agent check", "Missing agent", "Judge check", "Unknown format"],
+      criteria: [
+        { criterion: "Direction check", state: "met" as const, evidence: "ok", by: "supervisor:dir-1" },
+        { criterion: "Conversation check", state: "met" as const, evidence: "ok", by: "supervisor:conv-1" },
+        { criterion: "Unknown supervisor", state: "met" as const, evidence: "ok", by: "supervisor:agy-231f5e13-secret" },
+        { criterion: "Agent check", state: "met" as const, evidence: "ok", by: "agent:m1/s2" },
+        { criterion: "Missing agent", state: "met" as const, evidence: "ok", by: "agent:m1/gone-session" },
+        { criterion: "Judge check", state: "met" as const, evidence: "ok", by: "judge" },
+        { criterion: "Unknown format", state: "met" as const, evidence: "ok", by: "raw:internal-999" },
+      ],
+    };
+    const defaultTodo: Todo = { ...todo("tc", "Checklist", "s2"), supervision: baseSup };
+    await act(async () => root.render(<ReviewChecklist todo={defaultTodo} lookup={lookup} />));
+    const authors = () => [...host.querySelectorAll('[data-testid="review-evidence-author"]')].map((el) => el.textContent);
+    expect(authors()).toEqual([
+      "Release Train",
+      "Weekly Triage",
+      t("assistant-tasks.evidence_author_supervisor"),
+      "Fix login tests",
+      t("assistant-tasks.evidence_author_agent"),
+      t("assistant-tasks.evidence_author_reviewer"),
+      t("assistant-tasks.evidence_author_reviewer"),
+    ]);
+    expect(host.textContent).not.toContain("supervisor:");
+    expect(host.textContent).not.toContain("agy-231f5e13");
+    expect(host.textContent).not.toContain("agent:m1/");
+    expect(host.textContent).not.toContain("gone-session");
+    expect(host.textContent).not.toContain("internal-999");
+
+    // Cross-manager todo must not leak the default manager's direction name, conversation title, or session title.
+    const otherManagerTodo: Todo = { ...defaultTodo, manager: "other-mgr" };
+    await act(async () => root.render(<ReviewChecklist todo={otherManagerTodo} lookup={lookup} />));
+    expect(authors()).toEqual([
+      t("assistant-tasks.evidence_author_supervisor"),
+      t("assistant-tasks.evidence_author_supervisor"),
+      t("assistant-tasks.evidence_author_supervisor"),
+      t("assistant-tasks.evidence_author_agent"),
+      t("assistant-tasks.evidence_author_agent"),
+      t("assistant-tasks.evidence_author_reviewer"),
+      t("assistant-tasks.evidence_author_reviewer"),
+    ]);
   });
   it("keeps the selected Needs you detail neutral while working retains its orange tint", async () => {
     const { TODO_STATUS_INFO } = await import("../lib/todos");

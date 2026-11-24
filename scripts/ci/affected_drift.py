@@ -38,10 +38,8 @@ import sys
 import tempfile
 
 ROOT = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(ROOT / "scripts/ci"))
-sys.path.insert(0, str(ROOT / "scripts/operations"))
-import paths  # noqa: E402
-import pr_watch_verify  # noqa: E402
+# Lane comparison imports paths.py and the watcher lazily: check-fast --each's
+# frozen reader index needs only the standard library and tracked Git matches.
 
 # CI's platform lanes. scripts is "**" in CI, so it is left out of the lane comparison.
 LANES = ("server", "web", "android", "apple", "core", "runtimes", "desktop", "image")
@@ -64,15 +62,32 @@ _APPLE_SKIP = "SKIP  apple/** builds and tests"
 # named and reader differences cannot be listed in ALLOWED.
 Disagreement = namedtuple("Disagreement", "lane side reason detail")
 
-# The differences that are meant, each with the reason. A row is (lane, side, patterns, reason). A path is explained
-# when it matches one of the patterns (fnmatch: * matches / too).
+
+def _comparison():
+    """Load lane inputs only for comparison, not for check-fast's reader index."""
+    global paths, pr_watch_verify, ALLOWED
+    if "paths" in globals():
+        return
+    sys.path.insert(0, str(ROOT / "scripts/ci"))
+    sys.path.insert(0, str(ROOT / "scripts/operations"))
+    import paths as lane_paths
+    import pr_watch_verify as watcher
+    paths, pr_watch_verify = lane_paths, watcher
+    ALLOWED = ALLOWED_ROWS(paths)
+    _lane_constants(paths)
+
+
+# A named path difference; its human-readable reason is attached by compare.
 _NAMED = "check-fast names it instead (the apple SKIP line, or the INFO line of the CI lanes it does not run)"
 _READERS = "; the reader check holds check-fast to every one"
 _SAMPLE_CONSUMERS = ("apple/Persona/Views/Machines/MachinesView.swift",
                      "android/feature/machines/src/main/kotlin/persona/feature/machines/MachineConcern.kt")
 _SAMPLE_REASON = ("internal/hub's wire samples name these client decoders as the samples' consumers without reading "
                   "them; check-fast runs internal/hub for them, CI's server lane does not watch them")
-ALLOWED = (
+
+
+def ALLOWED_ROWS(lane_paths):
+    return (
     # Lanes check-fast never runs: they need a toolchain or a build that takes minutes.
     ("android", "ci", ("**",), "check-fast never runs Gradle; " + _NAMED),
     ("apple", "ci", ("**",), "check-fast never runs Xcode; " + _NAMED),
@@ -83,7 +98,7 @@ ALLOWED = (
     ("apple", "watcher", ("**",), "the watcher has no Mac; it records a policy line for the apple lane instead"),
     # CI watches whole directories that tests outside the lane's tree read; check-fast runs the tests that read the
     # changed file, and names the lane when none does.
-    ("server", "ci", tuple(paths.SERVER_CLIENT_INPUTS),
+    ("server", "ci", tuple(lane_paths.SERVER_CLIENT_INPUTS),
      "CI runs the server lane for every client contract source; check-fast runs the Go tests that read the file"
      + _READERS),
     ("server", "ci", ("spec/**",),
@@ -105,24 +120,24 @@ ALLOWED = (
     ("web", "ci", ("scripts/ci/web.sh", ".github/workflows/*"), "the lane's own runner and workflow"),
     ("runtimes", "ci", ("scripts/ci/runtimes.sh", ".github/workflows/*"), "the lane's own runner and workflow"),
     # CI's selection itself changed: CI runs every lane.
-    ("server", "ci", tuple(paths.SHARED), "CI's selection itself: every lane runs"),
-    ("web", "ci", tuple(paths.SHARED), "CI's selection itself: every lane runs"),
-    ("runtimes", "ci", tuple(paths.SHARED), "CI's selection itself: every lane runs"),
+    ("server", "ci", tuple(lane_paths.SHARED), "CI's selection itself: every lane runs"),
+    ("web", "ci", tuple(lane_paths.SHARED), "CI's selection itself: every lane runs"),
+    ("runtimes", "ci", tuple(lane_paths.SHARED), "CI's selection itself: every lane runs"),
 )
 
-# The server lane's inputs outside server/ whose Go readers check-fast runs instead of the lane. sdk/go and sdk/ts/src
-# are left out: check-fast runs sdk/go's own module and the trusted adapter's tests for them, and the Go tests that
-# name SDK paths name them inside a generated extension (internal/extmgr) or guard the plugins' imports.
-GO_READ_INPUTS = tuple(pattern for pattern in paths.FILTERS["server"]
-                       if not pattern.startswith(("server/", "sdk/", "scripts/ci/", ".github/"))
-                       and pattern != "scripts/test/go_trimpath.sh")
-# Where a Go test's reads are held to check-fast's plan and to CI's server lane: those inputs, and the whole of each
-# tree CI watches only in part (apple/, android/: the client contract sources), so a client file a Go test reads but
-# CI's server lane does not watch is a gap too.
-GO_READ_SCOPE = GO_READ_INPUTS + tuple(sorted({pattern.split("/")[0] + "/**" for pattern in paths.SERVER_CLIENT_INPUTS}))
-# The runtimes lane's shared inputs (fixtures and schemas), whose runtime readers check-fast runs instead of the lane.
-RUNTIME_READ_INPUTS = tuple(pattern for pattern in paths.FILTERS["runtimes"]
-                            if not pattern.startswith(("integrations/", "sdk/ts/", "scripts/ci/", ".github/")))
+
+def _lane_constants(lane_paths):
+    global GO_READ_INPUTS, GO_READ_SCOPE, RUNTIME_READ_INPUTS
+    # The server lane's inputs outside server/ whose Go readers check-fast runs instead of the lane.
+    GO_READ_INPUTS = tuple(pattern for pattern in lane_paths.FILTERS["server"]
+                           if not pattern.startswith(("server/", "sdk/", "scripts/ci/", ".github/"))
+                           and pattern != "scripts/test/go_trimpath.sh")
+    GO_READ_SCOPE = GO_READ_INPUTS + tuple(sorted({pattern.split("/")[0] + "/**"
+                                                   for pattern in lane_paths.SERVER_CLIENT_INPUTS}))
+    RUNTIME_READ_INPUTS = tuple(pattern for pattern in lane_paths.FILTERS["runtimes"]
+                                if not pattern.startswith(("integrations/", "sdk/ts/", "scripts/ci/", ".github/")))
+
+
 # The scripts suites check-fast leaves to a dedicated check (script_test_add), and that check's plan line.
 DEDICATED = {
     "scripts/test/test_external_service_refs.py": "external service refs",
@@ -198,6 +213,7 @@ class Readers:
     """
 
     def __init__(self, root=ROOT, tracked_paths=None):
+        _comparison()
         self.root = Path(root)
         self.files = sorted(tracked_paths if tracked_paths is not None else tracked(self.root))
         self.file_set = set(self.files)
@@ -296,11 +312,13 @@ class Readers:
 
 
 def ci_lanes(path):
+    _comparison()
     return {lane for lane, on in paths.select([path]).items() if on and lane in LANES}
 
 
 def watcher_lanes(path):
     """The lanes the watcher runs for a PR that changes only this path (not a test-only test/fix PR)."""
+    _comparison()
     return set(pr_watch_verify.watcher_lanes(paths.select([path]), [path])) & set(LANES)
 
 
@@ -334,6 +352,88 @@ def check_fast_plans(path_list, root=ROOT):
     return plans
 
 
+def _reader_regex(path):
+    """The exact extended regex check-fast.sh uses for a single changed path."""
+    if path.startswith("spec/fixtures/"):
+        return 'spec/fixtures|"spec", *"fixtures"'
+    if path.startswith("schema/") and path.count("/") >= 2:
+        family = re.escape(path.split("/")[1])
+        return 'schema/%s|"schema", *"%s"' % (family, family)
+    if path.startswith("integrations/") and path.count("/") >= 2:
+        return 'integrations/|"integrations"'
+    if path == "scripts/test/server_test_env.py":
+        return r"server_test_env\.py"
+    if path.startswith("docs/"):
+        return re.escape(path)
+    return None
+
+
+def _git_reader_lines(root):
+    result = subprocess.run(["git", "grep", "-nE", r'spec/fixtures|"spec", *"fixtures"|schema/|"schema", *|'
+                            r'integrations/|"integrations"|server_test_env\.py|docs/|"(apple|android)/[^"]*"',
+                            "--", "server/*_test.go"], cwd=root, capture_output=True, text=True, timeout=120)
+    if result.returncode not in (0, 1):
+        raise RuntimeError("the --each Go reader index could not search the tracked tests: " + result.stderr[-500:])
+    return [line for line in result.stdout.splitlines() if not re.match(r"^[^:]*:[0-9]+:\s*//", line)]
+
+
+def reader_plan(path_list, root=ROOT):
+    """The server/runtime readers for each path in a frozen --each plan.
+
+    Go matching uses the same regex as check-fast.sh, applied to one indexed
+    set of matching tracked-test lines rather than a fresh git process for every
+    client/document path. Only literal filepath.Join components count, as in the
+    shell reader. Client paths additionally require a whole quoted path; a longer
+    sample description that merely mentions a file is not a read.
+    """
+    lines = _git_reader_lines(root)
+    server_patterns = {path: _reader_regex(path) for path in path_list}
+    regexes = {path: re.compile(pattern) for path, pattern in server_patterns.items() if pattern is not None}
+    server = {path: set() for path in path_list}
+    for line in lines:
+        source = line.split(":", 1)[0]
+        if not source.startswith("server/") or not source.endswith("_test.go"):
+            continue
+        package = posixpath.dirname(source)[len("server/"):]
+        text = line.split(":", 2)[-1]
+        for path, regex in regexes.items():
+            if regex.search(text):
+                server[path].add(package)
+        for match in re.finditer(r'"(apple|android)/[^"]*"', text):
+            name = match.group()[1:-1]
+            if name in server:
+                server[name].add(package)
+    runtime = {path: set() for path in path_list}
+    result = subprocess.run(["git", "grep", "-nE", "(spec|schema)/[A-Za-z0-9_.-]", "--", "integrations/*", "sdk/ts/*"],
+                            cwd=root, capture_output=True, text=True, timeout=120)
+    if result.returncode not in (0, 1):
+        raise RuntimeError("the --each runtime reader index could not search tracked packages: " + result.stderr[-500:])
+    for line in result.stdout.splitlines():
+        if re.match(r"^[^:]*:[0-9]+:\s*(//|\*|#)", line):
+            continue
+        source = line.split(":", 1)[0]
+        if source.startswith("integrations/") and source.count("/") >= 2:
+            owner = "/".join(source.split("/")[:2])
+        elif source.startswith("sdk/ts/"):
+            owner = "sdk/ts"
+        else:
+            continue
+        for match in re.finditer(r"(spec|schema)/[A-Za-z0-9_./-]*", line.split(":", 2)[-1]):
+            name = match.group()
+            for path in path_list:
+                if path == name or path.startswith(name.rstrip("/") + "/"):
+                    runtime[path].add(owner)
+    return {path: (sorted(server[path]), sorted(runtime[path])) for path in path_list}
+
+
+def write_reader_plan(path_list, output, root=ROOT):
+    """Write path, server and runtime fields, each NUL terminated."""
+    for path, (server, runtime) in reader_plan(path_list, root=root).items():
+        output.buffer.write(path.encode("utf-8", "surrogateescape") + b"\0")
+        output.buffer.write("\n".join(server).encode("utf-8", "surrogateescape") + b"\0")
+        output.buffer.write("\n".join(runtime).encode("utf-8", "surrogateescape") + b"\0")
+
+
 def fast_lanes(lines):
     return {lane for lane, pattern in FAST_LANES for line in lines if pattern.match(line)}
 
@@ -362,6 +462,7 @@ def _covered(check, queued):
 
 
 def allowed(lane, side, path):
+    _comparison()
     for row_lane, row_side, patterns, reason in ALLOWED:
         if row_lane == lane and row_side == side and _matches(path, patterns):
             return reason
@@ -433,7 +534,14 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("paths", nargs="*", help="paths to compare (default: every tracked file)")
     parser.add_argument("--table", help="write the per-path table (tab-separated) here")
+    parser.add_argument("--reader-plan-each", action="store_true",
+                        help="write the frozen listed paths' indexed reader records for check-fast --each")
     args = parser.parse_args(argv)
+    if args.reader_plan_each:
+        if args.paths or args.table:
+            parser.error("--reader-plan-each reads its listed paths from stdin, without paths or --table")
+        write_reader_plan([line for line in sys.stdin.read().splitlines() if line], sys.stdout)
+        return 0
     if not shutil.which("timeout") and not shutil.which("gtimeout"):
         parser.error("check-fast.sh needs GNU timeout")
     rows = measure(args.paths or tracked())

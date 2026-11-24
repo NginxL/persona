@@ -4,11 +4,32 @@ import { heldDelivery, openAsk } from "./todos";
 import { hubNeedsYou } from "./todo-triage";
 import type { Interaction } from "./types";
 
-/** Current cards only its user can answer. Agent plan/permission approvals and terminal dialogs are not owner questions. */
+/** A supervisor (`ask_escalate`) or the assistant (`agents.delegate`) explicitly passed this card to the owner with
+ *  context (`server/internal/assistant/ask_route.go` `ringAsks`). */
+function hasEscalationContext(ix: Interaction): boolean {
+  return Boolean(ix.delegate && Object.values(ix.delegate).some((v) => typeof v === "string" && v.trim()));
+}
+
+/** Current cards only its user can answer, or explicitly escalated to them (`ask_escalate`, non-delegating with
+ *  `delegate` context). Unescalated Agent plan/permission approvals and terminal dialogs, and cards still held by a
+ *  supervisor (`delegating`), stay out. */
 export function directUserInteraction(ix: Interaction): boolean {
+  return !ix.delegating && (
+    ix.kind === "question" ||
+    ix.kind === "elicitation" ||
+    (ix.kind === "permission" && ix.owner_proposal === true) ||
+    hasEscalationContext(ix)
+  );
+}
+
+/** Pending cards shown inside a task row whose hub view places it in Needs you. Cards still held by a supervisor
+ *  (`delegating`) never show; non-delegating terminal dialogs, permissions and plans stay visible when the hub says
+ *  an agent of this task asks (`agent_asks`, or names the card in `view.asks`) so the owner can respond in place. */
+function hubTaskInteraction(todo: Extract<NeedsYouItem, { kind: "task" }>["todo"], ix: Interaction): boolean {
   if (ix.delegating) return false;
-  if (ix.kind === "question" || ix.kind === "elicitation") return true;
-  return ix.kind === "permission" && ix.owner_proposal === true;
+  if (directUserInteraction(ix)) return true;
+  const v = todo.view;
+  return v?.section === "needs_you" && (v.reason === "agent_asks" || Boolean(v.asks?.some((a) => a.interaction === ix.id)));
 }
 
 /** A current owner decision or an explicit acceptance, not a generic retry, acknowledgement or supervisor review. */
@@ -36,7 +57,15 @@ export function directUserWaiting(items: NeedsYouItem[], deferred: Record<string
     // already left out a step its parent carries): the tray, the To-dos badge and the hub say one number
     const hub = item.kind === "task" ? hubNeedsYou(item.todo, () => false) : undefined;
     if (item.kind === "task" && hub !== undefined) {
-      if (hub) out.push({ ...item, asks: item.asks.filter(directUserInteraction) });
+      if (hub) {
+        out.push({ ...item, asks: item.asks.filter((ix) => hubTaskInteraction(item.todo, ix)) });
+        continue;
+      }
+      // A quiet main-chat task is left out of the global To-dos badge (`hubNeedsYou` returns false), and a cached
+      // `todo.view` may briefly lag a live `ask_escalate` push: still surface cards explicitly escalated to the owner.
+      // Unescalated Agent permissions, plans and terminal dialogs on quiet tasks stay with the supervisor (D19).
+      const asks = item.asks.filter((ix) => !ix.delegating && hasEscalationContext(ix));
+      if (asks.length) out.push({ ...item, asks });
       continue;
     }
     if (item.kind === "task" && (item.status === "failed" || (item.status === "not_started" && heldDelivery(item.todo)?.unblock !== "user"))) continue;

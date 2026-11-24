@@ -114,10 +114,17 @@ func (s Segment) Project(it proto.Item, machine, session, history string) (proto
 
 // Span includes an empty bridge at a segment boundary. Never advance over a gap
 // within a physical source, nor beyond a retired source's frozen line end.
+// A source answers a cursor past its end with from > through: the cursor is from
+// an earlier numbering of the source (agy renumbers a turn's live steps when its
+// export replaces them, under a new history). That is the empty span at the
+// source's end. The batch must still reach its reader: its new history is what
+// tells the reader to start over, and refusing it would leave the reader on a
+// cursor the source may not reach again for many turns.
 func (s Segment) Span(from, through int) (int, int, error) {
-	if from < 0 || through < from {
+	if from < 0 || through < 0 {
 		return 0, 0, errors.New("invalid source span")
 	}
+	from = min(from, through)
 	if s.FrozenEnd != nil {
 		from, through = min(from, *s.FrozenEnd), min(through, *s.FrozenEnd)
 	}

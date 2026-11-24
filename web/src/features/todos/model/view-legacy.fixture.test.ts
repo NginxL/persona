@@ -39,6 +39,7 @@ const DECIDED: Record<string, ByDesign> = {
   transient_retry_stays_background: "run_waits",
   failed_start_supervised: "supervisor_holds",
   agent_asks_held_by_supervisor: "supervisor_holds",
+  steps_with_superseded_child: "steps",
 };
 
 const zone = process.env.TZ;

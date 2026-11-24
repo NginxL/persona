@@ -65,6 +65,9 @@ func TestLeadPlanStartsAtOnce(t *testing.T) {
 	if !strings.Contains(res, "without asking") {
 		t.Fatalf("the lead's plan waits on a card: %s", res)
 	}
+	if !strings.Contains(res, "automatic start initiated (delegated by the direction lead)") {
+		t.Fatalf("the lead's plan does not say why it started: %s", res)
+	}
 	waitFor(t, "the lead's task to start", func() bool { return len(onlyTodo(s).Agents) == 1 })
 	if got := f.pushed(); len(got) != 0 {
 		t.Fatalf("the lead's plan was pushed: %+v", got)

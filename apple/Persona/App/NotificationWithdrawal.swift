@@ -14,6 +14,10 @@ nonisolated enum NotificationWithdrawal {
         var group: String
         var interactionID: String
         var date: Date
+        /// A push about one of the assistant's own cards (a plan waiting for Start, a decision, a failed start: the
+        /// push's `card_id`), never in the list of pending interactions. Only the hub's withdrawal push takes it back:
+        /// the list saying nothing of it does not make it stale.
+        var ownerCard = false
 
         /// As `Interaction.uid`: unique across groups, just the id for the default group.
         var uid: String { group.isEmpty ? interactionID : group + "|" + interactionID }
@@ -23,7 +27,7 @@ nonisolated enum NotificationWithdrawal {
     /// (an answer that did not go through puts its card back).
     static func settled(gone: Set<String>, pending: Set<String>, delivered: [Delivered]) -> [String] {
         let over = gone.subtracting(pending)
-        return delivered.filter { over.contains($0.uid) }.map(\.identifier)
+        return delivered.filter { !$0.ownerCard && over.contains($0.uid) }.map(\.identifier)
     }
 
     /// The notifications a group's whole list says are over: delivered before that list was asked for (a later push
@@ -31,7 +35,7 @@ nonisolated enum NotificationWithdrawal {
     /// the cached list of the last run says nothing about what happened since.
     static func stale(listedAt: [String: Date], pending: Set<String>, delivered: [Delivered]) -> [String] {
         delivered.filter { d in
-            guard let at = listedAt[d.group] else { return false }
+            guard !d.ownerCard, let at = listedAt[d.group] else { return false }
             return d.date < at && !pending.contains(d.uid)
         }.map(\.identifier)
     }
@@ -51,13 +55,17 @@ nonisolated enum NotificationWithdrawal {
         var interactionID: String
         var date: Date
         var ref: PushRef
+        var ownerCard = false
     }
 
     static func raw(_ notifications: [UNNotification]) -> [Raw] {
         notifications.compactMap { n in
             let info = n.request.content.userInfo
-            guard let id = info["interaction_id"] as? String, !id.isEmpty, let ref = PushRef(info) else { return nil }
-            return Raw(identifier: n.request.identifier, interactionID: id, date: n.date, ref: ref)
+            // An assistant card's push names its card as card_id (a plan's, from before, as interaction_id only).
+            let card = info["card_id"] as? String ?? ""
+            let id = card.isEmpty ? info["interaction_id"] as? String ?? "" : card
+            guard !id.isEmpty, let ref = PushRef(info) else { return nil }
+            return Raw(identifier: n.request.identifier, interactionID: id, date: n.date, ref: ref, ownerCard: !card.isEmpty)
         }
     }
 }
@@ -102,7 +110,7 @@ extension AppModel {
                     let model = self
                     let delivered = raw.map {
                         NotificationWithdrawal.Delivered(identifier: $0.identifier, group: $0.ref.key(model).group,
-                                                         interactionID: $0.interactionID, date: $0.date)
+                                                         interactionID: $0.interactionID, date: $0.date, ownerCard: $0.ownerCard)
                     }
                     let ids = pick(model, delivered)
                     if !ids.isEmpty { UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: ids) }

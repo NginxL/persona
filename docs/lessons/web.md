@@ -1,5 +1,17 @@
 # Lessons: web UI and interactions
 
+## A folder of trees names its repository, it is not one (#13453)
+
+Path inference keys a tree in a folder kept apart from its repository (herdr's `~/.herdr/worktrees/<repository>/<tree>`)
+by that folder. Nothing is checked out there, so a Repo section keyed by it never meets the repository's own section,
+which Git keys by the main checkout. When a tree was removed after its work merged, or has not been read yet, Git places
+none of its Agents, and the repository showed as a second section with its name. Treat such a folder as naming its
+repository, and resolve it against what Git placed on the same computer: another tree of that folder, else the one
+section of that name. When either is ambiguous, keep it apart. A fixture where every session carries `repo_root` never
+reaches this fallback, so test sessions with a removed tree's bare `cwd`. Check the folder is at the computer's home: a
+cwd in a folder of a repository's own tree (`/code/app/.worktrees/feature/src`) has the same shape, and joining by the
+tree's name moved its Agent into an unrelated repository's section.
+
 ## A folded launcher must retain its identity (#10249)
 
 When replacing a launcher rail, do not promote the current launcher's models into a separate Recommended group or

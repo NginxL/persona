@@ -1167,7 +1167,7 @@ func (s *Service) drainRelays(machine string, list []proto.Session) {
 			// A needs notice may have been answered on the phone after it queued while the agent's node still
 			// reported blocked (#4332): ask the task once more right before it would interrupt. A node that cannot
 			// be reached is not an answer, so its notice stays queued for a later drain.
-			stale, keep := msg.Withdrawn, false
+			stale, keep := msg.Withdrawn || msg.Tool == chatReplyTool && !chatReplyRelayOn(s.settings(ctx)), false
 			if !stale && msg.Tool == noticeTool && msg.State == "needs" {
 				// The loading read covers a hub restart whose first drain runs before the todos were read in:
 				// an unreadable todo is unknown, so the notice is delivered as without the recheck.

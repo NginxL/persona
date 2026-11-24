@@ -146,7 +146,6 @@ const rows = () => [...host.querySelectorAll<HTMLElement>("[data-model-purpose]"
 const row = (id: string) => host.querySelector<HTMLElement>(`[data-model-purpose="${id}"]`)!;
 const dialog = () => document.querySelector<HTMLElement>('[role="dialog"]')!;
 const button = (label: string, scope: ParentNode = document) => [...scope.querySelectorAll("button")].find((b) => b.textContent === label);
-const effort = () => dialog().querySelector<HTMLInputElement>('input[list="model-efforts"]');
 const effortSelect = () => [...dialog().querySelectorAll<HTMLSelectElement>("select")]
   .find((node) => node.closest("label")?.querySelector("span")?.textContent === t("settings-modelconfiguration.effort"));
 const modelField = () => dialog().querySelector<HTMLInputElement>(`input[aria-label="${t("settings-modelconfiguration.specific_model")}"]`);
@@ -261,7 +260,7 @@ describe("the meeting uses' models (#7980)", () => {
     await open("meeting.room");
     expect(dialog().textContent).toContain("In-meeting conversation");
     expect(dialog().textContent).toContain("Follows Main chat");
-    const options = [...dialog().querySelectorAll<HTMLOptionElement>("select option")];
+    const options = [...dialog().querySelector("select")!.options];
     expect(options.map((o) => o.value)).toEqual(["", "launcher.claude", "api.messages"]);
     expect(options[0].textContent).toBe("Follow Main chat");
     const only = dialog().querySelector<HTMLElement>('[data-testid="claude-code-only"]')!;
@@ -269,10 +268,13 @@ describe("the meeting uses' models (#7980)", () => {
     expect(dialog().querySelector("select")!.getAttribute("aria-describedby")).toBe(only.id);
     expect(dialog().textContent).not.toContain(t("settings-modelconfiguration.runtime"));
     expect(dialog().querySelector('[role="radiogroup"]')).toBeNull();
-    expect(effort()).not.toBeNull();
+    expect(effortSelect()).toBeDefined();
     await choose("api.messages");
     type(modelField()!, "api-model");
-    type(effort()!, "high");
+    await act(async () => {
+      effortSelect()!.value = "high";
+      effortSelect()!.dispatchEvent(new Event("change", { bubbles: true }));
+    });
     await act(async () => button("Save", dialog())!.click());
     await flush();
     expect(patches).toEqual([{ path: "/api/v1/model-config/purposes/meeting.room", body: { revision: 0, provider: "api.messages", model: "api-model", effort: "high" } }]);
@@ -286,14 +288,12 @@ describe("the meeting uses' models (#7980)", () => {
     await open("meeting.minutes");
     expect(dialog().querySelector('[data-testid="claude-code-only"]')).toBeNull();
     expect([...dialog().querySelectorAll<HTMLOptionElement>("select option")][0].textContent).toBe("Follow Information processing");
-    expect(effort()).not.toBeNull();
+    expect(effortSelect()).toBeDefined();
     await choose("api.chat");
-    expect(effort()).toBeNull();
     expect(effortSelect()).toBeDefined();
     expect(dialog().textContent).not.toContain("Test connection");
     await choose("api.messages");
-    expect(effort()).not.toBeNull();
-    expect(effortSelect()).toBeUndefined();
+    expect(effortSelect()).toBeDefined();
   });
 
   it("uses the selected Chat model's exact capabilities and saves only a supported effort", async () => {
@@ -443,7 +443,7 @@ describe("the meeting uses' models (#7980)", () => {
     await render();
     await open("meeting.minutes");
     await choose("api.messages");
-    expect(effort()).not.toBeNull();
+    expect(effortSelect()).toBeDefined();
   });
 
   it("the minutes' editor hides and omits Chat effort after a Messages switch on an older hub", async () => {
@@ -451,9 +451,9 @@ describe("the meeting uses' models (#7980)", () => {
     setApart("meeting.minutes", { provider: "api.messages", model: "api-model" }, 4);
     await render();
     await open("meeting.minutes");
-    expect(effort()).not.toBeNull();
+    expect(effortSelect()).toBeDefined();
     await choose("api.chat");
-    expect(effort()).toBeNull();
+    expect(effortSelect()).toBeUndefined();
     type(modelField()!, "chat-model");
     await act(async () => button("Save", dialog())!.click());
     await flush();
@@ -547,17 +547,20 @@ describe("the meeting uses' models (#7980)", () => {
     setApart("meeting.minutes", { provider: "api.chat", model: "chat-model" }, 4, ["provider", "model"]);
     await render();
     await open("meeting.minutes");
-    expect(effort()).toBeNull();
+    expect(effortSelect()).toBeUndefined();
     expect(dialog().querySelector("[data-execution-preview]")!.textContent).toBe("Direct API · Chat");
     // following Information processing again: its Messages connection, which takes one
     await choose("");
     expect(dialog().querySelector("[data-execution-preview]")!.textContent).toBe("Direct API · Messages");
-    expect(effort()).not.toBeNull();
+    expect(effortSelect()).toBeDefined();
     expect(modelField()!.placeholder).toBe("kb-model"); // its model, not the connection's default (api-default)
     await choose("api.chat");
-    expect(effort()).toBeNull();
+    expect(effortSelect()).toBeUndefined();
     await choose("api.messages");
-    type(effort()!, "high");
+    await act(async () => {
+      effortSelect()!.value = "high";
+      effortSelect()!.dispatchEvent(new Event("change", { bubbles: true }));
+    });
     await act(async () => button("Save", dialog())!.click());
     await flush();
     expect(patches.map((p) => p.body)).toEqual([{ revision: 4, provider: "api.messages", model: null, effort: "high" }]);

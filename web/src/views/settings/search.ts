@@ -1,7 +1,7 @@
 import { t } from "../../i18n";
 import { LOCAL_SHORTCUTS, SHORTCUTS } from "../../lib/shortcuts";
 import { enabledSettingsTabs, registeredModules } from "../../core/module-host";
-import { MODULES_LABS_ID } from "../../core/module-labs";
+import { MODULE_FEATURES_ID } from "../../core/module-features";
 import { tabInfo, TABS, type Tab } from "./nav";
 
 // ── search ──────────────────────────────────────────────
@@ -189,10 +189,14 @@ export const SEARCH_INDEX: SearchGroup[] = [
   { tab: "devices", group: t("settings-connectdevice.add"), anchor: "devices" },
 ];
 
-/** Labs › Features: one entry per module's switch, from the module list (core/module-labs.ts draws each as a row of
- *  the configuration form, `configuration-<document>-<field>`). */
+/** General › Optional features follows the registry, including modules switched off on this browser. */
 function moduleSwitchEntries(): SearchGroup[] {
-  return registeredModules().map((d) => ({ tab: "labs", group: path(t("settings-labs.area_features"), d.title()), hint: d.description(), anchor: `configuration-${MODULES_LABS_ID}-${d.id}` }));
+  const modules = registeredModules();
+  if (!modules.length) return [];
+  return [
+    { tab: "general", group: t("settings-features.features_group"), hint: t("settings-features.area_features"), anchor: `configuration-${MODULE_FEATURES_ID}-modules` },
+    ...modules.map((d): SearchGroup => ({ tab: "general", group: d.title(), hint: d.description(), anchor: `configuration-${MODULE_FEATURES_ID}-${d.id}` })),
+  ];
 }
 
 // What is typed and what is matched, compared without case or spaces: "timezone" finds "Time zone", "apikey" "API Key".
@@ -202,9 +206,15 @@ const fold = (s: string) => s.toLocaleLowerCase().replace(/\s+/g, "");
 export function searchSettings(query: string): { tabs: Tab[]; groups: SearchGroup[] } {
   const q = fold(query);
   if (!q) return { tabs: [], groups: [] };
+  const featureEntries = moduleSwitchEntries();
+  const [features] = featureEntries;
+  // The exact group name and its short alias both open General. The broader category hints can also contain "features".
+  if (features && [features.group, features.hint].some((label) => label && fold(label) === q)) {
+    return { tabs: [], groups: [features] };
+  }
   const has = (...texts: (string | undefined)[]) => texts.some((s) => s && fold(s).includes(q));
   return {
     tabs: [...TABS, ...enabledSettingsTabs().map((m) => m.key)].filter((k) => has(tabInfo(k).label, tabInfo(k).hint)),
-    groups: [...SEARCH_INDEX, ...moduleSwitchEntries()].filter((g) => has(g.group, g.hint)),
+    groups: [...SEARCH_INDEX, ...featureEntries].filter((g) => has(g.group, g.hint)),
   };
 }

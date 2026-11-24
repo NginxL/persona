@@ -54,6 +54,10 @@ A tier is Persona's equivalent of a Paseo Agent profile: a named launch preset (
 
 The web app adds **Settings › Models › Model profiles**: inspect a profile (its Agent presets, purpose bindings, and launcher model overrides), edit it interactively using the same provider/launcher/model/effort/permission-mode pickers as Model Configuration, apply it, or roll back; with no profile in use it says presets are off. You can also ask Persona to edit Agent presets (above) or use the hub API (authenticated as usual) to automate edits and create/delete profiles. Native settings controls require an app release and are deferred in v1.
 
+A managed launcher's folded model and effort pick sets the variant ID and clears its saved standalone effort on
+switch. When the model is left unchanged, the effort can still be left unchanged or cleared separately. Additional
+launcher model fields expose concrete variant IDs because they each have their own model choice.
+
 | Method | Path | Operation |
 | --- | --- | --- |
 | GET | `/api/v1/model-profiles` | Catalog, revision, active profile, rollback preview, history |

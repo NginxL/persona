@@ -17,7 +17,7 @@
   "make_leader": "设为常驻",
   "end_leader": "取消常驻",
   "leader_made": "已设为常驻「{title}」",
-  "leader_ended": "已取消常驻「{title}」，它派出的任务不变",
+  "leader_ended": "已取消常驻「{title}」，还在办的任务已交还主对话督办",
   "leader_failed": "没能改常驻：{error}",
   "delete": "删除…",
   "make_leader_confirm": "确认设为常驻",

@@ -9,6 +9,11 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.decodeFromJsonElement
 import java.io.File
 import java.io.FileOutputStream
 import java.nio.file.Files
@@ -56,7 +61,7 @@ class InboxReplyJournal(private val directory: File, private val pairingScope: S
             updated
         } }
     private fun readLocked(scope: String): InboxReplyDocument = file(scope).let {
-        if (it.exists()) JsonCodec.decodeFromString(it.readText()) else InboxReplyDocument()
+        if (it.exists()) decodeReplyDocument(it.readText()) else InboxReplyDocument()
     }
 
     /** Reconcile only target-journal delivery evidence, never an outbox row's Sent or Shown state. */
@@ -142,4 +147,25 @@ class InboxReplyJournal(private val directory: File, private val pairingScope: S
 internal fun ReplyTarget.storageKey(): String = when (this) {
     is ReplyTarget.Inbox -> "inbox:$itemId"
     is ReplyTarget.Lark -> "lark:$feedId"
+}
+
+/**
+ * Decodes `replies.json`, also accepting `persona.core.inbox.ReplyTarget.*` discriminators written during the window
+ * after #14075 moved `ReplyTarget` to `:core:inbox` before its original `@SerialName` was restored.
+ */
+internal fun decodeReplyDocument(raw: String): InboxReplyDocument {
+    if ("persona.core.inbox.ReplyTarget." !in raw) return JsonCodec.decodeFromString(raw)
+    val root = JsonCodec.parseToJsonElement(raw) as? JsonObject ?: return JsonCodec.decodeFromString(raw)
+    val outbox = root["outbox"] as? JsonArray ?: return JsonCodec.decodeFromJsonElement(root)
+    val migrated = JsonArray(outbox.map { entry ->
+        val obj = entry as? JsonObject ?: return@map entry
+        val target = obj["target"] as? JsonObject ?: return@map entry
+        val mapped = when ((target["type"] as? JsonPrimitive)?.contentOrNull) {
+            "persona.core.inbox.ReplyTarget.Inbox" -> "persona.feature.inbox.ReplyTarget.Inbox"
+            "persona.core.inbox.ReplyTarget.Lark" -> "persona.feature.inbox.ReplyTarget.Lark"
+            else -> null
+        } ?: return@map entry
+        JsonObject(obj + ("target" to JsonObject(target + ("type" to JsonPrimitive(mapped)))))
+    })
+    return JsonCodec.decodeFromJsonElement(JsonObject(root + ("outbox" to migrated)))
 }

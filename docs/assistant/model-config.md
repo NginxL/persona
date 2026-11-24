@@ -215,6 +215,13 @@ only the prompt and the answer travel.
 
 ## Editing and inheritance
 
+The web model, profile and scheduled task editors group launcher models when at least two catalog IDs share a base
+and end in their advertised default effort. The model picker shows the base name, searches the concrete IDs, and
+accepts custom IDs. The effort selector shows the levels the catalog and save path support. Choosing a group starts
+at Medium when available, or the first listed level, and keeps an explicit effort choice the group supports.
+The saved model ID carries the level. A supported legacy effort takes precedence over the suffix and is cleared on
+save once the catalog identifies the group. An effort override on a followed variant pins the matching concrete ID.
+
 Each category shows both “In Effect” and “Model Settings”:
 
 - Empty provider: inherit; empty specific model: use that source's default model.

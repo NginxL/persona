@@ -2,8 +2,8 @@
 """Check the Android app's translations (docs/protocol/i18n.md).
 
 - Every language in android/i18n/*.properties has complete resources in each module, matching keys and placeholders,
-  and plurals
-  with the quantities their language needs; values/ is English, so its translatable text has no Chinese or Japanese.
+  plurals with the quantities their language needs, and string arrays that match the fallback's length and each item's
+  placeholders. values/ is English, so its translatable text has no Chinese or Japanese.
 - String keys start with the module's name (`settings_…`), since all modules' resources merge into one table.
 - Kotlin code and XML outside the translated values directories (and outside tests and the design system's debug catalog)
   only lose hardcoded Chinese / Japanese text: each file may hold
@@ -164,6 +164,17 @@ def resource_problems(module, root=ANDROID):
             other_kind, other, _ = have[key]
             if kind != other_kind:
                 problems.append(f'{name}: "{key}" is a {kind} in values/ but a {other_kind} in {locale}/')
+                continue
+            if kind == 'array':
+                if len(value) != len(other):
+                    problems.append(f'{name}: string-array "{key}" has {len(value)} items in values/ '
+                                    f'but {len(other)} in {locale}/')
+                    continue
+                for index, (original, translated) in enumerate(zip(value, other), 1):
+                    expected, found = placeholders(original), placeholders(translated)
+                    if found != expected:
+                        problems.append(f'{name}: string-array "{key}" item {index} has placeholders {expected} '
+                                        f'in values/ but {found} in {locale}/')
                 continue
             if placeholders(value) != placeholders(other):
                 problems.append(f'{name}: "{key}" has placeholders {placeholders(value)} in values/ but {placeholders(other)} in {locale}/')

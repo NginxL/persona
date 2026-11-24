@@ -71,13 +71,15 @@ func (h *Hub) notifyDoneUnder(owner, kind, machineID, machine, sessionID, title,
 			p["recording_id"] = recordingID
 		}
 		if policy.cardID != "" {
-			p["interaction_id"] = policy.cardID
+			// card_id: the app keeps the push until the hub's withdrawal names it (an app from before reads only
+			// interaction_id, and clears it when its card list next comes without it).
+			p["card_id"], p["interaction_id"] = policy.cardID, policy.cardID
 		}
 		return p
 	}
 	var sent func(Device)
 	if policy.cardID != "" {
-		sent = func(d Device) { h.push.cardPushedTo(policy.cardID, d.DeviceID) }
+		sent = func(d Device) { h.push.ownerCardPushedTo(policy.cardID, d.DeviceID) }
 	}
 	if !h.sessionHiddenFromExtensions(machineID, sessionID) { // only of a session the extensions are shown (extension_private.go)
 		h.emitToExtensions(owner, "agent.finished", map[string]any{"machine_id": machineID, "machine": machine, "session_id": sessionID, "title": title})
@@ -164,13 +166,20 @@ func (h *Hub) notifyDecideKeyed(owner, machineID, machine, sessionID, title, tex
 	if !h.push.claimTodoPush(key) {
 		return // the same to-do's decision rang and still waits on the owner
 	}
+	// The decision's card (TodoAskCardID): once the to-do no longer waits on the owner, the manager names it
+	// (EventFleetResolved) and the push leaves the devices it went to. card_id only, never interaction_id: an app from
+	// before would clear a delivered push whose interaction_id its card list lacks, and a decision is never in it.
+	card := assistantwire.TodoAskCardID(todo.ID)
 	build := func(i18n.Lang) map[string]any {
-		return decidePayloadIn(owner, machineID, machine, sessionID, title, text, todo)
+		p := decidePayloadIn(owner, machineID, machine, sessionID, title, text, todo)
+		p["card_id"] = card
+		return p
 	}
+	sent := func(d Device) { h.push.ownerCardPushedTo(card, d.DeviceID) }
 	wants := pushWants{Kind: "input"}
 	sum := sha256.Sum256([]byte("todo_decide\x00" + todo.ID))
 	policy := pushPolicy{level: assistantwire.LevelP0, relatedKey: key, title: title, body: text}
-	if _, _, heldReason := h.push.sendFromPolicy(owner, policy, build, "td_"+hex.EncodeToString(sum[:12]), wants.fn(), wants.quiet(), nil, nil); heldReason == "" {
+	if _, _, heldReason := h.push.sendFromPolicy(owner, policy, build, "td_"+hex.EncodeToString(sum[:12]), wants.fn(), wants.quiet(), nil, sent); heldReason == "" {
 		h.notifyWSFrom(owner, "assistant", build, wants.fn(), wants.quiet())
 	}
 }

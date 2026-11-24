@@ -19,6 +19,7 @@ import uuid
 CONTEXT = "simulator-readiness-context.json"
 BUNDLE = "org.example.persona.ci"
 READINESS_SECONDS = 900
+VISUAL_SECONDS = 600
 TIMEOUT = 20
 MAX_BYTES = 128 * 1024
 RAW_LOG_BYTES = 4 * 1024 * 1024
@@ -352,7 +353,15 @@ class LiveLog:
             self.fail(category)
         finally:
             self.process.stdout.close()
-            self.exit_code = self.process.poll()
+            # EOF means the writer closed stdout, not that waitpid has already
+            # reaped the command. Preserve the completed wait status so a quick
+            # nonzero exit cannot later be mistaken for a clean empty capture.
+            try:
+                self.exit_code = self.process.wait(timeout=2)
+            except subprocess.TimeoutExpired:
+                # stop() retains its bounded terminate/kill fallback when the
+                # command closes stdout but keeps running.
+                self.exit_code = None
 
     def drain_stderr(self):
         try:
@@ -387,6 +396,11 @@ class LiveLog:
         if self.process is None or self.thread is None or self.stderr_thread is None:
             return
         if self.pre_stop_code is None:
+            self.pre_stop_code = self.process.poll()
+        if self.pre_stop_code is None and not self.thread.is_alive():
+            # A reader that already observed EOF may still be waiting briefly
+            # for the process's final wait status. It is not a stop-induced
+            # termination and must not turn a real command failure into success.
             self.pre_stop_code = self.process.poll()
         self.stopped = True
         if self.reaper is not None and self.reaper.poll() is None:
@@ -439,10 +453,14 @@ def live_command():
     return ["/usr/bin/log", "stream", "--style", "ndjson", "--info", "--debug", "--predicate", predicate]
 
 
-def observation_scope(output, now, regular=False):
+def observation_scope(output, now, regular=False, seconds=READINESS_SECONDS, visual=False,
+                      allow_current_start=False):
     """Resolve the existing phone/regular fixture without borrowing the other's scope."""
-    context_name = "regular-readiness-context.json" if regular else CONTEXT
-    simulator_name = "regular-simulator.log" if regular else "simulator.log"
+    if seconds not in {READINESS_SECONDS, VISUAL_SECONDS}:
+        raise ScopeContextTimeError()
+    context_name = "regular-visual-context.json" if visual else (
+        "regular-readiness-context.json" if regular else CONTEXT)
+    simulator_name = ("regular-simulator.log" if regular or visual else "simulator.log")
     try:
         context = json.loads(read_scope_file(output / context_name))
         if not isinstance(context, dict) or set(context) != {"udid", "bundle_id", "started_at"}:
@@ -458,8 +476,8 @@ def observation_scope(output, now, regular=False):
         raise ScopeContextTimeError() from None
     if start.utcoffset() != timedelta(0) or start > now or now - start > timedelta(hours=2):
         raise ScopeContextTimeError()
-    end = min(now, start + timedelta(seconds=READINESS_SECONDS))
-    if end <= start:
+    end = min(now, start + timedelta(seconds=seconds))
+    if end < start or (end == start and not allow_current_start):
         raise ScopeContextTimeError()
     return context, start, end
 
@@ -468,15 +486,19 @@ def start_live_log(scope_root, destination, deadline=None, popen=subprocess.Pope
                    now=lambda: datetime.now(timezone.utc), regular=False):
     """Start before the test child; leave the owned shell process group intact."""
     current = now()
+    visual = destination.name == "live-regular-visual"
+    regular = regular or visual
+    seconds = VISUAL_SECONDS if visual else READINESS_SECONDS
     # The regular fixture has its own context file in the same explicit output root.
-    context, start, _ = observation_scope(scope_root, current, regular=regular)
+    context, start, _ = observation_scope(scope_root, current, regular=regular,
+                                          seconds=seconds, visual=visual, allow_current_start=True)
     # Live observation runs forward from now, so it must not inherit the
     # `observation_scope` end, which is already clamped to `now` for the
-    # historical collector. The live window closes at the scope's readiness
-    # horizon, optionally narrowed by an explicit caller deadline. Falling
-    # back to `current` here would freeze the live filter at startup and
-    # shrink the watchdog lifetime to ~10 seconds.
-    end = start + timedelta(seconds=READINESS_SECONDS)
+    # historical collector. The live window closes at the invocation's horizon,
+    # optionally narrowed by an explicit caller deadline. Falling back to
+    # `current` here would freeze the live filter at startup and shrink the
+    # watchdog lifetime to ~10 seconds.
+    end = start + timedelta(seconds=seconds)
     if deadline is not None:
         end = min(end, deadline)
     destination.mkdir(parents=True, exist_ok=True)
@@ -578,14 +600,17 @@ def stream_output(command, start, end, udid, bundle, timeout=TIMEOUT):
 def collect(output, destination, reader=bounded_output, now=None, stream_reader=stream_output, scope_root=None):
     status = destination / "simulator-launch.status.txt"
     evidence = destination / "simulator-launch.json"
-    context = destination / ("regular-readiness-context.json" if destination.name == "live-regular-readiness" else CONTEXT)
+    visual = destination.name == "live-regular-visual"
+    regular = destination.name == "live-regular-readiness" or visual
+    context = destination / ("regular-visual-context.json" if visual else
+                             "regular-readiness-context.json" if regular else CONTEXT)
     category = "publication"
     try:
         invalidate(status, evidence, context)
         category = "scope-validation"
         context_data, start, end = observation_scope(
             scope_root or output, now or datetime.now(timezone.utc),
-            regular=destination.name == "live-regular-readiness")
+            regular=regular, seconds=VISUAL_SECONDS if visual else READINESS_SECONDS, visual=visual)
         udid, bundle = context_data["udid"], context_data["bundle_id"]
         predicate = ("(" + " OR ".join(f'process == "{name}"' for name in PROCESSES + RUNTIME_PROCESSES) +
                      f') AND (eventMessage CONTAINS[c] "{udid}" OR eventMessage CONTAINS "{bundle}"' +

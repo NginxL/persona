@@ -591,3 +591,139 @@ func TestSubagentCheckedWarmRefreshZeroQueriesAndPerMachinePrune(t *testing.T) {
 			macLive1, macLive2, macArch1, macSub1, boxLive1)
 	}
 }
+
+type legacySpawnTodoStore struct {
+	*memA2AStore
+	todoStore
+	agentsMu     sync.Mutex
+	todos        []db.TodoRow
+	agents       []db.TodoAgentRow
+	agentsErr    error
+	agentsCalls  int
+	listTodosHit int
+}
+
+func (st *legacySpawnTodoStore) ListTodos(context.Context) ([]db.TodoRow, error) {
+	st.agentsMu.Lock()
+	defer st.agentsMu.Unlock()
+	st.listTodosHit++
+	return slices.Clone(st.todos), nil
+}
+
+func (st *legacySpawnTodoStore) ListAllTodoSpaces(context.Context) ([]db.TodoSpaceRow, error) {
+	return nil, nil
+}
+
+func (st *legacySpawnTodoStore) ListTodoThreads(context.Context) (map[string]db.TodoThread, error) {
+	return map[string]db.TodoThread{}, nil
+}
+
+func (st *legacySpawnTodoStore) ListTodoSources(context.Context) (map[string]db.TodoSource, error) {
+	return map[string]db.TodoSource{}, nil
+}
+
+func (st *legacySpawnTodoStore) ListAllTodoAgents(context.Context) ([]db.TodoAgentRow, error) {
+	st.agentsMu.Lock()
+	defer st.agentsMu.Unlock()
+	st.agentsCalls++
+	if st.agentsErr != nil {
+		return nil, st.agentsErr
+	}
+	return slices.Clone(st.agents), nil
+}
+
+// Legacy task_spawn subagent provenance restores directly from todo_agents (or already-loaded
+// in-memory todos) without invoking ensureTodosLoaded, keeping decorateInventory free of todo
+// startup side effects and call-graph cycles (#14377).
+func TestLegacySpawnedSubagentLoadsWithoutInitializingTodos(t *testing.T) {
+	ctx := context.Background()
+	st := &legacySpawnTodoStore{
+		memA2AStore: newMemA2AStore(),
+		todos:       []db.TodoRow{{ID: "t1", Title: "Parent task"}},
+		agents: []db.TodoAgentRow{
+			{TodoID: "t1", MachineID: "box", SessionID: "spawn-cross", Source: sourceSpawned, Via: "mac/lead"},
+			{TodoID: "t1", MachineID: "mac", SessionID: "spawn-local", Source: sourceSpawned, Via: "mac/lead"},
+			{TodoID: "t1", MachineID: "box", SessionID: "manual-peer", Source: "manual", Via: "mac/lead"},
+			{TodoID: "t1", MachineID: "box", SessionID: "bad-via", Source: sourceSpawned, Via: "no-slash"},
+		},
+		agentsErr: errors.New("transient todo_agents read error"),
+	}
+	s := New(Options{Hub: newFakeHub(), Store: func() Store { return st }, Logf: testLogf(t)})
+
+	// 1. Transient read failure retries on the next call and does not load full todos.
+	rows := []proto.Session{
+		{MachineID: "box", SessionID: "spawn-cross", Status: proto.StatusWorking},
+		{MachineID: "box", SessionID: "manual-peer", Status: proto.StatusIdle},
+		{MachineID: "box", SessionID: "bad-via", Status: proto.StatusIdle},
+	}
+	s.decorateSubagents(ctx, "box", rows)
+	if rows[0].IsSubagent {
+		t.Fatalf("expected transient error to leave link unloaded, got %+v", rows[0].Hierarchy)
+	}
+	s.fleet.subagentsMu.RLock()
+	loadedAfterErr := s.fleet.subagentsLegacyLoaded
+	s.fleet.subagentsMu.RUnlock()
+	if loadedAfterErr {
+		t.Fatal("subagentsLegacyLoaded became true despite ListAllTodoAgents error")
+	}
+
+	// 2. Next call recovers both cross-machine and same-machine task_spawn provenance directly
+	// without calling ListTodos or marking s.todos.loaded.
+	st.agentsMu.Lock()
+	st.agentsErr = nil
+	st.agentsMu.Unlock()
+	s.decorateSubagents(ctx, "box", rows)
+	if !rows[0].IsSubagent || rows[0].ParentSessionID != "lead" || rows[0].ParentMachineID() != "mac" ||
+		rows[0].SubagentOrigin() != proto.SubagentOriginSpawned {
+		t.Fatalf("cross-machine task_spawn provenance wrong: %+v %+v", rows[0], rows[0].Hierarchy)
+	}
+	if rows[1].IsSubagent || rows[2].IsSubagent {
+		t.Fatalf("non-spawned or malformed via row tagged: manual=%+v bad=%+v", rows[1].Hierarchy, rows[2].Hierarchy)
+	}
+	localRows := []proto.Session{{MachineID: "mac", SessionID: "spawn-local", Status: proto.StatusWorking}}
+	s.decorateSubagents(ctx, "mac", localRows)
+	if !localRows[0].IsSubagent || localRows[0].ParentSessionID != "lead" || localRows[0].ParentMachineID() != "" ||
+		localRows[0].SubagentOrigin() != proto.SubagentOriginSpawned {
+		t.Fatalf("same-machine task_spawn provenance wrong: %+v %+v", localRows[0], localRows[0].Hierarchy)
+	}
+	s.todos.mu.RLock()
+	todosLoaded := s.todos.loaded
+	s.todos.mu.RUnlock()
+	st.agentsMu.Lock()
+	agentsCalls, listTodosHit := st.agentsCalls, st.listTodosHit
+	st.agentsMu.Unlock()
+	if todosLoaded || listTodosHit != 0 {
+		t.Fatalf("decorateSubagents initialized todos: todosLoaded=%v listTodosHit=%d", todosLoaded, listTodosHit)
+	}
+	if agentsCalls != 2 {
+		t.Fatalf("ListAllTodoAgents calls = %d, want 2 (1 failed + 1 cached success)", agentsCalls)
+	}
+
+	// 3. When todos are already loaded in memory, ensureLegacySubagentsLoaded reads them with zero DB queries.
+	st2 := &legacySpawnTodoStore{
+		memA2AStore: newMemA2AStore(),
+		todos:       []db.TodoRow{{ID: "t2", Title: "In-memory parent task"}},
+		agents: []db.TodoAgentRow{
+			{TodoID: "t2", MachineID: "box", SessionID: "mem-spawn", Source: sourceSpawned, Via: "mac/lead"},
+		},
+	}
+	s2 := New(Options{Hub: newFakeHub(), Store: func() Store { return st2 }, Logf: testLogf(t)})
+	s2.todos.mu.Lock()
+	s2.todos.loaded = true
+	s2.todos.todos = map[string]*Todo{
+		"t2": {ID: "t2", Agents: []TodoAgent{{MachineID: "box", SessionID: "mem-spawn", Source: sourceSpawned, Via: "mac/lead"}}},
+	}
+	s2.todos.mu.Unlock()
+	memRows := []proto.Session{{MachineID: "box", SessionID: "mem-spawn", Status: proto.StatusWorking}}
+	s2.decorateSubagents(ctx, "box", memRows)
+	if !memRows[0].IsSubagent || memRows[0].ParentSessionID != "lead" || memRows[0].ParentMachineID() != "mac" ||
+		memRows[0].SubagentOrigin() != proto.SubagentOriginSpawned {
+		t.Fatalf("in-memory todo spawned provenance wrong: %+v %+v", memRows[0], memRows[0].Hierarchy)
+	}
+	st2.agentsMu.Lock()
+	st2Calls := st2.agentsCalls
+	st2.agentsMu.Unlock()
+	if st2Calls != 0 {
+		t.Fatalf("already-loaded todos still queried ListAllTodoAgents %d times", st2Calls)
+	}
+}

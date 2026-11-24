@@ -112,7 +112,7 @@ class AndroidBuildPerfTest(unittest.TestCase):
                 argv = ["android_build_perf", "synthetic", str(out), "debug=test.app"]
                 with (patch.object(sys, "argv", argv), patch.dict(os.environ, {"CHAT": "", "ONLY": "agents"}),
                       patch.object(perf, "RUNS", 2), patch.object(perf, "COLD", 0), patch.object(perf.time, "sleep"),
-                      patch.object(perf.subprocess, "run", side_effect=adb), redirect_stdout(io.StringIO())):
+                      patch.object(subprocess, "run", side_effect=adb), redirect_stdout(io.StringIO())):
                     with self.assertRaises(SystemExit) as error:
                         perf.main()
                     self.assertEqual(str(error.exception), expected)

@@ -76,6 +76,8 @@ type briefFacts struct {
 	// Asks are the asks of the tasks to verify (by task id): their verdict line and a decision's recommended option, the
 	// same as their cards say (conclusion.go).
 	Asks map[string]acceptAsk
+	// Deliveries are the effective delivery states (currentDelivery) of the tasks to verify (by task id).
+	Deliveries map[string]*TodoDelivery
 	// Leaders: one line per current leader (direction_progress.go briefLeaders), for the model only.
 	Leaders []prompts.BriefLeader
 	// Directions: main and every leader, with deterministic stopped-work rows; DisabledRoutines are the daily reports
@@ -103,7 +105,7 @@ type briefFacts struct {
 // failed attempt (this run is its retry) is not news.
 func (s *Service) briefFactsAt(ctx context.Context, now time.Time, self string) *briefFacts {
 	l, web, loc := s.botLang(ctx), s.webBase(ctx), s.location(ctx)
-	f := &briefFacts{At: now, l: l, web: web, loc: loc, WaitingUnknown: !s.fleetReady(), Changed: map[string]string{}, Asks: map[string]acceptAsk{}}
+	f := &briefFacts{At: now, l: l, web: web, loc: loc, WaitingUnknown: !s.fleetReady(), Changed: map[string]string{}, Asks: map[string]acceptAsk{}, Deliveries: map[string]*TodoDelivery{}}
 	if feat, ready := s.chat().Features(ctx); ready && feat.Pushes {
 		f.Card = true
 	}
@@ -118,6 +120,9 @@ func (s *Service) briefFactsAt(ctx context.Context, now time.Time, self string) 
 			waiting[r.id] = true
 			if a, ok := s.askCopy(r.id); ok {
 				f.Changed[r.id], f.Asks[r.id] = a.Changed, a
+			}
+			if t, ok := s.todoNow(r.id); ok {
+				f.Deliveries[r.id] = currentDelivery(t)
 			}
 		}
 	}

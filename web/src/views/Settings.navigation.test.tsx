@@ -47,6 +47,8 @@ vi.mock("./settings/HubConnector", () => ({
 }));
 vi.mock("./settings/SentSettings", () => ({ SentSettings: () => <div data-page="sent" /> }));
 
+import { enabledNavItems, registerModule, resetModulesForTest } from "../core/module-host";
+import { forgetModuleSwitches, MODULE_SWITCH_KEY } from "../core/module-switch";
 import { initI18n, t } from "../i18n";
 import { Settings } from "./Settings";
 import { loadPages } from "../lib/lazy-page";
@@ -117,6 +119,46 @@ describe("Settings category navigation", () => {
       await initI18n("zh-Hans");
     }
   });
+  it("omits Optional features when the build registers no modules", async () => {
+    await mount("/settings?tab=general");
+    expect(host.querySelector('[data-configuration="features"]')).toBeNull();
+  });
+
+  it("switches a module off and back on from General and reflects another tab's choice", async () => {
+    forgetModuleSwitches();
+    registerModule({
+      id: "garden", title: () => "Garden", description: () => "A synthetic module",
+      navItems: [{ key: "garden", path: "/garden", icon: "heart", label: () => "Garden", after: "inbox" }],
+      load: async () => ({}),
+    });
+    try {
+      await mount("/settings?tab=general");
+      const toggle = () => host.querySelector<HTMLButtonElement>('[data-configuration-field="garden"] [role="switch"]')!;
+      expect(toggle()).not.toBeNull();
+      expect(toggle().getAttribute("aria-checked")).toBe("true");
+      expect(enabledNavItems().map((n) => n.key)).toEqual(["garden"]);
+
+      await act(async () => toggle().click());
+      expect(localStorage.getItem(MODULE_SWITCH_KEY)).toBe('["garden"]');
+      expect(enabledNavItems()).toEqual([]);
+
+      await act(async () => toggle().click());
+      expect(localStorage.getItem(MODULE_SWITCH_KEY)).toBeNull();
+      expect(enabledNavItems().map((n) => n.key)).toEqual(["garden"]);
+
+      await act(async () => {
+        localStorage.setItem(MODULE_SWITCH_KEY, '["garden"]');
+        window.dispatchEvent(new StorageEvent("storage", { key: MODULE_SWITCH_KEY, newValue: '["garden"]' }));
+      });
+      expect(toggle().getAttribute("aria-checked")).toBe("false");
+      expect(enabledNavItems()).toEqual([]);
+    } finally {
+      await act(async () => resetModulesForTest());
+      localStorage.removeItem(MODULE_SWITCH_KEY);
+      forgetModuleSwitches();
+    }
+  });
+
   // audit item 17: General's hints were cut at one line ("切换后页面会重新载…"), at every width
   it.each([false, true])("lets General's hints wrap rather than cutting them (phone: %s)", async (phone) => {
     viewport.phone = phone;

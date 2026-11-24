@@ -429,7 +429,7 @@ Lark tokens and gates. node drives it with calls the protocol already has:
 
 | node sends | With (all optional fields; runtimes that don't declare `caps.assistant` never receive them) |
 | --- | --- |
-| `session.start {cwd, assistant: true, supervision_instructions?}` | `cwd` is the assistant directory (`~/.persona/assistant`, containing `AGENTS.md` / `CLAUDE.md` and `.agents/skills/`); no `prompt`. The runtime reports this `cwd` for the chat's whole life (`runtime.sessions`, its cards), not where a tool's `cd` left the shell: the hub places assistant and health chats by that directory exactly (#2368). `supervision_instructions` is sent only when nonempty and the runtime also declared `caps.supervision_policy` (#11173) |
+| `session.start {cwd, assistant: true, supervision_instructions?}` | `cwd` is the assistant directory (`~/.persona/assistant`, containing bounded `AGENTS.md` / `CLAUDE.md` entry files, generated native rules and `.agents/skills/`); no `prompt`. The runtime reports this `cwd` for the chat's whole life (`runtime.sessions`, its cards), not where a tool's `cd` left the shell: the hub places assistant and health chats by that directory exactly (#2368). `supervision_instructions` is sent only when nonempty and the runtime also declared `caps.supervision_policy` (#11173) |
 | `session.send {session_id, text, images, client_msg_id, assistant: true, context, mode, memory_dir, supervision_instructions?}` | `context`: a `<persona-context>` block given to the model before the user's text (the live snapshot; the first message of a new chat also has memory and Lark notes), not shown in the chat, and left out of a message that is only a slash command (`/compact`, one line, no picture) so the runtime can run it: the snapshot goes with the next message, and after `/compact` in full; `mode`: Persona's permission mode (`default` / `acceptEdits` / `auto` / `plan` / `bypassPermissions`); `memory_dir`: the memory directory; `client_msg_id`: the id the message came with (the App's, a channel's), absent when it came without one: put it on the message's item, or leave the item without one, never another (`docs/protocol/protocol.md` "Matching pending messages"); `supervision_instructions`: sent only when the runtime declared `caps.supervision_policy` (always present, including explicit `""` to clear a prior role on demotion) |
 | `session.interrupt` | Stop on the phone; closing the assistant chat = stopping the running turn, the chat stays in the runtime |
 
@@ -440,6 +440,10 @@ Apply a snapshot only when spawning that conversation's **dedicated Assistant wo
 Antigravity sends `context` as an ACP embedded text resource before the separate user text block. Plain text blocks
 are subject to native slash-command expansion, so auxiliary context must not use that channel, even in its own block.
 An explicit standalone command still uses a plain text block without context.
+Antigravity natively loads the generated flat `.agents/rules/` files with `trigger: always_on` on every turn. Other
+runtimes have no verified native rule-directory contract: when the complete instructions exceed the bounded entry,
+node includes the exact remainder in `context` on every non-command message, so later turns and post-compaction turns
+do not lose it. This is not a replacement or summary of the runtime's `AGENTS.md`; it is the continuation of that file.
 
 For sessions it starts, the node restores persisted ownership and launcher metadata before publishing runtime rows.
 The original assistant or health directory identifies the conversation after rediscovery and reconnects. Runtime
@@ -619,7 +623,10 @@ The CLI companion runs the **Antigravity CLI (`agy`)**. When `personad node`
 runs (`--attach` or `--stdio`), `agy` is installed, Node.js 22.5+ (`node:sqlite`) is available, and no external `agy`
 runtime is connected on `runtime.sock`, the node automatically writes out the embedded `persona-antigravity-runtime`
 package and supervises `antigravity/companion.mjs` (passing `--no-update --parent-stdin`), yielding whenever an external
-`agy` runtime connects (`server/internal/node/agybridge.go`). You can also start
+`agy` runtime connects (`server/internal/node/agybridge.go`). The node resolves `agy` when it starts the companion and
+looks again every 30 seconds while it runs (#14533): when the path or the file there changed (replaced by an update,
+installed elsewhere, removed) and two looks in a row agree, it restarts the companion on the `agy` found now, waiting
+while one of its sessions is working or a call to it is pending (the old file keeps running until then). You can also start
 `node integrations/antigravity/companion.mjs` manually from the repository root, or install into the runtime package store
 with `node integrations/antigravity/install.mjs` and supervise
 `node ~/.persona/runtime-packages/persona-antigravity-runtime/current/antigravity/companion.mjs` under launchd / systemd.
@@ -630,7 +637,8 @@ it on the new code; direct launches outside the store leave self-update off. The
 socket, lists CLI transcripts, and uses `agy acp` for terminal-less session creation, sending and interruption. It can also
 serve as an assistant backend through the optional assistant contract above. It requires an installed, authenticated `agy`
 with ACP support; `--agy-bin`, `--agy-dir`, `--socket`, `--no-update` and `--parent-stdin` override the executable, CLI data
-directory, node socket, automatic updates and parent-pipe shutdown.
+directory, node socket, automatic updates and parent-pipe shutdown. When `--agy-dir` is passed explicitly, the companion also sets `ANTIGRAVITY_CLI_CONFIG_DIR` for its spawned `agy` child processes (`acp` and `models`) so discovery, ACP sessions, and transcript reads share the same directory.
+To run an additional companion instance alongside the default `agy` companion (for example, a wrapped `agy` executable or separate configuration directory), pass a distinct `--runtime <id>` (default `agy`), and optionally `--launcher <name>` (default `<runtime>`), `--display-name <label>` (default `Antigravity`), `--prefix <prefix>` (default `<runtime>-`), and `--assistant-for <launcher>` to point a non-assistant Agent launcher at this companion in the main-chat picker. Custom runtime IDs keep `agent: "agy"` and do not cause the node's built-in `agy` companion to yield.
 Models come from authenticated `agy models` discovery and ACP session metadata. The companion refreshes the catalog every
 five minutes, and the picker's refresh requests a fresh catalog through optional `models({launcher, refresh})`
 (`caps.models`, `launchers.models`). Discovery never sends a prompt. The native settings file determines the advertised
@@ -662,9 +670,13 @@ mode and adds one reloadable notice through the existing localized runtime-notic
 authoritative over later settings-file changes. A mode taken from agy's settings is read again on each session projection
 and applied again before the next prompt, so changing `agentMode` needs no companion restart. External session models stay
 unspecified until native metadata is available. Session discovery does not resume them.
+An Antigravity CLI from before `session/set_mode` answers it with -32601 (#14533): a request for `default` is then a no-op
+(the session is already in the CLI's own default), and any other mode fails with "This Antigravity CLI (agy) is too old to
+switch to the … mode … Please update agy.", which launcher health classes as `cli_outdated`.
 
 Availability checks use optional `check({launcher, cwd, prompt})` (`caps.check`) through the companion's authenticated
-ACP client. They run the existing one-word probe, cancel tool permission requests, and close their temporary session
+ACP client. They switch the probe session to `default` only when `session/new` lists that mode (or lists none), and a CLI
+without `session/set_mode` skips the switch. They run the existing one-word probe, cancel tool permission requests, and close their temporary session
 on success, failure or timeout. Completed probe workspaces stay out of the user inventory after companion restarts.
 The runtime bounds native calls to a 75-second budget, followed by bounded session cleanup. Older runtimes keep the
 node's shell check. Shell and managed launchers keep their own execution context.

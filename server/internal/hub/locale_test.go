@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/nwverse/persona/server/internal/i18n"
+	"github.com/nwverse/persona/server/internal/prompts"
 	"github.com/nwverse/persona/server/internal/proto"
 )
 
@@ -280,6 +281,17 @@ func TestInjectedLineLanguage(t *testing.T) {
 	one := &proto.Injected{Kind: proto.InjectedSystem, State: "lost_tasks", Line: "node 重启过，1 个后台任务停了"}
 	if got := injectedLine(i18n.En, one); got != "The node restarted and 1 background task stopped" {
 		t.Fatalf("en one: %q", got)
+	}
+	// A usage limit's continuation on a backup launcher (assistant/limit_fallback.go, #14435).
+	backup := prompts.ParseInjected(prompts.RenderLimitFallbackContinue("English"))
+	if backup == nil || injectedLine(i18n.ZhHans, backup) != "用量额度用完了，Persona 换了个启动器让它接着做" {
+		t.Fatalf("zh-Hans backup line: %+v", backup)
+	}
+	if got := injectedLine(i18n.En, backup); got != "Usage limit reached: Persona moved it to another launcher to go on" {
+		t.Fatalf("en backup line: %q", got)
+	}
+	if got := injectedLine(i18n.Ja, backup); got != "利用上限に達したため、Personaが別のランチャーに移して続けさせました" {
+		t.Fatalf("ja backup line: %q", got)
 	}
 }
 

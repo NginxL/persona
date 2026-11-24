@@ -1025,12 +1025,44 @@ class CheckFastPlanTests(unittest.TestCase):
         self.assertIn("queued: server go test ./internal/foo/...", server)
         self.assertNotIn("android i18n", server)
 
+    def test_each_retains_unittest_classification(self):
+        # Both paths select the same table suite. Its file is classified once,
+        # while each path still gets its own queue or SKIP result.
+        self.write("scripts/ci/alpha.py", "VALUE = 1\n")
+        self.write("scripts/ci/other.py", "VALUE = 2\n")
+        self.write("listed.txt", "scripts/ci/alpha.py\nscripts/ci/other.py\n")
+        for text, expected in (("import unittest\n", "queued: scripts/test/test_doc_sections.py"),
+                               ("print('not a suite')\n", "SKIP  scripts/test/test_doc_sections.py (not a unittest suite)")):
+            with self.subTest(expected=expected):
+                self.write("scripts/test/test_doc_sections.py", text)
+                counter = self.repo / "grep-count.txt"
+                counter.write_text("")
+                bin_dir = self.repo / "counting-bin"
+                bin_dir.mkdir(exist_ok=True)
+                grep = bin_dir / "grep"
+                real_grep = shutil.which("grep")
+                grep.write_text(f'#!/bin/sh\nprintf "%s\\n" "$*" >> "{counter}"\nexec "{real_grep}" "$@"\n')
+                grep.chmod(0o755)
+                env = dict(self.env, PATH=f"{bin_dir}{os.pathsep}{self.env['PATH']}")
+                run = subprocess.run(["bash", str(self.repo / "scripts/test/check-fast.sh"), "--dry-run",
+                                      "--changed-from", "listed.txt", "--each"], cwd=self.repo, env=env,
+                                     capture_output=True, text=True, timeout=300)
+                self.assertEqual(0, run.returncode, run.stdout + run.stderr)
+                out = run.stdout + run.stderr
+                alpha, other = out.split("== scripts/ci/other.py\n")
+                self.assertIn(expected, alpha)
+                self.assertIn(expected, other)
+                calls = counter.read_text().splitlines()
+                self.assertEqual(1, sum(call == "-q unittest scripts/test/test_doc_sections.py" for call in calls), calls)
+
     def test_listed_paths_only_plan(self):
         for args in (("--changed-from", "-"), ("--dry-run", "--all", "--changed-from", "-"),
                      ("--dry-run", "--base", "base", "--changed-from", "-"), ("--dry-run", "--each")):
             with self.subTest(args=args):
                 self.check_fast(*args, stdin="server/go.mod\n", code=2)
         self.check_fast("--dry-run", "--changed-from", "missing.txt", code=2)
+        (self.repo / "scripts/ci/affected_drift.py").unlink()
+        self.check_fast("--dry-run", "--changed-from", "-", "--each", stdin="server/go.mod\n", code=2)
 
     def test_the_ci_lanes_it_runs_no_part_of_are_named(self):
         out = self.check_fast("--dry-run", "--changed-from", "-", stdin="android/app/build.gradle.kts\n")

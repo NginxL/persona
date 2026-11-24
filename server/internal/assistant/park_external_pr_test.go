@@ -375,9 +375,14 @@ func TestExternalPRParkReceiptAndReviewRecoverTogether(t *testing.T) {
 	// routing (#5732), without changing the external source's identity or duplicating the receipt.
 	third.signal(signals[0])
 	sendPendingPRConflicts(third)
-	hub.mu.Lock()
-	message := sentText(hub.sends)
-	hub.mu.Unlock()
+	// Relay delivery is asynchronous: observe the actual main-conversation message before restarting again.
+	var message string
+	waitFor(t, "the recovered PR wake to reach main", func() bool {
+		hub.mu.Lock()
+		message = sentText(hub.sends)
+		hub.mu.Unlock()
+		return hub.sentTo("conv1") == 1 && strings.Contains(message, "The bound PR is merged: "+externalPRSource)
+	})
 	if hub.sentTo("conv1") != 1 || hub.sentTo("conv2") != 0 ||
 		!strings.Contains(message, "The bound PR is merged: "+externalPRSource) {
 		t.Fatalf("recovered wake did not reach main with the receipt: %q", message)

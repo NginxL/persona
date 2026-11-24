@@ -26,6 +26,8 @@ runtime errors. Shell launchers, managed launchers and older runtimes keep their
   Runtime launchers (DSH, agy and others, whose `source` is the runtime's id) are not checked, with one exception (#10369): the main chat's launcher and the Agents' default launcher.
   While one of those has a failing record on a computer that lists it (`failing`, `repairing` or `blocked` within 6 hours, or a usage limit in force), the round checks it there like any launcher (once per interval, through the runtime's own `launchers.check`, as the on-demand probe below already does), and so does `POST /api/v1/launchers/health/check`; a failure updates the record's check time, a pass clears it.
   A runtime launcher of theirs that passed, or never failed there, is not checked again, so no runtime spends a request each interval; its record stays while the computer lists the launcher. Before, nothing rechecked such a record (a round dropped it instead, as a launcher the computer does not have), so the main chat's readiness could stay in setup for up to 6 hours after the cause was fixed.
+  Asked for by name (`POST /api/v1/launchers/health/check?machine=<id>&launcher=<name>`, the alert sheet's **Test again**), any runtime launcher the computer lists is checked, whatever its record says and whoever runs on it (#14534): a person asked for that one request. Before, a runtime launcher that was neither the main chat's nor the Agents' got no check and an empty answer, so a failure a start had recorded stayed until it went stale.
+  A check drops only the records of launchers the computer no longer lists (its whole list, not just the ones that run checks), so checking one launcher never erases another's record.
   The desktop apps' launchers (`claude_desktop`, `codex_app`), whose check runs no prompt, are never checked.
 - A failed Agent start is recorded too: when `agent_start`, a task plan starting an Agent (`startTaskAgent`) or a repair Agent's start gets an error from `session.start`, it is recorded as a failure (source `start`),
   and a check runs right away to confirm (one network blip should not leave a launcher unavailable; if the check passes, it recovers).
@@ -123,7 +125,7 @@ Nothing is ever taken away by a failure. "No new information" means the fold cha
 | `upstream` | Explicit upstream account-pool exhaustion (`no eligible upstream`, `no other eligible account`, `upstream attempt budget`, #13372), matched before `model_route` even when the message also names the requested model | None, however many in a row: nothing on the computer is broken |
 | `model_route` | `Bare Claude model name`, `cannot be routed`, `no account match`, model does not exist / not supported | Repair Agent (reconfigure the gateway's model) |
 | `auth` | 401 / 403, `invalid … api key`, `authentication_error`, `Not logged in`, expired token | Repair Agent (reconfigure the gateway's key) |
-| `cli_outdated` | `unknown option`, asks to upgrade / version too old / no longer supported | First the node upgrades itself (`claude update`); if that fails, a repair Agent |
+| `cli_outdated` | `unknown option`, a JSON-RPC `Method not found` (a CLI older than a method its runtime calls), asks to upgrade / version too old / no longer supported | First the node upgrades itself (`claude update`); if that fails, a repair Agent |
 | `timeout` | `context deadline exceeded`, no answer within 150 seconds (twice: a timed-out check is asked again at once) | Counts only after two in a row; handed to a repair Agent |
 | `other` | Everything else | Same: repaired only after two in a row |
 | `not_in_terminal` | A start's new terminal tab could not run the launcher or its claude (`launcher_missing` / `claude_missing` with `where: "terminal"`, #1642, `docs/integrations/launchers.md` "The terminal's shell is another environment") | None: `blocked` at once, the reason says to define the launcher where the terminal's shell reads it or add it as a model provider |
@@ -206,7 +208,7 @@ set `default` if you want it to wait for your approval at every step. Member hub
 ## API for the board
 
 - `GET /api/v1/launchers/health?state=blocked&machine=`: all records (or filtered by state or computer), `{records: [{machine, launcher, state, kind, error, checked_at, source, fails, missing_fails?, repair?, blocked_reason?, resets_at?, limit_models?, limit_resets?}]}`.
-- `POST /api/v1/launchers/health/check?machine=&launcher=`: check right now (without parameters, all online computers), returns this run's results.
+- `POST /api/v1/launchers/health/check?machine=&launcher=`: check right now (without parameters, all online computers), returns this run's results. With no record in the answer for the launcher it asked about (the computer is offline, or no longer lists it), the web alert sheet reads `GET /api/v1/launchers/health` again, so it shows what the hub holds now.
 - A state change broadcasts a `launcher_health` event (`{type, record}`, only to connected clients, not a push).
   The "decisions / blocked / progress" board reads `state=blocked` records, or subscribes to this event, to list what is blocked.
 

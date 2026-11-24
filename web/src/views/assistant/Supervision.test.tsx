@@ -38,18 +38,22 @@ describe("a supervised task", () => {
     expect(html).toContain("1/2");
     expect(html).toContain("pull/7 merged");
     expect(html).toContain('dateTime="2026-11-10T09:00:00Z"');
-    expect(html).toContain("agent:box/s1");
+    expect(html).toContain('data-testid="review-evidence-author">Agent<');
+    expect(html).not.toContain("agent:box/s1");
     expect(html).toContain('aria-label="还没验收"');
   });
   it.each([
-    "agent:box/s1", "supervisor:main", "judge",
-  ])("keeps the %s evidence attribution in the existing task detail without new labels", (by) => {
+    ["agent:box/s1", "Agent"],
+    ["supervisor:main", "主管"],
+    ["judge", "评审"],
+  ])("maps %s evidence attribution to readable label %s in the task detail", (by, expected) => {
     const detail: Todo = { ...todo, supervision: {
       supervisor: "main", done_when: ["Tests pass"],
       criteria: [{ criterion: "Tests pass", state: "met", evidence: "go test: PASS", at: "2026-11-11T01:00:00Z", by }],
     } };
     const html = renderToStaticMarkup(<ReviewChecklist todo={detail} />);
-    expect(html).toContain(by);
+    expect(html).toContain(`data-testid="review-evidence-author">${expected}<`);
+    expect(html).not.toContain(by);
     expect(html).toContain("go test: PASS");
     expect(html).toContain('dateTime="2026-11-11T01:00:00Z"');
   });
@@ -62,7 +66,8 @@ describe("a supervised task", () => {
     expect(html).toContain('data-testid="review-parked"');
     expect(html).toContain("Waiting for the external release");
     expect(html).toContain("go test: PASS");
-    expect(html).toContain("agent:box/s1");
+    expect(html).toContain('data-testid="review-evidence-author">Agent<');
+    expect(html).not.toContain("agent:box/s1");
     expect(html).toContain('dateTime="2026-11-11T01:00:00Z"');
   });
   it("does not display stale parked metadata while the task's Agent is working", () => {

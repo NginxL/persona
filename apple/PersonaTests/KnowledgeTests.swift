@@ -1,4 +1,5 @@
 import Foundation
+import SwiftUI
 import Testing
 @testable import Persona
 
@@ -33,9 +34,13 @@ struct KnowledgeTests {
         // Go's times, nanoseconds and all; its zero time is none.
         #expect(ItemFacts.parse("2026-10-29T18:27:00.519822572Z") == ISO8601DateFormatter().date(from: "2026-10-29T18:27:00Z"))
         #expect(ItemFacts.parse("0001-01-01T00:00:00Z") == nil)
-        // Every word searched for is marked.
+    }
+
+    @Test func searchMarksAllMatchingWordsInTheAccentTint() {
         let marked = KBHitRow.marked("MCP 挂了，重启 mcp", "mcp 重启")
-        #expect(marked.runs.filter { $0.inlinePresentationIntent == .stronglyEmphasized }.count == 3)
+        let matches = marked.runs.filter { $0.backgroundColor == Theme.accentTint }
+        #expect(matches.map { String(marked[$0.range].characters) } == ["MCP", "重启", "mcp"])
+        #expect(matches.allSatisfy { $0.foregroundColor == .primary && $0.inlinePresentationIntent == nil })
     }
 }
 

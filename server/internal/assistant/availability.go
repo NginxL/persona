@@ -128,6 +128,7 @@ type availBook struct {
 	known  map[[2]string]bool       // the conversations an input was noted for: assistant conversations
 	inputs map[[2]string]availInput // the input a conversation's next round starts with
 	rounds map[[2]string]availRound // the rounds under way
+	ended  map[[2]string]availRound // each conversation's latest round that ended (availLastRound)
 	waits  map[[2]string]availWait  // the owner's earliest message still without a reply
 	// sent: the client_msg_id of the owner's messages of the last availSentKeep; replayed: the conversations a
 	// replay was seen for whose session.user_spoke has not come yet.
@@ -367,11 +368,25 @@ func (b *availBook) closeRound(k [2]string, now time.Time) (availRound, bool) {
 		return round, false
 	}
 	delete(b.rounds, k)
+	if b.ended == nil {
+		b.ended = map[[2]string]availRound{}
+	}
+	b.ended[k] = round
 	if in, ok := b.inputs[k]; ok {
 		in.until = now.Add(availQueuedGrace)
 		b.inputs[k] = in
 	}
 	return round, true
+}
+
+// availLastRound is machine's assistant conversation session's latest round that ended, as this manager saw it start
+// (its source: who started it); false when none ended since the manager started.
+func (s *Service) availLastRound(machine, session string) (availRound, bool) {
+	b := &s.avail
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	round, ok := b.ended[[2]string{machine, session}]
+	return round, ok
 }
 
 // availTurnEnded: machine's session finished a turn: its round is recorded, and an owner message the round started

@@ -3021,7 +3021,13 @@ item states its own scope, then one configuration form per module. Where a featu
 the page (never navigating away, so nothing open behind it, such as a chat's unsent draft, is unmounted) instead of a
 second switch, so there is one place to change it.
 
-An experiment can supply a permanent note under its introduction or beside a field, using the existing info and warning
+Admit a temporary trial of a real feature or a choice between the stable and new implementations of one capability.
+Keep the stable default and a lossless rollback, with a linked tracking issue for graduation or removal. Put shipped
+module switches in General › Optional features using the same configuration form. Keep other lasting preferences,
+including per-browser and advanced settings, in their owning category. Keep irreversible changes, internal debug
+controls and placeholder demos out of Labs.
+
+An experiment can supply a note under its introduction or beside a field, using the existing info and warning
 hint styles. A choice with consequences can request confirmation for a specific change. Use the shared Dialog, with the
 affected scope, impact, timing and an action-specific button. All dismissal paths preserve the edit. On success the
 field’s polite save status can explain when the choice takes effect. Show this receipt once, in the field footer.
@@ -4092,6 +4098,8 @@ Launcher discovery failure or a missing saved launcher keeps the saved choice vi
 Assistant inheritance option remains selectable. Selecting it explicitly clears launcher, model and effort together;
 discovery alone never changes saved choices. Computer-scoped defaults come from that computer's launcher response.
 A saved model alias uses its folded catalog row's capabilities and default thinking effort without rewriting the saved ID.
+When the catalog lists a model by effort level, the model picker shows one base name. The effort selector shows
+the available levels and chooses the concrete variant ID, including when the task starts by following Assistant.
 Defaults, model and launcher catalogs are keyed to the current assistant and their exact execution context; stale
 responses cannot replace the current catalog. Discovery reads and the task save target the same assistant. Task
 inheritance is requested explicitly, leaving ordinary Assistant picker defaults unchanged.

@@ -448,7 +448,9 @@ var launcherErrorKinds = []struct {
 	{errKindUpstream, lazyre.New(`(?i)no other eligible account|no eligible upstream|upstream attempt budget`)},
 	{errKindModelRoute, lazyre.New(`(?i)bare claude model name|cannot be routed|no account match|model[^.\n]{0,60}(not found|not supported|not available|does not exist|unknown)|unknown model|invalid model`)},
 	{errKindAuth, lazyre.New(`(?i)\b40[13]\b|invalid (or missing )?(api[ _-]?key|x-api-key|token|bearer)|authentication_error|unauthori[sz]ed|not logged in|please run /login|token (has )?expired|permission_error|forbidden|requires \w+ auth|no \w+ auth token|auth login`)},
-	{errKindCLIOutdated, lazyre.New(`(?i)unknown option|unrecognized option|unexpected argument|please (update|upgrade)|(update|upgrade) (claude|codex|your)|version[^.\n]{0,40}(too old|no longer supported|not supported|outdated)|minimum (required )?version|requires (a )?newer`)},
+	// A JSON-RPC "Method not found" is a CLI that predates a method its runtime calls (an Antigravity CLI without
+	// session/set_mode, #14533): updating the CLI is the fix.
+	{errKindCLIOutdated, lazyre.New(`(?i)unknown option|unrecognized option|unexpected argument|method not found|please (update|upgrade)|(update|upgrade) (claude|codex|your)|version[^.\n]{0,40}(too old|no longer supported|not supported|outdated)|minimum (required )?version|requires (a )?newer`)},
 	{errKindTimeout, lazyre.New(`(?i)context deadline exceeded|deadline exceeded|timed? ?out|秒内没有回答`)},
 }
 

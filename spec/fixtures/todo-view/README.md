@@ -12,7 +12,7 @@ unchanged (Go `server/internal/assistantwire/todo_view_gen_test.go`, Kotlin
 
 | File | What it pins | Cases |
 | --- | --- | --- |
-| `todo_view.json` | One to-do, its runs' sessions and pending cards → its view | 55: every phase and section at least once, every reason the hub produces, each kind of ask's risk |
+| `todo_view.json` | One to-do, its runs' sessions and pending cards → its view | 63: every phase and section at least once, every reason the hub produces, each kind of ask's risk, and compatibility edge cases |
 
 ## Format
 
@@ -109,6 +109,14 @@ failed start reads as open although `done_at` is stored: `done` holds exactly wh
 | `run_question_with_options_safe` | needs_you · needs_you · `agent_asks`, a `question` by its card, `safe` | row 2, 3.7 | waiting · agent_asks |
 | `run_plan_open_with_card` | needs_you · needs_you · `agent_asks`, a `plan` by its card, `open` | row 2, 3.7 | waiting · agent_asks |
 | `run_permission_is_tool` | needs_you · needs_you · `agent_asks`, a `tool` by its card, `open` | row 2, 3.7 | waiting · agent_asks |
+| `can_wait_with_agent_asks` | needs_you · needs_you · `agent_asks`, both asks listed (run first, `can_wait` second) | rows 2, 4 | waiting · agent_asks |
+| `supervisor_held_vs_real_owner_ask` | needs_you · needs_you · `agent_asks`, only the real owner ask listed | rows 2, 5 | waiting · agent_asks |
+| `multi_agent_asks_same_todo` | needs_you · needs_you · `agent_asks`, two asking runs sorted oldest first | row 2 | waiting · agent_asks |
+| `steps_with_superseded_child` | working · working · `agent_running`, superseded failed-start step counted done (`2/3`) | row 5, 3.4 "Steps roll up", Rule 1a | other · rest |
+| `delivery_merged_not_live` | todo · todo · `rest`, `merged` does not settle into Just finished | rows 9, 13, 14 | other · rest |
+| `new_activity_after_seen_at` | ready · just_finished · `finished_unseen`, `seen` cleared by newer turn | row 9 | just_done · finished_unseen |
+| `parked_until_expired_stays_waiting` | waiting · waiting · `parked`, expired `until` sets no `next_change_at` | row 8 | parked · parked |
+| `parked_real_wake_agent_running` | working · working · `agent_running`, real wake beats lingering park | rows 5, 8 | working · agent_running |
 
 The last column is what `triageTodo` answers for the same input, for the web's shadow comparison; the view differs
 from it only where 6.3 changes a rule. It was computed with `triageTodo` as of commit `d477f040e2` (the last change to

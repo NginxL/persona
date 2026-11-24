@@ -100,7 +100,14 @@ const flush = async () => { for (let i = 0; i < 6; i++) await act(async () => { 
 const dialog = () => document.querySelector<HTMLElement>('[role="dialog"]')!;
 const button = (label: string, scope: ParentNode = document) => [...scope.querySelectorAll("button")].find((b) => b.textContent === label)!;
 const row = () => [...host.querySelectorAll("button")].find((b) => b.textContent?.includes(current.name))!;
-const effort = () => dialog().querySelector<HTMLInputElement>('input[list="model-efforts"]')!;
+const effort = () => [...dialog().querySelectorAll("select")]
+  .find((node) => node.closest("label")?.querySelector("span")?.textContent === t("settings-modelconfiguration.effort"))!;
+function changeEffort(value: string) {
+  act(() => {
+    effort().value = value;
+    effort().dispatchEvent(new Event("change", { bubbles: true }));
+  });
+}
 function type(input: HTMLInputElement, value: string) {
   act(() => {
     Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input, value);
@@ -238,7 +245,7 @@ describe.each([
     await act(async () => dialog().querySelector<HTMLButtonElement>("button[aria-expanded]")!.click());
     await flush();
     await act(async () => [...dialog().querySelectorAll<HTMLButtonElement>('[role="option"]')].find((b) => b.textContent?.includes("Custom model"))!.click());
-    type(effort(), "high");
+    changeEffort("high");
     await act(async () => button(t("common.save"), dialog()).click());
     await flush();
     expect(writes).toEqual([{ path: `/api/v1/model-config/purposes/${use.id}`, method: "PATCH", body: {
@@ -253,7 +260,7 @@ describe.each([
     await open();
     await choose("launcher.messages");
     type(dialog().querySelector<HTMLInputElement>(`input[aria-label="${t("settings-modelconfiguration.specific_model")}"]`)!, "api-model");
-    type(effort(), "low");
+    changeEffort("low");
     await act(async () => button(t("common.save"), dialog()).click());
     expect(writes[0].body).toEqual({ revision: 7, provider: "launcher.messages", model: "api-model", effort: "low" });
   });
@@ -307,7 +314,7 @@ describe.each([
     await open();
     const model = () => dialog().querySelector<HTMLInputElement>(`input[aria-label="${t("settings-modelconfiguration.specific_model")}"]`)!;
     type(model(), "draft-model");
-    type(effort(), "high");
+    changeEffort("high");
     conflict = true;
     await act(async () => button(t("common.save"), dialog()).click());
     expect(model().value).toBe("draft-model");
@@ -421,11 +428,12 @@ describe("API-kind purpose CLI backend badges (#12027)", () => {
     listFails = true;
     await render();
     await open();
-    const effortValues = () => [...dialog().querySelectorAll<HTMLOptionElement>("#model-efforts option")].map((o) => o.value);
+    const effortValues = () => [...effort().options].map((o) => o.value);
 
     await choose("launcher.codex");
     expect(effortValues()).toContain("minimal");
     expect(effortValues()).toContain("ultra");
+    expect([...effort().options].filter((option) => ["minimal", "ultra"].includes(option.value)).map((option) => option.textContent)).toEqual(["Minimal", "Ultra"]);
 
     await choose("launcher.codex-responses");
     expect(effortValues()).toContain("minimal");

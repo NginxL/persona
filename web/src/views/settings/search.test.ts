@@ -81,7 +81,8 @@ async function inLanguage(lang: string) {
   const { initI18n, t } = await import("../../i18n");
   await initI18n(lang);
   const { SEARCH_INDEX, searchSettings } = await import("./search");
-  return { lang, t, SEARCH_INDEX, searchSettings };
+  const { registerModule, resetModulesForTest } = await import("../../core/module-host");
+  return { lang, t, SEARCH_INDEX, searchSettings, registerModule, resetModulesForTest };
 }
 const languages: Awaited<ReturnType<typeof inLanguage>>[] = [];
 // resetModules changes the registry: constructing these fixtures concurrently would mix their catalogs.
@@ -127,6 +128,23 @@ describe("the settings search's index", () => {
     finds(t("settings.device_tokens"), "devices", "devices");
     finds("API Key", "models", "settings-providers");
     if (lang !== "ja") finds("token", "devices", "devices");
+  });
+
+  it.each(languages)("finds registered feature switches and their group in General in $lang", ({ t, searchSettings, registerModule, resetModulesForTest }) => {
+    const group = t("settings-features.features_group");
+    const features = t("settings-features.area_features");
+    const title = t("sidebar.nav_health");
+    const matches = (query: string) => searchSettings(query).groups.filter((g) => g.anchor.startsWith("configuration-features-"));
+    expect(matches(group)).toEqual([]);
+    registerModule({ id: "sample", title: () => title, description: () => "A synthetic module", load: async () => ({}) });
+    try {
+      const destination = { tab: "general", anchor: "configuration-features-modules" };
+      expect(matches(group)).toEqual([expect.objectContaining(destination)]);
+      expect(searchSettings(features)).toEqual({ tabs: [], groups: [expect.objectContaining(destination)] });
+      expect(matches(title)).toEqual([expect.objectContaining({ tab: "general", anchor: "configuration-features-sample" })]);
+    } finally {
+      resetModulesForTest();
+    }
   });
 
   it("finds the words people searched for in Chinese (audit item 18), each under a label that says it", () => {

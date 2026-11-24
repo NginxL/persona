@@ -68,4 +68,15 @@ struct NotificationWithdrawalTests {
         #expect(NotificationWithdrawal.resolved(["ix1", "ix3"], group: nil, delivered: pushes) == ["n1", "n3"])
         #expect(NotificationWithdrawal.resolved([], group: nil, delivered: pushes).isEmpty)
     }
+
+    @Test func anAssistantCardsPushWaitsForItsWithdrawal() {
+        // A decision's push (card_id): never in the list of pending interactions, so neither a list without it nor a
+        // settled interaction takes it back; the hub's withdrawal push naming it does.
+        var card = delivered("n1", "todo-ask:t1")
+        card.ownerCard = true
+        let pushes = [card, delivered("n2", "ix2")]
+        #expect(NotificationWithdrawal.stale(listedAt: ["": t0.addingTimeInterval(60)], pending: [], delivered: pushes) == ["n2"])
+        #expect(NotificationWithdrawal.settled(gone: ["todo-ask:t1"], pending: [], delivered: pushes).isEmpty)
+        #expect(NotificationWithdrawal.resolved(["todo-ask:t1"], group: "", delivered: pushes) == ["n1"])
+    }
 }

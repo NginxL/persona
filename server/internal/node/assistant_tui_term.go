@@ -385,7 +385,7 @@ func (b *tuiBridge) awaitReady(ctx context.Context) error {
 			time.Sleep(time.Second)
 			continue
 		}
-		if reason := firstRunScreen(unframed(plain)); reason != "" {
+		if reason := claudeStartupError(plain); reason != "" {
 			return errors.New(reason)
 		}
 		if strings.Contains(plain, tuiNoTranscript) {

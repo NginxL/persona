@@ -59,8 +59,8 @@ type preemptBook struct {
 }
 
 // backgroundRoundKind is the kind of round text with source starts when it is one the owner did not start, else "".
-// Persona continuing the owner's own work (a usage limit that reset, a wake for what it waits on) is not one, as it
-// is no background round in the apps ("Background rounds").
+// Persona continuing the owner's own work (a usage limit that reset or moved it to a backup launcher, a wake for what
+// it waits on: prompts.ContinuesOwnWork) is not one, as it is no background round in the apps ("Background rounds").
 func backgroundRoundKind(text string, source *proto.MessageSource) string {
 	if source == nil {
 		if in := prompts.ParseInjected(text); in != nil && in.Kind == proto.InjectedTaskNotice {
@@ -72,7 +72,7 @@ func backgroundRoundKind(text string, source *proto.MessageSource) string {
 	case proto.SourceSupervision, proto.SourceConversation, proto.SourcePatrol:
 		return source.Kind
 	case proto.SourceFollowup:
-		if in := prompts.ParseInjected(text); in != nil && (in.State == "limit_continue" || in.State == "wake") {
+		if prompts.ContinuesOwnWork(prompts.ParseInjected(text)) {
 			return ""
 		}
 		return source.Kind

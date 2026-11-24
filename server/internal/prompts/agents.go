@@ -121,6 +121,16 @@ func RenderAgentLimitContinue(language string) string {
 	return render("agents/limit_continue", struct{ Language string }{language})
 }
 
+// LimitFallbackMarker starts agents/limit_fallback_continue in every language: ParseInjected knows it by this line.
+const LimitFallbackMarker = "<persona-limit-fallback />"
+
+// RenderLimitFallbackContinue is what the manager sends a conversation a usage limit stopped, once it moved the
+// conversation to a backup launcher (agents/limit_fallback_continue, docs/assistant/agent-work.md "Usage limits: a
+// backup launcher"). It goes in as the backup's first turn, after the switch's summary of what went before.
+func RenderLimitFallbackContinue(language string) string {
+	return render("agents/limit_fallback_continue", struct{ Language string }{language})
+}
+
 // AgentAnswer is the user's answers to the hub's decision card, sent on to the agent (agents/answer).
 type AgentAnswer struct {
 	Language string // Owner language; empty preserves legacy Chinese bytes.

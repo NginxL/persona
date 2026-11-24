@@ -30,6 +30,7 @@ import plistlib
 import re
 import subprocess
 import sys
+from functools import lru_cache
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -309,6 +310,7 @@ def infoplist_drift(rel, catalog, plist):
     return problems
 
 
+@lru_cache(maxsize=65536)
 def normalize(text, literal=False, raw_hashes=0, formats=True):
     """Normalize interpolation/format arguments without losing a scoped key's English text.
 

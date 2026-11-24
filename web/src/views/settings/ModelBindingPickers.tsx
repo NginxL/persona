@@ -3,14 +3,15 @@
 import { Suspense, useEffect, useRef, useState } from "react";
 import { t } from "../../i18n";
 import { api, errorText } from "../../lib/api";
-import { effortChoices, providerModels, takesEffort } from "../../lib/launcher-models";
+import { providerModels } from "../../lib/launcher-models";
+import type { launcherBindingState } from "../../lib/launcher-model-binding";
 import { lazyPage } from "../../lib/lazy-page";
 import { MANAGER_HEADER } from "../../lib/manager-choice";
-import { modelProviderTitle, providerAgent, providerName, type ModelBinding, type ModelProvider, type ModelPurpose } from "../../lib/model-config";
+import { modelProviderTitle, providerName, type ModelBinding, type ModelProvider, type ModelPurpose } from "../../lib/model-config";
 import { providersFor } from "../../lib/model-config-execution";
 import { EFFORT_LEVELS, type ProviderModel } from "../../lib/providers";
-import { effortTitle } from "../../lib/session-actions";
 import { Loading } from "../../ui/atoms";
+import { LauncherEffortSelect } from "../../ui/LauncherEffortSelect";
 import type { ModelList } from "../../ui/ModelPicker";
 import { DirectEffortSelect, directEffortState } from "./DirectAPIEditor";
 
@@ -27,7 +28,9 @@ export function useLauncherModels(
   providerId: string,
   opts: { manager?: string; machine?: string; onProviderChange?: () => void } = {},
 ): { list: LauncherModelState; reload: () => void; hasPicker: boolean } {
-  const [list, setList] = useState<LauncherModelState>({ status: "idle" });
+  const key = JSON.stringify([providerId, opts.manager, opts.machine]);
+  const [loaded, setList] = useState<LauncherModelState & { key?: string }>({ status: "idle" });
+  const list: LauncherModelState = loaded.key === key ? loaded : { status: providerId ? "loading" : "idle", provider: providerId };
   const [reloadSeq, setReloadSeq] = useState(0);
   const refreshNext = useRef(false);
   const onChangeRef = useRef(opts.onProviderChange);
@@ -37,23 +40,23 @@ export function useLauncherModels(
     const refresh = refreshNext.current;
     refreshNext.current = false;
     if (!refresh) onChangeRef.current?.();
-    if (!providerId) {
-      setList({ status: "idle" });
-      return;
-    }
+    if (!providerId) return;
     const controller = new AbortController();
     setList((prev) => ({
       status: "loading",
+      key,
       provider: providerId,
-      list: refresh && prev.provider === providerId ? prev.list : undefined,
+      list: refresh && prev.key === key ? prev.list : undefined,
     }));
     providerModels(providerId, { manager: opts.manager, refresh, machine: opts.machine, signal: controller.signal })
-      .then((res) => setList({ status: "ready", list: res, machine: res?.machine, provider: providerId }))
+      .then((res) => {
+        if (!controller.signal.aborted) setList({ status: "ready", list: res, key, machine: res?.machine, provider: providerId });
+      })
       .catch((e) => {
-        if (!controller.signal.aborted) setList({ status: "error", error: errorText(e), provider: providerId });
+        if (!controller.signal.aborted) setList({ status: "error", error: errorText(e), key, provider: providerId });
       });
     return () => controller.abort();
-  }, [providerId, reloadSeq, opts.manager, opts.machine]);
+  }, [providerId, reloadSeq, opts.manager, opts.machine, key]);
 
   const reload = () => {
     refreshNext.current = true;
@@ -168,6 +171,7 @@ export function LauncherModelSelect({
   ariaLabel,
   placeholder,
   hint,
+  foldVariants,
   onChange,
 }: {
   models: LauncherModelState;
@@ -180,6 +184,7 @@ export function LauncherModelSelect({
   ariaLabel: string;
   placeholder?: string;
   hint?: string;
+  foldVariants?: boolean;
   onChange: (model: string) => void;
 }) {
   const [open, setOpen] = useState(false);
@@ -201,6 +206,7 @@ export function LauncherModelSelect({
               model={model}
               followed={followed}
               defaultLabel={defaultLabel}
+              ariaLabel={ariaLabel}
               open={open}
               onToggle={() => setOpen((o) => !o)}
               query={query}
@@ -213,6 +219,7 @@ export function LauncherModelSelect({
               }}
               onReload={onReload}
               custom
+              foldVariants={foldVariants}
               failedNote={t("settings-modelconfiguration.list_failed")}
             />
           </Suspense>
@@ -325,11 +332,10 @@ export function ApiModelSelect({
   );
 }
 
-/** Effort selector reusing DirectEffortSelect for API providers and effortChoices/EFFORT_LEVELS for launchers. */
+/** API providers use the same capability projection as the direct connection editor. */
 export function ProfileEffortSelect({
   chosen,
-  kind,
-  launcherList,
+  launcherBinding,
   discoveredModels = [],
   model,
   followed,
@@ -339,8 +345,7 @@ export function ProfileEffortSelect({
   onChange,
 }: {
   chosen?: ModelProvider;
-  kind: "api" | "launcher";
-  launcherList?: LauncherModelState;
+  launcherBinding: ReturnType<typeof launcherBindingState>;
   discoveredModels?: ProviderModel[];
   model: string;
   followed?: ModelBinding;
@@ -353,7 +358,7 @@ export function ProfileEffortSelect({
     const effortModel = model.trim() || followed?.model || chosen.model || "";
     const state = directEffortState(chosen, discoveredModels, effortModel);
     // Purpose/profile Save accepts proto.EffortLevels plus off/none for API purposes; filter out levels Save rejects.
-    const allowed = new Set(allowOff || kind === "api" ? ["off", "none", ...EFFORT_LEVELS] : EFFORT_LEVELS);
+    const allowed = new Set(allowOff ? ["off", "none", ...EFFORT_LEVELS] : EFFORT_LEVELS);
     const filteredState = {
       ...state,
       efforts: state.efforts.filter((e) => allowed.has(e)),
@@ -368,41 +373,5 @@ export function ProfileEffortSelect({
     );
   }
 
-  const agent = (launcherList?.list?.agent) || providerAgent(chosen);
-  const rawChoices =
-    launcherList?.status === "ready" && launcherList.list && takesEffort(launcherList.list.agent)
-      ? effortChoices(launcherList.list, model, followed)
-      : allowOff || kind === "api"
-        ? ["off", ...EFFORT_LEVELS]
-        : EFFORT_LEVELS;
-  const allowed = new Set(allowOff || kind === "api" ? ["off", "none", ...EFFORT_LEVELS] : EFFORT_LEVELS);
-  const choices = rawChoices.filter((e) => allowed.has(e));
-  const unsupported = !takesEffort(agent) && kind === "launcher" && !allowOff;
-  const effortLabel = (effort: string) =>
-    effort === "off" || effort === "none" ? t("settings-modelconfiguration.api_effort_off") : effortTitle(effort);
-
-  return (
-    <label className="block">
-      <span className="mb-1 block text-label font-medium text-ink-2">{t("settings-modelconfiguration.effort")}</span>
-      <select
-        className={pickerInputClass}
-        value={value}
-        disabled={disabled || (unsupported && !value)}
-        onChange={(e) => onChange(e.target.value)}
-      >
-        <option value="">{t("settings-modelconfiguration.follow_default")}</option>
-        {value && !choices.includes(value) && (
-          <option value={value}>{t("settings-modelconfiguration.model_current", { id: effortLabel(value) })}</option>
-        )}
-        {!unsupported && choices.map((effort) => (
-          <option key={effort} value={effort}>
-            {effortLabel(effort)}
-          </option>
-        ))}
-      </select>
-      {unsupported && (
-        <span className="mt-1 block text-submeta text-ink-3">{t("settings-modelconfiguration.api_effort_unsupported")}</span>
-      )}
-    </label>
-  );
+  return <LauncherEffortSelect {...launcherBinding} className={pickerInputClass} disabled={disabled} onChange={onChange} />;
 }

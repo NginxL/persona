@@ -248,8 +248,10 @@ func (s *Service) makeDirection(ctx context.Context, id, project, newProject, ti
 	return &view, nil
 }
 
-// endDirection takes leader id out of assistant.leaders as the owner chose: its record is ended (directionsSync), its
-// tasks' signals go back to the main conversation, nothing is deleted. One that is no leader is a no-op.
+// endDirection takes leader id out of assistant.leaders as the owner chose (Unpin): its record is ended
+// (directionsSync), its open tasks go to the main conversation's supervision as a transfer moves them
+// (handBackDirectionTasks), nothing is closed or deleted. Pinning it again does not take them back. One that is no
+// leader is a no-op.
 func (s *Service) endDirection(ctx context.Context, id string) (bool, error) {
 	cfg := s.settings(ctx)
 	if !slices.Contains(cfg.Leaders, id) {
@@ -273,9 +275,70 @@ func (s *Service) endDirection(ctx context.Context, id string) (bool, error) {
 		}
 	}
 	b.mu.Unlock()
+	s.handBackDirectionTasks(context.WithoutCancel(ctx), id) // the owner's tap is done: a closed request stops nothing
 	s.settingsChanged(ctx)
 	s.directionsSoon()
 	return true, nil
+}
+
+// handBackDirectionTasks gives the main conversation the open tasks of id, a direction that just ended (Unpin, or an
+// approved assistant.leaders without it), as the Unpin confirmation tells the owner: its open tasks go back to the main
+// chat's supervision. That one action of the owner's is the explicit transfer, so each task moves as agent_transfer
+// moves one (transferTaskLocked): an explicit assignment kept across restarts, with its supervisor-held cards and
+// queued signals; owner-escalated cards keep their state. Pinning id again does not take them back. It says how many
+// moved.
+//
+// Its open tasks are the ones whose ledger names id (planned by it, transferred to it, or assigned to it by hand) and
+// that are not closed for good: a failed start still waits on the owner (the To-dos SOP keeps it open). The ledger's
+// supervisor rather than effectiveSupervisor: a pre-#5732 plan that named id is main's only while id leads
+// (legacyLeaderPlanSupervision), and once id does not its signals would go back to it. Not moved: closed tasks, other
+// leads' and main's own, the legacy background supervisor's, the owner's own to-dos (Move to leaves them too), and a
+// task leader's workers, whose ledger names their leader Agent: they stay with it, which reviews them, and what it
+// sends up goes to whoever supervises the task leader's own task, main once that moved (supervisorAboveTask).
+//
+// The target, main, is checked as a Move to's is (transferTarget: main passes; it refuses a lead whose runtime
+// cannot take supervision policy), and delivery keeps digestTarget's runtime boundary as after any transfer. A task
+// that cannot be moved (its ledger or the card checkpoint not writable) is logged and keeps its supervisor, and the
+// direction stays ended: the owner's Unpin is saved already, undoing it for one task would leave the others moved
+// under a direction pinned again, and Move to still moves that task.
+func (s *Service) handBackDirectionTasks(ctx context.Context, id string) int {
+	cfg := s.settings(ctx)
+	main := cfg.Main
+	if id == "" || main == "" || id == main {
+		return 0
+	}
+	if err := s.transferTarget(ctx, cfg, main); err != nil {
+		s.logf("direction %s ended: its open tasks keep it as supervisor: %v", short(id), err)
+		return 0
+	}
+	if err := s.ensureTodosLoaded(ctx); err != nil {
+		s.logf("direction %s ended: its open tasks keep it as supervisor, the to-dos could not be read: %v", short(id), err)
+		return 0
+	}
+	open := s.todosWhere(ctx, "*", func(t *Todo) bool {
+		return !t.closedForGood() && t.Supervision != nil && t.Supervision.Supervisor == id
+	})
+	moved := 0
+	for _, t := range open {
+		func() {
+			s.supervise.routingMu.Lock()
+			defer s.supervise.routingMu.Unlock()
+			cur, ok := s.todoNow(t.ID)
+			if !ok || cur.closedForGood() {
+				return // closed meanwhile
+			}
+			// Only while id still supervises it: one moved meanwhile stays where it went.
+			if _, blockedBy, err := s.transferTaskLocked(ctx, cur, main, id); err != nil {
+				s.logf("direction %s ended: task %s keeps it as supervisor: %v (Move to moves it)", short(id), t.ID, err)
+			} else if blockedBy == "" {
+				moved++
+			}
+		}()
+	}
+	if moved > 0 {
+		s.logf("direction %s ended: %d open tasks are supervised by the main conversation now", short(id), moved)
+	}
+	return moved
 }
 
 // routeRoutes are the owner's taps on a direction (docs/protocol/protocol.md "REST (App → hub)").

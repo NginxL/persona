@@ -6,6 +6,7 @@ import persona.core.contracts.*
 import persona.core.contracts.api.*
 import persona.core.contracts.api.ResolveOutcome
 import persona.core.domain.answer.*
+import persona.core.domain.sort.canAnswerInteraction
 import persona.core.domain.sort.*
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.*
@@ -1003,8 +1004,7 @@ internal class AgentsViewModel(
     fun answer(interaction: Interaction, action: AnswerAction, draft: AnswerDraft = AnswerDraft(), fullPlanRead: Boolean = false) {
         val latest = interactions.pending.value.firstOrNull { it.id == interaction.id } ?: return
         if (latest != interaction || latest.expired(Instant.now()) || RequestDeliveries.locks(_delivery.value[interaction.id])) return
-        // A session whose source does not approve (a Codex thread not joined live) is answered on the computer.
-        if (page.value.sessions.firstOrNull { it.key == latest.sessionKey }?.canApprove == false) {
+        if (page.value.sessions.firstOrNull { it.key == latest.sessionKey }?.canAnswerInteraction(latest) == false) {
             _notice.value = AgentText(R.string.agents_notice_approve_blocked); return
         }
         if (hubGroups.groups.value.stateFor(latest.machineId, connection.state.value) != ConnectionState.Online) {

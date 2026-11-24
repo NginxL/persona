@@ -31,6 +31,8 @@ func TestClassifyLauncherError(t *testing.T) {
 		`ERROR codex_models_manager: No Trae auth token available for Trae model fetch`:         errKindAuth,
 		`error: unknown option '--plugin-dir'`:                                                  errKindCLIOutdated,
 		`Claude Code version 2.0.1 is no longer supported, please update`:                       errKindCLIOutdated,
+		`Method not found: session/set_mode`:                                                    errKindCLIOutdated,
+		`This Antigravity CLI (agy) is too old to switch to the "accept-edits" mode: it has no session/set_mode. Please update agy.`:                              errKindCLIOutdated,
 		`Claude Code 还没完成首次引导（hasCompletedOnboarding 未置为 true）：请在这台机器的终端里运行一次 claude`:                                                                             errKindOnboarding,
 		`claude did not become ready within 1m0s of starting: this machine's Claude Code has not completed its first-run setup (hasCompletedOnboarding is unset)`: errKindOnboarding,
 		`zsh: command not found: work`: errKindOther,

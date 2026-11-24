@@ -8,20 +8,22 @@ gfxinfo, fling up and down twice, then read the summary (total / janky frames, p
 (frame time = FrameCompleted - IntendedVsync). The conversation is the Persona tab unless CHAT=<machine>/<session>; ONLY=chat,inbox limits the scenarios.
 The last style passed stays selected in the app: end with the one the phone should keep.
 RUNS, SWIPE_MS and SETTLE_S override the run count, swipe duration and idle delay; for example, SWIPE_MS=1000 SETTLE_S=0
-keeps the page scrolling through most of the sample instead of counting ambient-rendering frames during the default idle delays."""
-import json, os, re, statistics, subprocess, sys, time
+keeps the page scrolling through most of the sample instead of counting ambient-rendering frames during the default idle delays.
+Failed ADB commands and unusable frame counts stop the current scenario before its results are written."""
+from functools import partial
+import json, os, re, statistics, sys, time
+
+from android_perf_capture import adb_command, frame_counts
 
 serial, package, out = sys.argv[1:4]
 styles = sys.argv[4:] or ["glass", "brief", "board"]
 RUNS = int(os.environ.get("RUNS", "10"))
+if RUNS < 1:
+    raise SystemExit("RUNS must be positive")
 SWIPE_MS = int(os.environ.get("SWIPE_MS", "180"))
 SETTLE_S = float(os.environ.get("SETTLE_S", "0.9"))
 
-def adb(*args, capture=False):
-    cmd = ["adb", "-s", serial, *args]
-    if capture:
-        return subprocess.run(cmd, capture_output=True, text=True, timeout=60).stdout
-    subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=60)
+adb = partial(adb_command, serial, timeout=60)
 
 size = adb("shell", "wm", "size", capture=True)
 w, h = map(int, re.findall(r"(\d+)x(\d+)", size)[-1])
@@ -41,9 +43,10 @@ def fling(up=True):
 
 def summary():
     text = adb("shell", "dumpsys", "gfxinfo", package, "framestats", capture=True)
-    def num(pattern, cast=float):
+    total, janky = frame_counts(text)
+    def num(pattern):
         m = re.search(pattern, text)
-        return cast(m.group(1)) if m else None
+        return float(m.group(1)) if m else None
     frames = []
     block = text.split("---PROFILEDATA---")
     if len(block) >= 3:
@@ -59,8 +62,8 @@ def summary():
                 continue
             frames.append((done - start) / 1e6)
     return {
-        "total": num(r"Total frames rendered: (\d+)", int),
-        "janky": num(r"Janky frames: (\d+)", int),
+        "total": total,
+        "janky": janky,
         "p50": num(r"50th percentile: (\d+)ms"), "p90": num(r"90th percentile: (\d+)ms"),
         "p95": num(r"95th percentile: (\d+)ms"), "p99": num(r"99th percentile: (\d+)ms"),
         "frames": frames,
@@ -104,14 +107,16 @@ if __name__ == "__main__":
                 extras = ["debug.openSession", chat, "debug.conversationKind", "agent"] if chat else ["debug.openTab", "Persona"]
             runs = run_scenario(style, name, extras)
             frames = [f for r in runs for f in r["frames"]]
-            jank = [100.0 * r["janky"] / r["total"] for r in runs if r["total"]]
+            total = sum(r["total"] for r in runs)
+            jank = [100.0 * r["janky"] / r["total"] for r in runs]
             result[f"{style}/{name}"] = {
                 "frame_ms": stats(frames),
                 "janky_percent_per_run": stats(jank),
-                "janky_percent_total": round(100.0 * sum(r["janky"] or 0 for r in runs) / max(1, sum(r["total"] or 0 for r in runs)), 2),
-                "frames_total": sum(r["total"] or 0 for r in runs),
+                "janky_percent_total": round(100.0 * sum(r["janky"] for r in runs) / total, 2),
+                "frames_total": total,
                 "gfx_p90_ms_per_run": stats([r["p90"] for r in runs]),
                 "runs": [{k: v for k, v in r.items() if k != "frames"} for r in runs],
             }
-            json.dump(result, open(out, "w"), ensure_ascii=False, indent=1)
+            with open(out, "w") as output:
+                json.dump(result, output, ensure_ascii=False, indent=1)
     print(json.dumps({k: {"frame_ms": v["frame_ms"], "janky_total": v["janky_percent_total"]} for k, v in result.items()}, ensure_ascii=False, indent=1))

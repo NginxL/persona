@@ -347,6 +347,7 @@ func TestQueuedRefusalForGoodEndsByKind(t *testing.T) {
 			relayRetryGap = 0 // a message that stays is tried on every drain
 			t.Cleanup(func() { relayRetryGap = gap })
 			s, f, tries := relayRefusalEnv(t, &rpc.Error{Code: "unheard_of", Message: "this conversation will not take it"})
+			setSettings(t, s, func(v *Settings) { on := true; v.ChatReplyRelay = &on }) // a chat_reply is only delivered while the relay is on
 			fromConversation := tc.msg.Tool == "conversation_send" || tc.msg.Tool == "conversation_new"
 			s.queueRelay("side1", tc.msg)
 

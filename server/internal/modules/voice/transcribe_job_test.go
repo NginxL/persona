@@ -323,6 +323,11 @@ func TestTranscriptionCaptionsAsMeasured(t *testing.T) {
 	for name, items := range map[string]bool{"one item": false, "an item per sentence": true} {
 		t.Run(name, func(t *testing.T) {
 			trFast(t)
+			// trFast leaves 80 ms of wall time between a window's end and the point where a caption frame counts as one
+			// that ran past the settled window (captionPast). A busy machine can stall a frame that long while the
+			// test streams 20 times real time; the job then moves the rest of that caption to the next window, and the
+			// interim caption carries only the tail, which is no sentence's beginning. Production waits 1.5 s.
+			setVar(t, &trSettleWall, time.Second)
 			_, srv, logs, _ := trLive(t, voicetest.Script{Sentences: trScript, CaptionItems: items})
 			tc := startTr(t, srv, liveStart())
 			tc.next(extwire.TFReady)

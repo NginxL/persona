@@ -384,11 +384,34 @@ func (s *Service) allOwnSettings() []ownSetting {
 				return fmt.Sprint(backgroundKeepsContext(s.settings(ctx))), nil
 			},
 			set: s.setBackgroundSupervisorKeepsContext},
+		{Setting: Setting{Key: "assistant.chat_reply_relay", Title: "Tell chats where it wrote as me about new replies", Actions: getSet,
+			About: "off (the default): nothing is passed on. on: after a conversation wrote into a Lark chat as the user, other " +
+				"people's new messages in that chat are told to that conversation (once, at most every 10 minutes per chat), for all " +
+				"chats, not one by one. Turning it off drops those still waiting in a conversation's queue",
+			Value: "true or false"},
+			get: func(ctx context.Context) (string, error) {
+				return fmt.Sprint(chatReplyRelayOn(s.settings(ctx))), nil
+			},
+			set: s.setChatReplyRelay},
 		{Setting: Setting{Key: "assistant.launcher", Title: "Persona 的启动器", Actions: getSet,
 			About: "which launcher (model) new Persona conversations start with by default",
 			Value: "a launcher name from this setting's get"},
 			get: s.getLauncher,
 			set: s.setLauncher},
+		{Setting: Setting{Key: "assistant.limit_fallbacks", Title: "Backup launchers for a usage limit", Actions: getSet,
+			About: "[] (the default): a conversation a subscription's usage limit stops waits for the reset, and the main chat, the " +
+				"leaders and the background supervisor are continued a minute after it, as before. A list of the assistant's " +
+				"launchers, first choice first: when the limit stops the main chat, a leader, the background supervisor or a " +
+				"side chat answering the owner, and it resets 10 minutes or more later, the conversation moves to the first " +
+				"listed launcher it is not on that is not itself failing (launcher health) and that its role can run on, with " +
+				"the usual summary of what went before, and goes on with the work there; a minute after the reset it moves " +
+				"back to the launcher it was on, unless someone switched it meanwhile. Coding Agents and spaces are never " +
+				"moved; a backup that meets its own limit waits for its reset. Once moved, a conversation keeps the launcher " +
+				"and model it was moved to, as after any switch: a later change of the main chat's model setting applies to " +
+				"the next new main chat, and the chat's own model menu still changes it",
+			Value: "a JSON list of launcher names from this setting's get, at most 8; [] turns it off"},
+			get: s.getLimitFallbacks,
+			set: s.setLimitFallbacks},
 		{Setting: Setting{Key: "model_profiles.tiers", Title: "Agent presets (the model profiles' tiers)", Actions: getSet,
 			About: "the Agent presets: each model profile's named tiers, what agent_start / task_plan's tier and the New Agent " +
 				"form's presets run on (launcher, model, effort) and when to use each; get lists every profile's, set adds, " +
@@ -628,9 +651,9 @@ var settingTitles = map[string]string{modulesKey: "title_modules", standingAutho
 	"assistant.idle_release_minutes":      "title_idle_release_minutes",
 	readonlyModeKey:                       "title_readonly_mode",
 	"assistant.task_workspace_preference": "title_task_workspace_preference",
-	"assistant.start_requested_tasks":     "title_start_requested_tasks", "assistant.launcher": "title_launcher",
+	"assistant.start_requested_tasks":     "title_start_requested_tasks", "assistant.launcher": "title_launcher", "assistant.limit_fallbacks": "title_limit_fallbacks",
 	"assistant.recording_days": "title_recording_days", "assistant.delivery_gate": "title_delivery_gate", "assistant.done_needs_delivery": "title_done_needs_delivery",
-	"assistant.review_sample_percent": "title_review_sample_percent", "assistant.leaders": "title_leaders", "assistant.briefing_waits": "title_briefing_waits", "assistant.background_supervisor_keeps_context": "title_background_supervisor_keeps_context",
+	"assistant.review_sample_percent": "title_review_sample_percent", "assistant.leaders": "title_leaders", "assistant.briefing_waits": "title_briefing_waits", "assistant.background_supervisor_keeps_context": "title_background_supervisor_keeps_context", "assistant.chat_reply_relay": "title_chat_reply_relay",
 	"assistant.interject_background": "title_interject_background", "assistant.claude_interactive": "title_claude_interactive", "assistant.agent_tasks": "title_agent_tasks", "assistant.task_lessons": "title_task_lessons", "assistant.close_ended_terminals": "title_close_ended_terminals", "assistant.inbox_signals": "title_inbox_signals", "inbox.todo_forward.enabled": "title_inbox_todo_forward", "assistant.pr_events_route_to_agent": "title_pr_events_route_to_agent", "assistant.main_supervises_own_tasks": "title_main_supervises_own_tasks", "assistant.supervision_batch_minutes": "title_supervision_batch_minutes", "model_profiles.tiers": "title_model_tiers",
 	"assistant.load_all_tools":                "title_load_all_tools",
 	"assistant.meeting_transcription_default": "title_meeting_transcription_default",
@@ -1162,6 +1185,26 @@ func (s *Service) setBackgroundSupervisorKeepsContext(ctx context.Context, v jso
 		}, func(v *Settings) **bool { return &v.BackgroundSupervisorKeepsContext },
 		"assistant.background_supervisor_keeps_context is %v from the background supervisor's next round (one running now "+
 			"finishes as it is).")
+}
+
+func (s *Service) setChatReplyRelay(ctx context.Context, v json.RawMessage) (*ownChange, error) {
+	ch, err := s.setBoolSetting(ctx, v, func(ctx context.Context) bool { return chatReplyRelayOn(s.settings(ctx)) },
+		"assistant.chat_reply_relay is unchanged", func(l i18n.Lang, before, after string) string {
+			return i18n.T(l, "assistant-settings_tool.change_chat_reply_relay", i18n.Args{"before": before, "after": after})
+		}, func(v *Settings) **bool { return &v.ChatReplyRelay },
+		"assistant.chat_reply_relay is %v from now on.")
+	if err != nil || ch == nil || ch.apply == nil {
+		return ch, err
+	}
+	apply := ch.apply
+	ch.apply = func(ctx context.Context) (string, error) {
+		out, err := apply(ctx)
+		if err == nil && !chatReplyRelayOn(s.settings(ctx)) {
+			s.dropQueuedChatReplies(ctx)
+		}
+		return out, err
+	}
+	return ch, nil
 }
 
 // launchers are the launchers of the assistant's machine, as the apps list them.

@@ -2,7 +2,7 @@ import { decisionSourceLabel } from "../lib/todo-decision-label";
 import { NewTodoRepositoryBindings, TodoRepositoryBindings, useRepositoryRequestContext } from "../ui/TaskRepositoryBindingsEditor";
 import { cleanRepositoryDraft, createTodoWithRepositories, repositoryDuplicateLink, validRepositoryDraft, type CreateRepositoryBindings, type RepositoryCatalog } from "../lib/task-repositories";
 import { hasRequestPieces } from "../lib/request-pieces";
-import { defaultManager, MANAGER_HEADER, useShownManager } from "../lib/manager-choice";
+import { defaultManager, MANAGER_HEADER, sameManager, useShownManager } from "../lib/manager-choice";
 // Beautiful UI Todos View: left list (sorted by status & created_at), right detail, handover dialog.
 import { lazy, memo, Suspense, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type InputHTMLAttributes, type ReactNode, type RefObject } from "react";
 import { api, apiBlob, credentialOwner, enc, errorText, getToken, subscribeCredentialOwner } from "../lib/api";
@@ -81,6 +81,7 @@ import { SESSION_LIST_STYLE } from "../ui/list-metrics";
 import { formatDate, t } from "../i18n";
 import { groupTodosByProject, treeStateLabel, type TodoProjectGroup, type TreeState } from "../lib/todo-tree";
 import { cancellationReason, formatAgentSource, formatTodoContext } from "../lib/todo-details";
+import { useCachedDirectionNames } from "../lib/direction-names";
 import { directionTitle, groupsByDirection, useDirectionTree, type Direction } from "../lib/direction-tree";
 import { DirectionCountsText } from "./DirectionMarks";
 import { FOLDED_SECTIONS, TRIAGE_SECTIONS, checksAsOpen, countsAsOpen, lastActivity, openMergePRs, sectionStartsFolded, supersededFailedStarts, triage, triageTodos, type OwnerNeed, type TriageGroup, type TriageResult, type TriageRule, type TriageSection } from "../lib/todo-triage";
@@ -103,6 +104,7 @@ import type { MenuItem } from "../ui/menu-model";
 import { useRestoredTodos } from "../lib/todo-restore";
 import { stepsWords } from "../lib/todo-steps";
 import { useOwnerNeeds, useTodoLookup, useTodoMinute } from "../lib/todo-owner-needs";
+import { evidenceAuthorLabel, type EvidenceAuthorContext } from "../lib/evidence-author";
 import { autoReviewLine, checklist, latestReview, parkedLine, progressLine, type CheckMark, type Supervision } from "../lib/supervision";
 import { resultExtras } from "../lib/brief";
 import { prLink } from "./TodoStageBar";
@@ -2131,6 +2133,9 @@ const MARK: Record<CheckMark, { icon: "check" | "x" | "clock" | "minus"; classNa
 
 /** The task's criteria, each as its latest report or review found it, and what the supervisor said last. */
 export function ReviewChecklist({ todo, lookup }: { todo: Todo; lookup?: SessionLookup }) {
+  const cachedDirectionNames = useCachedDirectionNames();
+  const assistant = useStore((s) => s.assistant);
+  const shown = useShownManager();
   const sup = todo.supervision;
   if (!sup) return null;
   const list = checklist(sup);
@@ -2138,6 +2143,14 @@ export function ReviewChecklist({ todo, lookup }: { todo: Todo; lookup?: Session
   const parked = triage(todo, lookup, Date.now()).section === "parked";
   // What this list cannot say of finished work (#3822): the criteria a scope change dropped, and what was done beyond the brief.
   const extras = todo.done_at ? resultExtras(todo) : undefined;
+  const assistantMatchesTodo = Boolean(assistant && sameManager(assistant.manager ?? shown, todo.manager));
+  const authorCtx: EvidenceAuthorContext = {
+    manager: todo.manager,
+    directionNames: sameManager(todo.manager, defaultManager()) ? cachedDirectionNames : undefined,
+    conversations: assistantMatchesTodo ? assistant?.conversations : undefined,
+    mainConversationId: assistantMatchesTodo ? assistant?.main : undefined,
+    lookup,
+  };
   return (
     <section data-testid="review-checklist" className="mt-4 rounded-control bg-inset p-3.5 shadow-hairline">
       <div className="flex items-center gap-2">
@@ -2152,6 +2165,7 @@ export function ReviewChecklist({ todo, lookup }: { todo: Todo; lookup?: Session
         <ul className="mt-2 flex flex-col gap-1.5">
           {list.map((c) => {
             const m = MARK[c.mark];
+            const author = evidenceAuthorLabel(c.by, authorCtx);
             return (
               <li key={c.criterion} className="flex items-start gap-2 text-[13px]">
                 <span role="img" aria-label={m.label()} title={m.label()} className={cx("mt-0.5 shrink-0", m.className)}>
@@ -2160,9 +2174,9 @@ export function ReviewChecklist({ todo, lookup }: { todo: Todo; lookup?: Session
                 <span className="flex min-w-0 flex-col">
                   <span className="text-ink">{c.criterion}</span>
                   {c.evidence && <span className="text-[12px] text-ink-3 select-text">{c.evidence}</span>}
-                  {(c.at || c.by) && (
+                  {(c.at || author) && (
                     <span className="flex flex-wrap gap-x-1.5 text-[11px] text-ink-3">
-                      {c.by && <span>{c.by}</span>}
+                      {author && <span data-testid="review-evidence-author">{author}</span>}
                       {c.at && <time dateTime={c.at} title={c.at}>{new Date(c.at).toLocaleString()}</time>}
                     </span>
                   )}

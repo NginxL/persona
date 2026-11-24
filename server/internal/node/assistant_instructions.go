@@ -8,8 +8,8 @@ import (
 	"path/filepath"
 )
 
-// instructionsDigest is a digest of the instructions the agent reads in dir at start (CLAUDE.md for Claude, AGENTS.md
-// for Codex; assistant.prepare writes both with the same text), "" when there are none.
+// instructionsDigest is a digest of the complete instructions the agent reads in dir at start: the bounded
+// CLAUDE.md / AGENTS.md entry plus every generated native-rule part, "" when there are none.
 func instructionsDigest(dir string) string {
 	if dir == "" {
 		return ""
@@ -23,6 +23,13 @@ func instructionsDigest(dir string) string {
 		}
 		fmt.Fprintf(h, "%s\x00%d\x00", name, len(b))
 		h.Write(b)
+	}
+	remainder, err := assistantInstructionRemainder(dir)
+	if err != nil {
+		fmt.Fprintf(h, "remainder error\x00%s\x00", err)
+	} else {
+		fmt.Fprintf(h, "remainder\x00%d\x00", len(remainder))
+		h.Write([]byte(remainder))
 	}
 	if !found {
 		return ""

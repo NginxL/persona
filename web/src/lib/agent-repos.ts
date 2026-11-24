@@ -5,8 +5,12 @@ import { byWorkspacePin, workspaceKey, workspacePinTime, workspaceTarget, type H
 import { sessionHost } from "./agent-groups";
 import { directoryKey } from "./workspace-directory";
 
-/** Where a session's cwd sits: the repository it belongs to and the working tree inside it. */
-export type Repo = { repo: string; name: string; worktree: string; main: boolean };
+/** Where a session's cwd sits: the repository it belongs to and the working tree inside it. `apart`: the cwd has the
+ *  shape of a tree in a folder of trees kept apart from its repository (`~/.herdr/worktrees/<repository>/<tree>`), and
+ *  `repo` is that folder, which names the repository without being its checkout. Only such a folder at the computer's
+ *  home is one (joinApart): a repository can keep its own trees in a `.worktrees` folder, and a cwd in a folder of one
+ *  of those has the same shape. */
+export type Repo = { repo: string; name: string; worktree: string; main: boolean; apart?: boolean };
 
 export type RepoWorktree = {
   key: string;
@@ -44,6 +48,9 @@ export type RepoTree = {
   worktrees: RepoWorktree[];
   /** Newest host pin among this repository's visible workspaces. */
   latestPinTime?: number;
+  /** Keyed by a folder of trees kept apart from the repository at the computer's home (`Repo.apart`, joinApart), not by
+   *  the repository itself. */
+  apart?: boolean;
 };
 
 /** One computer's section in the repository tree: its live repositories ordered by name. */
@@ -59,6 +66,9 @@ export interface RepoMachine {
 // The layouts a working tree commonly lives in (herdr, Claude Code, a home-level collection): the parts before the
 // last one name the repository, everything from there on is the tree.
 const WORKTREE_SEGMENTS = [["/.worktrees/"], ["/.claude/worktrees/"], ["/.herdr/worktrees/"]];
+// The ones that keep every repository's trees in a folder of its own at the home level (`~/.worktrees/<repository>/<tree>`,
+// herdr's `~/.herdr/worktrees/<repository>/<tree>`). Claude Code keeps a repository's trees inside it.
+const APART_SEGMENTS = ["/.worktrees/", "/.herdr/worktrees/"];
 
 const trimmed = (value?: string) => {
   const path = pathSlashes(value ?? "");
@@ -96,7 +106,7 @@ export function repoOf(cwd: string, repoRoot?: string): Repo {
     const repo = path.slice(0, at);
     // ~/.worktrees/<repo>/<tree>: the marker sits at the home level, so the repository is the first part after it and
     // the tree is what follows.
-    if (rest.length >= 2) return { repo: `${repo}${marker}${rest[0]}`, name: rest[0]!, worktree: path, main: false };
+    if (rest.length >= 2) return { repo: `${repo}${marker}${rest[0]}`, name: rest[0]!, worktree: path, main: false, ...(APART_SEGMENTS.includes(marker) && { apart: true }) };
     return { repo, name: baseName(repo), worktree: path, main: false };
   }
   return { repo: path, name: baseName(path), worktree: path, main: true };
@@ -292,7 +302,7 @@ function buildRepos(sessions: Session[], machineId: string): RepoTree[] {
     let bucket = repos.get(key);
     if (!bucket) {
       bucket = {
-        tree: { key, machineId, name: where.name, repo: where.repo, count: 0, worktrees: [] },
+        tree: { key, machineId, name: where.name, repo: where.repo, count: 0, worktrees: [], ...(where.apart && { apart: true }) },
         orca: Boolean(where.spaceId),
         git: Boolean(where.git),
         bySpace: new Map(),
@@ -529,24 +539,26 @@ function catalogRepos(sessions: Session[], machineId: string, options: RepoCatal
   // A host that names no project for a workspace (herdr) leaves it to Git: the repository its Agents agree on, else the
   // one its own folder is. Such a workspace shares that repository's section with the other hosts' places in it and with
   // the session-only rows below, so one repository is one section, while every place keeps its own row.
-  const repositoryPath = (root: RepoWorktree): string => {
+  const repositoryPath = (root: RepoWorktree): { path: string; apart?: boolean } => {
     const w = root.workspace!;
-    if (w.project_id) return "";
-    if (w.project_path) return catalogPath(w.project_path);
+    if (w.project_id) return { path: "" };
+    if (w.project_path) return { path: catalogPath(w.project_path) };
     const roots = new Set(root.tree.map((s) => catalogPath(gitPlaceOf(s)?.repo || s.repo_root)).filter(Boolean));
-    if (roots.size > 1) return "";
-    return roots.size ? [...roots][0]! : catalogPath(repoOf(catalogPath(w.cwd)).repo);
+    if (roots.size > 1) return { path: "" };
+    if (roots.size) return { path: [...roots][0]! };
+    const own = repoOf(catalogPath(w.cwd));
+    return { path: catalogPath(own.repo), apart: own.apart };
   };
   const repos = new Map<string, RepoTree>();
   const byPath = new Map<string, RepoTree>();
   for (const root of top.filter(fill).sort(order)) {
     const w = root.workspace!;
-    const path = repositoryPath(root);
+    const { path, apart } = repositoryPath(root);
     const project = w.project_id || w.project_path || w.source_id;
     const key = JSON.stringify(path ? [options.owner, options.manager, machineId, "path", path] : [options.owner, options.manager, machineId, w.source, project]);
     let repo = repos.get(key);
     if (!repo) {
-      repo = { key, machineId, name: w.project_name || baseName(path || w.project_path || "") || root.name, repo: path || w.project_path || `${w.source}:${project}`, count: 0, worktrees: [] };
+      repo = { key, machineId, name: w.project_name || baseName(path || w.project_path || "") || root.name, repo: path || w.project_path || `${w.source}:${project}`, count: 0, worktrees: [], ...(apart && { apart: true }) };
       // Roots are already ordered by pin, so the first member holds this repository's newest one.
       if (root.latestPinTime !== undefined) repo.latestPinTime = root.latestPinTime;
       repos.set(key, repo);
@@ -579,6 +591,52 @@ function catalogRepos(sessions: Session[], machineId: string, options: RepoCatal
     .sort((a, b) => byWorkspacePin(a, b) || a.name.localeCompare(b.name) || a.key.localeCompare(b.key));
 }
 
+/**
+ * One section per repository when a folder of trees kept apart from it (`~/.herdr/worktrees/<repository>/<tree>`) is all
+ * that places some of its rows. A tree there that Git no longer places (removed once its work merged, or not read yet)
+ * names its repository only by that folder, which is never the checkout, so its rows formed a second section with the
+ * repository's name (#13453). They join the repository Git placed another tree of that folder in, else the one other
+ * section of that name on the computer; when Git placed that folder's trees in two repositories, or two sections share
+ * the name, they keep their own section rather than guess. Only a folder of trees at the computer's home keeps them
+ * apart: in a repository's own tree a folder such as `/code/app/.worktrees/feature/src` has the same shape, but
+ * `feature` is that tree, not a repository to join. Without the home, nothing joins.
+ */
+function joinApart(repos: RepoTree[], sessions: readonly Session[], home?: string): RepoTree[] {
+  const folders = home ? APART_SEGMENTS.map((marker) => catalogPath(`${home}${marker}`)) : [];
+  for (const r of repos) {
+    const path = catalogPath(r.repo);
+    if (r.apart && !folders.includes(path.slice(0, path.lastIndexOf("/")))) delete r.apart;
+  }
+  if (!repos.some((r) => r.apart)) return repos;
+  const taught = new Map<string, string | null>();
+  for (const s of sessions) {
+    const git = gitPlaceOf(s);
+    if (!git || git.main) continue;
+    const folder = repoOf(git.worktree);
+    if (!folder.apart) continue;
+    const key = catalogPath(folder.repo);
+    const known = taught.get(key);
+    taught.set(key, known === undefined || known === git.repo ? git.repo : null);
+  }
+  const placed = repos.filter((r) => !r.apart);
+  const out = [...placed];
+  for (const r of repos) {
+    if (!r.apart) continue;
+    const root = taught.get(catalogPath(r.repo));
+    const named = placed.filter((p) => p.name === r.name);
+    const into = root ? placed.find((p) => catalogPath(p.repo) === catalogPath(root)) : root === undefined && named.length === 1 ? named[0] : undefined;
+    if (!into) {
+      out.push(r);
+      continue;
+    }
+    into.worktrees.push(...r.worktrees);
+    into.worktrees.sort((a, b) => byWorkspacePin(a, b) || Number(b.main) - Number(a.main) || a.name.localeCompare(b.name) || a.key.localeCompare(b.key));
+    into.count += r.count;
+    if (r.latestPinTime !== undefined && r.latestPinTime > (into.latestPinTime ?? -Infinity)) into.latestPinTime = r.latestPinTime;
+  }
+  return out.sort((a, b) => byWorkspacePin(a, b) || a.name.localeCompare(b.name) || a.key.localeCompare(b.key));
+}
+
 export function buildRepoMachineTree(all: Session[], machines: Machine[], options?: RepoCatalogOptions): RepoMachine[] {
   const online = new Set(machines.filter((m) => m.online).map((m) => m.id));
   const byMachine = new Map<string, Session[]>();
@@ -598,7 +656,8 @@ export function buildRepoMachineTree(all: Session[], machines: Machine[], option
     const workspaces = options?.workspaces.some((w) => w.machine_id === m.id && w.source !== "session-directory");
     const navigation = m.online && options?.navigationSessions?.some((s) => !s.assistant && s.machine_id === m.id);
     if ((!sessions || sessions.length === 0) && !workspaces && !navigation) continue;
-    const repos = options ? catalogRepos(sessions ?? [], m.id, options) : buildRepos(sessions!, m.id);
+    const known = [...(sessions ?? []), ...(options?.navigationSessions ?? []).filter((s) => s.machine_id === m.id)];
+    const repos = joinApart(options ? catalogRepos(sessions ?? [], m.id, options) : buildRepos(sessions!, m.id), known, m.home);
     if (!repos.length) continue;
     out.push({
       key: `repo-machine:${m.id}`,

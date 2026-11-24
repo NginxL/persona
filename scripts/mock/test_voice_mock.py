@@ -14,6 +14,7 @@ import sys
 import tempfile
 import time
 import unittest
+from unittest import mock
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
@@ -81,6 +82,15 @@ class Socket:
             if match(obj):
                 return seen
         raise AssertionError("no matching frame in %s s; saw %s" % (timeout, [x.get("type") for x in seen]))
+
+    def until_binary(self, timeout=15):
+        """Wait for actual audio, not a caption emitted just before speak(True)."""
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            op, data = self.frame()
+            if op == 2:
+                return data
+        raise AssertionError("no audio frame in %s s" % timeout)
 
     def close(self):
         self.sock.close()
@@ -311,6 +321,9 @@ class VoiceMockTests(unittest.TestCase):
         try:
             ws.send({"type": "start", "protocol": 2, "target": TARGET})
             ws.until(lambda f: f["type"] == "transcript" and f["id"] == "a1")
+            # A caption is written immediately before speak(True). Wait for the
+            # actual audio frame so interrupt cannot arrive in that gap.
+            ws.until_binary(timeout=5)
             self.assertIsNone(self.get("/mock/voice2")["starts"][-1]["speech_gate"], "not said: the gate on")
             ws.send({"type": "interrupt"})
             ws.until(lambda f: f["type"] == "clear", timeout=5)
@@ -360,6 +373,24 @@ class VoiceMockTests(unittest.TestCase):
             self.assertEqual(caption["text"], "今天下午")
         finally:
             ws.close()
+
+
+class VoiceCallRegistrationTests(unittest.TestCase):
+    def test_ready_is_sent_after_the_call_can_accept_unprompted(self):
+        import voice_mock
+
+        hub = mock.Mock(VOICE_MODELS={"default": "voice-fast"}, SESSIONS=[], ASSISTANT=[], LOG=mock.Mock())
+        handler = mock.Mock()
+        call = voice_mock.Call(hub, handler, {"type": "start", "protocol": 2, "target": TARGET})
+        seen = []
+        with mock.patch.object(voice_mock, "CALLS", []), \
+             mock.patch.object(call, "say", side_effect=lambda frame: seen.append((frame, list(voice_mock.CALLS)))), \
+             mock.patch.object(voice_mock, "_read_frame", return_value=None), \
+             mock.patch.object(call, "script"):
+            call.run()
+        self.assertEqual(seen[0][0]["type"], "ready")
+        self.assertEqual(seen[0][1], [call])
+        self.assertEqual(voice_mock.CALLS, [])
 
 
 if __name__ == "__main__":

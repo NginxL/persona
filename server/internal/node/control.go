@@ -318,7 +318,7 @@ func (n *Node) start(ctx context.Context, cwd, launcher, prompt, resume, workspa
 		return nil, err
 	}
 	// No tier alias on the command line for a gateway provider (#10365): its model for that tier, else its default.
-	spec := claudeLaunch{Source: execution.Source, Launcher: launcher, Settings: settings, Hooks: hooks, Display: n.liveRepliesPlugin(hooks), Model: n.claudeModelArg(launcher, execution.Model),
+	spec := claudeLaunch{Source: execution.Source, Launcher: launcher, Settings: settings, Hooks: hooks, Display: n.liveRepliesPlugin(hooks), Model: n.claudeModelArg(launcher, execution.Model), Effort: effort,
 		Plugins: n.claudeLoadsPlugins(ctx), TaskInstructionFile: instructionFile}
 	if backend := backendLaunchFrom(ctx); backend != nil && mode != "plan" {
 		for _, repo := range backend.executor.journal.Repositories {
@@ -365,7 +365,7 @@ func (n *Node) start(ctx context.Context, cwd, launcher, prompt, resume, workspa
 		cmd = cdThen(cwd, cmd, shells...)
 	}
 	n.notePaneStart(launcher) // not in the agent sandbox unless a managed launcher (agentsandbox.go)
-	st := sessionState{ModelSource: execution.Source, Pane: pane, Launcher: launcher, Cwd: cwd, StartedAt: time.Now().UTC(), Model: execution.Model, ModelFingerprint: execution.Fingerprint,
+	st := sessionState{ModelSource: execution.Source, Pane: pane, Launcher: launcher, Cwd: cwd, StartedAt: time.Now().UTC(), Model: execution.Model, ModelEffort: effort, ModelFingerprint: execution.Fingerprint,
 		PlanThen: planThen, TaskInstructions: execution.TaskInstructions, TaskInstructionFile: instructionFile, TaskInstructionChannel: instructionChannel}
 	if prev, ok := n.state.get(id); ok && resume != "" {
 		if !prev.StartedAt.IsZero() { // a branch (fork.go) has none: it starts now

@@ -4,10 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"time"
 
@@ -129,12 +131,41 @@ func (n *Node) startEffortRemote(ctx context.Context, home, endpoint, exe, cwd s
 type codexPreparedThread struct {
 	server      *codexRemote
 	raw, public string
+	path        string
 }
 
-func (t *codexPreparedThread) unsubscribe() {
+func (t *codexPreparedThread) discard() {
+	c := t.server
+	c.mu.Lock()
+	if c.discardedStarts == nil {
+		c.discardedStarts = map[string]time.Time{}
+	}
+	c.discardedStarts[t.raw] = time.Now()
+	delete(c.threads, t.raw)
+	c.mu.Unlock()
+	r := c.n.codices
+	r.mu.Lock()
+	delete(r.threads, codexSourceID(c.spec.Home, t.raw, r.config.LegacyHome))
+	r.mu.Unlock()
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	_ = t.server.wire.call(ctx, "thread/unsubscribe", map[string]any{"threadId": t.raw}, nil)
+	params := map[string]any{"threadId": t.raw}
+	_ = c.wire.call(ctx, "thread/unsubscribe", params, nil)
+	// A history read can leave an empty rollout. Use Codex's reversible archive
+	// operation so that the abandoned start is also removed from active history.
+	if codexRolloutExists(t.path) {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		if err := c.wire.call(ctx, "thread/archive", params, nil); err != nil {
+			c.n.logf("codex %s: archive unused thread: %v", t.raw, err)
+		}
+	}
+	c.n.notifyCodex()
+}
+
+func codexRolloutExists(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && info.Mode().IsRegular() && info.Size() > 0
 }
 
 // A nil thread and nil error allow terminal fallback. An ambiguous creation error
@@ -166,6 +197,14 @@ func (n *Node) prepareCodexEffort(ctx context.Context, launch host.Launcher, arg
 	if c == nil {
 		return nil, nil
 	}
+	// The app-server accepts even efforts outside its model catalog in thread/start
+	// and settings/update. Validate the selected model when the catalog knows it.
+	models := c.startEffortModels(ctx)
+	if model, _ := params["model"].(string); model != "" {
+		if err := checkCodexStartEffort(models, model, e.Effort); err != nil {
+			return nil, err
+		}
+	}
 	var reply struct {
 		Thread      remoteThreadData
 		ServiceTier json.RawMessage `json:"serviceTier"`
@@ -184,11 +223,41 @@ func (n *Node) prepareCodexEffort(ctx context.Context, launch host.Launcher, arg
 	if !validID(reply.Thread.ID) {
 		return nil, errors.New("Codex thread/start returned no valid thread ID")
 	}
-	t := &codexPreparedThread{server: c, raw: reply.Thread.ID}
+	t := &codexPreparedThread{server: c, raw: reply.Thread.ID, path: reply.Thread.Path}
+	keep := false
+	defer func() {
+		if !keep {
+			t.discard()
+		}
+	}()
+	if err := checkCodexStartEffort(models, reply.Model, e.Effort); err != nil {
+		return nil, err
+	}
+	if reply.Thread.Ephemeral {
+		return nil, errors.New("Codex app-server created an ephemeral thread that cannot be resumed")
+	}
 	tier := codexServiceTier(reply.ServiceTier)
 	if e.ServiceTier != "" && e.ServiceTier != tier {
-		t.unsubscribe()
 		return nil, nil
+	}
+	if reply.Thread.Path != "" && !codexRolloutExists(reply.Thread.Path) {
+		// Codex 0.169 defers the rollout until the first turn. A full read of a
+		// paginated thread writes its initial history before listing turns. On
+		// 0.169.1 that listing can still return -32601 until settings are written
+		// to the materialized thread. Confirm the file before applying effort.
+		if reply.Thread.HistoryMode == "paginated" {
+			err := c.wire.call(ctx, "thread/read", map[string]any{"threadId": t.raw, "includeTurns": true}, nil)
+			var readErr *codexError
+			if err != nil && !(errors.As(err, &readErr) && readErr.Code == -32601 && strings.Contains(readErr.Message, "list_turns")) {
+				return nil, err
+			}
+		}
+		if !codexRolloutExists(reply.Thread.Path) {
+			if endpoint != "" {
+				return nil, errors.New("Codex app-server did not persist the new thread for resume")
+			}
+			return nil, nil
+		}
 	}
 	effort := reply.Effort
 	err = c.wire.call(ctx, "thread/settings/update", map[string]any{"threadId": t.raw, "effort": e.Effort}, nil)
@@ -202,21 +271,17 @@ func (n *Node) prepareCodexEffort(ctx context.Context, launch host.Launcher, arg
 			Thread remoteThreadData
 		}
 		if err := c.wire.call(ctx, "thread/read", map[string]any{"threadId": t.raw, "includeTurns": false}, &read); err != nil || read.Thread.ID != t.raw {
-			t.unsubscribe()
 			return nil, nil
 		}
 		effort = read.Thread.Effort
 	default:
-		t.unsubscribe()
 		return nil, nil
 	}
 	if effort != e.Effort {
-		t.unsubscribe()
 		return nil, nil
 	}
 	t.public = n.registerCodex(c.spec.Home, t.raw, reply.Thread.Path)
 	if t.public == "" || n.codexBlocked(t.public) {
-		t.unsubscribe()
 		return nil, nil
 	}
 	c.mu.Lock()
@@ -228,5 +293,26 @@ func (n *Node) prepareCodexEffort(ctx context.Context, launch host.Launcher, arg
 	thread.revision++
 	c.threads[t.raw] = thread
 	c.mu.Unlock()
+	keep = true
 	return t, nil
+}
+
+func (c *codexRemote) startEffortModels(ctx context.Context) map[string]codexModelEfforts {
+	c.mu.Lock()
+	models := c.models
+	c.mu.Unlock()
+	if models == nil {
+		// The connection's asynchronous model/list may still be in flight.
+		ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+		defer cancel()
+		models, _ = readCodexModels(ctx, c.wire.call)
+	}
+	return models
+}
+
+func checkCodexStartEffort(models map[string]codexModelEfforts, model, effort string) error {
+	if m, ok := models[model]; ok && !slices.Contains(m.levels, effort) {
+		return fmt.Errorf("Codex model %q does not support effort %q (available: %s)", model, effort, strings.Join(m.levels, ", "))
+	}
+	return nil
 }

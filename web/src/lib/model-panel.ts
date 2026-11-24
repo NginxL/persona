@@ -2,10 +2,11 @@
 // the providers a chat can run on and their models, the setup that runs now, and what the panel keeps in this browser
 // (favorites, recent setups, per-model customizations). The panel (ui/model-panel/ModelPanel.tsx) draws them; each chat
 // kind builds them from its own sources (an Agent: its computer's launchers; a Persona chat: the assistant's list).
-import { effortVariantBase, matches, withoutEffortQualifier } from "./launcher-models";
+import { effortVariantBase, matches } from "./launcher-models";
 import { cleanModelId, validModelId } from "./model-id";
 import { isCurrentModel } from "./model-switch";
 import { familyBlocks, type PanelBlock } from "./model-families";
+import { defaultVariant, groupVariants, variantName } from "./model-variant-groups";
 
 /** The catalog's reference price in USD per one million tokens; absent means unknown, not free. */
 export interface PanelPrice {
@@ -288,20 +289,7 @@ function variantBase(m: PanelModel): string | undefined {
  *  other model alone. Only levels the node told apart (`default_effort` naming the ID's suffix, server agyModelList)
  *  group; a model with one level listed stays as it is. */
 export function variantGroups(models: PanelModel[]): PanelModel[][] {
-  const out: PanelModel[][] = [];
-  const byBase = new Map<string, PanelModel[]>();
-  for (const m of models) {
-    const base = variantBase(m);
-    const group = base === undefined ? undefined : byBase.get(base);
-    if (group) {
-      group.push(m);
-      continue;
-    }
-    const own = [m];
-    if (base !== undefined) byBase.set(base, own);
-    out.push(own);
-  }
-  return out;
+  return groupVariants(models, variantBase);
 }
 
 /** How many models a list has, each model's levels counted once (a launcher's "N models"). */
@@ -312,19 +300,16 @@ const levelRank = (effort: string) => {
   return i < 0 ? EFFORT_TONES.length : i;
 };
 
-/** The level a model listed per level runs at when none was chosen: Medium where it has one (agy names no default),
- *  else the one its list names first. */
-const defaultLevel = (levels: PanelModel[]) => (levels.some((m) => m.defaultEffort === "medium") ? "medium" : (levels[0].defaultEffort ?? ""));
+const defaultLevel = (levels: PanelModel[]) => defaultVariant(levels, (m) => m.defaultEffort);
 
 /** One row's model for the levels of one model (two or more, from variantGroups), standing for `chosen`: the model's
  *  name without the level ("Gemini 4 Neon (High)" → "Gemini 4 Neon"; the base ID when the names disagree), the levels
  *  as its efforts, and `chosen`'s level as its own. */
 export function foldVariants(levels: PanelModel[], chosen: PanelModel): PanelModel {
   const base = variantBase(levels[0]) ?? chosen.id;
-  const names = new Set(levels.map((m) => withoutEffortQualifier(m.name)));
-  const name = names.size === 1 ? [...names][0] || base : base;
+  const name = variantName(levels.map((m) => m.name), base);
   const sorted = levels.map((m) => ({ effort: m.defaultEffort ?? "", id: m.id })).sort((a, b) => levelRank(a.effort) - levelRank(b.effort));
-  return { ...chosen, name, efforts: sorted.map((l) => l.effort), variants: { base, levels: sorted, first: defaultLevel(levels) } };
+  return { ...chosen, name, efforts: sorted.map((l) => l.effort), variants: { base, levels: sorted, first: defaultLevel(levels).defaultEffort ?? "" } };
 }
 
 /** The level a model's folded row stands for: the one that runs now, else the one a switch waits for, else the one
@@ -334,8 +319,7 @@ function chosenLevel(provider: PanelProvider, levels: PanelModel[], state: Pick<
   const pending = state.pending;
   const waiting = pending && pending.provider === provider.id ? levels.find((m) => isCurrentModel(m, pending.model)) : undefined;
   const picked = override?.effort ? levels.find((m) => m.defaultEffort === override.effort) : undefined;
-  const first = defaultLevel(levels);
-  return now ?? waiting ?? picked ?? levels.find((m) => m.defaultEffort === first) ?? levels[0];
+  return now ?? waiting ?? picked ?? defaultLevel(levels);
 }
 
 /** A provider's model rows (the search applied): one row per model, a model's levels folded into one (#12315). A

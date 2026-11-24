@@ -10,6 +10,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/nwverse/persona/server/internal/proto"
 )
@@ -22,6 +23,7 @@ func TestCodexStartsWithEffortOnSharedDaemon(t *testing.T) {
 		name, prompt, initialEffort                    string
 		legacy, refuse                                 bool
 		rejectAfterCreation, ignoreUpdate, wrongReadID bool
+		lazy, cannotPersist, paneFails, unsupported    bool
 	}{
 		{name: "settings update", prompt: "first task", initialEffort: "low"},
 		{name: "empty thread", initialEffort: "low"},
@@ -31,6 +33,10 @@ func TestCodexStartsWithEffortOnSharedDaemon(t *testing.T) {
 		{name: "acknowledged but ignored", prompt: "work", initialEffort: "low", ignoreUpdate: true, refuse: true},
 		{name: "effort missing from readback", prompt: "work", ignoreUpdate: true, refuse: true},
 		{name: "readback is for another thread", prompt: "work", wrongReadID: true, refuse: true},
+		{name: "lazy rollout", prompt: "first task", initialEffort: "high", lazy: true},
+		{name: "cannot persist", prompt: "work", initialEffort: "high", lazy: true, cannotPersist: true, refuse: true},
+		{name: "resume exits", prompt: "work", initialEffort: "high", lazy: true, paneFails: true},
+		{name: "unsupported effort", prompt: "work", unsupported: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			n, f, _, _ := codexStartHerdr(t, 0)
@@ -44,6 +50,7 @@ func TestCodexStartsWithEffortOnSharedDaemon(t *testing.T) {
 			cwd := mkdir(t, filepath.Join(home, "proj"))
 			t.Setenv("HOME", home)
 			t.Setenv("ZDOTDIR", home)
+			t.Setenv("CODEX_HOME", filepath.Join(home, ".codex"))
 			codexOnPath(t, home)
 			n.codices = newCodexRegistry()
 			n.configureCodex(proto.CodexConfig{})
@@ -61,7 +68,24 @@ func TestCodexStartsWithEffortOnSharedDaemon(t *testing.T) {
 				t.Fatal(err)
 			}
 			rf := &remoteFixture{home: n.codexHome()}
+			path := filepath.Join(n.codexHome(), "rollout.jsonl")
+			if tc.unsupported {
+				rf.models = map[string]any{"data": []any{map[string]any{
+					"model": "example", "supportedReasoningEfforts": []any{map[string]any{"reasoningEffort": "low"}},
+				}}}
+			}
 			rf.response = func(method string, p map[string]any) (any, bool) {
+				if tc.lazy && method == "thread/read" && p["includeTurns"] == true {
+					if !tc.cannotPersist {
+						if err := os.WriteFile(path, []byte("{\"type\":\"session_meta\"}\n"), 0o600); err != nil {
+							t.Error(err)
+						}
+					}
+					return &codexError{Code: -32601, Message: "list_turns is not supported yet"}, true
+				}
+				if tc.lazy && method == "thread/settings/update" && !codexRolloutExists(path) {
+					t.Error("settings were applied before the rollout was materialized")
+				}
 				if method == "turn/start" {
 					rf.mu.Lock()
 					effort := rf.threadEffort
@@ -86,7 +110,11 @@ func TestCodexStartsWithEffortOnSharedDaemon(t *testing.T) {
 				if tc.rejectAfterCreation {
 					return &codexError{Code: -32602, Message: "fixture rejected parameters after creation"}, true
 				}
-				return map[string]any{"thread": map[string]any{"id": remoteRaw}, "reasoningEffort": tc.initialEffort, "model": "example"}, true
+				thread := map[string]any{"id": remoteRaw}
+				if tc.lazy {
+					thread["path"], thread["historyMode"] = path, "paginated"
+				}
+				return map[string]any{"thread": thread, "reasoningEffort": tc.initialEffort, "model": "example"}, true
 			}
 			if tc.legacy {
 				rf.reject, rf.rejectCode = "thread/settings/update", -32601
@@ -95,18 +123,46 @@ func TestCodexStartsWithEffortOnSharedDaemon(t *testing.T) {
 			go server.Serve(listener)
 			t.Cleanup(func() { server.Close() })
 			endpoint := "unix://" + filepath.Join(canonicalCodexHome(n.codexHome(), n.home), "app-server-control", "app-server-control.sock")
-			connectFixtureEndpoint(t, n, n.codexHome(), "local", endpoint)
+			remote := connectFixtureEndpoint(t, n, n.codexHome(), "local", endpoint)
 			withCodexLaunchers(t, map[string][]string{"codex": {"codex"}})
 			f.after(func(c herdrCall) {
 				if c.Method == "pane.send_input" && strings.Contains(str(c.Params["text"]), "codex-start") {
 					f.setScreen("w1:p2", cxReady)
+					if tc.paneFails {
+						f.setScreen("w1:p2", "Error: Failed to resume session from rollout.jsonl: no rollout found\n$ ")
+					}
 					if rf.count("thread/settings/update") != 1 || rf.count("turn/start") != 0 {
 						t.Error("pane opened before configuration or after a premature first turn")
 					}
 				}
 			})
 			f.reply("session.snapshot", snapshot(nil, nil, []any{agentOf("codex", remoteRaw, proto.StatusDone, "w1:p2", "w1:t2", "w1", cwd, "")}, nil))
+			began := time.Now()
 			result, err := request(t, n, "session.start", map[string]any{"cwd": cwd, "launcher": "codex", "prompt": tc.prompt, "effort": "high", "model": "example", "codex_effort_fallback": proto.CodexFallbackNotify})
+			if tc.unsupported {
+				if err == nil || !strings.Contains(err.Error(), `does not support effort "high"`) || rf.count("thread/start") != 0 || len(f.trace("tab.create")) != 0 {
+					t.Fatalf("unsupported effort reached startup: %v", err)
+				}
+				return
+			}
+			if tc.paneFails {
+				if err == nil || !strings.Contains(err.Error(), "Failed to resume session") || time.Since(began) > 10*time.Second {
+					t.Fatalf("resume failure was not returned promptly: %v after %s", err, time.Since(began))
+				}
+				if rf.count("thread/unsubscribe") != 1 || rf.count("thread/archive") != 1 || rf.count("turn/start") != 0 || len(f.trace("tab.close")) != 1 {
+					t.Fatalf("failed launch retained its pane, subscription or rollout: %v", err)
+				}
+				if err := remote.refresh(); err != nil {
+					t.Fatal(err)
+				}
+				remote.mu.Lock()
+				_, loaded := remote.threads[remoteRaw]
+				remote.mu.Unlock()
+				if _, registered := n.codexSource(remoteRaw); loaded || registered {
+					t.Fatalf("failed launch retained its thread: loaded=%v registered=%v", loaded, registered)
+				}
+				return
+			}
 			if tc.rejectAfterCreation {
 				if err == nil || !strings.Contains(err.Error(), "rejected parameters after creation") || rf.count("thread/start") != 1 || rf.count("thread/settings/update") != 0 || rf.count("turn/start") != 0 || len(f.trace("tab.create")) != 0 {
 					t.Fatalf("ambiguous creation must stop before retry or delivery: %v", err)

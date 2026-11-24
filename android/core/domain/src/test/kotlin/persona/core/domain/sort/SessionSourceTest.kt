@@ -5,6 +5,7 @@ import persona.core.domain.zhAny
 import persona.core.domain.zh
 import persona.core.contracts.CoreText
 import persona.core.contracts.JsonCodec
+import persona.core.contracts.Interaction
 import persona.core.contracts.Session
 import persona.core.contracts.SessionCapabilities
 import org.junit.Assert.assertEquals
@@ -25,6 +26,22 @@ class SessionSourceTest {
         assertNull(old.sourceSubtitle)
         val missing = old.copy(sourceKind = "codex_app_server")
         assertFalse(missing.canRead || missing.canSend || missing.canInterrupt || missing.canApprove || missing.canTerminal || missing.canAttach)
+    }
+
+    @Test fun desktopCodexCanAnswerOnlyItsOwnAsyncQuestionWithoutApprovalSupport() {
+        val desktop = session("""{"machine_id":"m","session_id":"s","agent":"codex","agent_surface":"desktop",
+            "source_kind":"codex_history","capabilities":{"read":true,"send":true,"answer_questions":true}}""")
+        val question = JsonCodec.decodeFromString<Interaction>("""{"id":"ask","machine_id":"m","session_id":"s",
+            "kind":"question","agent":"codex","tool_name":"request_user_input_async","questions":[{"question":"Choose"}]}""")
+
+        assertFalse(desktop.canApprove)
+        assertTrue(desktop.canAnswerInteraction(question))
+        assertFalse(desktop.canAnswerInteraction(question.copy(kind = "permission")))
+        assertFalse(desktop.canAnswerInteraction(question.copy(kind = "plan")))
+        assertFalse(desktop.canAnswerInteraction(question.copy(toolName = "request_user_input")))
+        assertFalse(desktop.canAnswerInteraction(question.copy(sessionId = "another")))
+        assertFalse(desktop.copy(capabilities = SessionCapabilities(read = true, send = true)).canAnswerInteraction(question))
+        assertFalse(desktop.copy(capabilities = SessionCapabilities(read = true, answerQuestions = true)).canAnswerInteraction(question))
     }
 
     /** The engine an agent ran in made its own worktree, and is the one asked about it and to remove it (#6115). */

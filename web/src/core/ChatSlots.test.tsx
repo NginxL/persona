@@ -177,8 +177,8 @@ describe("Settings categories", () => {
     expect(settingsAt("?tab=garden").tab).toBeNull();
   });
 
-  it("find each module's switch in Labs › Features", () => {
+  it("find each module's switch in General › Optional features", () => {
     registerModule(garden);
-    expect(searchSettings("watering").groups).toEqual([expect.objectContaining({ tab: "labs", anchor: "configuration-features-garden" })]);
+    expect(searchSettings("watering").groups).toEqual([expect.objectContaining({ tab: "general", anchor: "configuration-features-garden" })]);
   });
 });

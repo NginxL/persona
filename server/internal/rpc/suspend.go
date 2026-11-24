@@ -21,6 +21,13 @@ func (p *Peer) ResumeCalls() {
 	p.mu.Unlock()
 }
 
+// Pending is how many of this peer's own calls still wait for their reply.
+func (p *Peer) Pending() int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return len(p.pending)
+}
+
 // WaitPending waits for the replies of calls registered before SuspendCalls. The read loop must continue meanwhile.
 func (p *Peer) WaitPending(ctx context.Context) error {
 	tick := time.NewTicker(time.Millisecond)

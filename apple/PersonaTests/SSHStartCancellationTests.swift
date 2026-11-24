@@ -6,12 +6,19 @@ import Synchronization
 import Testing
 @testable import Persona
 
+/// A count the loopback server's callback, its tasks and the test share: a reference, since a captured local `Mutex` is
+/// a 'sending' data race to Xcode 26's checker (#13374).
+private final class Count: Sendable {
+    private let value = Mutex(0)
+    func withLock<R: Sendable>(_ body: (inout Int) -> R) -> R { value.withLock { body(&$0) } }
+}
+
 @MainActor
 struct SSHStartCancellationTests {
     private let hub = URL(string: "http://ssh-cancellation.example.test")!
 
     @Test func closingDuringLoginLetsTheNextForegroundAttemptStart() async throws {
-        let accepted = Mutex(0), closed = Mutex(0)
+        let accepted = Count(), closed = Count()
         let server = try LoopbackServer { connection in
             accepted.withLock { $0 += 1 }
             Task {

@@ -5,6 +5,7 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { registerModule, resetModulesForTest } from "../../core/module-host";
 import { t } from "../../i18n";
 import { allTypes } from "../../lib/configuration/fixtures/shared";
 import type { ConfigurationUpdate } from "../../lib/configuration/contract";
@@ -46,6 +47,19 @@ const click = async (el: HTMLElement) => {
 };
 
 describe("Settings › Labs", () => {
+  it("keeps shipped module switches out of Labs and its dialog", async () => {
+    registerModule({ id: "garden", title: () => "Garden", description: () => "A synthetic module", load: async () => ({}) });
+    try {
+      await render();
+      expect(host.querySelector('[data-configuration="features"]')).toBeNull();
+      await act(async () => root.render(<LabsDialog open onClose={() => {}} />));
+      expect(document.querySelector('[data-labs-dialog] [data-configuration="terminal"]')).not.toBeNull();
+      expect(document.querySelector('[data-labs-dialog] [data-configuration="features"]')).toBeNull();
+    } finally {
+      resetModulesForTest();
+    }
+  });
+
   it("explains Labs and that each item states its own scope, and shows the terminal renderer under Agents", async () => {
     await render();
     expect(host.textContent).toContain(t("settings-labs.intro"));
@@ -178,35 +192,5 @@ describe.each(["settings", "feature dialog"])("experiment guidance from %s", (en
     expect(dialog()).toBeUndefined();
     expect(update).toHaveBeenCalledTimes(2);
     expect(row.querySelector("[aria-live]")?.textContent).toBe(t("settings-configuration.saved"));
-  });
-});
-
-describe("Settings › Labs › Features (#13434)", () => {
-  it("switches a feature module off and on in this browser, through the generic form", async () => {
-    const { registerModule, resetModulesForTest, enabledNavItems } = await import("../../core/module-host");
-    const { forgetModuleSwitches } = await import("../../core/module-switch");
-    const { modulesLabsSource } = await import("../../core/module-labs");
-    forgetModuleSwitches();
-    resetModulesForTest();
-    registerModule({ id: "garden", title: () => "Garden", description: () => "A synthetic module", navItems: [{ key: "garden", path: "/garden", icon: "heart", label: () => "Garden", after: "inbox" }], load: async () => ({}) });
-    try {
-      act(() => root.render(<LabsSettings modules={[{ source: modulesLabsSource()! }]} />));
-      await settle();
-      const row = host.querySelector<HTMLElement>('[data-configuration-field="garden"]')!;
-      expect(row.textContent).toContain("Garden");
-      expect(row.textContent).toContain("A synthetic module");
-      const toggle = row.querySelector<HTMLButtonElement>('[role="switch"]')!;
-      expect(toggle.getAttribute("aria-checked")).toBe("true");
-      expect(enabledNavItems().map((n) => n.key)).toEqual(["garden"]);
-      await click(toggle);
-      expect(localStorage.getItem("persona.modules.off")).toBe('["garden"]');
-      expect(enabledNavItems()).toEqual([]);
-      await click(host.querySelector<HTMLButtonElement>('[data-configuration-field="garden"] [role="switch"]')!);
-      expect(localStorage.getItem("persona.modules.off")).toBeNull();
-      expect(enabledNavItems().map((n) => n.key)).toEqual(["garden"]);
-    } finally {
-      resetModulesForTest();
-      forgetModuleSwitches();
-    }
   });
 });

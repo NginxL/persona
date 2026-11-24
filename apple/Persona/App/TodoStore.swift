@@ -291,7 +291,17 @@ final class TodoStore {
     var openTodos: [TodoItem] { scopedTodos.filter { !$0.isDone } }
     /// The To-dos badge (the drawer, the Mac's sidebar): the current assistant's open todos, quiet tasks left out (#1731,
     /// the main conversation tells about them). The list itself still has them.
-    var badgeCount: Int { scopedTodos.count(where: { !$0.isDone && !$0.quiet }) }
+    var badgeCount: Int { scopedTodos.count(where: Self.countsForOwner) }
+
+    /// Whether an open to-do counts in the badge: one the owner made (no `origin`), or one a conversation handed out that
+    /// waits on the owner (a decision, a check only they can do, a delivery for them to accept). A handed-out task nothing
+    /// works on is its supervisor's to pick up, not the owner's, so it is not counted, as the web's `ownerNeeds` leaves
+    /// it out (docs/designs cards rule 2, #13702).
+    static func countsForOwner(_ todo: TodoItem) -> Bool {
+        guard !todo.isDone, !todo.quiet else { return false }
+        if (todo.origin ?? "").isEmpty { return true }
+        return todo.waitsForOwner || todo.reviewState == .userCheck || todo.delivery?.waitsForOwner == true
+    }
 
     /// The manager a request about to-do `id` names: its own, as the list stamped it, whichever assistant is current
     /// (docs/protocol/protocol.md "Per-manager routing"); none for the default's, or one the list doesn't have.

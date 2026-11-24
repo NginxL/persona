@@ -124,6 +124,7 @@ type chatFeed struct {
 	page    int
 	reads   []string // "session after"
 	offline bool
+	fail    error // the next read's answer, once
 }
 
 func (c *chatFeed) fetch(_ context.Context, _, session string, after int) (searchPage, error) {
@@ -133,6 +134,10 @@ func (c *chatFeed) fetch(_ context.Context, _, session string, after int) (searc
 		return searchPage{}, errors.New("computer offline")
 	}
 	c.reads = append(c.reads, fmt.Sprintf("%s %d", session, after))
+	if err := c.fail; err != nil {
+		c.fail = nil
+		return searchPage{}, err
+	}
 	var page []proto.Item
 	for _, it := range c.items[session] {
 		if it.Seq > after {
@@ -360,6 +365,61 @@ func TestSearchIndexKeepsUp(t *testing.T) {
 	s.searchSweep(ctx)
 	if len(feed.reads) != 0 {
 		t.Fatalf("a working chat read again at once: %v", feed.reads)
+	}
+}
+
+// A read that fails because the conversation's history moved under it (the manager's read of a switched
+// conversation saw the history change on every try) starts the conversation over: the next read is from the start,
+// and the page that brings the new history drops what the index held of the old one. Any other failure keeps the
+// cursor.
+func TestSearchIndexStartsOverWhenTheHistoryMovedUnderARead(t *testing.T) {
+	s, feed, store, list := searchFixture(t)
+	ctx := context.Background()
+	trip := searchKey{"server", "trip"}
+	cursor := func() searchCursor {
+		s.search.mu.Lock()
+		defer s.search.mu.Unlock()
+		return s.search.cursors[trip]
+	}
+	retryNow := func() {
+		s.search.mu.Lock()
+		s.search.retry[trip] = time.Now().Add(-time.Second)
+		s.search.mu.Unlock()
+	}
+	feed.history["trip"] = "h0"
+	for s.searchSweep(ctx) == 0 {
+	}
+	if c := cursor(); c != (searchCursor{history: "h0", afterSeq: 6}) {
+		t.Fatalf("trip read to %+v", c)
+	}
+
+	feed.fail = errors.New("the node did not answer")
+	list.edit(t, "trip", func(c *proto.Session) { c.Rev = 2 })
+	s.searchSweep(ctx)
+	if c := cursor(); c != (searchCursor{history: "h0", afterSeq: 6}) {
+		t.Fatalf("an ordinary failure moved the cursor to %+v", c)
+	}
+
+	retryNow()
+	feed.fail = db.ErrConversationHistoryChanged
+	feed.history["trip"] = "h1"
+	feed.items["trip"] = []proto.Item{msg(1, "user", "the rewritten trip FernGate")}
+	list.edit(t, "trip", func(c *proto.Session) { c.Rev = 3 })
+	s.searchSweep(ctx)
+	if c := cursor(); c != (searchCursor{history: "h0"}) {
+		t.Fatalf("after the history moved under a read: %+v", c)
+	}
+	retryNow()
+	feed.reads = nil
+	s.searchSweep(ctx)
+	if store.resets != 1 || !slices.Equal(feed.reads, []string{"trip 0", "trip 0"}) {
+		t.Fatalf("resets %d reads %v", store.resets, feed.reads)
+	}
+	if got := found(searchFor(t, s, "ferngate")); !slices.Equal(got, []string{"trip title=false hits=1"}) {
+		t.Fatalf("the rewritten transcript: %v", got)
+	}
+	if got := found(searchFor(t, s, "wisteriatea")); got != nil {
+		t.Fatalf("the old transcript's words are still found: %v", got)
 	}
 }
 

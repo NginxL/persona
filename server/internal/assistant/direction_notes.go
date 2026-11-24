@@ -246,9 +246,10 @@ func (s *Service) leaderPolicy(ctx context.Context, id, policy string, idle bool
 		return policy
 	}
 	if !slices.Contains(s.settings(ctx).Leaders, id) {
-		// No leader now (an ended direction that still supervises its tasks): no notes block. A send that finds it
-		// idle records that, so a direction made again starts from what the conversation runs on, not from the block
-		// it had before it ended (#11392).
+		// No leader now (an ended direction that still supervises a task: one handed out since it ended, or one its
+		// hand-back to main could not move, handBackDirectionTasks): no notes block. A send that finds it idle records
+		// that, so a direction made again starts from what the conversation runs on, not from the block it had before
+		// it ended (#11392).
 		s.notesInEffect(ctx, id, "", idle)
 		return policy
 	}

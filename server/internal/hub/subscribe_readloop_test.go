@@ -151,14 +151,16 @@ func TestSubscribeWhileARestartedManagerWaitsForTheComputer(t *testing.T) {
 	a := dialApp(t, mh, tok)
 	a.send(t, map[string]any{"type": "subscribe", "machine_id": "box", "session_id": "s1"})
 	a.pongWithin(t, "p1", "while the manager waits for the computer")
-	// The watch is still out, waiting for the node: the ping did not just follow a call that failed at once.
+	// The watch is still out, waiting for the node: the ping did not just follow a call that failed at once. The
+	// manager's own catch-up (watchAgain, run when the new manager attaches) may queue a second sync for the same
+	// session behind the subscriber's, so the slot is held by one or more calls, not exactly one.
 	m := mh.h.localMachine("box")
 	eventually(t, readLoopLimit, "the watch still waiting for the node", func() bool {
 		m.mu.Lock()
 		defer m.mu.Unlock()
 		slot := m.watchMu["s1"]
 		_, told := m.nodeWatch["s1"]
-		return m.watchers["s1"] == 1 && slot != nil && slot.refs == 1 && !told
+		return m.watchers["s1"] == 1 && slot != nil && slot.refs >= 1 && !told
 	})
 }
 

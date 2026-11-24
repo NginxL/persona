@@ -11,6 +11,7 @@
   "lost_tasks_n_other": "The node restarted and {count} background tasks stopped",
   "inbox_update": "Inbox: an update on “{title}”",
   "limit_continue": "Usage limit reset: Persona told it to go on",
+  "limit_fallback": "Usage limit reached: Persona moved it to another launcher to go on",
   "ask_answered": "You answered: {title}",
   "ask_expired": "The question timed out unanswered",
   "ask_closed": "The question was closed without an answer",

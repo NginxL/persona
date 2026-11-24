@@ -299,7 +299,7 @@ export function matches(fields: (string | undefined)[], query: string): boolean 
 
 /** What the open list shows for `query` (name, id, resolved model, folded aliases, description; every word): "Default"
  *  first when it matches, then the rest in the agent's order. */
-export function modelRows(models: AgentModel[], query: string, followed: ModelBinding = {}): { showDefault: boolean; rows: AgentModel[] } {
+export function modelRows<M extends AgentModel>(models: M[], query: string, followed: ModelBinding = {}): { showDefault: boolean; rows: M[] } {
   const d = defaultModel(models);
   const showDefault = !query.trim() || matches([t("lib-launcher-models.default"), "default", defaultDetail(models, followed), d && modelName(d), d?.name, d?.id, d?.resolved, d?.description], query);
   const rows = models.filter((m) => m !== d && matches([modelName(m), m.name, m.id, m.resolved, ...(m.aliases ?? []), m.description], query));

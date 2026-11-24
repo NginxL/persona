@@ -299,7 +299,7 @@ func (s *Service) snapshotUnaccepted(ctx context.Context, loc *time.Location) ([
 			continue
 		}
 		total++
-		out = append(out, prompts.SnapshotAccept{Title: clip(oneLine(t.Title), 40), Verdict: clip(oneLine(verdictText(s.botLang(ctx), &x.a)), 120),
+		out = append(out, prompts.SnapshotAccept{Title: clip(oneLine(t.Title), 40), Verdict: clip(oneLine(verdictText(s.botLang(ctx), &x.a, currentDelivery(t))), 120),
 			Changed: x.a.Changed, Link: x.a.Link, Since: x.a.AskedAt.In(loc), Owner: todoOwner(t)})
 	}
 	if len(ended) > 0 {

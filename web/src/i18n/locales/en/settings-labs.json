@@ -25,13 +25,5 @@
   "work_activation": "Start a new chat to apply your choice fully. An open chat may keep its earlier instructions and tool information.",
   "work_rollback": "Turn this off and start a new chat to restore the usual instructions and tool loading.",
   "work_saved": "Saved. Start a new chat to fully apply this choice.",
-  "work_unsupported": "Update this assistant to change this setting.",
-  "area_features": "Features",
-  "features_group": "Optional features",
-  "features_hint": "Turn off a feature you don't use. It disappears from the sidebar and its pages, and nothing of it is loaded in this browser. Your data stays where it is.",
-  "features_not_offered": "Your hub doesn't offer this feature.",
-  "features_activation": "Right away, in every tab of this browser.",
-  "features_rollback": "Turn it back on. Nothing was deleted, so everything is where you left it.",
-  "module_voice": "Voice chat",
-  "module_voice_hint": "Talk to Persona or an Agent by voice from a chat's composer, with live captions. Typing and sending stay as they are."
+  "work_unsupported": "Update this assistant to change this setting."
 }

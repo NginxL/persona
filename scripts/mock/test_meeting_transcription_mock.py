@@ -4,6 +4,7 @@ import json
 import threading
 import unittest
 import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 
 from test_meeting_attendance_mock import start
@@ -446,8 +447,14 @@ class MeetingTranscriptionMockTests(Transcription, unittest.TestCase):
         self.wait(lambda: self.meta(rid)["transcription"]["state"] == "final", "the final pass")
         self.assertEqual([(s["text"], s.get("echo")) for s in self.detail(rid)["segments"]], [(CAP_LINE, True)])
         day = str(uuid.uuid4())
-        out = self.upload(day, kind="day", day="2026-11-10", transcription="hub", timeline={"roles": [{"at": 0, "attendance": "participant"}]})[1]
+        # The shared meeting upload uses a fixed old meeting date. A day
+        # recording has its own retention window, so give this fixture a real
+        # current day instead of turning the response into an expired no-op.
+        started_at = datetime.now(timezone.utc).isoformat()
+        out = self.upload(day, kind="day", day=started_at[:10], started_at=started_at,
+                          transcription="hub", timeline={"roles": [{"at": 0, "attendance": "participant"}]})[1]
         self.assertEqual((out["transcription"], out["transcription_problem"]), ("device", "not_meeting"))
+        self.assertEqual(out["status"], "stored")
         stored = self.call("GET", "/mock/recordings")[1]["recordings"][day]
         self.assertNotIn("timeline", stored)
         self.assertNotIn("transcription", stored)

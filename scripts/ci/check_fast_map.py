@@ -217,8 +217,8 @@ TABLE = (
     # they and the prompt-language ratchet import (#12785); test_changed_ratchets.py imports them, and the ratchets'
     # own suites load ratchet_base.py through them (test_prompt_language_ratchet.py copies both). test_ci.py and test_check_fast_inputs.py run server.sh and check-fast.sh with go_trimpath.sh, which composes
     # their GOFLAGS; test_check_fast_inputs.py runs check-fast.sh with heavy_slot.py too, and test_android_sh.py runs
-    # android.sh with it (#11250). check-fast.sh's tests are three files (#11017): its own name picks
-    # test_check_fast.py, and the other two, which import its fixtures, come along. They copy check_fast_compare.py,
+    # android.sh with it (#11250). check-fast.sh's tests are six files (#11017, #14321): its own name picks
+    # test_check_fast.py, and the other five, which import its fixtures, come along. They copy check_fast_compare.py,
     # which names a failure's rerun and compares it with the merge base (#12733), into their temp repositories too,
     # and go_test_partitioned.py with the go_partitions.py it imports, which every Go group runs through (#12765).
     (
@@ -238,11 +238,15 @@ TABLE = (
         (("scripts/ci/web_module_boundary_ratchet.py",), ("scripts/ci/test_web_module_boundary_ratchet.py",)),
         (("scripts/test/go_trimpath.sh",), ("scripts/ci/test_ci.py", "scripts/test/test_check_fast_inputs.py")),
         (("scripts/heavy_slot.py",), ("scripts/test/test_check_fast_inputs.py", "scripts/test/test_android_sh.py")),
-        (("scripts/check-fast.sh", "scripts/test/check-fast.sh", "scripts/test/test_check_fast.py"),
-         ("scripts/test/test_check_fast_guards.py", "scripts/test/test_check_fast_inputs.py")),
+        (("scripts/check-fast.sh", "scripts/test/check-fast.sh", "scripts/test/test_check_fast.py",
+          "scripts/ci/affected_drift.py"),
+         ("scripts/test/test_check_fast_guards.py", "scripts/test/test_check_fast_inputs.py",
+          "scripts/test/test_check_fast_base.py", "scripts/test/test_check_fast_reports.py",
+          "scripts/test/test_check_fast_callers.py")),
         (("scripts/ci/check_fast_compare.py", "scripts/test/go_test_partitioned.py", "scripts/test/go_partitions.py"),
          ("scripts/test/test_check_fast.py", "scripts/test/test_check_fast_guards.py",
-          "scripts/test/test_check_fast_inputs.py")),
+          "scripts/test/test_check_fast_inputs.py", "scripts/test/test_check_fast_base.py",
+          "scripts/test/test_check_fast_reports.py", "scripts/test/test_check_fast_callers.py")),
     ),
     # test_heavy_slot.py reads CI's lanes, the operations scripts (the watchers among them), their example configs and
     # services, and both watcher skills: one that names a script taking a slot must set PERSONA_HEAVY_SLOTS=0
@@ -257,14 +261,16 @@ TABLE = (
     ),
     # The selections of what a change affects (#11026): CI's lanes (paths.py, tested in test_ci.py and, for the web
     # plan and the lanes a plan names, test_check_fast_inputs.py), check-fast (check-fast.sh and this table, which
-    # check-fast's three test files run) and the watcher's lanes; test_affected_drift.py compares them.
+    # check-fast's six test files run) and the watcher's lanes; test_affected_drift.py compares them.
     (
         (("scripts/ci/paths.py",), ("scripts/ci/test_ci.py", "scripts/test/test_check_fast_inputs.py",
                                     "scripts/ci/test_affected_drift.py")),
-        (("scripts/test/check-fast.sh",), ("scripts/ci/test_affected_drift.py",)),
+        (("scripts/test/check-fast.sh", "scripts/ci/affected_drift.py"), ("scripts/ci/test_affected_drift.py",)),
         (("scripts/ci/check_fast_map.py",),
          ("scripts/test/test_check_fast.py", "scripts/test/test_check_fast_guards.py",
-          "scripts/test/test_check_fast_inputs.py", "scripts/ci/test_affected_drift.py")),
+          "scripts/test/test_check_fast_inputs.py", "scripts/test/test_check_fast_base.py",
+          "scripts/test/test_check_fast_reports.py", "scripts/test/test_check_fast_callers.py",
+          "scripts/ci/test_affected_drift.py")),
         (("scripts/operations/pr_watch_verify.py",),
          ("scripts/operations/test_pr_watch.py", "scripts/ci/test_affected_drift.py")),
         (("scripts/operations/pr_watch_*.py",), ("scripts/operations/test_pr_watch.py",)),

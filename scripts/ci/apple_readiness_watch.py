@@ -52,11 +52,18 @@ def bounded_file(command, path, timeout=COMMAND_TIMEOUT, limit=MAX_SAMPLE_BYTES)
                               "unavailable: " + type(error).__name__ + "\n")
         return 127
     finally:
-        if process is not None and process.poll() is None:
-            # Reap an interrupted child here; an outer SIGKILL remains bounded
-            # by the shell's kill of the whole observer process group.
-            process.kill()
-            process.wait()
+        try:
+            if process is not None and process.poll() is None:
+                # Reap an interrupted child here. A signal may arrive during
+                # this cleanup too; finish the bounded kill/wait, then preserve
+                # that interruption for observe()'s final collector.
+                process.kill()
+                process.wait()
+        except KeyboardInterrupt:
+            if process is not None and process.poll() is None:
+                process.kill()
+                process.wait()
+            raise
 
 
 def host_pids(udid, runner=subprocess.run):
@@ -134,6 +141,7 @@ def product_evidence(app, test_bundle, destination):
 def observe(udid, bundle, app, test_bundle, destination, seconds, runner=subprocess.run,
             monotonic=time.monotonic, sleep=time.sleep, scope_root=None):
     launch.identity(udid, bundle)
+    parent_pid = os.getppid()
     if app.name != "Persona" or app.parent.name != "Persona.app" or test_bundle.name != "PersonaTests":
         raise ValueError("unexpected CI product identity")
     destination.mkdir(parents=True, exist_ok=True)
@@ -171,6 +179,13 @@ def observe(udid, bundle, app, test_bundle, destination, seconds, runner=subproc
                 stopped = True
             while not stopped and monotonic() < deadline - FINISH_BEFORE:
                 if (destination / "observer.stop").exists():
+                    stopped = True
+                    break
+                if os.getppid() != parent_pid:
+                    # Job control deliberately keeps this observer outside the
+                    # readiness process group. If that shell dies before its
+                    # trap can publish observer.stop, finish the same bounded
+                    # final evidence rather than polling until the full horizon.
                     stopped = True
                     break
                 now = monotonic()
