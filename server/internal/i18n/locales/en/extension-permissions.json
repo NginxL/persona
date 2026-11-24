@@ -73,6 +73,7 @@
   "scope_machines_pair": "Pair new computers (pending your confirmation)",
   "scope_browser_run": "Run scripts in an isolated tab of your paired computer's browser",
   "scope_notify": "Send notifications to your devices",
+  "scope_push_grading": "Manage its push grading layer and preview grading decisions",
   "scope_assistant_ask": "Start Persona chats and read chat activity",
   "scope_assistant_read": "Read your Persona chats (your messages and its replies)",
   "scope_assistant_entries_read": "Read your saved facts, preferences, rules and decisions, including personal information",

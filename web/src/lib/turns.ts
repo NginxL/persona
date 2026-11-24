@@ -836,7 +836,7 @@ export function backgroundSource(it: Item): MessageSource | undefined {
 }
 
 /** `background`: background rounds are separate rounds like supervision ones (a queued real message never joins them). */
-export function buildBlocks(items: Item[], background = false): Block[] {
+export function buildBlocks(items: readonly Item[], background = false): Block[] {
   const blocks: Block[] = [];
   let cur: Turn | null = null;
   let lastUserEntry = "";

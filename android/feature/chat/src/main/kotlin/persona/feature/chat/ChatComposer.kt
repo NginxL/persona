@@ -78,6 +78,8 @@ fun ChatComposer(
     placeholder: String = stringResource(R.string.chat_composer_placeholder),
     leading: (@Composable RowScope.() -> Unit)? = null,
     accessory: (@Composable ColumnScope.() -> Unit)? = null,
+    /** Short chips sharing one wrapping row with [modeHint] above [accessory] (e.g., Brief/Board's launcher chip). */
+    hintChips: (@Composable FlowRowScope.() -> Unit)? = null,
     modeHint: String? = null,
     onOverlay: (Boolean) -> Unit = {},
     visible: Boolean = true,
@@ -527,8 +529,17 @@ fun ChatComposer(
             if (PersonaTheme.style == AppStyle.Glass && enabled && !sending && service != null && state.focused && clipboardImages.offered)
                 PasteImageChip(onPaste = ::pasteImages, onDismiss = clipboardImages::dismiss)
             ComposerAttachmentPreviews(state, service, sending, enabled, onEdit = ::editPhoto)
+            if (fullToolbar && (hintChips != null || modeHint != null)) {
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(Tokens.Space.s),
+                    verticalArrangement = Arrangement.spacedBy(Tokens.Space.xs),
+                    itemVerticalAlignment = Alignment.CenterVertically,
+                ) {
+                    hintChips?.invoke(this)
+                    modeHint?.let { JChip(it, icon = PhIcons.SlidersHorizontal) }
+                }
+            }
             if (fullToolbar) accessory?.invoke(this)
-            if (fullToolbar) modeHint?.let { JChip(it, icon = PhIcons.SlidersHorizontal) }
             if (working && hasContent && enabled) Text(stringResource(R.string.chat_composer_will_queue), style = PersonaTheme.type.caption, color = PersonaTheme.palette.ink2)
             ComposerSuggestions(slashItems,
                 onPick = { row ->

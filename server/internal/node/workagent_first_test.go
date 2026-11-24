@@ -2,7 +2,6 @@ package node
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"slices"
 	"strings"
@@ -213,10 +212,8 @@ func TestWorkAgentFirstMessageGivesUpAfterTries(t *testing.T) {
 	if row == nil || row.Status != proto.StatusBlocked || row.AttentionReason != want {
 		t.Fatalf("listed as %+v, want blocked with %q", row, want)
 	}
-	a, _ := x.n.agent(id)
-	params, _ := json.Marshal(map[string]any{"session_id": id, "text": "Please start on the task above."})
-	if _, err, handled := x.n.workAgentCalls(context.Background(), "session.send", id, a, params); !handled || err != nil {
-		t.Fatalf("send: handled %v, %v", handled, err)
+	if _, err := request(t, x.n, "session.send", map[string]any{"session_id": id, "text": "Please start on the task above."}); err != nil {
+		t.Fatalf("send: %v", err)
 	}
 	if p, ok := x.n.lostFirst.get(id); ok {
 		t.Errorf("still listed as lost after a message went in: %q", p.why)

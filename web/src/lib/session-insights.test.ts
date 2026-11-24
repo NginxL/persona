@@ -303,6 +303,81 @@ describe("buildSessionInsights & performance", () => {
     expect(insights.performance?.ttftMs).toBe(0);
   });
 
+  it.each([
+    null,
+    emptyRateHistory(),
+    { ...emptyRateHistory(), genTokens: 100, genMs: 3000 },
+    { ...emptyRateHistory(), latestRate: -1, samples: [{ durationMs: 1000, rate: NaN }, { durationMs: 2000, rate: 0 }] },
+  ])("uses elapsed turn rates when there is no positive streaming rate (%j)", (history) => {
+    const items: Item[] = [
+      { id: "u1", seq: 1, role: "user", kind: "text", ts: "2026-11-20T10:00:00Z" },
+      { id: "a1", seq: 2, role: "assistant", kind: "thinking", ts: "2026-11-20T10:00:02Z", usage: [{ out: 40 }] },
+      { id: "q", seq: 3, role: "user", kind: "text", queued: true, ts: "2026-11-20T10:00:04Z" },
+      { id: "r1", seq: 4, role: "user", kind: "tool_result", ts: "2026-11-20T10:00:06Z" },
+      { id: "a2", seq: 5, role: "assistant", kind: "text", ts: "2026-11-20T10:00:10Z", usage: [{ out: 60 }] },
+      { id: "u2#0", seq: 6, role: "user", kind: "text", ts: "2026-11-20T10:01:00Z" },
+      { id: "u2#1", seq: 6, role: "user", kind: "image", ts: "2026-11-20T10:01:00Z" },
+      {
+        id: "f1", seq: 7, role: "assistant", kind: "fold", ts: "2026-11-20T10:01:03Z", ttft_ms: 2900,
+        fold: { items: 3, tools: 1, thoughts: 0, through_seq: 9, until: "2026-11-20T10:01:04Z", usage: [{ out: 200 }] },
+      },
+      { id: "u3", seq: 10, role: "user", kind: "text", ts: "2026-11-20T10:02:00Z" },
+    ];
+    const performance = buildSessionInsights(baseSession, items, { rateHistory: history }).performance;
+    expect(performance).toMatchObject({
+      rateSource: "turn",
+      latestTurnDurationMs: 4000,
+      latestTokPerSec: 50,
+      avgTokPerSec: 300 / 14,
+      peakTokPerSec: null,
+      ttftMs: 2900,
+    });
+    expect(latestTurnDurationMs(items)).toBe(performance?.latestTurnDurationMs);
+  });
+
+  it("keeps valid streaming samples even if a later sample is invalid", () => {
+    const history = { ...emptyRateHistory(), samples: [{ durationMs: 4000, rate: 20 }, { durationMs: 5000, rate: Infinity }] };
+    expect(summarizeSessionPerformance([], history)).toMatchObject({
+      rateSource: "stream",
+      latestTokPerSec: 20,
+      avgTokPerSec: 20,
+      peakTokPerSec: 20,
+    });
+  });
+
+  it("uses a background wake as a turn start and leaves separately reported agent output out of its rate", () => {
+    const report = { id: "agent:sample", model: "claude-opus-4-5", out: 500 };
+    const items: Item[] = [
+      { id: "u", seq: 1, role: "user", kind: "text", ts: "2026-11-20T10:00:00Z" },
+      { id: "a", seq: 2, role: "assistant", kind: "text", ts: "2026-11-20T10:00:04Z", usage: [{ out: 40 }, report] },
+      { id: "w", seq: 3, role: "system", kind: "notice", wake: true, ts: "2026-11-20T10:10:00Z", usage: [report] },
+      { id: "b", seq: 4, role: "assistant", kind: "text", ts: "2026-11-20T10:10:02Z", usage: [{ out: 80 }] },
+    ];
+    const { tokens, performance } = buildSessionInsights(baseSession, items);
+    expect(tokens?.output).toBe(620);
+    expect(performance).toMatchObject({
+      latestTurnDurationMs: 2000, latestTokPerSec: 40, avgTokPerSec: 20, peakTokPerSec: null,
+    });
+  });
+
+  it.each([
+    ["missing start", undefined, "2026-11-20T10:00:10Z", 100],
+    ["missing end", "2026-11-20T10:00:00Z", undefined, 100],
+    ["invalid end", "2026-11-20T10:00:00Z", "invalid", 100],
+    ["zero timestamp", "0001-01-01T00:00:00Z", "2026-11-20T10:00:10Z", 100],
+    ["zero duration", "2026-11-20T10:00:00Z", "2026-11-20T10:00:00Z", 100],
+    ["zero output", "2026-11-20T10:00:00Z", "2026-11-20T10:00:10Z", 0],
+  ] as const)("omits the turn rate with %s", (_case, start, end, out) => {
+    const items: Item[] = [
+      { id: "u", seq: 1, role: "user", kind: "text", ts: start },
+      { id: "a", seq: 2, role: "assistant", kind: "text", ts: end, usage: [{ in: 500, out }] },
+    ];
+    const performance = summarizeSessionPerformance(items);
+    expect(performance?.latestTokPerSec ?? null).toBeNull();
+    expect(performance?.avgTokPerSec ?? null).toBeNull();
+    expect(performance?.peakTokPerSec ?? null).toBeNull();
+  });
+
   it("omits performance and breakdown when data is unavailable", () => {
     const insights = buildSessionInsights(baseSession, []);
     expect(insights.context).toBeNull();

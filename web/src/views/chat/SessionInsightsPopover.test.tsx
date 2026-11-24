@@ -227,6 +227,8 @@ describe("ContextMeter + lazy SessionInsightsPopover", () => {
       expect(dialog.querySelector('[data-breakdown-source="exact"]')).not.toBeNull();
       expect(dialog.querySelector('[data-breakdown-top-consumer="tool_outputs"]')).not.toBeNull();
       expect(dialog.querySelector("[data-insights-ttft]")?.textContent).toContain("350 ms");
+      expect(dialog.querySelector("[data-insights-speed-latest]")?.textContent).toBe("57.1 tok/s");
+      expect(dialog.querySelector("[data-insights-speed-peak]")).toBeNull();
 
       const compactBtn = dialog.querySelector<HTMLButtonElement>("[data-insights-compact]")!;
       expect(compactBtn).not.toBeNull();
@@ -400,10 +402,11 @@ describe("ContextMeter + lazy SessionInsightsPopover", () => {
     expect(dialog.querySelector("[data-insights-output]")?.textContent).toBe("700");
   });
 
-  it("renders session.context_breakdown (~estimated) and items[].ttft_ms automatically without overrides", async () => {
+  it("renders an estimated agy breakdown with labeled turn rates and observed TTFT", async () => {
     const anchor = { current: host };
     const sessionWithBreakdown: Session = {
       ...baseSession,
+      agent: "agy",
       context_tokens: 100_000,
       context_window: 200_000,
       context_breakdown: {
@@ -418,18 +421,23 @@ describe("ContextMeter + lazy SessionInsightsPopover", () => {
     };
     const itemsWithTtft: Item[] = [
       { id: "u1", seq: 1, role: "user", kind: "text", ts: "2026-11-20T10:00:00Z", text: "go" },
-      { id: "a1", seq: 2, role: "assistant", kind: "text", ts: "2026-11-20T10:00:08Z", ttft_ms: 1450 },
+      { id: "a1", seq: 2, role: "assistant", kind: "text", ts: "2026-11-20T10:00:08Z", ttft_ms: 1450, usage: [{ out: 320 }] },
     ];
     await mount(
       <SessionInsightsPopover anchor={anchor} session={sessionWithBreakdown} items={itemsWithTtft} onClose={() => {}} />,
     );
     const dialog = document.querySelector("[data-session-insights]")!;
+    expect(dialog.querySelector('[data-insights-stacked-bar] [data-breakdown-segment="tools_and_mcp"]')).not.toBeNull();
     expect(dialog.querySelector('[data-breakdown-source="estimated"]')?.textContent).toContain("~");
     expect(dialog.querySelector('[data-breakdown-row="tool_outputs"]')?.textContent).toContain("~50.0k");
     expect(dialog.querySelector('[data-breakdown-row="free"]')?.textContent).toContain("100.0k");
     expect(dialog.querySelector("[data-breakdown-auto-compact]")?.textContent).toContain("160.0k");
     expect(dialog.querySelector('[data-breakdown-top-consumer="tool_outputs"]')?.textContent).toContain("50%");
     expect(dialog.querySelector("[data-insights-ttft]")?.textContent).toBe("1.45 s");
+    expect(dialog.querySelector("[data-insights-speed-latest]")?.textContent).toBe("40 tok/s");
+    expect(dialog.querySelector("[data-insights-speed-avg]")?.textContent).toBe("40 tok/s");
+    expect(dialog.querySelector("[data-insights-speed-latest]")?.previousElementSibling?.textContent).toBe("最近有数据的回合速率");
+    expect(dialog.querySelector("[data-insights-speed-peak]")).toBeNull();
   });
 
   it("preserves observed 0 ms TTFT in the performance section", async () => {

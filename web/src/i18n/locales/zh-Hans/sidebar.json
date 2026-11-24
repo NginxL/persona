@@ -168,5 +168,7 @@
   "module_recording": "会议录音",
   "module_recording_hint": "在知识库的录音条目里查看纪要、全天回顾、转写和照片。",
   "subagents_running": "{count} 个运行中",
-  "subagents_need_you": "{count} 个等你确认"
+  "subagents_need_you": "{count} 个等你确认",
+  "sort_activity": "按最近更新排序",
+  "show_list_filter": "显示筛选"
 }

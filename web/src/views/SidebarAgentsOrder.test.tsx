@@ -2,7 +2,8 @@
 // Settings › Agents: "Sort Agents by recent activity" and "Show the Filter on the Agents list". The list keeps the stable
 // order of #11801 until the sort is on; on, it orders by activity but holds still while the pointer is over the sidebar.
 // The Filter is drawn on both the complete and the paged list only while its switch is on; a choice the hub's paged read
-// cannot express is answered by the complete list.
+// cannot express is answered by the complete list. The ⋯ menu carries both choices directly, writing the same hub setting
+// Settings › Agents shows (#14398).
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -234,5 +235,61 @@ describe("the paged list's Filter", () => {
     display({ sort_by_activity: true });
     await flush();
     expect(names()).toBe("second computer first");
+  });
+});
+
+describe("the ⋯ menu's direct switches (#14398)", () => {
+  const sessions: Session[] = [{ machine_id: "mac", session_id: "a", title: "旧会话", cwd: "/code/a", status: "idle", state: "idle", updated_at: "2026-01-01T01:00:00Z" }];
+  const hub = (settings: { sort_by_activity?: boolean; show_filter?: boolean }) => vi.fn((url: string, init?: RequestInit) => {
+    const path = new URL(url, "http://x").pathname;
+    if (path === "/api/v1/agents/display-settings") return json({ show_botmux: true, configured: true, ...settings, ...(init?.body ? JSON.parse(String(init.body)) : {}) });
+    return json(path === "/api/v1/sessions" ? { sessions } : { machines: [{ id: "mac", name: "工作电脑", online: true }] });
+  });
+  const setup = async (fetched: ReturnType<typeof vi.fn>) => {
+    vi.stubGlobal("fetch", fetched);
+    await act(async () => { await refresh(); });
+    act(() => root.render(sidebar()));
+    await flush();
+  };
+  const openMenu = async () => {
+    const button = host.querySelector<HTMLButtonElement>('button[aria-label="Agent 列表选项"]')!;
+    await act(async () => button.click());
+    await flush();
+  };
+  const puts = (fetched: ReturnType<typeof vi.fn>) => fetched.mock.calls.filter(([, init]) => (init as RequestInit | undefined)?.method === "PUT");
+  // a toggle row (not one of a radio set) draws its check invisibly when off
+  const checked = (label: string) => !!menuRow(label)?.querySelector('svg.invisible') === false;
+
+  it("offers both choices, checked as they are, and writes the hub setting on a click", async () => {
+    const fetched = hub({ sort_by_activity: false, show_filter: false });
+    await setup(fetched);
+    await openMenu();
+    expect(checked(t("sidebar.sort_activity"))).toBe(false);
+    expect(checked(t("sidebar.show_list_filter"))).toBe(false);
+
+    await act(async () => menuRow(t("sidebar.sort_activity"))!.click());
+    await flush();
+    expect(JSON.parse(String((puts(fetched).at(-1)?.[1] as RequestInit).body))).toEqual({ sort_by_activity: true });
+    expect(checked(t("sidebar.sort_activity"))).toBe(true); // the menu stays open
+
+    await act(async () => menuRow(t("sidebar.show_list_filter"))!.click());
+    await flush();
+    expect(JSON.parse(String((puts(fetched).at(-1)?.[1] as RequestInit).body))).toEqual({ show_filter: true });
+    expect(filterButton()).not.toBeNull();
+  });
+
+  it("shows neither on a hub that does not have the fields", async () => {
+    const fetched = vi.fn((url: string) => {
+      const path = new URL(url, "http://x").pathname;
+      if (path === "/api/v1/agents/display-settings") return json({ show_botmux: true, configured: true });
+      return json(path === "/api/v1/sessions" ? { sessions } : { machines: [{ id: "mac", name: "工作电脑", online: true }] });
+    });
+    await setup(fetched);
+    const menu = host.querySelector<HTMLButtonElement>('button[aria-label="Agent 列表选项"]');
+    if (menu) {
+      await openMenu();
+      expect(menuRow(t("sidebar.sort_activity"))).toBeUndefined();
+      expect(menuRow(t("sidebar.show_list_filter"))).toBeUndefined();
+    }
   });
 });

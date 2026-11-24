@@ -7,6 +7,8 @@ import { contextUsage, type ContextUsage } from "./context-usage";
 import { sessionCan } from "./format";
 import { bareModel, replyModelName } from "./model-change";
 import { loadRateHistory, turnAverage, type RateHistory } from "./token-rate";
+import { itemUsage } from "./turn-usage";
+import { buildBlocks, isInterruptNotice, isUserInput } from "./turns";
 import type { ContextBreakdown, Item, Session, TokenUsage } from "./types";
 
 export type ContextBreakdownKey = "system_and_rules" | "tools_and_mcp" | "conversation" | "tool_outputs";
@@ -77,11 +79,12 @@ export interface SessionTokenSummary {
 export interface SessionPerformanceSummary {
   /** Duration of the latest turn in ms, derived from item timestamps. */
   latestTurnDurationMs: number | null;
-  /** Latest measured output speed in tok/s. */
+  rateSource: "stream" | "turn" | null;
+  /** Latest streaming sample or observed turn output rate in tok/s. */
   latestTokPerSec: number | null;
-  /** Average measured output speed in tok/s. */
+  /** Streaming average or total observed output divided by elapsed time across timed turns. */
   avgTokPerSec: number | null;
-  /** Peak measured output speed in tok/s. */
+  /** Peak measured streaming output speed in tok/s. */
   peakTokPerSec: number | null;
   /** Latest observed streaming Time-To-First-Token in milliseconds (0 is valid). */
   ttftMs?: number | null;
@@ -138,7 +141,7 @@ const positive = (v: unknown): number => (typeof v === "number" && Number.isFini
 const nonNegInt = (v: unknown): number | null => (typeof v === "number" && Number.isFinite(v) && v >= 0 ? Math.round(v) : null);
 
 function tsMs(ts?: string): number | null {
-  if (!ts) return null;
+  if (!ts || ts === "0001-01-01T00:00:00Z") return null;
   const ms = Date.parse(ts);
   return Number.isFinite(ms) ? ms : null;
 }
@@ -331,46 +334,63 @@ export function aggregateSessionTokens(items: readonly Item[]): SessionTokenSumm
   };
 }
 
-/**
- * Estimates the latest turn's duration in milliseconds from loaded transcript items.
- * Splits turns on non-queued user items and measures from the turn's start to its latest assistant/fold timestamp.
- */
+/** Duration of the latest timed exchange in the loaded transcript. */
 export function latestTurnDurationMs(items: readonly Item[]): number | null {
-  if (!items.length) return null;
+  return summarizeTranscriptTurns(items, false).durationMs;
+}
 
-  const turns: { userStart: number | null; replyStart: number | null; replyEnd: number | null }[] = [];
-  let current: { userStart: number | null; replyStart: number | null; replyEnd: number | null } | null = null;
+function summarizeTranscriptTurns(items: readonly Item[], withOutput: boolean) {
+  let durationMs: number | null = null;
+  let latestRate: number | null = null;
+  let timedOutput = 0;
+  let totalElapsedMs = 0;
 
-  for (const item of items) {
-    if (item.role === "user" && !item.queued) {
-      current = { userStart: tsMs(item.ts), replyStart: null, replyEnd: null };
-      turns.push(current);
-      continue;
+  for (const block of buildBlocks(items)) {
+    if (block.kind !== "turn") continue;
+    const { ordered, process, trailing } = block.turn;
+    const first = ordered[0];
+    const start = first && (first.wake || (isUserInput(first) && !first.queued)) ? tsMs(first.ts) : null;
+    let replyStart: number | null = null;
+    let end: number | null = null;
+    let missingTime = false;
+    let output = 0;
+
+    for (const group of [process, trailing]) {
+      for (const item of group) {
+        // An unrelated notice can arrive long after the work. Interrupted notices can end a turn and carry its usage.
+        if (item.wake || (item.kind === "notice" && !isInterruptNotice(item))) continue;
+        const at = tsMs(item.ts);
+        const until = tsMs(item.fold?.until);
+        const itemEnd = until !== null && (at === null || until > at) ? until : at;
+        if (at !== null && (replyStart === null || at < replyStart)) replyStart = at;
+        if (itemEnd === null || (start !== null && itemEnd < start)) missingTime = true;
+        else if (end === null || itemEnd > end) end = itemEnd;
+        if (withOutput && (item.usage || item.fold?.usage)) {
+          // A fold replaces its steps and carries their usage. ID-bearing reports count toward
+          // session tokens, but describe other agents' output with no matching elapsed time here.
+          for (const usage of itemUsage(item)) output += positive(usage.out);
+        }
+      }
     }
-    if (item.role === "user") continue;
-    if (!current) {
-      current = { userStart: null, replyStart: null, replyEnd: null };
-      turns.push(current);
-    }
-    const start = tsMs(item.ts);
-    const foldEnd = tsMs(item.fold?.until);
-    if (start !== null) {
-      if (current.replyStart === null || start < current.replyStart) current.replyStart = start;
-      if (current.replyEnd === null || start > current.replyEnd) current.replyEnd = start;
-    }
-    if (foldEnd !== null && (current.replyEnd === null || foldEnd > current.replyEnd)) {
-      current.replyEnd = foldEnd;
-    }
+
+    const observedStart = start ?? replyStart;
+    if (observedStart === null || end === null || end <= observedStart) continue;
+    durationMs = end - observedStart;
+    // A rate requires the observed turn start. Use wall-clock elapsed time, including TTFT and
+    // tool waits, since the transcript does not measure time spent generating across the turn.
+    if (start === null || missingTime || output <= 0) continue;
+    const rate = positive((output * 1000) / durationMs);
+    if (rate === 0) continue;
+    latestRate = rate;
+    timedOutput += output;
+    totalElapsedMs += durationMs;
   }
 
-  for (let i = turns.length - 1; i >= 0; i--) {
-    const turn = turns[i];
-    if (turn.replyEnd === null) continue;
-    const start = turn.userStart ?? turn.replyStart;
-    if (start !== null && turn.replyEnd > start) return turn.replyEnd - start;
-  }
-
-  return null;
+  return {
+    durationMs,
+    latestRate,
+    avgRate: positive((timedOutput * 1000) / totalElapsedMs) || null,
+  };
 }
 
 /**
@@ -407,25 +427,28 @@ export function summarizeSessionPerformance(
   rateHistory?: RateHistory | null,
   ttftMs?: number | null,
 ): SessionPerformanceSummary | null {
-  const turnMs = latestTurnDurationMs(items);
-
   let latestTokPerSec: number | null = null;
   let avgTokPerSec: number | null = null;
   let peakTokPerSec: number | null = null;
 
   if (rateHistory) {
-    const latestCandidate = rateHistory.latestRate ?? rateHistory.samples.at(-1)?.rate ?? null;
-    latestTokPerSec = latestCandidate !== null && Number.isFinite(latestCandidate) && latestCandidate > 0 ? latestCandidate : null;
-
-    const turnAvg = turnAverage(rateHistory);
-    const avgCandidate = turnAvg !== null && Number.isFinite(turnAvg) && turnAvg > 0 ? turnAvg : sampleAverageRate(rateHistory);
-    avgTokPerSec = avgCandidate !== null && Number.isFinite(avgCandidate) && avgCandidate > 0 ? avgCandidate : null;
-
+    latestTokPerSec = positive(rateHistory.latestRate) || rateHistory.samples.findLast((sample) => positive(sample.rate))?.rate || null;
     let maxRate = positive(rateHistory.peak);
     for (const s of rateHistory.samples) {
-      if (Number.isFinite(s.rate) && s.rate > maxRate) maxRate = s.rate;
+      maxRate = Math.max(maxRate, positive(s.rate));
     }
     peakTokPerSec = maxRate > 0 ? maxRate : null;
+    if (latestTokPerSec !== null || peakTokPerSec !== null) {
+      avgTokPerSec = positive(turnAverage(rateHistory)) || positive(sampleAverageRate(rateHistory)) || null;
+    }
+  }
+
+  const hasStreamingRate = latestTokPerSec !== null || peakTokPerSec !== null;
+  const { durationMs: turnMs, latestRate, avgRate } = summarizeTranscriptTurns(items, !hasStreamingRate);
+  const rateSource = hasStreamingRate ? "stream" : latestRate !== null ? "turn" : null;
+  if (!hasStreamingRate) {
+    latestTokPerSec = latestRate;
+    avgTokPerSec = avgRate;
   }
 
   const candidateTtft = ttftMs !== undefined ? ttftMs : latestTtftMs(items);
@@ -437,6 +460,7 @@ export function summarizeSessionPerformance(
 
   return {
     latestTurnDurationMs: turnMs,
+    rateSource,
     latestTokPerSec,
     avgTokPerSec,
     peakTokPerSec,

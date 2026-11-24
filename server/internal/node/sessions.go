@@ -259,11 +259,16 @@ func (n *Node) sessionListIn(ctx context.Context, refreshAgents bool, pass *code
 					if s.OutputTokens == 0 && runtimeRow.OutputTokens > 0 {
 						s.OutputTokens = runtimeRow.OutputTokens
 					}
+					if bd := runtimeRow.ContextBreakdown(); bd != nil {
+						if existing := s.ContextBreakdown(); existing == nil || existing.Source != proto.ContextBreakdownExact {
+							s.SetContextBreakdown(bd)
+						}
+					}
 				}
 			}
 			if a.Agent == agyAgent {
 				if hasRuntimeRow {
-					n.resolveAgyContextWindow(&s)
+					n.resolveAgyContext(&s, agyConversations[id])
 				} else {
 					n.mergeAgyTranscript(&s, agyConversations[id])
 				}

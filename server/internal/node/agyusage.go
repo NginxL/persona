@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/nwverse/persona/server/internal/proto"
+	"github.com/nwverse/persona/server/internal/transcript"
 )
 
 // Antigravity (agy) transcript token accounting and model context window resolution (#12540).
@@ -111,6 +112,23 @@ func (u *agyTranscriptUsage) observeCheckpoint() {
 	u.compactions++
 	u.contextTokens = 0
 	u.compacted = true
+	u.contextStats.ResetCompacted()
+}
+
+func (u *agyTranscriptUsage) observeContextStep(step agyStep) {
+	switch step.Type {
+	case "SYSTEM_MESSAGE", "CORTEX_STEP_TYPE_SYSTEM_MESSAGE":
+		u.contextStats.SystemBytes += transcript.SampleContextBytes(step.Content)
+	case "USER_INPUT", "PLANNER_RESPONSE":
+		u.contextStats.ConversationBytes += transcript.SampleContextBytes(step.Content) + transcript.SampleContextBytes(step.Thinking)
+		for _, call := range step.ToolCalls {
+			if call != nil {
+				u.contextStats.ToolsBytes += transcript.SampleContextBytes(call.Name) + transcript.SampleContextBytes(call.Args)
+			}
+		}
+	case "GENERIC":
+		u.contextStats.ToolOutputBytes += transcript.SampleContextBytes(firstNonEmpty(step.Error, step.Content))
+	}
 }
 
 func (u *agyTranscriptUsage) observePlanner(step agyStep) (proto.TokenUsage, bool) {
@@ -144,6 +162,7 @@ func (u *agyTranscriptUsage) observePlanner(step agyStep) (proto.TokenUsage, boo
 func extractAgyUsage(steps []agyStep) agyTranscriptUsage {
 	var u agyTranscriptUsage
 	for _, step := range steps {
+		u.observeContextStep(step)
 		switch step.Type {
 		case "USER_INPUT":
 			if step.Source == "" || step.Source == "USER_EXPLICIT" {
@@ -353,13 +372,48 @@ func (n *Node) agyContextWindowFor(s *proto.Session, transcriptModel string, rec
 	return agyContextWindow(lPtr, transcriptModel, recorded, used, lookupAgyModelWindow, fallbacks...)
 }
 
-// resolveAgyContextWindow fills Session.ContextWindow for an agy session row whose ContextTokens were supplied by the
-// companion runtime without an explicit window, using managed launcher, agyModelList catalog, or built-in model rules.
+// resolveAgyContextWindow fills missing context metadata for a companion-supplied row.
 func (n *Node) resolveAgyContextWindow(s *proto.Session) {
-	if s == nil || s.ContextTokens <= 0 || s.ContextWindow > 0 {
+	if s == nil {
 		return
 	}
-	s.ContextWindow = proto.Tokens32(n.agyContextWindowFor(s, s.Model, 0, int(s.ContextTokens)))
+	conversation, _ := strings.CutPrefix(s.SessionID, agyAgent+"-")
+	n.resolveAgyContext(s, conversation)
+}
+
+func (n *Node) resolveAgyContext(s *proto.Session, conversation string) {
+	if s.ContextTokens > 0 && s.ContextWindow <= 0 {
+		s.ContextWindow = proto.Tokens32(n.agyContextWindowFor(s, s.Model, 0, int(s.ContextTokens)))
+	}
+	if bd := s.ContextBreakdown(); bd != nil && (bd.Source == proto.ContextBreakdownExact || s.ContextTokens > 0) {
+		fillBreakdownDerived(s, bd, 0)
+		return
+	}
+	s.SetContextBreakdown(nil)
+	if s.ContextTokens <= 0 {
+		return
+	}
+	// The companion may have filtered out a rewound tail that is still on disk. Pair the
+	// local category weights with companion counts only when their observed usage agrees.
+	if u, ok := n.agyTranscriptMeta(conversation); ok && proto.Tokens32(u.contextTokens) == s.ContextTokens &&
+		(s.OutputTokens == 0 || u.outputTokens == s.OutputTokens) {
+		setAgyContextBreakdown(s, u.contextStats)
+	}
+}
+
+func setAgyContextBreakdown(s *proto.Session, stats transcript.ContextStats) {
+	if bd := s.ContextBreakdown(); bd != nil && bd.Source == proto.ContextBreakdownExact {
+		fillBreakdownDerived(s, bd, 0)
+		return
+	}
+	if s.ContextTokens <= 0 || stats.Empty() {
+		s.SetContextBreakdown(nil)
+		return
+	}
+	// Native exports can omit model instructions and clip message/tool bodies even from step zero.
+	// Scale the observed categories without assigning the unrecorded context to system and rules.
+	const fullWindow = false
+	s.SetContextBreakdown(transcript.BuildContextBreakdown(stats, int(s.ContextTokens), int(s.ContextWindow), 0, fullWindow))
 }
 
 // agyTranscriptMeta reads (with stat-based LRU caching) the token usage summary of an agy conversation on disk.
@@ -409,8 +463,7 @@ func (n *Node) agyTranscriptMeta(conversation string) (agyTranscriptUsage, bool)
 	return usage, true
 }
 
-// mergeAgyTranscript populates Session.Model, ContextTokens, ContextWindow, and OutputTokens on a standalone
-// herdr-pane agy session row from its local transcript and resolves ContextWindow from launcher/catalog/model metadata.
+// mergeAgyTranscript populates an agy pane row from its local transcript.
 func (n *Node) mergeAgyTranscript(s *proto.Session, conversation string) {
 	if s == nil {
 		return
@@ -422,20 +475,24 @@ func (n *Node) mergeAgyTranscript(s *proto.Session, conversation string) {
 		if u.outputTokens > 0 {
 			s.OutputTokens = u.outputTokens
 		}
-		switch {
-		case u.contextTokens > 0:
-			s.ContextTokens = proto.Tokens32(u.contextTokens)
-			recorded := u.contextWindow
-			if recorded <= 0 {
-				recorded = int(s.ContextWindow)
-			}
-			model := firstNonEmpty(u.model, s.Model)
-			s.ContextWindow = proto.Tokens32(n.agyContextWindowFor(s, model, recorded, u.contextTokens))
-			return
-		case u.compacted:
-			s.ContextTokens, s.ContextWindow = 0, 0
-			return
-		}
+		n.setAgyTranscriptContext(s, u)
+		return
 	}
-	n.resolveAgyContextWindow(s)
+	n.resolveAgyContext(s, "")
+}
+
+func (n *Node) setAgyTranscriptContext(s *proto.Session, u agyTranscriptUsage) {
+	switch {
+	case u.contextTokens > 0:
+		s.ContextTokens = proto.Tokens32(u.contextTokens)
+		recorded := firstPositiveInt(u.contextWindow, int(s.ContextWindow))
+		model := firstNonEmpty(u.model, s.Model)
+		s.ContextWindow = proto.Tokens32(n.agyContextWindowFor(s, model, recorded, u.contextTokens))
+	case u.compacted:
+		s.ContextTokens, s.ContextWindow = 0, 0
+	default:
+		n.resolveAgyContext(s, "")
+		return
+	}
+	setAgyContextBreakdown(s, u.contextStats)
 }

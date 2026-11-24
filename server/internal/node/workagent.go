@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"strings"
 	"time"
 
 	"github.com/nwverse/persona/server/internal/host"
@@ -398,11 +399,17 @@ func (n *Node) reportedWorkAgent(pane, kind string) (id string, ambiguous bool) 
 	return id, false
 }
 
+// paneMessage is the message content already decoded by the node's request dispatcher.
+type paneMessage struct {
+	Text   string
+	Images []proto.Image
+}
+
 // workAgentCalls serves a hub call for a Cursor or agy session herdr runs. A message goes through herdr's
 // agent.prompt (never typed blind), and Persona interrupts by sending Esc through herdr. Agy reads the
 // verified pane conversation when available. A page for Cursor is a terminal notice. The pane's own calls
 // (keys, screen, close) fall through to the node.
-func (n *Node) workAgentCalls(ctx context.Context, method, id string, a host.Agent, params json.RawMessage) (any, error, bool) {
+func (n *Node) workAgentCalls(ctx context.Context, method, id string, a host.Agent, params json.RawMessage, msg paneMessage) (any, error, bool) {
 	if a.Agent == agyAgent {
 		if res, err, handled := n.agyPaneCall(ctx, method, id, a.PaneID, params); handled {
 			return res, err, true
@@ -418,17 +425,18 @@ func (n *Node) workAgentCalls(ctx context.Context, method, id string, a host.Age
 	case "session.watch", "session.unwatch":
 		return okResult(nil), nil, true
 	case "session.send":
-		var p struct {
-			Text string `json:"text"`
-		}
-		if err := json.Unmarshal(params, &p); err != nil {
-			return nil, err, true
-		}
 		// After the check of a start's first message (workAgentFirst): a message typed meanwhile could meet the first
 		// one typed again.
 		unlock := n.typing.lock(id)
 		defer unlock()
-		if err := n.hostPrompt(ctx, a.PaneID, p.Text); err != nil {
+		if len(msg.Images) > 0 {
+			paths, err := n.saveImages(msg.Images)
+			if err != nil {
+				return nil, err, true
+			}
+			msg.Text = strings.TrimSpace(attachImages(msg.Text, paths))
+		}
+		if err := n.hostPrompt(ctx, a.PaneID, msg.Text); err != nil {
 			return nil, fmt.Errorf("send: %w", err), true
 		}
 		n.lostFirst.clear(id) // the message the start could not deliver went in now, or another one

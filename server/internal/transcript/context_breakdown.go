@@ -327,34 +327,63 @@ func (m *Meta) observeToolContext(name string, input json.RawMessage, output str
 	m.ContextStats.ToolOutputBytes += int64(len(name)) + estimateWeightedBytes(string(input)) + estimateWeightedBytes(output)
 }
 
+// SampleContextBytes weighs a bounded UTF-8 sample without extrapolating to the full field size.
+// Use it for exports that can contain opaque blobs or clipped previews. Long base64-like runs
+// contribute no text weight, including when embedded in otherwise useful text or JSON.
+func SampleContextBytes[T ~string | ~[]byte](text T) int64 {
+	sample := strings.TrimSpace(breakdownSample(text))
+	weight := weightContextSample(sample)
+	const minOpaqueRun = 64 // also handle wrapped base64 output
+	run := 0
+	for i := range len(sample) {
+		c := sample[i]
+		if c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' ||
+			c == '+' || c == '/' || c == '=' || c == '-' || c == '_' {
+			run++
+			continue
+		}
+		if run >= minOpaqueRun {
+			weight -= int64(run)
+		}
+		run = 0
+	}
+	if run >= minOpaqueRun {
+		weight -= int64(run)
+	}
+	return weight
+}
+
 // estimateWeightedBytes converts text into ASCII-equivalent bytes (~4 weighted bytes per token),
 // scanning at most breakdownSampleLimit bytes so cost is strictly O(1) bounded.
 func estimateWeightedBytes(s string) int64 {
-	n := len(s)
-	if n == 0 {
-		return 0
+	sample := breakdownSample(s)
+	weight := weightContextSample(sample)
+	if len(sample) == len(s) {
+		return weight
 	}
-	sample := s
-	if n > breakdownSampleLimit {
-		sample = s[:breakdownSampleLimit]
+	if sample == "" {
+		return int64(len(s))
+	}
+	return (weight * int64(len(s))) / int64(len(sample))
+}
+
+func breakdownSample[T ~string | ~[]byte](s T) string {
+	sample := string(s[:min(len(s), breakdownSampleLimit)])
+	if len(s) > len(sample) && sample[len(sample)-1] >= utf8.RuneSelf {
 		// Trim a trailing incomplete UTF-8 rune split across the sample boundary in O(1):
-		// walk back over at most 3 continuation bytes to the candidate rune start, then
-		// check once with DecodeRuneInString.
-		if sample[len(sample)-1] >= utf8.RuneSelf {
-			start := len(sample) - 1
-			for steps := 0; start > 0 && steps < 3 && (sample[start]&0xc0) == 0x80; steps++ {
-				start--
-			}
-			if r, size := utf8.DecodeRuneInString(sample[start:]); (r == utf8.RuneError && size == 1) || start+size != len(sample) {
-				if !utf8.FullRuneInString(sample[start:]) {
-					sample = sample[:start]
-				}
-			}
+		// walk back over at most 3 continuation bytes to the candidate rune start.
+		start := len(sample) - 1
+		for steps := 0; steps < 3 && (sample[start]&0xc0) == 0x80; steps++ {
+			start--
 		}
-		if len(sample) == 0 {
-			return int64(n)
+		if !utf8.FullRuneInString(sample[start:]) {
+			sample = sample[:start]
 		}
 	}
+	return sample
+}
+
+func weightContextSample(sample string) int64 {
 	var asciiBytes, nonASCIIRunes int64
 	for i := 0; i < len(sample); {
 		if sample[i] < utf8.RuneSelf {
@@ -367,11 +396,7 @@ func estimateWeightedBytes(s string) int64 {
 		i += size
 	}
 	// ASCII averages ~4 bytes/token (weight 1/byte); non-ASCII runes average ~1 token/rune (weight 4/rune).
-	weightedSample := asciiBytes + nonASCIIRunes*4
-	if len(sample) == n {
-		return weightedSample
-	}
-	return (weightedSample * int64(n)) / int64(len(sample))
+	return asciiBytes + nonASCIIRunes*4
 }
 
 // EstimateTokens converts weighted bytes to a bounded, deterministic token count (~4 bytes/token).

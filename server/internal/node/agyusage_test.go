@@ -303,6 +303,85 @@ func TestAgyTranscriptCheckpointResetsContextAndRewindExcludesAbandoned(t *testi
 	}
 }
 
+func TestAgyContextBreakdown(t *testing.T) {
+	t.Setenv("ANTIGRAVITY_CLI_CONFIG_DIR", "")
+	n := &Node{home: t.TempDir()}
+	const firstTurn = "" +
+		`{"step_index":0,"type":"SYSTEM_MESSAGE","source":"SYSTEM","content":"Read only."}` + "\n" +
+		`{"step_index":1,"type":"USER_INPUT","source":"USER_EXPLICIT","content":"Inspect the sample."}` + "\n" +
+		`{"step_index":2,"type":"PLANNER_RESPONSE","content":"Looking now.","thinking":"Read the file first.","input_tokens":500,"tool_calls":[{"name":"read_file","args":{"path":"sample.txt"}}]}` + "\n" +
+		`{"step_index":3,"type":"GENERIC","content":"The sample has one line of plain text."}` + "\n" +
+		`{"step_index":4,"type":"PLANNER_RESPONSE","content":"The file looks good.","input_tokens":500}` + "\n"
+	const secondTurn = "" +
+		`{"step_index":6,"type":"USER_INPUT","content":"What next?"}` + "\n" +
+		`{"step_index":7,"type":"PLANNER_RESPONSE","content":"Try the example.","input_tokens":800,"context_window":10000}` + "\n"
+	const checkpoint = `{"step_index":5,"type":"CHECKPOINT","content":"Summary of prior work","input_tokens":2000}` + "\n"
+
+	merge := func(t *testing.T, raw string, existing *proto.ContextBreakdown) *proto.ContextBreakdown {
+		t.Helper()
+		agyTestFile(t, n.agyDataRoot(), agyTestID, raw)
+		s := proto.Session{Agent: agyAgent}
+		s.SetContextBreakdown(existing)
+		n.mergeAgyTranscript(&s, agyTestID)
+		return s.ContextBreakdown()
+	}
+	bd := merge(t, firstTurn+secondTurn, nil)
+	if bd == nil || bd.Source != proto.ContextBreakdownEstimated ||
+		bd.SystemAndRules == nil || *bd.SystemAndRules <= 0 ||
+		bd.ToolsAndMCP == nil || *bd.ToolsAndMCP <= 0 ||
+		bd.Conversation == nil || bd.ToolOutputs == nil || *bd.Conversation <= *bd.ToolOutputs || *bd.ToolOutputs <= 0 ||
+		bd.Free == nil || *bd.Free != 9200 {
+		t.Fatalf("multi-turn category breakdown = %+v", bd)
+	}
+	if got := *bd.SystemAndRules + *bd.ToolsAndMCP + *bd.Conversation + *bd.ToolOutputs; got != 800 {
+		t.Fatalf("classified %d context tokens, want 800", got)
+	}
+
+	steps, _ := parseAgySteps([]byte(firstTurn+checkpoint+secondTurn), agyTestID)
+	stats := extractAgyUsage(steps).contextStats
+	if want := (transcript.ContextStats{ConversationBytes: 26, CompactedInWindow: true}); stats != want {
+		t.Fatalf("post-checkpoint stats = %+v, want %+v", stats, want)
+	}
+	bd = merge(t, firstTurn+checkpoint+secondTurn, nil)
+	if want := (&proto.ContextBreakdown{Source: proto.ContextBreakdownEstimated, Conversation: proto.Int(800), Free: proto.Int(9200)}); !bd.Equal(want) {
+		t.Fatalf("post-checkpoint breakdown = %+v, want %+v", bd, want)
+	}
+
+	// A pending or usage-only step can leave one of the two inputs to estimation absent.
+	for name, raw := range map[string]string{
+		"empty":          "",
+		"missing usage":  `{"type":"USER_INPUT","content":"Hello"}` + "\n",
+		"no input count": `{"type":"PLANNER_RESPONSE","content":"Hello","output_tokens":4}` + "\n",
+		"no text":        `{"type":"PLANNER_RESPONSE","input_tokens":800,"context_window":10000}` + "\n",
+		"after compact":  firstTurn + checkpoint,
+	} {
+		t.Run(name, func(t *testing.T) {
+			if got := merge(t, raw, bd); got != nil {
+				t.Fatalf("breakdown without evidence = %+v", got)
+			}
+		})
+	}
+	exact := &proto.ContextBreakdown{Source: proto.ContextBreakdownExact, Conversation: proto.Int(111), Free: proto.Int(9200)}
+	if got := merge(t, firstTurn+secondTurn, exact); !got.Equal(exact) {
+		t.Fatalf("native breakdown replaced: %+v, want %+v", got, exact)
+	}
+}
+
+func TestAgyContextStatsBoundTextAndIgnoreMedia(t *testing.T) {
+	blob := strings.Repeat("A+/a", 128<<10)
+	stats := extractAgyUsage([]agyStep{
+		{Type: "USER_INPUT", Content: "Input", Media: json.RawMessage(`[{"uri":"data:image/png;base64,` + blob + `"}]`)},
+		{Type: "PLANNER_RESPONSE", Thinking: "考え", ToolCalls: []*agyToolCall{
+			{Name: "upload", Args: json.RawMessage(`{"data":"` + blob + `"}`)},
+		}},
+		{Type: "GENERIC", Content: strings.Repeat("actual tool output ", 8192)},
+	}).contextStats
+	if stats.ConversationBytes != 13 || stats.SystemBytes != 0 || stats.ToolsBytes < 6 || stats.ToolsBytes > 100 ||
+		stats.ToolOutputBytes < 100 || stats.ToolOutputBytes > 4096 {
+		t.Fatalf("bounded context stats = %+v", stats)
+	}
+}
+
 func TestAgyPaneSessionTokensAndInfo(t *testing.T) {
 	resetAgyModelWindowCache(t)
 	n, herdr, home := herdrNode(t)
@@ -329,6 +408,10 @@ func TestAgyPaneSessionTokensAndInfo(t *testing.T) {
 	if row.Model != "gemini-4-carbon-high" || row.ContextTokens != 35_000 || row.ContextWindow != 1_000_000 || row.OutputTokens != 400 {
 		t.Fatalf("pane row = model:%q ctx:%d/%d out:%d", row.Model, row.ContextTokens, row.ContextWindow, row.OutputTokens)
 	}
+	bd := row.ContextBreakdown()
+	if bd == nil || bd.Source != proto.ContextBreakdownEstimated || bd.Free == nil || *bd.Free != 965_000 {
+		t.Fatalf("pane breakdown = %+v", bd)
+	}
 
 	items, _ := agyTestItems(t, n, agyTestRow, nil)
 	var withUsage []proto.Item
@@ -351,6 +434,9 @@ func TestAgyPaneSessionTokensAndInfo(t *testing.T) {
 	if info["usage_unknown"] != nil || info["context_tokens"] != 35_000 || info["output_tokens"] != 400 || info["turns"] != 1 || info["compactions"] != 0 || info["model"] != "gemini-4-carbon-high" {
 		t.Fatalf("pane session.info = %+v", info)
 	}
+	if got, _ := info["context_breakdown"].(*proto.ContextBreakdown); !got.Equal(bd) {
+		t.Fatalf("pane session.info breakdown = %+v, want %+v", got, bd)
+	}
 
 	// Unknown model without catalog keeps ContextTokens and OutputTokens while leaving ContextWindow == 0.
 	agyTestFile(t, n.agyDataRoot(), agyOtherTestID, ""+
@@ -361,6 +447,9 @@ func TestAgyPaneSessionTokensAndInfo(t *testing.T) {
 	row = listed(t, n)[agyTestRow]
 	if row.ContextTokens != 8000 || row.ContextWindow != 0 || row.OutputTokens != 90 {
 		t.Fatalf("unknown model row = ctx:%d/%d out:%d, want 8000/0 out 90", row.ContextTokens, row.ContextWindow, row.OutputTokens)
+	}
+	if bd := row.ContextBreakdown(); bd == nil || bd.Free != nil {
+		t.Fatalf("unknown model breakdown = %+v, want an estimate with no free count", bd)
 	}
 }
 
@@ -395,6 +484,9 @@ func TestAgyRuntimeSessionTokensItemsAndInfo(t *testing.T) {
 	agyTestFile(t, n.agyDataRoot(), rewoundConv, ""+
 		`{"step_index":0,"type":"USER_INPUT","source":"USER_EXPLICIT","created_at":"2026-11-21T10:00:00Z","content":"Rewound prompt"}`+"\n"+
 		`{"step_index":1,"type":"PLANNER_RESPONSE","status":"DONE","created_at":"2026-11-21T10:00:01Z","model":"claude-opus-5-5-high","content":"Rewound away","input_tokens":70000,"output_tokens":700}`+"\n")
+	agyTestFile(t, n.agyDataRoot(), unknownConv, ""+
+		`{"step_index":0,"type":"USER_INPUT","content":"Inspect"}`+"\n"+
+		`{"step_index":1,"type":"PLANNER_RESPONSE","content":"Done","input_tokens":10000,"output_tokens":55}`+"\n")
 
 	hello := map[string]any{
 		"runtime": agyAgent, "name": "Antigravity", "agent": agyAgent, "launcher": agyAgent,
@@ -458,11 +550,17 @@ func TestAgyRuntimeSessionTokensItemsAndInfo(t *testing.T) {
 	if s := got[claudeSID]; s.Model != "claude-opus-5-5-high" || s.ContextTokens != 51_500 || s.ContextWindow != 1_000_000 || s.OutputTokens != 250 {
 		t.Fatalf("claudeSID row = model:%q ctx:%d/%d out:%d", s.Model, s.ContextTokens, s.ContextWindow, s.OutputTokens)
 	}
+	if row := got[claudeSID]; row.ContextBreakdown() != nil {
+		t.Fatalf("runtime row used unrelated disk stats: %+v", row.ContextBreakdown())
+	}
 	if s := got[unknownSID]; s.Model != "opaque-agy-model-medium" || s.ContextTokens != 10_000 || s.ContextWindow != 0 || s.OutputTokens != 55 {
 		t.Fatalf("unknownSID row = model:%q ctx:%d/%d out:%d", s.Model, s.ContextTokens, s.ContextWindow, s.OutputTokens)
 	}
 	if s := got[rewoundSID]; s.Model != "" || s.ContextTokens != 0 || s.ContextWindow != 0 || s.OutputTokens != 0 {
 		t.Fatalf("rewoundSID row must stay cleared despite stale disk transcript = model:%q ctx:%d/%d out:%d", s.Model, s.ContextTokens, s.ContextWindow, s.OutputTokens)
+	}
+	if row := got[rewoundSID]; row.ContextBreakdown() != nil {
+		t.Fatalf("rewound runtime row breakdown = %+v", row.ContextBreakdown())
 	}
 
 	// Verify session.items preserves companion-projected shifted-seq usage and model without raw-disk clobbering.
@@ -553,8 +651,20 @@ func TestAgyRuntimeSessionTokensItemsAndInfo(t *testing.T) {
 
 	// Verify runtime session with agyModelList catalog window resolves dynamically without fabricating for others.
 	recordAgyModelWindows(map[string]int{"opaque-agy-model": 256_000})
-	if s := listed(t, n)[unknownSID]; s.ContextTokens != 10_000 || s.ContextWindow != 256_000 {
+	s := listed(t, n)[unknownSID]
+	if s.ContextTokens != 10_000 || s.ContextWindow != 256_000 {
 		t.Fatalf("after agyModelList window recorded: ctx=%d/%d, want 10000/256000", s.ContextTokens, s.ContextWindow)
+	}
+	want := &proto.ContextBreakdown{Source: proto.ContextBreakdownEstimated, Conversation: proto.Int(10_000), Free: proto.Int(246_000)}
+	if bd := s.ContextBreakdown(); !bd.Equal(want) {
+		t.Fatalf("companion row breakdown = %+v, want %+v", bd, want)
+	}
+	rawInfo, err = nodeCall(t, n, "session.info", map[string]any{"session_id": unknownSID})
+	var summary struct {
+		Breakdown *proto.ContextBreakdown `json:"context_breakdown"`
+	}
+	if err != nil || json.Unmarshal(rawInfo, &summary) != nil || !summary.Breakdown.Equal(want) {
+		t.Fatalf("companion summary = %s, err=%v", rawInfo, err)
 	}
 }
 
@@ -574,10 +684,11 @@ func TestAgyPanePrefersCompanionProjectedUsageOverUnfilteredDisk(t *testing.T) {
 	n.runtimes = newRuntimeRegistry()
 	runtime := n.runtimes.add(nil)
 	runtime.ready, runtime.hello.Runtime, runtime.hello.Agent = true, agyAgent, agyAgent
-	n.runtimes.setSessions(runtime, []proto.Session{{
+	companion := proto.Session{
 		SessionID: agyAgent + "-" + agyTestID, Agent: agyAgent, Cwd: home, Status: proto.StatusIdle,
 		Model: "claude-opus-5-5-high", ContextTokens: 12_000, OutputTokens: 110,
-	}})
+	}
+	n.runtimes.setSessions(runtime, []proto.Session{companion})
 
 	var row proto.Session
 	for _, r := range listSessions(t, n) {
@@ -588,9 +699,36 @@ func TestAgyPanePrefersCompanionProjectedUsageOverUnfilteredDisk(t *testing.T) {
 	if row.Model != "claude-opus-5-5-high" || row.ContextTokens != 12_000 || row.ContextWindow != 1_000_000 || row.OutputTokens != 110 {
 		t.Fatalf("pane row with companion = model:%q ctx:%d/%d out:%d", row.Model, row.ContextTokens, row.ContextWindow, row.OutputTokens)
 	}
+	if bd := row.ContextBreakdown(); bd != nil {
+		t.Fatalf("companion row used stale transcript stats: %+v", bd)
+	}
 	info := agyTestCall(t, n, "session.info", agyTestRow, nil).(map[string]any)
 	if info["usage_unknown"] != nil || info["context_tokens"] != 12_000 || info["output_tokens"] != 110 || info["model"] != "claude-opus-5-5-high" {
 		t.Fatalf("pane session.info with companion = %+v", info)
+	}
+
+	// Once disk agrees with the companion, the estimate reaches the merged herdr row too.
+	agyTestFile(t, n.agyDataRoot(), agyTestID, ""+
+		`{"step_index":0,"type":"USER_INPUT","source":"USER_EXPLICIT","content":"Hi"}`+"\n"+
+		`{"step_index":1,"type":"PLANNER_RESPONSE","model":"claude-opus-5-5-high","content":"Done","input_tokens":12000,"output_tokens":110}`+"\n")
+	companion.ContextWindow = 1_000_000
+	n.runtimes.setSessions(runtime, []proto.Session{companion})
+	row = listed(t, n)[agyTestRow]
+	estimate := &proto.ContextBreakdown{Source: proto.ContextBreakdownEstimated, Conversation: proto.Int(12_000), Free: proto.Int(988_000)}
+	if got := row.ContextBreakdown(); !got.Equal(estimate) {
+		t.Fatalf("pane row omitted matching estimate: %+v", got)
+	}
+
+	exact := &proto.ContextBreakdown{Source: proto.ContextBreakdownExact, Conversation: proto.Int(12_000), Free: proto.Int(988_000)}
+	companion.SetContextBreakdown(exact)
+	n.runtimes.setSessions(runtime, []proto.Session{companion})
+	row = listed(t, n)[agyTestRow]
+	if got := row.ContextBreakdown(); !got.Equal(exact) {
+		t.Fatalf("pane row changed companion's exact breakdown: %+v", got)
+	}
+	info = agyTestCall(t, n, "session.info", agyTestRow, nil).(map[string]any)
+	if got, _ := info["context_breakdown"].(*proto.ContextBreakdown); !got.Equal(exact) {
+		t.Fatalf("pane summary changed companion's exact breakdown: %+v", got)
 	}
 
 	// Full rewind on the companion row must also keep pane row and session.info cleared instead of reading stale disk.
@@ -605,6 +743,9 @@ func TestAgyPanePrefersCompanionProjectedUsageOverUnfilteredDisk(t *testing.T) {
 	}
 	if row.Model != "" || row.ContextTokens != 0 || row.ContextWindow != 0 || row.OutputTokens != 0 {
 		t.Fatalf("fully rewound pane row must stay cleared = model:%q ctx:%d/%d out:%d", row.Model, row.ContextTokens, row.ContextWindow, row.OutputTokens)
+	}
+	if got := row.ContextBreakdown(); got != nil {
+		t.Fatalf("rewound pane row breakdown = %+v", got)
 	}
 	info = agyTestCall(t, n, "session.info", agyTestRow, nil).(map[string]any)
 	if info["usage_unknown"] != true || info["context_tokens"] != 0 || info["output_tokens"] != 0 {

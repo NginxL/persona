@@ -1,6 +1,6 @@
 import { pendingPlanCounts } from "../lib/pending-plan-counts";
 import { loadFeed, useFeed } from "../lib/feed";
-import { useAgentsDisplay, useBotmuxHidden, useShowFilter, useSortByActivity } from "../lib/agents-display";
+import { saveAgentsDisplay, useAgentsDisplay, useBotmuxHidden, useShowFilter, useSortByActivity, type AgentsDisplay, type DisplayChange } from "../lib/agents-display";
 import { activityOrder, useActivityDates } from "../lib/agent-sort";
 import { useSidebarEngaged } from "../lib/sidebar-engaged";
 import { setChatList, useChatList } from "../lib/agent-chat-list";
@@ -659,7 +659,7 @@ function MorePages({ more, reg, hover, activeKey, go }: { more: NavPage[]; reg: 
 /** The sidebar's "Agents": grouping, the quick filter, "Pinned", "Starting", the groups (spaces, machines, repositories,
  *  states or todos) and "Recent". The drawer and the phone's Agents page both show it. `add`: the title row's "+". */
 /** What Settings › Agents turned on and what the Filter holds, read once by AgentsBlock for whichever list it draws. */
-type AgentsDisplayProps = { showFilter: boolean; dimFilters: AgentDimensionFilters; chatList: boolean };
+type AgentsDisplayProps = { showFilter: boolean; dimFilters: AgentDimensionFilters; chatList: boolean; /** the hub's display settings, for the ⋯ menu's switches (null: an older hub, or not read yet) */ displayValue: AgentsDisplay | null };
 type AgentsBlockProps = { workspaceActions?: WorkspaceTreeActions; reg: RegFn; hover: (k: string | null) => void; activeKey: string; go: GoFn; onNewAgent: () => void; onNavigate?: () => void; add?: boolean; foldable?: boolean; chooseGrouping?: (g: AgentGrouping) => void };
 
 /** The to-dos could not be read and none are known (audit item 27): By to-do has nothing to group by, so it shows By
@@ -686,6 +686,7 @@ function AgentsBlock(props: AgentsBlockProps) {
   const pins = useStore((s) => s.pins);
   // The Filter is a Settings switch (hub-synced, default off): off, it is not drawn and what it held is not applied
   const showFilter = useShowFilter();
+  const displayValue = useAgentsDisplay().value;
   const displayLoaded = useAgentsDisplay().value !== null;
   const storedFilters = useAgentListFilters();
   const dimFilters = showFilter ? storedFilters : DEFAULT_DIMENSION_FILTERS;
@@ -705,7 +706,7 @@ function AgentsBlock(props: AgentsBlockProps) {
   // A filter or view the hub's paged list cannot ask for (model, pinned, search scope, several computers, the chat list…)
   // is answered by the complete list, which has every one of them: never a filter that half works
   const paged = pagedAgentList({ bounded, byTodo, todosSupported, pins, stored, several }) && !chatList && pagedFilterOf(dimFilters) !== null;
-  const display: AgentsDisplayProps = { showFilter, dimFilters, chatList };
+  const display: AgentsDisplayProps = { showFilter, dimFilters, chatList, displayValue };
   const chooseGrouping = useCallback((g: AgentGrouping) => {
     storeValue("persona.agentGrouping", g);
     setGrouping(g);
@@ -737,10 +738,21 @@ function ListMenuButton({ open, onClick }: { open: boolean; onClick: React.Mouse
   );
 }
 
+/** What the ⋯ switches show: the hub's answer (null when unread or an older hub) and the two effective values. */
+type ListDisplay = { value: AgentsDisplay | null; sort: boolean; filter: boolean };
+
 /** The ⋯'s items, the paged list's as the complete list's (#6662). Collapse all / Expand all are the title row's button
- *  alone (#6447). */
-function agentListItems({ archives, hover, onNavigate }: { archives: boolean; hover: (k: string | null) => void; onNavigate?: () => void }): MenuItem[] {
-  return archives ? [{ key: "archived", label: t("agentmenus.archived_agents"), icon: "archive" as const, onSelect: () => { navigate({ name: "agent-archives" }); onNavigate?.(); hover(null); } }] : [];
+ *  alone (#6447). The two display choices (#13727) are switches here, writing the same hub setting Settings › Agents
+ *  holds, so a click shows on every device and that page follows; an older hub has neither field and gets no item. */
+function agentListItems({ archives, hover, onNavigate, display }: { archives: boolean; hover: (k: string | null) => void; onNavigate?: () => void; display: ListDisplay }): MenuItem[] {
+  const set = (change: DisplayChange) => { void saveAgentsDisplay(change); hover(null); };
+  const sortable = display.value?.sort_by_activity !== undefined;
+  const filterable = display.value?.show_filter !== undefined;
+  return [
+    ...(sortable ? [{ key: "sort-activity", label: t("sidebar.sort_activity"), icon: "clock" as const, checked: display.sort, keepOpen: true, divider: true, onSelect: () => set({ sort_by_activity: !display.sort }) }] : []),
+    ...(filterable ? [{ key: "show-filter", label: t("sidebar.show_list_filter"), icon: "filter" as const, checked: display.filter, keepOpen: true, divider: !sortable, onSelect: () => set({ show_filter: !display.filter }) }] : []),
+    ...(archives ? [{ key: "archived", label: t("agentmenus.archived_agents"), icon: "archive" as const, divider: sortable || filterable, onSelect: () => { navigate({ name: "agent-archives" }); onNavigate?.(); hover(null); } }] : []),
+  ];
 }
 
 /** The groupings this hub offers: By to-do only where it has to-dos. */
@@ -792,7 +804,7 @@ function PagedFilterChips({ filters, machines }: { filters: AgentDimensionFilter
   return <AgentFilterChips filters={filters} onChange={setAgentListFilters} facets={facets} />;
 }
 
-function BoundedAgentsBlock({ reg, hover, activeKey, go, onNewAgent, onNavigate, add = true, grouping, todosUnread = false, chooseGrouping, showFilter, dimFilters, chatList }: AgentsBlockProps & AgentsDisplayProps & { grouping: Exclude<AgentGrouping, "repo">; /** By to-do shown by status: its to-dos cannot be read */ todosUnread?: boolean; chooseGrouping: (g: AgentGrouping) => void }) {
+function BoundedAgentsBlock({ reg, hover, activeKey, go, onNewAgent, onNavigate, add = true, grouping, todosUnread = false, chooseGrouping, showFilter, dimFilters, chatList, displayValue }: AgentsBlockProps & AgentsDisplayProps & { grouping: Exclude<AgentGrouping, "repo">; /** By to-do shown by status: its to-dos cannot be read */ todosUnread?: boolean; chooseGrouping: (g: AgentGrouping) => void }) {
   const machines = useStore(selectSidebarMachines);
   const allLaunches = useStore((s) => s.launches);
   const launches = useMemo(() => Object.values(allLaunches).filter((launch) => launch.phase !== "ready"), [allLaunches]);
@@ -870,7 +882,7 @@ function BoundedAgentsBlock({ reg, hover, activeKey, go, onNewAgent, onNavigate,
   const listMenu = useMenu();
   const machineOrder = useMemo(() => machines.map((m) => m.id), [machines]);
   const rowOrder = useMemo(() => machineSessionPresentation(machines), [machines]);
-  const listItems = agentListItems({ archives, hover, onNavigate });
+  const listItems = agentListItems({ archives, hover, onNavigate, display: { value: displayValue, sort: sortByActivity, filter: showFilter } });
   const pagedGrouping = useMemo(() => ({
     dimension: PAGED_DIMENSION[grouping],
     label: AGENT_GROUPINGS.find((g) => g.key === grouping)?.label ?? "",
@@ -934,7 +946,7 @@ function retainedActiveSpaces(): ReadonlySet<string> | undefined {
   }
 }
 
-function LegacyAgentsBlock({ reg, hover, activeKey, go, onNewAgent, onNavigate, workspaceActions, add = true, foldable = false, grouping, hubUnreachable, chooseGrouping, showFilter, dimFilters, chatList }: AgentsBlockProps & AgentsDisplayProps & { grouping: AgentGrouping; /** useHubUnreachable */ hubUnreachable: boolean; chooseGrouping: (g: AgentGrouping) => void }) {
+function LegacyAgentsBlock({ reg, hover, activeKey, go, onNewAgent, onNavigate, workspaceActions, add = true, foldable = false, grouping, hubUnreachable, chooseGrouping, showFilter, dimFilters, chatList, displayValue }: AgentsBlockProps & AgentsDisplayProps & { grouping: AgentGrouping; /** useHubUnreachable */ hubUnreachable: boolean; chooseGrouping: (g: AgentGrouping) => void }) {
   // the current assistant's computers, agents and to-dos (all of them with one assistant)
   const scope = useScope();
   const sidebarMachines = useStore(selectSidebarMachines);
@@ -1179,7 +1191,7 @@ function LegacyAgentsBlock({ reg, hover, activeKey, go, onNewAgent, onNavigate, 
   const tree = { machines, reg, hover, activeKey, go, mutes, onSpaceMenu, onRowMenu, onNodeMenu, onNavigate };
 
   // the list menu, the paged list's too (agentListItems); with nothing in it the menu's button goes
-  const listItems = agentListItems({ archives, hover, onNavigate });
+  const listItems = agentListItems({ archives, hover, onNavigate, display: { value: displayValue, sort: sortByActivity, filter: showFilter } });
 
   return (
     <div data-sidebar-agents ref={groupsRef}>

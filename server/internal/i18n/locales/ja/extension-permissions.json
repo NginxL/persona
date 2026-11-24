@@ -73,6 +73,7 @@
   "scope_machines_pair": "新しいコンピューターのペアリングリンクを作成（確認後に有効）",
   "scope_browser_run": "ペアリング済みコンピューターのブラウザー隔離空間でスクリプトを実行",
   "scope_notify": "デバイスに通知を送信",
+  "scope_push_grading": "自身の通知グレーディングレイヤーを管理し、判定をプレビュー",
   "scope_assistant_ask": "Persona の会話を開始して会話の動きを読み取り",
   "scope_assistant_read": "Persona との会話を読み取り（あなたのメッセージとその返信）",
   "scope_assistant_entries_read": "保存した事実、好み、ルール、決定事項を読み取り（個人情報を含む）",

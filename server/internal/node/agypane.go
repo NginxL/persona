@@ -798,6 +798,7 @@ func (n *Node) agyPaneSessionInfo(id, pane string) map[string]any {
 		}
 	}
 	if conversation := n.agyConversation(id, pane); conversation != "" {
+		var breakdown *proto.ContextBreakdown
 		if runtimeRow, _, ok := n.runtimes.rowOf(agyAgent + "-" + conversation); ok {
 			if runtimeRow.Model != "" {
 				info["model"] = runtimeRow.Model
@@ -813,6 +814,8 @@ func (n *Node) agyPaneSessionInfo(id, pane string) map[string]any {
 				info["output_tokens"] = runtimeRow.OutputTokens
 				delete(info, "usage_unknown")
 			}
+			n.resolveAgyContext(&runtimeRow, conversation)
+			breakdown = runtimeRow.ContextBreakdown()
 		} else if u, ok := n.agyTranscriptMeta(conversation); ok {
 			if u.model != "" {
 				info["model"] = u.model
@@ -824,6 +827,12 @@ func (n *Node) agyPaneSessionInfo(id, pane string) map[string]any {
 				info["output_tokens"] = u.outputTokens
 				delete(info, "usage_unknown")
 			}
+			row := proto.Session{SessionID: id, Model: u.model}
+			n.setAgyTranscriptContext(&row, u)
+			breakdown = row.ContextBreakdown()
+		}
+		if breakdown != nil {
+			info["context_breakdown"] = breakdown
 		}
 	}
 	return info

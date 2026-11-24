@@ -176,5 +176,7 @@
   "module_recording": "Meeting recording",
   "module_recording_hint": "Minutes, all-day recaps, transcripts and photos of what you record with Persona, on its entries in Knowledge.",
   "subagents_running": "{count} running",
-  "subagents_need_you": "{count} need you"
+  "subagents_need_you": "{count} need you",
+  "sort_activity": "Sort by recent activity",
+  "show_list_filter": "Show filter"
 }

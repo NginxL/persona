@@ -73,6 +73,7 @@
   "scope_machines_pair": "配对新电脑（仍需你确认后生效）",
   "scope_browser_run": "在已配对电脑的浏览器隔离空间里执行脚本",
   "scope_notify": "给你的设备发通知",
+  "scope_push_grading": "管理自己的推送分级配置层，并预演分级结果",
   "scope_assistant_ask": "给 Persona 开对话、读对话动态",
   "scope_assistant_read": "读你和 Persona 的对话（你的消息和它的回复）",
   "scope_assistant_entries_read": "读取保存的事实、偏好、规矩和决定（包括个人信息）",

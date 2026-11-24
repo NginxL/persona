@@ -3867,7 +3867,7 @@ are files already ("Sending videos"): they count toward neither, and their messa
   opencode and the xAI API set no count of their own. Oh My Pi allows 5 for a provider its catalog does not know, and drops older
   pictures itself.
 - History: Claude Code drops the oldest pictures of a conversation over its count before it sends, and compacts (a 413 through a
-  custom base URL ends the turn instead); Codex, opencode, Oh My Pi and Grok drop old ones too. Claude Code in a terminal and Codex get
+  custom base URL ends the turn instead); Codex, opencode, Oh My Pi and Grok drop old ones too. Claude Code, Cursor and Antigravity in terminal panes, as well as Codex, get
   the pictures as files they read (`<attached_images>` paths, `localImage`); `claude -p` and the runtime SDK get them inline.
 
 ### Sending files

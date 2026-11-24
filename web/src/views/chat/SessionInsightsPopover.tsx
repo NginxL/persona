@@ -203,7 +203,7 @@ function BreakdownCard({ breakdown }: { breakdown: SessionContextBreakdown }) {
             className="size-2 shrink-0 rounded-full"
             style={{ backgroundColor: BREAKDOWN_COLOR[breakdown.topConsumer.key] }}
           />
-          <span className="min-w-0 truncate">
+          <span className="min-w-0">
             {t("chat-sessioninsights.breakdown_top_consumer", {
               category: t(BREAKDOWN_LABEL_KEY[breakdown.topConsumer.key]),
               percent: Math.round(breakdown.topConsumer.usedShare),
@@ -321,6 +321,7 @@ export function SessionInsightsPopover({
   const compactBusy = compact.running || compactingNow;
   const current = currentContextTokens(session);
   const hasContextSection = Boolean(current || normalizedBreakdown);
+  const turnRates = performance?.rateSource === "turn";
   const style: CSSProperties = place
     ? { left: place.left, top: place.top, width: place.width, animation: `pop-in 160ms ${EASE} both`, transformOrigin: "bottom right" }
     : { left: 0, top: 0, width: POPOVER_WIDTH, visibility: "hidden" };
@@ -468,7 +469,9 @@ export function SessionInsightsPopover({
               )}
               {performance.latestTokPerSec !== null && (
                 <div className="rounded-lg bg-inset px-2.5 py-1.5">
-                  <dt className="text-ink-3">{t("chat-sessioninsights.latest_speed")}</dt>
+                  <dt className="text-ink-3">
+                    {t(turnRates ? "chat-sessioninsights.latest_turn_rate" : "chat-sessioninsights.latest_speed")}
+                  </dt>
                   <dd className="font-medium text-ink" data-insights-speed-latest>
                     {t("chat-sessioninsights.tok_per_sec", { rate: formatRate(performance.latestTokPerSec) })}
                   </dd>
@@ -476,7 +479,9 @@ export function SessionInsightsPopover({
               )}
               {performance.avgTokPerSec !== null && (
                 <div className="rounded-lg bg-inset px-2.5 py-1.5">
-                  <dt className="text-ink-3">{t("chat-sessioninsights.average_speed")}</dt>
+                  <dt className="text-ink-3">
+                    {t(turnRates ? "chat-sessioninsights.average_turn_rate" : "chat-sessioninsights.average_speed")}
+                  </dt>
                   <dd className="font-medium text-ink" data-insights-speed-avg>
                     {t("chat-sessioninsights.tok_per_sec", { rate: formatRate(performance.avgTokPerSec) })}
                   </dd>
@@ -491,6 +496,7 @@ export function SessionInsightsPopover({
                 </div>
               )}
             </dl>
+            {turnRates && <p className="text-ink-3">{t("chat-sessioninsights.turn_rate_hint")}</p>}
           </section>
         )}
 

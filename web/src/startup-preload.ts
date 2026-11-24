@@ -558,7 +558,10 @@ export async function brotliCopies(dir: string, files: string[]): Promise<{ file
 // deferred. The budget moves by the same 200 B, keeping the 58 B of room main had. Merged with #13846, the measured
 // first screens are ja 485,259 B, en 482,600 B and zh-Hans 483,235 B; the budget keeps #13846's 46 B of room rather
 // than adding the whole separate allowance again.
-export const FIRST_SCREEN_BUDGET = 485_305;
+// #14398: the Agents list's ⋯ menu toggles "按最近更新排序" and "显示筛选" (sidebar.sort_activity, sidebar.show_list_filter;
+// the sidebar namespace is first-screen whole) add 77 B to the ja first screen, measured with origin/main 1ad9a001e6
+// merged: en 482,711 B, ja 485,382 B, zh-Hans 483,352 B. The budget moves by the same 77 B plus 10 B of room.
+export const FIRST_SCREEN_BUDGET = 485_392;
 // The hash in a built file's name: the 8 characters of Rollup's [hash] (url-safe base64) between "-" and the
 // extension, as vite.config.ts names every chunk and asset ("assets/[name]-[hash].js", "[name]-[hash][extname]").
 const NAME_HASH = /-([A-Za-z0-9_-]{8})\.[^./]+$/;
