@@ -247,16 +247,23 @@ class PublicConstantTests(unittest.TestCase):
                          {"email", "private IP", "private value (18 chars)"})
 
     def test_adjacent_go_constants_are_not_a_banned_name_or_email(self):
-        join = "applink.feishu.cn/client/chat/" + "open" + "Lark" + " via lark-cli"
-        self.assertEqual(self.kinds("edit_titlerecipe.other_tool" + join + "devices.reconnect"), set())
-        # The wrong dependency set, other joins and look-alikes still count, and the kind is named truthfully.
-        banned = self.kinds("x" + join + "y", dependencies=())
-        self.assertEqual(len(banned), 1)
-        self.assertTrue(next(iter(banned)).startswith("banned name"))
-        for text in (join.replace("feishu.cn", "example.cn"), join.replace(" via lark-cli", ""),
-                     "chat/open" + "Lark via other", join + " open" + "Lark"):
-            with self.subTest(text=text):
-                self.assertTrue(self.kinds(text))
+        for prefix in ("applink.feishu.cn", "not a typedstream"):
+            join = prefix + "/client/chat/" + "open" + "Lark" + " via lark-cli"
+            with self.subTest(join=join):
+                self.assertEqual(self.kinds("edit_titlerecipe.other_tool" + join + "devices.reconnect"), set())
+                # The wrong dependency set, other joins and look-alikes still count, and the kind is named truthfully.
+                banned = self.kinds("x" + join + "y", dependencies=())
+                self.assertEqual(len(banned), 1)
+                self.assertTrue(next(iter(banned)).startswith("banned name"))
+                altered = [join.replace(" via lark-cli", ""), "chat/open" + "Lark via other", join + " open" + "Lark"]
+                if prefix == "not a typedstream":
+                    altered += [join.replace("not a typedstream", "not another parser")]
+                else:
+                    altered.append(join.replace("feishu.cn", "example.cn"))
+                for text in altered:
+                    with self.subTest(text=text):
+                        self.assertTrue(self.kinds(text))
+                self.assertIn("private value (%d chars)" % len(join), self.kinds(join, words=(join,)))
         # Gmail's source-domain constants next to a field name are not addresses; other domains still are.
         gmail = "title_mail@" + "gmail.com" + "extension. updated" + "@googlemail.com" + "no extension"
         self.assertEqual(self.kinds(gmail), set())

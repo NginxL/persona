@@ -129,3 +129,67 @@ test('in API key mode the runtime lists the agy models the provider serves and s
   assert.ok(!logs.some((l) => /model discovery error/.test(l)), logs.join('\n'))
   assert.ok(!logs.join('\n').includes(KEY))
 })
+
+test('gatewayModelNames routes HTTP and HTTPS requests through HTTP(S)_PROXY and honors NO_PROXY', async (t) => {
+  const g = await gateway(t)
+  const proxied = []
+  const connects = []
+  const proxy = createServer((req, res) => {
+    proxied.push({ method: req.method, url: req.url, key: req.headers['x-goog-api-key'] })
+    const target = new URL(req.url)
+    const up = new URL(target.pathname + target.search, g.base)
+    fetch(up, { headers: { 'x-goog-api-key': req.headers['x-goog-api-key'] || '' } }).then(async (r) => {
+      res.writeHead(r.status, { 'content-type': r.headers.get('content-type') || 'application/json' })
+      res.end(await r.text())
+    }, (err) => res.writeHead(502).end(String(err)))
+  })
+  proxy.on('connect', (req, socket) => {
+    connects.push(req.url)
+    socket.end('HTTP/1.1 502 Bad Gateway\r\n\r\n')
+  })
+  await new Promise((resolve) => proxy.listen(0, '127.0.0.1', resolve))
+  t.after(() => proxy.close())
+  const proxyBase = `http://127.0.0.1:${proxy.address().port}`
+
+  // HTTP gateway traffic goes through HTTP_PROXY when target host is not in NO_PROXY.
+  const names = await gatewayModelNames({
+    env: {
+      GOOGLE_GEMINI_BASE_URL: 'http://gateway.example.test',
+      GEMINI_API_KEY: KEY,
+      HTTP_PROXY: proxyBase,
+      NO_PROXY: 'localhost,127.0.0.1,::1',
+    },
+  })
+  assert.deepEqual([...names].sort(), ['gateway-only-model', 'gemini-3.8-flash', 'gemini-4-neon'])
+  assert.equal(proxied.length, 2)
+  assert.equal(proxied[0].url, 'http://gateway.example.test/v1beta/models?pageSize=1000')
+  assert.equal(proxied[0].key, KEY)
+
+  // HTTPS gateway traffic opens an HTTP CONNECT tunnel to HTTPS_PROXY and redacts key/host on proxy failure.
+  await assert.rejects(gatewayModelNames({
+    env: {
+      GOOGLE_GEMINI_BASE_URL: 'https://gateway.example.test',
+      GEMINI_API_KEY: KEY,
+      HTTPS_PROXY: proxyBase,
+      NO_PROXY: 'localhost,127.0.0.1,::1',
+    },
+  }), (err) => {
+    assert.match(err.message, /model list failed/)
+    assert.ok(!err.message.includes(KEY) && !err.message.includes('gateway.example.test') && !err.message.includes(proxyBase))
+    return true
+  })
+  assert.deepEqual(connects, ['gateway.example.test:443'])
+
+  // NO_PROXY bypasses HTTP_PROXY and reaches the direct loopback gateway without touching the proxy.
+  const before = proxied.length
+  const direct = await gatewayModelNames({
+    env: {
+      GOOGLE_GEMINI_BASE_URL: g.base,
+      GEMINI_API_KEY: KEY,
+      HTTP_PROXY: proxyBase,
+      NO_PROXY: 'localhost,127.0.0.1,::1',
+    },
+  })
+  assert.deepEqual([...direct].sort(), ['gateway-only-model', 'gemini-3.8-flash', 'gemini-4-neon'])
+  assert.equal(proxied.length, before, 'loopback target in NO_PROXY must not hit HTTP_PROXY')
+})

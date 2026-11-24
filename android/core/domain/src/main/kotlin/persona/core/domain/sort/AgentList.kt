@@ -25,7 +25,7 @@ data class AgentListSettings(
     val sort: AgentSort = AgentSort.State,
     /** botmux's sessions hidden from this list (web #2786, kept on this phone); "Lark group" shows them again. */
     val hideBotmux: Boolean = false,
-    /** sessions_hierarchy: even an orphan without rollup fields stays an ordinary, counted row. */
+    /** sessions_hierarchy: a folded child has its parent's row; an orphan subagent has no row or count. */
     val hierarchy: Boolean = false,
     /** UI-only row-cap expansion, distinct from [expandedIdle] so Show All never unfolds idle agents. */
     val expandedAll: Set<String> = emptySet(),

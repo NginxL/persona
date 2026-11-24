@@ -2,11 +2,38 @@ package hub
 
 import (
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
 	"github.com/nwverse/persona/server/internal/assistantwire"
 )
+
+func TestTodoListPaginationWithoutManagers(t *testing.T) {
+	h := newTestHub(t)
+	h.cfg.Assistant.External = true
+	srv := httptest.NewServer(h.routes())
+	t.Cleanup(srv.Close)
+	for _, path := range []string{"/api/v1/todos", "/api/v1/todos?limit=1"} {
+		code, body := ownershipGet(t, h, srv, http.MethodGet, path, nil)
+		if code != http.StatusServiceUnavailable || body["code"] != assistantwire.CodeAssistantOffline {
+			t.Errorf("%s: got %d %v, want 503 assistant_offline", path, code, body)
+		}
+	}
+}
+
+func TestTodoListPaginationWithLegacyManager(t *testing.T) {
+	h, srv, _, _, ra, _ := todoViewHub(t)
+	ra.set(`{"todos":[{"id":"one"},{"id":"two"}]}`, "", http.StatusOK)
+	code, body := ownershipGet(t, h, srv, http.MethodGet, "/api/v1/todos?manager=assistant&limit=1", nil)
+	if code != http.StatusNotImplemented || body["code"] != "todos_pagination_unsupported" {
+		t.Fatalf("legacy manager answered a page request: got %d %v", code, body)
+	}
+	resp, full := todoViewGet(t, h, srv, "/api/v1/todos?manager=assistant", nil)
+	if resp.StatusCode != http.StatusOK || !strings.Contains(string(full), `"id":"two"`) {
+		t.Errorf("legacy full list: %d %s", resp.StatusCode, full)
+	}
+}
 
 // A paginated to-dos read is one manager's list (#14506): the hub relays it to the manager the request names (an
 // extension's token implies its own) and keeps that manager's next_cursor and has_more, instead of merging pages of

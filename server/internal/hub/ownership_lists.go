@@ -15,6 +15,7 @@ import (
 	"github.com/nwverse/persona/server/internal/assistantwire"
 	"github.com/nwverse/persona/server/internal/bus"
 	"github.com/nwverse/persona/server/internal/extwire"
+	"github.com/nwverse/persona/server/internal/i18n"
 )
 
 // ---- merged lists ----
@@ -301,7 +302,11 @@ func (h *Hub) pagedTodoList(w http.ResponseWriter, r *http.Request, key string, 
 			writeErr(w, http.StatusServiceUnavailable, err)
 			return
 		}
-		if len(ids) != 1 {
+		if len(ids) == 0 {
+			writeErrCode(w, http.StatusServiceUnavailable, assistantwire.CodeAssistantOffline, errAssistantOffline)
+			return
+		}
+		if len(ids) > 1 {
 			writeErrCode(w, http.StatusBadRequest, "todos_pagination_manager_required",
 				errors.New("a paginated to-do list is one manager's: name it with X-Persona-Manager or the manager query parameter"))
 			return
@@ -318,6 +323,15 @@ func (h *Hub) pagedTodoList(w http.ResponseWriter, r *http.Request, key string, 
 	ask(bw, r, id)
 	ans := listAnswer{id: id, status: cmp.Or(bw.status, http.StatusOK), header: bw.header, body: bw.body.Bytes(), localize: bw.localize}
 	if ans.ok() {
+		// Older managers ignore limit and cursor and answer the complete list. Even a final page
+		// from a pagination-aware manager explicitly includes has_more=false.
+		var page struct {
+			HasMore *bool `json:"has_more"`
+		}
+		if json.Unmarshal(ans.body, &page) != nil || page.HasMore == nil {
+			writeErrCode(w, http.StatusNotImplemented, "todos_pagination_unsupported", i18n.Err("hub-assistant_link.todos_pagination_unsupported"))
+			return
+		}
 		h.noteTodoOwners(&ans) // a page teaches the hub its rows' manager as a complete list does
 	}
 	writeMerged(w, key, []listAnswer{ans})
